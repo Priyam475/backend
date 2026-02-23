@@ -1,0 +1,889 @@
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowLeft, FileText, Search, User, Package, Truck, Hash,
+  Edit3, Lock, Unlock, Save, Printer, ChevronDown, ChevronUp,
+  DollarSign, Minus, Plus, ToggleLeft, ToggleRight, PlusCircle, Receipt
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useDesktopMode } from '@/hooks/use-desktop';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import BottomNav from '@/components/BottomNav';
+import { toast } from 'sonner';
+
+// ── localStorage helpers ──────────────────────────────────
+function getStore<T>(key: string): T[] {
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
+}
+function setStore<T>(key: string, data: T[]) {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+// ── Types ─────────────────────────────────────────────────
+interface SellerSettlement {
+  sellerId: string;
+  sellerName: string;
+  sellerMark: string;
+  vehicleNumber: string;
+  lots: SettlementLot[];
+}
+
+interface SettlementLot {
+  lotId: string;
+  lotName: string;
+  commodityName: string;
+  entries: SettlementEntry[];
+}
+
+interface SettlementEntry {
+  bidNumber: number;
+  buyerMark: string;
+  buyerName: string;
+  rate: number;
+  quantity: number;
+  weight: number;
+}
+
+interface RateCluster {
+  rate: number;
+  totalQuantity: number;
+  totalWeight: number;
+  amount: number;
+}
+
+interface DeductionItem {
+  key: string;
+  label: string;
+  amount: number;
+  editable: boolean;
+  autoPulled: boolean;
+}
+
+interface PattiData {
+  pattiId: string;
+  sellerName: string;
+  rateClusters: RateCluster[];
+  grossAmount: number;
+  deductions: DeductionItem[];
+  totalDeductions: number;
+  netPayable: number;
+  createdAt: string;
+  useAverageWeight: boolean;
+}
+
+// REQ-PUT-008: Auto-generate unique Patti ID
+function generatePattiId(): string {
+  const counter = parseInt(localStorage.getItem('mkt_patti_counter') || '0') + 1;
+  localStorage.setItem('mkt_patti_counter', String(counter));
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+  return `PT-${dateStr}-${String(counter).padStart(4, '0')}`;
+}
+
+const SettlementPage = () => {
+  const navigate = useNavigate();
+  const isDesktop = useDesktopMode();
+  const [sellers, setSellers] = useState<SellerSettlement[]>([]);
+  const [selectedSeller, setSelectedSeller] = useState<SellerSettlement | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Patti state
+  const [pattiData, setPattiData] = useState<PattiData | null>(null);
+  const [masterEditMode, setMasterEditMode] = useState(false);
+  const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
+  const [hamaliEnabled, setHamaliEnabled] = useState(false);
+  const [gunniesAmount, setGunniesAmount] = useState(0);
+  const [showPrint, setShowPrint] = useState(false);
+  const [useAvgWeight, setUseAvgWeight] = useState(false);
+  const [showAddVoucher, setShowAddVoucher] = useState(false);
+  const [manualVoucherLabel, setManualVoucherLabel] = useState('');
+  const [manualVoucherAmount, setManualVoucherAmount] = useState('');
+
+  // Load seller data from completed auctions
+  useEffect(() => {
+    const auctionData = getStore<any>('mkt_auction_results');
+    const arrivals = getStore<any>('mkt_arrival_records');
+    const weighingSessions = getStore<any>('mkt_weighing_sessions');
+    
+    const sellerMap = new Map<string, SellerSettlement>();
+    
+    auctionData.forEach((auction: any) => {
+      let sellerName = auction.sellerName || 'Unknown';
+      let sellerMark = '';
+      let vehicleNumber = auction.vehicleNumber || '';
+      let sellerId = '';
+      
+      arrivals.forEach((arr: any) => {
+        (arr.sellers || []).forEach((seller: any) => {
+          (seller.lots || []).forEach((lot: any) => {
+            if (lot.lot_id === auction.lotId) {
+              sellerName = seller.seller_name;
+              sellerMark = seller.seller_mark || '';
+              vehicleNumber = arr.vehicle?.vehicle_number || vehicleNumber;
+              sellerId = seller.seller_vehicle_id || sellerName;
+            }
+          });
+        });
+      });
+      
+      if (!sellerMap.has(sellerId || sellerName)) {
+        sellerMap.set(sellerId || sellerName, {
+          sellerId: sellerId || sellerName,
+          sellerName,
+          sellerMark,
+          vehicleNumber,
+          lots: [],
+        });
+      }
+      
+      const seller = sellerMap.get(sellerId || sellerName)!;
+      
+      const entries: SettlementEntry[] = (auction.entries || []).map((entry: any) => {
+        const ws = weighingSessions.find((s: any) => s.bid_number === entry.bidNumber);
+        const weight = ws ? ws.net_weight : entry.quantity * 50;
+        return {
+          bidNumber: entry.bidNumber,
+          buyerMark: entry.buyerMark,
+          buyerName: entry.buyerName,
+          rate: entry.rate,
+          quantity: entry.quantity,
+          weight,
+        };
+      });
+      
+      const existingLot = seller.lots.find(l => l.lotId === auction.lotId);
+      if (existingLot) {
+        existingLot.entries.push(...entries);
+      } else {
+        seller.lots.push({
+          lotId: auction.lotId,
+          lotName: auction.lotName || '',
+          commodityName: auction.commodityName || '',
+          entries,
+        });
+      }
+    });
+    
+    setSellers(Array.from(sellerMap.values()));
+  }, []);
+
+  // Generate Patti when seller is selected
+  const generatePatti = useCallback((seller: SellerSettlement) => {
+    setSelectedSeller(seller);
+    
+    // REQ-PUT-001: Cluster by rate
+    const rateMap = new Map<number, RateCluster>();
+    let totalWeight = 0;
+    
+    seller.lots.forEach(lot => {
+      lot.entries.forEach(entry => {
+        const existing = rateMap.get(entry.rate);
+        if (existing) {
+          existing.totalQuantity += entry.quantity;
+          existing.totalWeight += entry.weight;
+          existing.amount += entry.weight * entry.rate;
+        } else {
+          rateMap.set(entry.rate, {
+            rate: entry.rate,
+            totalQuantity: entry.quantity,
+            totalWeight: entry.weight,
+            amount: entry.weight * entry.rate,
+          });
+        }
+        totalWeight += entry.weight;
+      });
+    });
+    
+    const rateClusters = Array.from(rateMap.values()).sort((a, b) => b.rate - a.rate);
+    
+    // REQ-PUT-002: GA = Σ (NW × SR)
+    const grossAmount = rateClusters.reduce((sum, c) => sum + c.amount, 0);
+    
+    // REQ-PUT-003: Auto-pull vouchers / deductions
+    const vouchers = getStore<any>('mkt_vouchers');
+    const freightVoucher = vouchers.find((v: any) => 
+      v.reference_type === 'FREIGHT' && v.status === 'OPEN'
+    );
+    const advanceVoucher = vouchers.find((v: any) =>
+      v.reference_type === 'ADVANCE' && v.status === 'OPEN'
+    );
+    
+    const totalBags = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+    
+    // REQ-PUT-005: All editable
+    // Coolie: Flat = per bag count, Recalculated = recalculate count based on weight (REQ-CNF-005)
+    const coolieAmount = coolieMode === 'FLAT' 
+      ? totalBags * 5 
+      : Math.round(totalWeight / 50) * 5; // Recalculated: bags = totalWeight / avgBagWeight
+
+    const deductions: DeductionItem[] = [
+      {
+        key: 'freight',
+        label: 'Freight',
+        amount: freightVoucher ? freightVoucher.amount : 0,
+        editable: true,
+        autoPulled: !!freightVoucher,
+      },
+      {
+        key: 'coolie',
+        label: `Coolie / Unloading (${coolieMode === 'FLAT' ? 'Flat — per bag' : 'Auto-calculated — by weight'})`,
+        amount: coolieAmount,
+        editable: true,
+        autoPulled: false,
+      },
+      {
+        key: 'weighing',
+        label: 'Weighing Charges',
+        amount: hamaliEnabled ? Math.round(totalWeight * 0.5) : 0,
+        editable: true,
+        autoPulled: false,
+      },
+      {
+        key: 'advance',
+        label: 'Cash Advance',
+        amount: advanceVoucher ? advanceVoucher.amount : 0,
+        editable: true,
+        autoPulled: !!advanceVoucher,
+      },
+      {
+        key: 'gunnies',
+        label: 'Gunnies',
+        amount: gunniesAmount,
+        editable: true,
+        autoPulled: false,
+      },
+    ];
+    
+    // REQ-PUT-004: NP = GA − TD
+    const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
+    const netPayable = grossAmount - totalDeductions;
+    
+    setPattiData({
+      pattiId: generatePattiId(),
+      sellerName: seller.sellerName,
+      rateClusters,
+      grossAmount,
+      deductions,
+      totalDeductions,
+      netPayable,
+      createdAt: new Date().toISOString(),
+      useAverageWeight: useAvgWeight,
+    });
+  }, [coolieMode, hamaliEnabled, gunniesAmount, useAvgWeight]);
+
+  // Update deduction amount
+  const updateDeduction = (key: string, newAmount: number) => {
+    if (!pattiData || (!masterEditMode && !pattiData.deductions.find(d => d.key === key)?.editable)) return;
+    
+    const updated = pattiData.deductions.map(d =>
+      d.key === key ? { ...d, amount: newAmount } : d
+    );
+    const totalDeductions = updated.reduce((s, d) => s + d.amount, 0);
+    setPattiData({
+      ...pattiData,
+      deductions: updated,
+      totalDeductions,
+      netPayable: pattiData.grossAmount - totalDeductions,
+    });
+  };
+
+  // Add manual voucher deduction
+  const addManualVoucher = () => {
+    if (!pattiData || !manualVoucherLabel || !manualVoucherAmount) return;
+    const key = `manual_${Date.now()}`;
+    const amount = parseInt(manualVoucherAmount) || 0;
+    const newDed: DeductionItem = {
+      key,
+      label: manualVoucherLabel,
+      amount,
+      editable: true,
+      autoPulled: false,
+    };
+    const updated = [...pattiData.deductions, newDed];
+    const totalDeductions = updated.reduce((s, d) => s + d.amount, 0);
+    setPattiData({
+      ...pattiData,
+      deductions: updated,
+      totalDeductions,
+      netPayable: pattiData.grossAmount - totalDeductions,
+    });
+    setManualVoucherLabel('');
+    setManualVoucherAmount('');
+    setShowAddVoucher(false);
+    toast.success('Manual deduction added');
+  };
+
+  // Remove a deduction
+  const removeDeduction = (key: string) => {
+    if (!pattiData) return;
+    const updated = pattiData.deductions.filter(d => d.key !== key);
+    const totalDeductions = updated.reduce((s, d) => s + d.amount, 0);
+    setPattiData({
+      ...pattiData,
+      deductions: updated,
+      totalDeductions,
+      netPayable: pattiData.grossAmount - totalDeductions,
+    });
+  };
+
+  // Save patti
+  const savePatti = () => {
+    if (!pattiData) return;
+    const pattis = getStore<any>('mkt_pattis');
+    pattis.push({
+      ...pattiData,
+      sellerId: selectedSeller?.sellerId,
+      savedAt: new Date().toISOString(),
+    });
+    setStore('mkt_pattis', pattis);
+    toast.success(`Sales Patti ${pattiData.pattiId} saved!`);
+    setShowPrint(true);
+  };
+
+  const filteredSellers = useMemo(() => {
+    if (!searchQuery) return sellers;
+    const q = searchQuery.toLowerCase();
+    return sellers.filter(s =>
+      s.sellerName.toLowerCase().includes(q) ||
+      s.sellerMark.toLowerCase().includes(q) ||
+      s.vehicleNumber.toLowerCase().includes(q)
+    );
+  }, [sellers, searchQuery]);
+
+  // ═══ PRINT PREVIEW ═══
+  if (showPrint && pattiData) {
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        {!isDesktop ? (
+        <div className="bg-gradient-to-br from-rose-400 via-pink-500 to-fuchsia-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-[2rem]">
+          <div className="relative z-10 flex items-center gap-3">
+            <button onClick={() => setShowPrint(false)}
+              aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div>
+              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                <Printer className="w-5 h-5" /> Sales Patti Print
+              </h1>
+              <p className="text-white/70 text-xs">{pattiData.pattiId}</p>
+            </div>
+          </div>
+        </div>
+        ) : (
+        <div className="px-8 py-5 flex items-center gap-4">
+          <Button onClick={() => setShowPrint(false)} variant="outline" size="sm" className="rounded-xl h-9">
+            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+          </Button>
+          <div>
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <Printer className="w-5 h-5 text-rose-500" /> Sales Patti Print
+            </h2>
+            <p className="text-sm text-muted-foreground">{pattiData.pattiId}</p>
+          </div>
+        </div>
+        )}
+
+        <div className="px-4 mt-4">
+          <div className="bg-card border border-border rounded-xl p-4 font-mono text-xs space-y-2 shadow-lg">
+            <div className="text-center border-b border-dashed border-border pb-2">
+              <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
+              <p className="text-muted-foreground">Sales Patti (Settlement)</p>
+              <p className="text-muted-foreground">{new Date(pattiData.createdAt).toLocaleDateString()} {new Date(pattiData.createdAt).toLocaleTimeString()}</p>
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2 space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Patti ID</span><span className="font-bold text-foreground">{pattiData.pattiId}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Seller</span><span className="font-bold text-foreground">{pattiData.sellerName}</span></div>
+              {pattiData.useAverageWeight && <div className="flex justify-between"><span className="text-muted-foreground">Mode</span><span className="font-bold text-amber-500">AVG WEIGHT (Quick Close)</span></div>}
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2">
+              <p className="font-bold text-foreground mb-1">RATE CLUSTERS</p>
+              {pattiData.rateClusters.map((c, i) => (
+                <div key={i} className="flex justify-between">
+                  <span className="text-foreground">{c.totalQuantity} bags @ ₹{c.rate} ({c.totalWeight.toFixed(0)}kg)</span>
+                  <span className="font-bold text-foreground">₹{c.amount.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between font-bold">
+              <span className="text-foreground">Gross Amount</span>
+              <span className="text-foreground">₹{pattiData.grossAmount.toLocaleString()}</span>
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2">
+              <p className="font-bold text-foreground mb-1">DEDUCTIONS</p>
+              {pattiData.deductions.filter(d => d.amount > 0).map(d => (
+                <div key={d.key} className="flex justify-between">
+                  <span className="text-muted-foreground">{d.label}{d.autoPulled ? ' (Auto)' : ''}</span>
+                  <span className="text-destructive">−₹{d.amount.toLocaleString()}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold border-t border-dashed border-border pt-1 mt-1">
+                <span className="text-foreground">Total Deductions</span>
+                <span className="text-destructive">−₹{pattiData.totalDeductions.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
+              <span className="font-bold text-foreground">NET PAYABLE</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{pattiData.netPayable.toLocaleString()}</span>
+            </div>
+
+            <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2 space-y-0.5">
+              <p>GA = Σ (NW × SR)</p>
+              <p>NP = GA − TD</p>
+              <p>TD = Freight + Coolie + Weighing + Advance + Gunnies + Other</p>
+            </div>
+
+            <div className="text-center border-t border-dashed border-border pt-2">
+              <p className="text-muted-foreground">--- END OF PATTI ---</p>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-4">
+            <Button onClick={() => {
+              const printLog = getStore<any>('mkt_print_logs');
+              printLog.push({
+                print_log_id: crypto.randomUUID(),
+                reference_type: 'SALES_PATTI',
+                reference_id: pattiData.pattiId,
+                print_type: 'SALES_PATTI',
+                printed_at: new Date().toISOString(),
+              });
+              setStore('mkt_print_logs', printLog);
+              toast.success('Sales Patti sent to printer!');
+            }}
+              className="flex-1 h-12 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold shadow-lg">
+              <Printer className="w-5 h-5 mr-2" /> Print Patti
+            </Button>
+            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); }}
+              variant="outline" className="h-12 rounded-xl px-6">
+              Done
+            </Button>
+          </div>
+        </div>
+        {!isDesktop && <BottomNav />}
+      </div>
+    );
+  }
+
+  // ═══ PATTI DETAIL SCREEN ═══
+  if (selectedSeller && pattiData) {
+    const totalBags = selectedSeller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        {/* Header */}
+        {!isDesktop ? (
+        <div className="bg-gradient-to-br from-rose-400 via-pink-500 to-fuchsia-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(6)].map((_, i) => (
+              <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
+                style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
+                animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
+                transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+              />
+            ))}
+          </div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-3">
+              <button onClick={() => { setSelectedSeller(null); setPattiData(null); }}
+                aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <div className="flex-1">
+                <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5" /> Sales Patti
+                </h1>
+                <p className="text-white/70 text-xs">{pattiData.pattiId}</p>
+              </div>
+              {/* REQ-PUT-009: Master Edit Mode */}
+              <button onClick={() => setMasterEditMode(!masterEditMode)}
+                className={cn("px-3 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1",
+                  masterEditMode
+                    ? "bg-amber-500/30 text-amber-100 border border-amber-400/50"
+                    : "bg-white/15 text-white/70")}>
+                {masterEditMode ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                {masterEditMode ? 'Editing' : 'Locked'}
+              </button>
+            </div>
+
+            {/* Seller info strip */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <User className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Seller</p>
+                <p className="text-[11px] font-semibold text-white truncate">{selectedSeller.sellerName}</p>
+              </div>
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <Truck className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Vehicle</p>
+                <p className="text-[11px] font-semibold text-white truncate">{selectedSeller.vehicleNumber}</p>
+              </div>
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <Package className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Bags</p>
+                <p className="text-[11px] font-semibold text-white">{totalBags}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        ) : (
+        <div className="px-8 py-5">
+          <div className="flex items-center gap-4 mb-4">
+            <Button onClick={() => { setSelectedSeller(null); setPattiData(null); }} variant="outline" size="sm" className="rounded-xl h-9">
+              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+            </Button>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <FileText className="w-5 h-5 text-rose-500" /> Sales Patti — {selectedSeller.sellerName}
+              </h2>
+              <p className="text-sm text-muted-foreground">{pattiData.pattiId} · {selectedSeller.vehicleNumber} · {totalBags} bags</p>
+            </div>
+            <button onClick={() => setMasterEditMode(!masterEditMode)}
+              className={cn("px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all",
+                masterEditMode
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-400/30"
+                  : "bg-muted/50 text-muted-foreground")}>
+              {masterEditMode ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              {masterEditMode ? 'Editing' : 'Locked'}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-rose-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Seller</p>
+              <p className="text-lg font-black text-foreground truncate">{selectedSeller.sellerName}</p>
+            </div>
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Vehicle</p>
+              <p className="text-lg font-black text-foreground truncate">{selectedSeller.vehicleNumber}</p>
+            </div>
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-amber-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Bags</p>
+              <p className="text-lg font-black text-foreground">{totalBags}</p>
+            </div>
+          </div>
+        </div>
+        )}
+
+        <div className="px-4 mt-4 space-y-3">
+          {/* REQ-PUT-006: Quick Exit / Average Close toggle */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="glass-card rounded-2xl p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-foreground">⚡ Quick Exit Mode</p>
+                <p className="text-[10px] text-muted-foreground">Use estimated average weight for early closure</p>
+              </div>
+              <button onClick={() => {
+                setUseAvgWeight(!useAvgWeight);
+                if (selectedSeller) {
+                  setTimeout(() => generatePatti(selectedSeller), 50);
+                }
+              }}
+                className={cn("w-12 h-7 rounded-full transition-all relative",
+                  useAvgWeight ? "bg-gradient-to-r from-amber-500 to-orange-500" : "bg-muted/40")}>
+                <div className={cn("w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-all",
+                  useAvgWeight ? "left-6" : "left-1")} />
+              </button>
+            </div>
+          </motion.div>
+
+          {/* REQ-PUT-001: Rate Clusters */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              📊 Rate Clusters (Buyer names hidden)
+            </p>
+            <div className="space-y-2">
+              {pattiData.rateClusters.map((cluster, i) => (
+                <div key={i} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-muted/20">
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center shadow-md">
+                      <span className="text-white text-[10px] font-bold">₹{cluster.rate}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{cluster.totalQuantity} bags @ ₹{cluster.rate}</p>
+                      <p className="text-[10px] text-muted-foreground">{cluster.totalWeight.toFixed(1)} kg net weight</p>
+                    </div>
+                  </div>
+                  <p className="text-sm font-bold text-foreground">₹{cluster.amount.toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/30">
+              <p className="text-xs font-semibold text-muted-foreground">Gross Amount (GA = Σ NW × SR)</p>
+              <p className="text-base font-black text-foreground">₹{pattiData.grossAmount.toLocaleString()}</p>
+            </div>
+          </motion.div>
+
+          {/* Deductions Panel — REQ-PUT-003, REQ-PUT-005, REQ-PUT-007 */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              📋 Deductions Panel (All Editable)
+            </p>
+
+            {/* Coolie mode toggle — Flat vs Recalculated per REQ-CNF-005 */}
+            <div className="mb-3">
+              <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">Coolie Calculation Mode</p>
+              <div className="flex gap-2">
+                <button onClick={() => { setCoolieMode('FLAT'); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+                  className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
+                    coolieMode === 'FLAT'
+                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
+                      : 'bg-muted/40 text-muted-foreground')}>
+                  <span>Flat Rate</span>
+                  <span className={cn("text-[9px]", coolieMode === 'FLAT' ? 'text-white/70' : 'text-muted-foreground/60')}>Per bag count</span>
+                </button>
+                <button onClick={() => { setCoolieMode('RECALCULATED'); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+                  className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
+                    coolieMode === 'RECALCULATED'
+                      ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-md'
+                      : 'bg-muted/40 text-muted-foreground')}>
+                  <span>Auto-calculated</span>
+                  <span className={cn("text-[9px]", coolieMode === 'RECALCULATED' ? 'text-white/70' : 'text-muted-foreground/60')}>By weight (REQ-CNF-005)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Hamali toggle */}
+            <div className="flex items-center justify-between mb-3 px-3 py-2.5 rounded-xl bg-muted/10 border border-border/20">
+              <div>
+                <p className="text-xs font-semibold text-foreground">⚖️ Weighing Charges</p>
+                <p className="text-[9px] text-muted-foreground">Separate from unloading. Charged per weighment session.</p>
+              </div>
+              <button onClick={() => { setHamaliEnabled(!hamaliEnabled); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+                className={cn("w-11 h-6 rounded-full transition-all relative",
+                  hamaliEnabled ? "bg-gradient-to-r from-emerald-500 to-green-500" : "bg-muted/40")}>
+                <div className={cn("w-4 h-4 rounded-full bg-white shadow-sm absolute top-1 transition-all",
+                  hamaliEnabled ? "left-6" : "left-1")} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {pattiData.deductions.map(deduction => (
+                <div key={deduction.key} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted/20">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-foreground flex items-center gap-1 truncate">
+                      {deduction.label}
+                      {deduction.autoPulled && (
+                        <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 text-[8px] font-bold flex-shrink-0">AUTO</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">₹</span>
+                    <Input
+                      type="number"
+                      value={deduction.amount || ''}
+                      onChange={e => updateDeduction(deduction.key, parseInt(e.target.value) || 0)}
+                      disabled={!deduction.editable && !masterEditMode}
+                      className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-transparent border-border/30"
+                    />
+                    {deduction.key.startsWith('manual_') && (
+                      <button onClick={() => removeDeduction(deduction.key)}
+                        className="w-6 h-6 rounded-md bg-destructive/10 flex items-center justify-center">
+                        <Minus className="w-3 h-3 text-destructive" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Gunnies input */}
+            <div className="flex items-center gap-2 px-3 py-2 mt-2 rounded-xl bg-amber-500/10 border border-amber-400/20">
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-foreground">🧳 Gunnies Amount</p>
+                <p className="text-[9px] text-muted-foreground">Per-seller gunny deduction</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">₹</span>
+                <Input type="number" value={gunniesAmount || ''}
+                  onChange={e => {
+                    setGunniesAmount(parseInt(e.target.value) || 0);
+                    setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50);
+                  }}
+                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-transparent border-amber-400/30"
+                />
+              </div>
+            </div>
+
+            {/* Add Manual Voucher — REQ-PUT-007 */}
+            <AnimatePresence>
+              {showAddVoucher && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                  className="mt-2 p-3 rounded-xl bg-primary/5 border border-primary/20 space-y-2 overflow-hidden">
+                  <Input placeholder="Voucher / Charge label" value={manualVoucherLabel}
+                    onChange={e => setManualVoucherLabel(e.target.value)}
+                    className="h-8 rounded-lg text-xs" />
+                  <div className="flex gap-2">
+                    <Input type="number" placeholder="Amount ₹" value={manualVoucherAmount}
+                      onChange={e => setManualVoucherAmount(e.target.value)}
+                      className="h-8 rounded-lg text-xs flex-1" />
+                    <Button size="sm" onClick={addManualVoucher} className="h-8 rounded-lg text-xs px-4">Add</Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <button onClick={() => setShowAddVoucher(!showAddVoucher)}
+              className="w-full mt-2 py-2 rounded-xl border border-dashed border-border/50 text-xs text-muted-foreground font-medium flex items-center justify-center gap-1 hover:bg-muted/20 transition-all">
+              <PlusCircle className="w-3.5 h-3.5" />
+              {showAddVoucher ? 'Cancel' : 'Add Manual Voucher / Charge'}
+            </button>
+
+            {/* Totals */}
+            <div className="mt-3 pt-2 border-t border-border/30 space-y-1">
+              <div className="flex justify-between">
+                <p className="text-xs text-muted-foreground">Total Deductions (TD)</p>
+                <p className="text-sm font-bold text-destructive">−₹{pattiData.totalDeductions.toLocaleString()}</p>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Footer — REQ-PUT-004 */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+            className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Gross Amount</span>
+                <span className="font-bold text-foreground">₹{pattiData.grossAmount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total Deductions</span>
+                <span className="font-bold text-destructive">−₹{pattiData.totalDeductions.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-lg border-t border-border/50 pt-2">
+                <span className="font-bold text-foreground">Net Payable</span>
+                <span className="font-black text-emerald-600 dark:text-emerald-400">₹{pattiData.netPayable.toLocaleString()}</span>
+              </div>
+              <p className="text-[9px] text-muted-foreground text-center">NP = GA − TD</p>
+            </div>
+
+            <Button onClick={savePatti}
+              className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-base shadow-lg">
+              <Save className="w-5 h-5 mr-2" /> Save & Close Patti
+            </Button>
+          </motion.div>
+        </div>
+        {!isDesktop && <BottomNav />}
+      </div>
+    );
+  }
+
+  // ═══ SELLER LIST SCREEN ═══
+  return (
+    <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      {!isDesktop ? (
+      <div className="bg-gradient-to-br from-rose-400 via-pink-500 to-fuchsia-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(6)].map((_, i) => (
+            <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
+              style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
+              animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
+              transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+            />
+          ))}
+        </div>
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div className="flex-1">
+              <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                <FileText className="w-5 h-5" /> Settlement (Sales Patti)
+              </h1>
+              <p className="text-white/70 text-xs">Seller settlement & payment reconciliation</p>
+            </div>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+            <input aria-label="Search" placeholder="Search seller, mark, vehicle…"
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
+          </div>
+        </div>
+      </div>
+      ) : (
+      <div className="px-8 py-5">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <FileText className="w-5 h-5 text-rose-500" /> Settlement (Sales Patti)
+            </h2>
+            <p className="text-sm text-muted-foreground">{sellers.length} sellers · Settlement & payment reconciliation</p>
+          </div>
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input aria-label="Search" placeholder="Search seller, mark, vehicle…"
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
+          </div>
+        </div>
+      </div>
+      )}
+
+      <div className="px-4 mt-4 space-y-2">
+        {filteredSellers.length === 0 ? (
+          <div className="glass-card rounded-2xl p-8 text-center">
+            <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground font-medium">
+              {sellers.length === 0 ? 'No completed auctions yet' : 'No matching sellers'}
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              {sellers.length === 0 ? 'Complete an auction to generate settlements' : 'Try a different search'}
+            </p>
+            {sellers.length === 0 && (
+              <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-xl">
+                Go to Auctions
+              </Button>
+            )}
+          </div>
+        ) : (
+          filteredSellers.map((seller, i) => {
+            const totalBags = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+            const totalAmount = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + (e.weight * e.rate), 0), 0);
+            return (
+              <motion.button key={seller.sellerId}
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                onClick={() => generatePatti(seller)}
+                className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center shadow-md flex-shrink-0">
+                    <span className="text-white font-black text-sm">{seller.sellerMark || seller.sellerName.charAt(0)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{seller.sellerName}</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      <span>🚛 {seller.vehicleNumber}</span>
+                      <span>•</span>
+                      <span>{totalBags} bags</span>
+                      <span>•</span>
+                      <span>{seller.lots.length} lot(s)</span>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold text-foreground">₹{totalAmount.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground">est. gross</p>
+                  </div>
+                </div>
+              </motion.button>
+            );
+          })
+        )}
+      </div>
+      {!isDesktop && <BottomNav />}
+    </div>
+  );
+};
+
+export default SettlementPage;

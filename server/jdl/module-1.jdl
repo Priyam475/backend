@@ -1,0 +1,58 @@
+// ============================================================
+// MERKOTRACE MODULE 1 — AUTH & TENANT (JDL)
+// Entities: Trader, Role, Permission, BusinessCategory
+// Relationships: User->Trader, User<->Role, Role<->Permission
+// Aligned with merkotrace_database_schema.sql Part 2 (Core Control)
+// ============================================================
+
+enum ApprovalStatus {
+  PENDING,
+  APPROVED
+}
+
+enum BusinessMode {
+  COMMISSION,
+  TRADING
+}
+
+entity Trader {
+  businessName String required maxlength(150),
+  ownerName String required maxlength(150),
+  address TextBlob,
+  category String maxlength(100),
+  approvalStatus ApprovalStatus,
+  businessMode BusinessMode,
+  billPrefix String maxlength(20),
+  createdAt Instant,
+  updatedAt Instant
+}
+
+entity Role {
+  roleName String required maxlength(100) unique,
+  createdAt Instant
+}
+
+entity Permission {
+  permissionName String required maxlength(150) unique,
+  createdAt Instant
+}
+
+entity BusinessCategory {
+  categoryName String required maxlength(100) unique,
+  isActive Boolean,
+  createdAt Instant,
+  updatedAt Instant
+}
+
+// Role <-> Permission (many-to-many)
+relationship ManyToMany {
+  Role{permission} to Permission{role}
+}
+
+// NOTE: User->Trader and User<->Role omitted (User is built-in). Add via migration if needed.
+
+// Pagination and options
+paginate Trader, Role, Permission, BusinessCategory with pagination
+dto * with mapstruct
+service * with serviceImpl
+filter Trader, Role, Permission, BusinessCategory

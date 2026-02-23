@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Explicit Module 1 trader seed data (independent of faker CSV) -->
+    <changeSet id="20260223111000-1" author="mercotrace" context="dev">
+        <insert tableName="trader">
+            <column name="id" valueNumeric="101"/>
+            <column name="business_name" value="Green Valley Mandi"/>
+            <column name="owner_name" value="Ramesh Kumar"/>
+            <column name="address" value="123 Market St, City"/>
+            <column name="category" value="Agriculture"/>
+            <column name="approval_status" value="PENDING"/>
+            <column name="business_mode" value="COMMISSION"/>
+            <column name="bill_prefix" value="GV"/>
+            <column name="created_at" valueDate="2026-02-23T00:00:00"/>
+            <column name="updated_at" valueDate="2026-02-23T00:00:00"/>
+        </insert>
+
+        <insert tableName="trader">
+            <column name="id" valueNumeric="102"/>
+            <column name="business_name" value="Sharma Traders"/>
+            <column name="owner_name" value="Vikram Sharma"/>
+            <column name="address" value="456 APMC Road"/>
+            <column name="category" value="Retail"/>
+            <column name="approval_status" value="APPROVED"/>
+            <column name="business_mode" value="TRADING"/>
+            <column name="bill_prefix" value="ST"/>
+            <column name="created_at" valueDate="2026-02-23T00:00:00"/>
+            <column name="updated_at" valueDate="2026-02-23T00:00:00"/>
+        </insert>
+
+        <insert tableName="trader">
+            <column name="id" valueNumeric="103"/>
+            <column name="business_name" value="Test Trader Shop"/>
+            <column name="owner_name" value="Test Owner"/>
+            <column name="address" value="789 Test Ave"/>
+            <column name="category" value="Agriculture"/>
+            <column name="approval_status" value="PENDING"/>
+            <column name="business_mode" value="COMMISSION"/>
+            <column name="bill_prefix" value="TS"/>
+            <column name="created_at" valueDate="2026-02-23T00:00:00"/>
+            <column name="updated_at" valueDate="2026-02-23T00:00:00"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>
+

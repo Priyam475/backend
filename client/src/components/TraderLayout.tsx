@@ -1,0 +1,124 @@
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Moon, Sun, Bell, User, Sparkles } from 'lucide-react';
+import DesktopSidebar from '@/components/DesktopSidebar';
+import { useDesktopMode } from '@/hooks/use-desktop';
+import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
+
+const pageTitles: Record<string, string> = {
+  '/home': 'Dashboard',
+  '/contacts': 'Contacts',
+  '/profile': 'Profile',
+  '/commodity-settings': 'Commodity Settings',
+  '/arrivals': 'Arrivals',
+  '/auctions': 'Auctions / Sales Pad',
+  '/weighing': 'Weighing',
+  '/writers-pad': "Writer's Pad",
+  '/logistics': 'Logistics & Navigation',
+  '/settlement': 'Settlement (Patti)',
+  '/billing': 'Billing (Sales Bill)',
+  '/accounting': 'Chart of Accounts',
+  '/vouchers': 'Vouchers & Payments',
+  '/financial-reports': 'Financial Reports',
+  '/scribble-pad': 'Scribble Pad',
+  '/self-sale': 'Self-Sale',
+  '/stock-purchase': 'Stock Purchase',
+  '/cdn': 'Consignment Dispatch Note',
+  '/prints-reports': 'Print Templates',
+  '/prints': 'Print Templates',
+  '/reports': 'Analytics Reports',
+};
+
+const pageGradients: Record<string, string> = {
+  '/home': 'from-primary/8 to-violet-500/5',
+  '/contacts': 'from-emerald-500/8 to-teal-500/5',
+  '/commodity-settings': 'from-emerald-500/8 to-teal-500/5',
+  '/arrivals': 'from-blue-500/8 to-cyan-500/5',
+  '/auctions': 'from-amber-500/8 to-orange-500/5',
+  '/weighing': 'from-indigo-500/8 to-blue-500/5',
+  '/settlement': 'from-rose-500/8 to-pink-500/5',
+  '/billing': 'from-cyan-500/8 to-blue-500/5',
+  '/accounting': 'from-emerald-500/8 to-teal-500/5',
+  '/vouchers': 'from-violet-500/8 to-purple-500/5',
+  '/financial-reports': 'from-red-500/8 to-rose-500/5',
+  '/self-sale': 'from-lime-500/8 to-green-500/5',
+  '/stock-purchase': 'from-sky-500/8 to-blue-500/5',
+  '/cdn': 'from-orange-500/8 to-amber-500/5',
+};
+
+const TraderLayout = () => {
+  const isDesktop = useDesktopMode();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { isDark, toggleTheme } = useTheme();
+  const { user, trader } = useAuth();
+
+  if (!isDesktop) {
+    return <Outlet />;
+  }
+
+  const pageTitle = pageTitles[location.pathname] || 
+    Object.entries(pageTitles).find(([k]) => location.pathname.startsWith(k))?.[1] || 
+    'Mercotrace';
+
+  const headerGradient = pageGradients[location.pathname] || 'from-primary/8 to-violet-500/5';
+
+  return (
+    <div className="flex min-h-screen w-full bg-background">
+      <DesktopSidebar />
+      <div className="flex-1 min-h-screen lg:ml-[260px] transition-all duration-250">
+        {/* Subtle background blobs */}
+        <div className="fixed pointer-events-none inset-0 lg:left-[260px]">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-primary/8 via-accent/5 to-transparent rounded-full blur-3xl" />
+          <div className="absolute bottom-0 left-0 w-80 h-80 bg-gradient-to-tr from-accent/6 via-primary/4 to-transparent rounded-full blur-3xl" />
+        </div>
+
+        {/* Aeroglass Desktop Top Bar */}
+        <header
+          className="sticky top-0 z-30 h-16 flex items-center justify-between px-8 border-b border-border/40 relative overflow-hidden"
+          style={{
+            background: 'var(--glass-bg)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+          }}
+        >
+          {/* Subtle gradient accent behind header */}
+          <div className={`absolute inset-0 bg-gradient-to-r ${headerGradient} pointer-events-none`} />
+          {/* Inner shine */}
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none" />
+          
+          <div className="relative z-10 flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-gradient-to-r from-primary to-violet-500 animate-pulse" />
+            <h2 className="text-lg font-bold text-foreground">{pageTitle}</h2>
+          </div>
+          <div className="relative z-10 flex items-center gap-3">
+            <button aria-label="Notifications" className="w-9 h-9 rounded-xl glass flex items-center justify-center hover:bg-muted/50 transition-all relative border border-border/30">
+              <Bell className="w-4 h-4 text-muted-foreground" />
+              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-gradient-to-r from-primary to-violet-500 shadow-sm shadow-primary/40" />
+            </button>
+            <button onClick={toggleTheme} aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'} className="w-9 h-9 rounded-xl glass flex items-center justify-center hover:bg-muted/50 transition-all border border-border/30">
+              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-muted-foreground" />}
+            </button>
+            <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl glass cursor-pointer hover:bg-muted/50 transition-all border border-border/30"
+              onClick={() => navigate('/profile')}
+            >
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-violet-500 flex items-center justify-center shadow-md shadow-primary/20">
+                <User className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-foreground">{trader?.business_name || user?.name || 'Trader'}</p>
+                <p className="text-[10px] text-muted-foreground">Trader Account</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="relative z-10">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+};
+
+export default TraderLayout;

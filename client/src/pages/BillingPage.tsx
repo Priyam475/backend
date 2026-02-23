@@ -1,0 +1,1044 @@
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowLeft, Receipt, Search, User, Package, Truck, Hash,
+  Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
+  DollarSign, Percent, FileText, ChevronDown, ChevronUp,
+  History
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useDesktopMode } from '@/hooks/use-desktop';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import BottomNav from '@/components/BottomNav';
+import { toast } from 'sonner';
+
+// ── localStorage helpers ──────────────────────────────────
+function getStore<T>(key: string): T[] {
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
+}
+function setStore<T>(key: string, data: T[]) {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+// ── Types ─────────────────────────────────────────────────
+interface BuyerPurchase {
+  buyerMark: string;
+  buyerName: string;
+  buyerContactId: string | null;
+  entries: BillEntry[];
+}
+
+interface BillEntry {
+  bidNumber: number;
+  lotId: string;
+  lotName: string;
+  sellerName: string;
+  commodityName: string;
+  rate: number;
+  quantity: number;
+  weight: number;
+  presetApplied: number;
+  isSelfSale: boolean;
+}
+
+interface CommodityGroup {
+  commodityName: string;
+  hsnCode: string;
+  commissionPercent: number;
+  userFeePercent: number;
+  items: BillLineItem[];
+  subtotal: number;
+  commissionAmount: number;
+  userFeeAmount: number;
+  totalCharges: number;
+}
+
+interface BillLineItem {
+  bidNumber: number;
+  lotName: string;
+  sellerName: string;
+  quantity: number;
+  weight: number;
+  baseRate: number;
+  brokerage: number;
+  otherCharges: number;
+  newRate: number; // REQ-BIL-002
+  amount: number;
+}
+
+interface BillData {
+  billId: string;
+  billNumber: string;
+  buyerName: string;
+  buyerMark: string;
+  billingName: string;
+  billDate: string;
+  commodityGroups: CommodityGroup[];
+  buyerCoolie: number;
+  outboundFreight: number;
+  outboundVehicle: string;
+  discount: number;
+  discountType: 'PERCENT' | 'AMOUNT';
+  manualRoundOff: number;
+  grandTotal: number;
+  brokerageType: 'PERCENT' | 'AMOUNT';
+  brokerageValue: number;
+  globalOtherCharges: number;
+  pendingBalance: number;
+  versions: any[];
+}
+
+// REQ-BIL bill number generation (isolated by prefix)
+function generateBillNumber(): string {
+  const prefix = (() => {
+    try {
+      const auth = JSON.parse(localStorage.getItem('mkt_auth') || '{}');
+      return auth.trader?.bill_prefix || 'MT';
+    } catch { return 'MT'; }
+  })();
+  const counter = parseInt(localStorage.getItem(`mkt_bill_counter_${prefix}`) || '0') + 1;
+  localStorage.setItem(`mkt_bill_counter_${prefix}`, String(counter));
+  return `${prefix}-${String(counter).padStart(5, '0')}`;
+}
+
+const BillingPage = () => {
+  const navigate = useNavigate();
+  const isDesktop = useDesktopMode();
+  const [buyers, setBuyers] = useState<BuyerPurchase[]>([]);
+  const [selectedBuyer, setSelectedBuyer] = useState<BuyerPurchase | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Bill state
+  const [bill, setBill] = useState<BillData | null>(null);
+  const [editLocked, setEditLocked] = useState(true);
+  const [showPrint, setShowPrint] = useState(false);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+
+  // Search mode for bill search
+  const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
+  const [savedBills, setSavedBills] = useState<BillData[]>([]);
+
+  // Load buyer data from completed auctions
+  useEffect(() => {
+    const auctionData = getStore<any>('mkt_auction_results');
+    const arrivals = getStore<any>('mkt_arrival_records');
+    const weighingSessions = getStore<any>('mkt_weighing_sessions');
+    const configs = getStore<any>('mkt_commodity_configs');
+    
+    // REQ-BIL-001: Aggregate all purchases by one buyer across vehicles/sellers
+    const buyerMap = new Map<string, BuyerPurchase>();
+    
+    auctionData.forEach((auction: any) => {
+      let sellerName = auction.sellerName || 'Unknown';
+      let lotName = auction.lotName || '';
+      let commodityName = auction.commodityName || '';
+      
+      arrivals.forEach((arr: any) => {
+        (arr.sellers || []).forEach((seller: any) => {
+          (seller.lots || []).forEach((lot: any) => {
+            if (lot.lot_id === auction.lotId) {
+              sellerName = seller.seller_name;
+              lotName = lot.lot_name || lotName;
+              commodityName = lot.commodity_name || commodityName;
+            }
+          });
+        });
+      });
+      
+      (auction.entries || []).forEach((entry: any) => {
+        if (entry.isSelfSale) return;
+        
+        const key = entry.buyerMark || entry.buyerName;
+        if (!buyerMap.has(key)) {
+          buyerMap.set(key, {
+            buyerMark: entry.buyerMark,
+            buyerName: entry.buyerName,
+            buyerContactId: entry.buyerContactId || null,
+            entries: [],
+          });
+        }
+        
+        const ws = weighingSessions.find((s: any) => s.bid_number === entry.bidNumber);
+        const weight = ws ? ws.net_weight : entry.quantity * 50;
+        
+        buyerMap.get(key)!.entries.push({
+          bidNumber: entry.bidNumber,
+          lotId: auction.lotId,
+          lotName,
+          sellerName,
+          commodityName,
+          rate: entry.rate,
+          quantity: entry.quantity,
+          weight,
+          presetApplied: entry.presetApplied || 0,
+          isSelfSale: false,
+        });
+      });
+    });
+    
+    setBuyers(Array.from(buyerMap.values()));
+    setSavedBills(getStore<any>('mkt_bills'));
+  }, []);
+
+  // Generate Bill
+  const generateBill = useCallback((buyer: BuyerPurchase) => {
+    setSelectedBuyer(buyer);
+    const configs = getStore<any>('mkt_commodity_configs');
+    const commodities = getStore<any>('mkt_commodities');
+    
+    // REQ-BIL-004: Group by commodity (separate calc tables per commodity)
+    const commodityMap = new Map<string, CommodityGroup>();
+    
+    buyer.entries.forEach(entry => {
+      const commName = entry.commodityName || 'Unknown';
+      if (!commodityMap.has(commName)) {
+        // Find config for this commodity
+        const commodity = commodities.find((c: any) => c.commodity_name === commName);
+        const config = commodity ? configs.find((c: any) => c.commodity_id === commodity.commodity_id) : null;
+        
+        commodityMap.set(commName, {
+          commodityName: commName,
+          hsnCode: config?.hsn_code || '',
+          commissionPercent: config?.commission_percent || 0,
+          userFeePercent: config?.user_fee_percent || 0,
+          items: [],
+          subtotal: 0,
+          commissionAmount: 0,
+          userFeeAmount: 0,
+          totalCharges: 0,
+        });
+      }
+      
+      const group = commodityMap.get(commName)!;
+      
+      // REQ-BIL-002: NR = B + P + BRK + Other Charges
+      const brokerage = 0; // default, can be edited
+      const otherCharges = 0; // default
+      const newRate = entry.rate + entry.presetApplied + brokerage + otherCharges;
+      
+      group.items.push({
+        bidNumber: entry.bidNumber,
+        lotName: entry.lotName,
+        sellerName: entry.sellerName,
+        quantity: entry.quantity,
+        weight: entry.weight,
+        baseRate: entry.rate,
+        brokerage,
+        otherCharges,
+        newRate,
+        amount: newRate * entry.quantity,
+      });
+    });
+    
+    // Calculate per-commodity totals
+    commodityMap.forEach(group => {
+      group.subtotal = group.items.reduce((s, item) => s + item.amount, 0);
+      // REQ-BIL-005: CA = BG × C%
+      group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
+      // REQ-BIL-006: UFA = BG × UF%
+      group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
+      group.totalCharges = group.commissionAmount + group.userFeeAmount;
+    });
+    
+    const commodityGroups = Array.from(commodityMap.values());
+    const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
+    
+    // REQ-BIL-009: GT = Σ(Commodity Totals) + Additions - Discount + Manual Round OFF
+    setBill({
+      billId: crypto.randomUUID(),
+      billNumber: '', // Generated on print (per SRS)
+      buyerName: buyer.buyerName,
+      buyerMark: buyer.buyerMark,
+      billingName: buyer.buyerName,
+      billDate: new Date().toISOString(),
+      commodityGroups,
+      buyerCoolie: 0,
+      outboundFreight: 0,
+      outboundVehicle: '',
+      discount: 0,
+      discountType: 'AMOUNT',
+      manualRoundOff: 0,
+      grandTotal: subtotalSum,
+      brokerageType: 'AMOUNT',
+      brokerageValue: 0,
+      globalOtherCharges: 0,
+      pendingBalance: subtotalSum,
+      versions: [],
+    });
+    setEditLocked(false);
+  }, []);
+
+  // Recalculate grand total
+  const recalcGrandTotal = useCallback((b: BillData): BillData => {
+    const subtotalSum = b.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
+    const additions = b.buyerCoolie + b.outboundFreight;
+    let discountAmount = b.discount;
+    if (b.discountType === 'PERCENT') {
+      discountAmount = Math.round(subtotalSum * b.discount / 100);
+    }
+    const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
+    return { ...b, grandTotal, pendingBalance: grandTotal };
+  }, []);
+
+  // Update brokerage/charges on a line item
+  const updateLineItem = (commIdx: number, itemIdx: number, field: 'brokerage' | 'otherCharges', value: number) => {
+    if (!bill) return;
+    const updated = { ...bill };
+    const group = { ...updated.commodityGroups[commIdx] };
+    const item = { ...group.items[itemIdx] };
+    item[field] = value;
+    // REQ-BIL-002
+    item.newRate = item.baseRate + (bill.commodityGroups[commIdx].items[itemIdx] === item ? item.brokerage : 0) + item.brokerage + item.otherCharges;
+    item.amount = item.newRate * item.quantity;
+    group.items = [...group.items];
+    group.items[itemIdx] = item;
+    group.subtotal = group.items.reduce((s, i) => s + i.amount, 0);
+    group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
+    group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
+    group.totalCharges = group.commissionAmount + group.userFeeAmount;
+    updated.commodityGroups = [...updated.commodityGroups];
+    updated.commodityGroups[commIdx] = group;
+    setBill(recalcGrandTotal(updated));
+  };
+
+  // Apply global brokerage/charges to all items
+  const applyGlobalCharges = () => {
+    if (!bill) return;
+    const updated = { ...bill };
+    updated.commodityGroups = updated.commodityGroups.map(group => {
+      const items = group.items.map(item => {
+        const brk = bill.brokerageType === 'PERCENT'
+          ? Math.round(item.baseRate * bill.brokerageValue / 100)
+          : bill.brokerageValue;
+        const newItem = {
+          ...item,
+          brokerage: brk,
+          otherCharges: bill.globalOtherCharges,
+          newRate: item.baseRate + brk + bill.globalOtherCharges,
+          amount: 0,
+        };
+        newItem.amount = newItem.newRate * newItem.quantity;
+        return newItem;
+      });
+      const subtotal = items.reduce((s, i) => s + i.amount, 0);
+      return {
+        ...group,
+        items,
+        subtotal,
+        commissionAmount: Math.round(subtotal * group.commissionPercent / 100),
+        userFeeAmount: Math.round(subtotal * group.userFeePercent / 100),
+        totalCharges: Math.round(subtotal * group.commissionPercent / 100) + Math.round(subtotal * group.userFeePercent / 100),
+      };
+    });
+    setBill(recalcGrandTotal(updated));
+    toast.success('Global charges applied to all line items');
+  };
+
+  // Save bill
+  const saveBill = () => {
+    if (!bill) return;
+    // Bill number generated on print only
+    const billNumber = generateBillNumber();
+    const finalBill = { ...bill, billNumber, savedAt: new Date().toISOString() };
+    
+    const bills = getStore<any>('mkt_bills');
+    const existingIdx = bills.findIndex((b: any) => b.billId === bill.billId);
+    if (existingIdx >= 0) {
+      // Version history (Audit Trail)
+      if (!finalBill.versions) finalBill.versions = [];
+      finalBill.versions.push({
+        version: finalBill.versions.length + 1,
+        savedAt: bills[existingIdx].savedAt,
+        data: { ...bills[existingIdx] },
+      });
+      bills[existingIdx] = finalBill;
+    } else {
+      bills.push(finalBill);
+    }
+    setStore('mkt_bills', bills);
+    
+    // REQ-BIL-008: Auto-create voucher for buyer coolie / outbound freight
+    if (finalBill.buyerCoolie > 0 || finalBill.outboundFreight > 0) {
+      const vouchers = getStore<any>('mkt_vouchers');
+      if (finalBill.buyerCoolie > 0) {
+        vouchers.push({
+          voucher_id: crypto.randomUUID(),
+          reference_type: 'BUYER_COOLIE',
+          reference_id: finalBill.billId,
+          amount: finalBill.buyerCoolie,
+          status: 'OPEN',
+          created_at: new Date().toISOString(),
+        });
+      }
+      if (finalBill.outboundFreight > 0) {
+        vouchers.push({
+          voucher_id: crypto.randomUUID(),
+          reference_type: 'OUTBOUND_FREIGHT',
+          reference_id: finalBill.billId,
+          amount: finalBill.outboundFreight,
+          status: 'OPEN',
+          created_at: new Date().toISOString(),
+        });
+      }
+      setStore('mkt_vouchers', vouchers);
+    }
+    
+    setBill(finalBill);
+    toast.success(`Bill ${billNumber} saved!`);
+    setShowPrint(true);
+  };
+
+  const filteredBuyers = useMemo(() => {
+    if (!searchQuery) return buyers;
+    const q = searchQuery.toLowerCase();
+    return buyers.filter(b =>
+      b.buyerMark.toLowerCase().includes(q) ||
+      b.buyerName.toLowerCase().includes(q)
+    );
+  }, [buyers, searchQuery]);
+
+  // Search saved bills
+  const filteredBills = useMemo(() => {
+    if (!searchQuery) return savedBills;
+    const q = searchQuery.toLowerCase();
+    return savedBills.filter((b: any) =>
+      b.buyerMark?.toLowerCase().includes(q) ||
+      b.buyerName?.toLowerCase().includes(q) ||
+      b.billNumber?.toLowerCase().includes(q) ||
+      b.billingName?.toLowerCase().includes(q) ||
+      b.outboundVehicle?.toLowerCase().includes(q)
+    );
+  }, [savedBills, searchQuery]);
+
+  // ═══ PRINT PREVIEW ═══
+  if (showPrint && bill) {
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        {!isDesktop ? (
+        <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-[2rem]">
+          <div className="relative z-10 flex items-center gap-3">
+            <button onClick={() => setShowPrint(false)}
+              aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div>
+              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                <Printer className="w-5 h-5" /> Sales Bill Print
+              </h1>
+              <p className="text-white/70 text-xs">{bill.billNumber || 'Draft'}</p>
+            </div>
+          </div>
+        </div>
+        ) : (
+        <div className="px-8 py-5 flex items-center gap-4">
+          <Button onClick={() => setShowPrint(false)} variant="outline" size="sm" className="rounded-xl h-9">
+            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+          </Button>
+          <div>
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <Printer className="w-5 h-5 text-indigo-500" /> Sales Bill Print
+            </h2>
+            <p className="text-sm text-muted-foreground">{bill.billNumber || 'Draft'}</p>
+          </div>
+        </div>
+        )}
+
+        <div className="px-4 mt-4">
+          <div className="bg-card border border-border rounded-xl p-4 font-mono text-xs space-y-2 shadow-lg">
+            <div className="text-center border-b border-dashed border-border pb-2">
+              <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
+              <p className="text-muted-foreground">Sales Bill (Buyer Invoice)</p>
+              <p className="text-muted-foreground">{new Date(bill.billDate).toLocaleDateString()}</p>
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2 space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Bill No.</span><span className="font-bold text-foreground">{bill.billNumber || 'DRAFT'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Buyer</span><span className="font-bold text-foreground">{bill.billingName} ({bill.buyerMark})</span></div>
+              {bill.outboundVehicle && <div className="flex justify-between"><span className="text-muted-foreground">Out Vehicle</span><span className="font-bold text-foreground">{bill.outboundVehicle}</span></div>}
+            </div>
+
+            {/* Per-commodity tables — REQ-BIL-004 */}
+            {bill.commodityGroups.map((group, gi) => (
+              <div key={gi} className="border-b border-dashed border-border pb-2">
+                <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}</p>
+                {group.items.map((item, ii) => (
+                  <div key={ii} className="flex justify-between text-[10px]">
+                    <span className="text-foreground">{item.quantity}×{item.weight.toFixed(0)}kg @₹{item.newRate}</span>
+                    <span className="font-bold text-foreground">₹{item.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="mt-1 pt-1 border-t border-dotted border-border/50 space-y-0.5">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{group.subtotal.toLocaleString()}</span></div>
+                  {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span><span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span></div>}
+                  {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span><span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span></div>}
+                </div>
+              </div>
+            ))}
+
+            {/* Additions */}
+            {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
+              <div className="border-b border-dashed border-border pb-2">
+                <p className="font-bold text-foreground mb-1">ADDITIONS</p>
+                {bill.buyerCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Buyer Coolie</span><span className="text-foreground">₹{bill.buyerCoolie.toLocaleString()}</span></div>}
+                {bill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{bill.outboundFreight.toLocaleString()}</span></div>}
+              </div>
+            )}
+
+            {/* REQ-BIL-010: Tax table */}
+            <div className="border-b border-dashed border-border pb-2">
+              <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
+              {bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0).map((g, i) => (
+                <div key={i} className="text-[10px] space-y-0.5">
+                  <span className="text-muted-foreground">{g.commodityName}:</span>
+                  {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{g.commissionAmount}</span></div>}
+                  {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{g.userFeeAmount}</span></div>}
+                </div>
+              ))}
+            </div>
+
+            {bill.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{bill.discountType === 'PERCENT' ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100) : bill.discount}</span></div>}
+            {bill.manualRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span></div>}
+
+            <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
+              <span className="font-bold text-foreground">GRAND TOTAL</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
+            </div>
+
+            <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2">
+              <p>NR = B + P + BRK + Other</p>
+              <p>GT = Σ(Commodity Totals) + Additions − Discount + Round Off</p>
+            </div>
+
+            <div className="text-center border-t border-dashed border-border pt-2">
+              <p className="text-muted-foreground">--- END OF BILL ---</p>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-4">
+            <Button onClick={() => {
+              const printLog = getStore<any>('mkt_print_logs');
+              printLog.push({
+                print_log_id: crypto.randomUUID(),
+                reference_type: 'SALES_BILL',
+                reference_id: bill.billId,
+                print_type: 'SALES_BILL',
+                printed_at: new Date().toISOString(),
+              });
+              setStore('mkt_print_logs', printLog);
+              toast.success('Sales Bill sent to printer!');
+            }}
+              className="flex-1 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
+              <Printer className="w-5 h-5 mr-2" /> Print Bill
+            </Button>
+            <Button onClick={() => { setShowPrint(false); setBill(null); setSelectedBuyer(null); }}
+              variant="outline" className="h-12 rounded-xl px-6">
+              Done
+            </Button>
+          </div>
+        </div>
+        {!isDesktop && <BottomNav />}
+      </div>
+    );
+  }
+
+  // ═══ BILL DETAIL SCREEN ═══
+  if (selectedBuyer && bill) {
+    const totalItems = bill.commodityGroups.reduce((s, g) => s + g.items.length, 0);
+
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        {!isDesktop ? (
+        <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(6)].map((_, i) => (
+              <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
+                style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
+                animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
+                transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+              />
+            ))}
+          </div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-3">
+               <button onClick={() => { setSelectedBuyer(null); setBill(null); }}
+                aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <div className="flex-1">
+                <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Receipt className="w-5 h-5" /> Sales Bill
+                </h1>
+                <p className="text-white/70 text-xs">{bill.billNumber || 'New Bill'} · {totalItems} item(s)</p>
+              </div>
+              <button onClick={() => setShowPaymentHistory(!showPaymentHistory)}
+                className="px-2.5 py-1.5 rounded-xl bg-white/15 text-white/80 text-[10px] font-bold flex items-center gap-1">
+                <History className="w-3 h-3" /> History
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <User className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Buyer</p>
+                <p className="text-[11px] font-semibold text-white truncate">{bill.buyerMark}</p>
+              </div>
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <Package className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Items</p>
+                <p className="text-[11px] font-semibold text-white">{totalItems}</p>
+              </div>
+              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                <DollarSign className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-[9px] text-white/60 uppercase">Total</p>
+                <p className="text-[11px] font-semibold text-white">₹{bill.grandTotal.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        ) : (
+        <div className="px-8 py-5">
+          <div className="flex items-center gap-4 mb-4">
+            <Button onClick={() => { setSelectedBuyer(null); setBill(null); }} variant="outline" size="sm" className="rounded-xl h-9">
+              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+            </Button>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-indigo-500" /> Sales Bill — {bill.buyerMark}
+              </h2>
+              <p className="text-sm text-muted-foreground">{bill.billNumber || 'New Bill'} · {totalItems} item(s) · ₹{bill.grandTotal.toLocaleString()}</p>
+            </div>
+            <button onClick={() => setShowPaymentHistory(!showPaymentHistory)}
+              className="px-3 py-1.5 rounded-xl bg-muted/50 text-muted-foreground text-xs font-bold flex items-center gap-1.5 hover:bg-muted transition-all">
+              <History className="w-3.5 h-3.5" /> History
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-indigo-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Buyer</p>
+              <p className="text-lg font-black text-foreground">{bill.buyerName} ({bill.buyerMark})</p>
+            </div>
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Items</p>
+              <p className="text-lg font-black text-foreground">{totalItems}</p>
+            </div>
+            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-emerald-500">
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Grand Total</p>
+              <p className="text-lg font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</p>
+            </div>
+          </div>
+        </div>
+        )}
+
+        <div className="px-4 mt-4 space-y-3">
+          {/* Billing Name text box */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Billing Name (appears on print)</p>
+            <Input value={bill.billingName}
+              onChange={e => setBill({ ...bill, billingName: e.target.value })}
+              className="h-10 rounded-xl text-sm font-medium bg-muted/20 border-border/30" />
+          </motion.div>
+
+          {/* Global Brokerage & Other Charges — Apply to all */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Global Charges (Apply to All Items)</p>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <p className="text-[9px] text-muted-foreground mb-0.5">Brokerage</p>
+                <div className="flex gap-1">
+                  <button onClick={() => setBill({ ...bill, brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
+                    className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
+                    {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
+                  </button>
+                  <Input type="number" value={bill.brokerageValue || ''}
+                    onChange={e => setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 })}
+                    className="h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1" />
+                </div>
+              </div>
+              <div>
+                <p className="text-[9px] text-muted-foreground mb-0.5">Other Charges (₹)</p>
+                <Input type="number" value={bill.globalOtherCharges || ''}
+                  onChange={e => setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 })}
+                  className="h-8 rounded-lg text-xs text-center font-bold bg-muted/10" />
+              </div>
+            </div>
+            <Button onClick={applyGlobalCharges} size="sm"
+              className="w-full h-9 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-xs font-bold">
+              Apply to All Line Items
+            </Button>
+          </motion.div>
+
+          {/* Per-commodity breakdown — REQ-BIL-004 */}
+          {bill.commodityGroups.map((group, gi) => (
+            <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 + gi * 0.05 }}
+              className="glass-card rounded-2xl overflow-hidden">
+              <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
+                  {group.hsnCode && <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">HSN: {group.hsnCode}</span>}
+                </div>
+              </div>
+              <div className="p-3 space-y-2">
+                {group.items.map((item, ii) => (
+                  <div key={ii} className="p-2.5 rounded-xl bg-muted/15 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-foreground">Bid #{item.bidNumber} · {item.lotName}</p>
+                        <p className="text-[10px] text-muted-foreground">{item.sellerName} · {item.quantity} bags · {item.weight.toFixed(0)}kg</p>
+                      </div>
+                      <p className="text-sm font-bold text-foreground">₹{item.amount.toLocaleString()}</p>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 text-[9px]">
+                      <div className="text-center p-1 rounded bg-muted/20">
+                        <p className="text-muted-foreground">Base</p>
+                        <p className="font-bold text-foreground">₹{item.baseRate}</p>
+                      </div>
+                      <div className="text-center p-1 rounded bg-muted/20">
+                        <p className="text-muted-foreground">BRK</p>
+                        <Input type="number" value={item.brokerage || ''}
+                          onChange={e => updateLineItem(gi, ii, 'brokerage', parseFloat(e.target.value) || 0)}
+                          className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
+                      </div>
+                      <div className="text-center p-1 rounded bg-muted/20">
+                        <p className="text-muted-foreground">Other</p>
+                        <Input type="number" value={item.otherCharges || ''}
+                          onChange={e => updateLineItem(gi, ii, 'otherCharges', parseFloat(e.target.value) || 0)}
+                          className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
+                      </div>
+                      <div className="text-center p-1 rounded bg-primary/10">
+                        <p className="text-primary text-[8px]">New Rate</p>
+                        <p className="font-bold text-primary">₹{item.newRate}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {/* Commodity subtotals */}
+                <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span className="font-bold text-foreground">₹{group.subtotal.toLocaleString()}</span>
+                  </div>
+                  {group.commissionPercent > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span>
+                      <span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {group.userFeePercent > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span>
+                      <span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+
+          {/* Additions Panel */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Additions</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-foreground flex-1">Buyer Coolie (Rate × Qty)</p>
+                <Input type="number" value={bill.buyerCoolie || ''}
+                  onChange={e => setBill(recalcGrandTotal({ ...bill, buyerCoolie: parseInt(e.target.value) || 0 }))}
+                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-foreground flex-1">Outbound Freight</p>
+                <Input type="number" value={bill.outboundFreight || ''}
+                  onChange={e => setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value) || 0 }))}
+                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
+                <Input value={bill.outboundVehicle}
+                  onChange={e => setBill({ ...bill, outboundVehicle: e.target.value })}
+                  placeholder="MH-12-XX-1234"
+                  className="h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Discount & Round Off — REQ-BIL-009 */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+            className="glass-card rounded-2xl p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Discount & Adjustments</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-foreground flex-1">Discount</p>
+                <button onClick={() => setBill({ ...bill, discountType: bill.discountType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
+                  className="px-2 py-1 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
+                  {bill.discountType === 'PERCENT' ? '%' : '₹'}
+                </button>
+                <Input type="number" value={bill.discount || ''}
+                  onChange={e => setBill(recalcGrandTotal({ ...bill, discount: parseFloat(e.target.value) || 0 }))}
+                  className="h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-foreground flex-1">Manual Round Off</p>
+                <Input type="number" value={bill.manualRoundOff || ''}
+                  onChange={e => setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 }))}
+                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10"
+                  placeholder="±" />
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Grand Total Footer — REQ-BIL-009 */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+            className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Commodity Totals</span>
+                <span className="font-bold text-foreground">
+                  ₹{bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0).toLocaleString()}
+                </span>
+              </div>
+              {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">+ Additions</span>
+                  <span className="text-foreground">₹{(bill.buyerCoolie + bill.outboundFreight).toLocaleString()}</span>
+                </div>
+              )}
+              {bill.discount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">− Discount</span>
+                  <span className="text-destructive">
+                    −₹{bill.discountType === 'PERCENT'
+                      ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100).toLocaleString()
+                      : bill.discount.toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {bill.manualRoundOff !== 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Round Off</span>
+                  <span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-lg border-t border-border/50 pt-2">
+                <span className="font-bold text-foreground">Grand Total</span>
+                <span className="font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
+              </div>
+              <p className="text-[9px] text-muted-foreground text-center">GT = Σ(Commodity) + Additions − Discount + Round Off</p>
+            </div>
+
+            {bill.pendingBalance > 0 && (
+              <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-400/20">
+                <div className="flex justify-between text-xs">
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">Pending Balance</span>
+                  <span className="font-bold text-amber-600 dark:text-amber-400">₹{bill.pendingBalance.toLocaleString()}</span>
+                </div>
+              </div>
+            )}
+
+            <Button onClick={saveBill}
+              className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-base shadow-lg">
+              <Save className="w-5 h-5 mr-2" /> Generate Bill & Print
+            </Button>
+          </motion.div>
+
+          {/* Payment History (toggle) */}
+          <AnimatePresence>
+            {showPaymentHistory && (
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                className="glass-card rounded-2xl p-3 overflow-hidden">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Payment History</p>
+                <p className="text-xs text-muted-foreground text-center py-4">No payments recorded yet</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        {!isDesktop && <BottomNav />}
+      </div>
+    );
+  }
+
+  // ═══ BUYER LIST / BILL SEARCH ═══
+  return (
+    <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      {!isDesktop ? (
+      <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(6)].map((_, i) => (
+            <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
+              style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
+              animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
+              transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+            />
+          ))}
+        </div>
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div className="flex-1">
+              <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                <Receipt className="w-5 h-5" /> Billing (Sales Bill)
+              </h1>
+              <p className="text-white/70 text-xs">Buyer invoicing & bill generation</p>
+            </div>
+          </div>
+
+          {/* Search mode tabs */}
+          <div className="flex gap-2 mb-3">
+            <button onClick={() => setBillSearchMode('buyer')}
+              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+                billSearchMode === 'buyer'
+                  ? 'bg-white/25 text-white border border-white/30'
+                  : 'bg-white/10 text-white/60')}>
+              <User className="w-3.5 h-3.5" /> New Bill
+            </button>
+            <button onClick={() => setBillSearchMode('bill')}
+              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+                billSearchMode === 'bill'
+                  ? 'bg-white/25 text-white border border-white/30'
+                  : 'bg-white/10 text-white/60')}>
+              <FileText className="w-3.5 h-3.5" /> Saved Bills
+            </button>
+          </div>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+            <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
+          </div>
+        </div>
+      </div>
+      ) : (
+      <div className="px-8 py-5">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-indigo-500" /> Billing (Sales Bill)
+            </h2>
+            <p className="text-sm text-muted-foreground">{buyers.length} buyers · Invoicing & bill generation</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1 bg-muted/30 rounded-xl p-1">
+              <button onClick={() => setBillSearchMode('buyer')}
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  billSearchMode === 'buyer' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
+                New Bill
+              </button>
+              <button onClick={() => setBillSearchMode('bill')}
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  billSearchMode === 'bill' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
+                Saved Bills
+              </button>
+            </div>
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
+                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+
+      <div className="px-4 mt-4 space-y-2">
+        {billSearchMode === 'buyer' ? (
+          // New bill — buyer list
+          filteredBuyers.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <Receipt className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">
+                {buyers.length === 0 ? 'No buyer purchases found' : 'No matching buyers'}
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                {buyers.length === 0 ? 'Complete auctions first to generate bills' : 'Try a different search'}
+              </p>
+              {buyers.length === 0 && (
+                <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-xl">
+                  Go to Auctions
+                </Button>
+              )}
+            </div>
+          ) : (
+            filteredBuyers.map((buyer, i) => {
+              const totalQty = buyer.entries.reduce((s, e) => s + e.quantity, 0);
+              const totalAmount = buyer.entries.reduce((s, e) => s + (e.rate * e.quantity), 0);
+              const commodities = [...new Set(buyer.entries.map(e => e.commodityName))];
+              return (
+                <motion.button key={buyer.buyerMark + i}
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  onClick={() => generateBill(buyer)}
+                  className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-md flex-shrink-0">
+                      <span className="text-white font-black text-sm">{buyer.buyerMark}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{buyer.buyerName}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        <span>{totalQty} bags</span>
+                        <span>•</span>
+                        <span>{buyer.entries.length} bid(s)</span>
+                        <span>•</span>
+                        <span>{commodities.join(', ')}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-bold text-foreground">₹{totalAmount.toLocaleString()}</p>
+                      <p className="text-[10px] text-muted-foreground">est. total</p>
+                    </div>
+                  </div>
+                </motion.button>
+              );
+            })
+          )
+        ) : (
+          // Saved bills search — REQ-BIL searchable
+          filteredBills.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">No saved bills found</p>
+            </div>
+          ) : (
+            filteredBills.map((b: any, i: number) => (
+              <motion.button key={b.billId}
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                onClick={() => {
+                  setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [] });
+                  setBill(b);
+                }}
+                className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center shadow-md flex-shrink-0">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground">{b.billNumber}</p>
+                    <p className="text-xs text-muted-foreground">{b.billingName} ({b.buyerMark})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-foreground">₹{b.grandTotal?.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              </motion.button>
+            ))
+          )
+        )}
+      </div>
+      {!isDesktop && <BottomNav />}
+    </div>
+  );
+};
+
+export default BillingPage;

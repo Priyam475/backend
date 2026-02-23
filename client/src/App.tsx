@@ -1,0 +1,129 @@
+import { lazy, Suspense } from "react";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "@/context/ThemeContext";
+import { AuthProvider } from "@/context/AuthContext";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import RootClassManager from "@/components/RootClassManager";
+import ScrollToTop from "@/components/ScrollToTop";
+import PortraitLock from "@/components/PortraitLock";
+import TraderLayout from "@/components/TraderLayout";
+import LoginScreen from "./pages/LoginScreen";
+
+// Eagerly loaded — all trader routes for instant navigation (no white flash)
+import SplashScreen from "./pages/SplashScreen";
+import OnboardingScreen from "./pages/OnboardingScreen";
+import RegisterScreen from "./pages/RegisterScreen";
+import Homepage from "./pages/Homepage";
+import NotFound from "./pages/NotFound";
+import CommoditySettings from "./pages/CommoditySettings";
+import AuctionsPage from "./pages/AuctionsPage";
+import ProfilePage from "./pages/ProfilePage";
+import ContactsPage from "./pages/ContactsPage";
+import ArrivalsPage from "./pages/ArrivalsPage";
+import ScribblePadPage from "./pages/ScribblePadPage";
+import LogisticsPage from "./pages/LogisticsPage";
+import WeighingPage from "./pages/WeighingPage";
+import WritersPadPage from "./pages/WritersPadPage";
+import SettlementPage from "./pages/SettlementPage";
+import BillingPage from "./pages/BillingPage";
+import AccountingPage from "./pages/AccountingPage";
+import VouchersPage from "./pages/VouchersPage";
+import LedgerViewPage from "./pages/LedgerViewPage";
+import FinancialReportsPage from "./pages/FinancialReportsPage";
+import SelfSalePage from "./pages/SelfSalePage";
+import StockPurchasePage from "./pages/StockPurchasePage";
+import CDNPage from "./pages/CDNPage";
+import PrintsPage from "./pages/PrintsPage";
+import ReportsPage from "./pages/ReportsPage";
+
+// Admin (lazy — less frequent access)
+const AdminLayout = lazy(() => import("./components/admin/AdminLayout"));
+const AdminLoginPage = lazy(() => import("./pages/admin/AdminLoginPage"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminTradersPage = lazy(() => import("./pages/admin/AdminTradersPage"));
+const AdminCategoriesPage = lazy(() => import("./pages/admin/AdminCategoriesPage"));
+const AdminCommoditiesPage = lazy(() => import("./pages/admin/AdminCommoditiesPage"));
+const AdminContactsPage = lazy(() => import("./pages/admin/AdminContactsPage"));
+const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage"));
+const AdminSettingsPage = lazy(() => import("./pages/admin/AdminSettingsPage"));
+
+const queryClient = new QueryClient();
+
+const LazyFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <ThemeProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <ScrollToTop />
+            <PortraitLock />
+            <RootClassManager />
+            <Suspense fallback={<LazyFallback />}>
+              <Routes>
+                {/* Public routes */}
+                <Route path="/" element={<SplashScreen />} />
+                <Route path="/onboarding" element={<OnboardingScreen />} />
+                <Route path="/login" element={<LoginScreen />} />
+                <Route path="/register" element={<RegisterScreen />} />
+
+                {/* Trader App — wrapped in TraderLayout (sidebar on desktop) */}
+                <Route element={<ProtectedRoute><TraderLayout /></ProtectedRoute>}>
+                  <Route path="/home" element={<Homepage />} />
+                  <Route path="/commodity-settings" element={<CommoditySettings />} />
+                  <Route path="/auctions" element={<AuctionsPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/contacts" element={<ContactsPage />} />
+                  <Route path="/arrivals" element={<ArrivalsPage />} />
+                  <Route path="/scribble-pad" element={<ScribblePadPage />} />
+                  <Route path="/logistics" element={<LogisticsPage />} />
+                  <Route path="/weighing" element={<WeighingPage />} />
+                  <Route path="/writers-pad" element={<WritersPadPage />} />
+                  <Route path="/settlement" element={<SettlementPage />} />
+                  <Route path="/billing" element={<BillingPage />} />
+                  <Route path="/accounting" element={<AccountingPage />} />
+                  <Route path="/vouchers" element={<VouchersPage />} />
+                  <Route path="/ledger-view/:ledgerId" element={<LedgerViewPage />} />
+                  <Route path="/financial-reports" element={<FinancialReportsPage />} />
+                  <Route path="/self-sale" element={<SelfSalePage />} />
+                  <Route path="/stock-purchase" element={<StockPurchasePage />} />
+                  <Route path="/cdn" element={<CDNPage />} />
+                  <Route path="/prints-reports" element={<PrintsPage />} />
+                  <Route path="/prints" element={<PrintsPage />} />
+                  <Route path="/reports" element={<ReportsPage />} />
+                </Route>
+
+                {/* Admin Portal */}
+                <Route path="/admin/login" element={<AdminLoginPage />} />
+                <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
+                  <Route index element={<AdminDashboard />} />
+                  <Route path="traders" element={<AdminTradersPage />} />
+                  <Route path="categories" element={<AdminCategoriesPage />} />
+                  <Route path="commodities" element={<AdminCommoditiesPage />} />
+                  <Route path="contacts" element={<AdminContactsPage />} />
+                  <Route path="reports" element={<AdminReportsPage />} />
+                  <Route path="settings" element={<AdminSettingsPage />} />
+                </Route>
+
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </ThemeProvider>
+  </QueryClientProvider>
+);
+
+export default App;

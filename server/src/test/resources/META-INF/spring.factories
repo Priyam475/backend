@@ -1,0 +1,3 @@
+org.springframework.test.context.ContextCustomizerFactory = \
+    com.mercotrace.config.SqlTestContainersSpringContextCustomizerFactory,com.\
+    mercotrace.config.RedisTestContainersSpringContextCustomizerFactory

@@ -1,0 +1,6 @@
+id;category_name;is_active;created_at;updated_at
+1;Agriculture;true;2026-02-23T00:00:00;2026-02-23T00:00:00
+2;Retail;true;2026-02-23T00:00:00;2026-02-23T00:00:00
+3;Wholesale;true;2026-02-23T00:00:00;2026-02-23T00:00:00
+4;Commission Agent;true;2026-02-23T00:00:00;2026-02-23T00:00:00
+5;Trader;true;2026-02-23T00:00:00;2026-02-23T00:00:00
