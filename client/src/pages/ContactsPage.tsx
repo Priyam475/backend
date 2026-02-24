@@ -107,7 +107,8 @@ const ContactsPage = () => {
       toast.success(`✅ ${created.name} registered with ledger created`);
     } catch (err) {
       console.error('Add contact error:', err);
-      toast.error('Failed to register contact');
+      const message = err instanceof Error && err.message ? err.message : 'Failed to register contact';
+      toast.error(message);
     }
   };
 
@@ -125,22 +126,19 @@ const ContactsPage = () => {
       toast.success(`✏️ ${updated.name} updated successfully`);
     } catch (err) {
       console.error('Edit contact error:', err);
-      toast.error('Failed to update contact');
+      const message = err instanceof Error && err.message ? err.message : 'Failed to update contact';
+      toast.error(message);
     }
   };
 
-  const handleDelete = (contactId: string) => {
+  const handleDelete = async (contactId: string) => {
     try {
       const contact = contacts.find(c => c.contact_id === contactId);
-      // Remove from localStorage
-      const list = JSON.parse(localStorage.getItem('mkt_contacts') || '[]');
-      const remaining = list.filter((c: any) => c.contact_id !== contactId);
-      localStorage.setItem('mkt_contacts', JSON.stringify(remaining));
-      // Also remove ledger
+      await contactApi.remove(contactId);
+      // Also remove local ledger entry for this contact (ledger is still local-only)
       const ledgers = JSON.parse(localStorage.getItem('mkt_ledgers') || '[]');
       const remainingLedgers = ledgers.filter((l: any) => l.contact_id !== contactId);
       localStorage.setItem('mkt_ledgers', JSON.stringify(remainingLedgers));
-      // Update state
       setContacts(prev => prev.filter(c => c.contact_id !== contactId));
       setDeleteConfirm(null);
       toast.success(`🗑️ ${contact?.name || 'Contact'} deleted`);

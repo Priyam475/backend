@@ -26,5 +26,6 @@
     <!-- <include file="config/liquibase/changelog/20260224120000_add_superadmin_user.xml" relativeToChangelogFile="false"/> -->
     <include file="config/liquibase/changelog/20260224121000_update_admin_password.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260224123000_extend_trader_module1.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260224130000_added_entity_Contact.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>
