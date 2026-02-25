@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { commodityApi, type FullCommodityConfigDto } from '@/services/api';
+import type { Commodity } from '@/types/models';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -120,12 +122,19 @@ const BillingPage = () => {
   const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
   const [savedBills, setSavedBills] = useState<BillData[]>([]);
 
+  // Commodities and configs from API (same on all devices)
+  const [commodities, setCommodities] = useState<Commodity[]>([]);
+  const [fullConfigs, setFullConfigs] = useState<FullCommodityConfigDto[]>([]);
+  useEffect(() => {
+    commodityApi.list().then(setCommodities);
+    commodityApi.getAllFullConfigs().then(setFullConfigs);
+  }, []);
+
   // Load buyer data from completed auctions
   useEffect(() => {
     const auctionData = getStore<any>('mkt_auction_results');
     const arrivals = getStore<any>('mkt_arrival_records');
     const weighingSessions = getStore<any>('mkt_weighing_sessions');
-    const configs = getStore<any>('mkt_commodity_configs');
     
     // REQ-BIL-001: Aggregate all purchases by one buyer across vehicles/sellers
     const buyerMap = new Map<string, BuyerPurchase>();
@@ -182,27 +191,24 @@ const BillingPage = () => {
     setSavedBills(getStore<any>('mkt_bills'));
   }, []);
 
-  // Generate Bill
+  // Generate Bill (uses commodities and fullConfigs from API)
   const generateBill = useCallback((buyer: BuyerPurchase) => {
     setSelectedBuyer(buyer);
-    const configs = getStore<any>('mkt_commodity_configs');
-    const commodities = getStore<any>('mkt_commodities');
-    
     // REQ-BIL-004: Group by commodity (separate calc tables per commodity)
     const commodityMap = new Map<string, CommodityGroup>();
     
     buyer.entries.forEach(entry => {
       const commName = entry.commodityName || 'Unknown';
       if (!commodityMap.has(commName)) {
-        // Find config for this commodity
-        const commodity = commodities.find((c: any) => c.commodity_name === commName);
-        const config = commodity ? configs.find((c: any) => c.commodity_id === commodity.commodity_id) : null;
+        const commodity = commodities.find((c) => c.commodity_name === commName);
+        const full = commodity ? fullConfigs.find((f) => f.commodityId === Number(commodity.commodity_id)) : null;
+        const config = full?.config;
         
         commodityMap.set(commName, {
           commodityName: commName,
-          hsnCode: config?.hsn_code || '',
-          commissionPercent: config?.commission_percent || 0,
-          userFeePercent: config?.user_fee_percent || 0,
+          hsnCode: config?.hsnCode ?? '',
+          commissionPercent: config?.commissionPercent ?? 0,
+          userFeePercent: config?.userFeePercent ?? 0,
           items: [],
           subtotal: 0,
           commissionAmount: 0,
@@ -268,7 +274,7 @@ const BillingPage = () => {
       versions: [],
     });
     setEditLocked(false);
-  }, []);
+  }, [commodities, fullConfigs]);
 
   // Recalculate grand total
   const recalcGrandTotal = useCallback((b: BillData): BillData => {

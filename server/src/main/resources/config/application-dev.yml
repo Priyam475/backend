@@ -107,4 +107,7 @@ jhipster:
 # https://www.jhipster.tech/common-application-properties/
 # ===================================================================
 
-# application:
+application:
+  liquibase:
+    # Run Liquibase synchronously so all tables exist before the app accepts requests
+    async-start: false

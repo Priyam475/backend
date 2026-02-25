@@ -90,6 +90,11 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.Permission.class.getName() + ".roles", jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.BusinessCategory.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Contact.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.Commodity.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.CommodityConfig.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.DeductionRule.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.HamaliSlab.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.DynamicCharge.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }

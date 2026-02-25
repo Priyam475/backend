@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Add audit columns to commodity -->
+    <changeSet id="20260226120000-1" author="mercotrace">
+        <addColumn tableName="commodity">
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </addColumn>
+    </changeSet>
+
+    <!-- commodity_config: one row per commodity (rate, weights, flags, bill_prefix, hamali_enabled, etc.) -->
+    <changeSet id="20260226120000-2" author="mercotrace">
+        <createTable tableName="commodity_config">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="commodity_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="rate_per_unit" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="min_weight" type="double precision" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_weight" type="double precision" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="govt_deduction_enabled" type="boolean" valueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="roundoff_enabled" type="boolean" valueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="commission_percent" type="double precision" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="user_fee_percent" type="double precision" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hsn_code" type="varchar(20)"/>
+            <column name="weighing_charge" type="double precision"/>
+            <column name="bill_prefix" type="varchar(10)"/>
+            <column name="hamali_enabled" type="boolean" valueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="commodity_config" baseColumnNames="commodity_id"
+            constraintName="fk_commodity_config_commodity" referencedTableName="commodity" referencedColumnNames="id"/>
+        <addUniqueConstraint tableName="commodity_config" columnNames="commodity_id" constraintName="ux_commodity_config_commodity"/>
+        <createIndex tableName="commodity_config" indexName="idx_commodity_config_commodity">
+            <column name="commodity_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- deduction_rule: weight range -> deduction value per commodity -->
+    <changeSet id="20260226120000-3" author="mercotrace">
+        <createTable tableName="deduction_rule">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="commodity_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="min_weight" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_weight" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deduction_value" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="deduction_rule" baseColumnNames="commodity_id"
+            constraintName="fk_deduction_rule_commodity" referencedTableName="commodity" referencedColumnNames="id"/>
+        <createIndex tableName="deduction_rule" indexName="idx_deduction_rule_commodity">
+            <column name="commodity_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- hamali_slab: unloading charge slabs per commodity -->
+    <changeSet id="20260226120000-4" author="mercotrace">
+        <createTable tableName="hamali_slab">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="commodity_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="threshold_weight" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="fixed_rate" type="double precision">
+                <constraints nullable="false"/>
+            </column>
+            <column name="per_kg_rate" type="double precision" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="hamali_slab" baseColumnNames="commodity_id"
+            constraintName="fk_hamali_slab_commodity" referencedTableName="commodity" referencedColumnNames="id"/>
+        <createIndex tableName="hamali_slab" indexName="idx_hamali_slab_commodity">
+            <column name="commodity_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- dynamic_charge: extra charges per commodity (Association Fee, etc.) -->
+    <changeSet id="20260226120000-5" author="mercotrace">
+        <createTable tableName="dynamic_charge">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="commodity_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint"/>
+            <column name="charge_name" type="varchar(150)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="charge_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="value_amount" type="numeric(19,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="applies_to" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="percent_basis" type="varchar(30)"/>
+            <column name="fixed_basis" type="varchar(30)"/>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="dynamic_charge" baseColumnNames="commodity_id"
+            constraintName="fk_dynamic_charge_commodity" referencedTableName="commodity" referencedColumnNames="id"/>
+        <createIndex tableName="dynamic_charge" indexName="idx_dynamic_charge_commodity">
+            <column name="commodity_id"/>
+        </createIndex>
+    </changeSet>
+</databaseChangeLog>

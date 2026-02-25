@@ -1,0 +1,6 @@
+url=jdbc:postgresql://localhost:5432/mercotrace
+username=postgres
+password=CHANGE_ME
+driver=org.postgresql.Driver
+changeLogFile=config/liquibase/master.xml
+liquibase.searchPath=src/main/resources
