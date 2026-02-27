@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -116,9 +117,10 @@ const BillingPage = () => {
   const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
   const [savedBills, setSavedBills] = useState<BillData[]>([]);
 
+  const { auctionResults: auctionData } = useAuctionResults();
+
   // Load buyer data from completed auctions
   useEffect(() => {
-    const auctionData = getStore<any>('mkt_auction_results');
     const arrivals = getStore<any>('mkt_arrival_records');
     const weighingSessions = getStore<any>('mkt_weighing_sessions');
     const configs = getStore<any>('mkt_commodity_configs');
@@ -151,7 +153,7 @@ const BillingPage = () => {
           buyerMap.set(key, {
             buyerMark: entry.buyerMark,
             buyerName: entry.buyerName,
-            buyerContactId: entry.buyerContactId || null,
+            buyerContactId: entry.buyerContactId ?? (entry.buyerId != null ? String(entry.buyerId) : null),
             entries: [],
           });
         }
@@ -176,7 +178,7 @@ const BillingPage = () => {
     
     setBuyers(Array.from(buyerMap.values()));
     setSavedBills(getStore<any>('mkt_bills'));
-  }, []);
+  }, [auctionData]);
 
   // Generate Bill
   const generateBill = useCallback((buyer: BuyerPurchase) => {

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
@@ -62,9 +63,8 @@ const PrintsReportsPage = () => {
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [showPreview, setShowPreview] = useState(false);
 
-  // Load mock data for reports
+  const { auctionResults } = useAuctionResults();
   const arrivals = getStore<any>('mkt_arrival_records');
-  const auctionResults = getStore<any>('mkt_auction_results');
   const bills = getStore<any>('mkt_bills');
   const settlements = getStore<any>('mkt_settlements');
   const contacts = getStore<any>('mkt_contacts');

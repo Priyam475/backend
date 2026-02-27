@@ -104,6 +104,9 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.FreightDistribution.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Voucher.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.DailySerial.class.getName(), jcacheConfiguration);
+            // Auction module (Sales Pad)
+            createCache(cm, com.mercotrace.domain.Auction.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.AuctionEntry.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }

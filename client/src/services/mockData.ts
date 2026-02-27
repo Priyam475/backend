@@ -166,7 +166,7 @@ export function initializeMockData() {
     localStorage.setItem('mkt_contacts', JSON.stringify(SEED_CONTACTS));
     localStorage.setItem('mkt_vehicles', JSON.stringify([]));
     localStorage.setItem('mkt_lots', JSON.stringify([]));
-    localStorage.setItem('mkt_auctions', JSON.stringify([]));
+    // mkt_auctions: not used; auction data is API-only. Not seeding to avoid leftover keys.
     localStorage.setItem('mkt_vouchers', JSON.stringify([]));
     localStorage.setItem('mkt_ledger', JSON.stringify([]));
     localStorage.setItem('mkt_users', JSON.stringify([SEED_USER]));
@@ -182,7 +182,7 @@ export function initializeMockData() {
   if (!localStorage.getItem('mkt_seed_v2')) {
     const seed = SEED_ARRIVAL_RECORDS();
     localStorage.setItem('mkt_arrival_records', JSON.stringify(seed.arrivals));
-    localStorage.setItem('mkt_auction_results', JSON.stringify(seed.auctionResults));
+    // Auction results are API-only. Do not seed mkt_auction_results so new users never fall back to stale local data.
     localStorage.setItem('mkt_weighing_sessions', JSON.stringify(seed.weighingSessions));
     localStorage.setItem('mkt_vouchers', JSON.stringify(seed.vouchers));
     localStorage.setItem('mkt_seed_v2', 'true');

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -98,9 +99,10 @@ const WeighingPage = () => {
     if (govtDeductionEnabled) setRoundOffEnabled(false);
   }, [govtDeductionEnabled]);
 
+  const { auctionResults: auctionData } = useAuctionResults();
+
   // Load bids from auction results
   useEffect(() => {
-    const auctionData = getStore<any>('mkt_auction_results');
     const arrivals = getStore<any>('mkt_arrival_records');
     const allBids: BidForWeighing[] = [];
 
@@ -111,7 +113,7 @@ const WeighingPage = () => {
         arrivals.forEach((arr: any) => {
           (arr.sellers || []).forEach((seller: any) => {
             (seller.lots || []).forEach((lot: any) => {
-              if (lot.lot_id === auction.lotId) {
+              if (String(lot.lot_id) === String(auction.lotId)) {
                 sellerName = seller.seller_name;
                 lotName = lot.lot_name || lotName;
               }
@@ -124,7 +126,7 @@ const WeighingPage = () => {
           buyerName: entry.buyerName,
           quantity: entry.quantity,
           rate: entry.rate,
-          lotId: auction.lotId,
+          lotId: String(auction.lotId),
           lotName,
           sellerName,
         });
@@ -134,12 +136,12 @@ const WeighingPage = () => {
 
     // PATH 1: Auto-select bid if coming from Sales Pad with ?bid=X
     const bidParam = searchParams.get('bid');
-    if (bidParam) {
+    if (bidParam && allBids.length > 0) {
       const bidNum = parseInt(bidParam);
       const found = allBids.find(b => b.bidNumber === bidNum);
       if (found) startSession(found);
     }
-  }, []);
+  }, [auctionData, searchParams]);
 
   const filteredBids = useMemo(() => {
     if (!searchQuery) return bids;

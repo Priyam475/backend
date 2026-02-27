@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -101,9 +102,10 @@ const SettlementPage = () => {
   const [manualVoucherLabel, setManualVoucherLabel] = useState('');
   const [manualVoucherAmount, setManualVoucherAmount] = useState('');
 
+  const { auctionResults: auctionData } = useAuctionResults();
+
   // Load seller data from completed auctions
   useEffect(() => {
-    const auctionData = getStore<any>('mkt_auction_results');
     const arrivals = getStore<any>('mkt_arrival_records');
     const weighingSessions = getStore<any>('mkt_weighing_sessions');
     
@@ -118,7 +120,7 @@ const SettlementPage = () => {
       arrivals.forEach((arr: any) => {
         (arr.sellers || []).forEach((seller: any) => {
           (seller.lots || []).forEach((lot: any) => {
-            if (lot.lot_id === auction.lotId) {
+            if (String(lot.lot_id) === String(auction.lotId)) {
               sellerName = seller.seller_name;
               sellerMark = seller.seller_mark || '';
               vehicleNumber = arr.vehicle?.vehicle_number || vehicleNumber;
@@ -153,12 +155,13 @@ const SettlementPage = () => {
         };
       });
       
-      const existingLot = seller.lots.find(l => l.lotId === auction.lotId);
+      const lotIdStr = String(auction.lotId);
+      const existingLot = seller.lots.find(l => l.lotId === lotIdStr);
       if (existingLot) {
         existingLot.entries.push(...entries);
       } else {
         seller.lots.push({
-          lotId: auction.lotId,
+          lotId: lotIdStr,
           lotName: auction.lotName || '',
           commodityName: auction.commodityName || '',
           entries,
@@ -167,7 +170,7 @@ const SettlementPage = () => {
     });
     
     setSellers(Array.from(sellerMap.values()));
-  }, []);
+  }, [auctionData]);
 
   // Generate Patti when seller is selected
   const generatePatti = useCallback((seller: SellerSettlement) => {

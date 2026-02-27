@@ -14,17 +14,15 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import ScribblePad from '@/components/ScribblePad';
 import InlineScribblePad from '@/components/InlineScribblePad';
-import { contactApi } from '@/services/api';
+import { contactApi, auctionApi } from '@/services/api';
+import type {
+  LotSummaryDTO,
+  AuctionSessionDTO,
+  AuctionEntryDTO,
+  AuctionBidCreateRequest,
+} from '@/services/api/auction';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
-
-// ── localStorage helpers ──────────────────────────────────
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
-function setStore<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
 
 // ── Types ─────────────────────────────────────────────────
 interface LotInfo {
@@ -38,6 +36,7 @@ interface LotInfo {
   seller_vehicle_id: string;
   vehicle_number: string;
   was_modified: boolean;
+  status?: LotStatus;
 }
 
 type LotStatus = 'available' | 'sold' | 'partial' | 'pending';
@@ -65,7 +64,7 @@ interface SaleEntry {
 
 const presetButtons = [10, 20, 50];
 
-// ── Draft key for auto-save ──────────────────────────────
+// ── Draft key for auto-save (only auction localStorage key; all other auction data is from API) ──
 const AUCTION_DRAFT_KEY = 'mkt_auction_draft';
 
 interface AuctionDraft {
@@ -96,18 +95,11 @@ function clearDraft() {
   localStorage.removeItem(AUCTION_DRAFT_KEY);
 }
 
-// ── Get lot status from auction results ──────────────────
-function getLotStatus(lotId: string, bagCount: number): LotStatus {
-  const results = getStore<any>('mkt_auction_results');
-  const result = results.find((r: any) => r.lotId === lotId);
-  if (result) {
-    const soldBags = (result.entries || []).reduce((s: number, e: any) => s + (e.quantity || 0), 0);
-    if (soldBags >= bagCount) return 'sold';
-    if (soldBags > 0) return 'partial';
-  }
-  // Check if there's an active draft for this lot
+// ── Get lot status (uses API status when available, else draft for pending) ──────────────────
+function getLotStatus(lotId: string, bagCount: number, apiStatus?: string): LotStatus {
   const draft = loadDraft();
   if (draft?.selectedLotId === lotId && draft.entries.length > 0) return 'pending';
+  if (apiStatus === 'sold' || apiStatus === 'partial' || apiStatus === 'available') return apiStatus as LotStatus;
   return 'available';
 }
 
@@ -118,12 +110,42 @@ const STATUS_CONFIG: Record<LotStatus, { label: string; bg: string; text: string
   pending: { label: 'Pending', bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
 };
 
-// ── Get next bid number ──────────────────────────────────
-function getNextBidNumber(): number {
-  const current = parseInt(localStorage.getItem('mkt_bid_counter') || '0');
-  const next = current + 1;
-  localStorage.setItem('mkt_bid_counter', String(next));
-  return next;
+// ── Map API DTOs to UI types ──────────────────────────────
+function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
+  return {
+    lot_id: String(dto.lot_id),
+    lot_name: dto.lot_name ?? '',
+    bag_count: dto.bag_count ?? 0,
+    original_bag_count: dto.original_bag_count ?? dto.bag_count ?? 0,
+    commodity_name: dto.commodity_name ?? '',
+    seller_name: dto.seller_name ?? '',
+    seller_mark: dto.seller_mark ?? '',
+    seller_vehicle_id: String(dto.seller_vehicle_id ?? ''),
+    vehicle_number: dto.vehicle_number ?? '',
+    was_modified: dto.was_modified ?? false,
+    status: (dto.status as LotStatus) ?? 'available',
+  };
+}
+
+function sessionEntryToSaleEntry(e: AuctionEntryDTO): SaleEntry {
+  return {
+    id: String(e.auction_entry_id),
+    bidNumber: e.bid_number,
+    buyerName: e.buyer_name ?? '',
+    buyerMark: e.buyer_mark ?? '',
+    buyerContactId: e.buyer_id != null ? String(e.buyer_id) : null,
+    rate: Number(e.bid_rate),
+    quantity: e.quantity ?? 0,
+    amount: Number(e.amount ?? 0),
+    isSelfSale: e.is_self_sale ?? false,
+    isScribble: e.is_scribble ?? false,
+    tokenAdvance: Number(e.token_advance ?? 0),
+    extraRate: Number(e.extra_rate ?? 0),
+    presetApplied: Number(e.preset_margin ?? 0),
+    presetType: (e.preset_type as PresetType) ?? 'PROFIT',
+    sellerRate: Number(e.seller_rate ?? e.bid_rate),
+    buyerRate: Number(e.buyer_rate ?? e.bid_rate),
+  };
 }
 
 const AuctionsPage = () => {
@@ -164,6 +186,12 @@ const AuctionsPage = () => {
     pendingEntry: Omit<SaleEntry, 'id' | 'bidNumber'>;
   } | null>(null);
 
+  // API loading / 409 retry
+  const [lotsLoading, setLotsLoading] = useState(true);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [completeLoading, setCompleteLoading] = useState(false);
+  const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+
   // New entry form
   const [selectedBuyer, setSelectedBuyer] = useState<Contact | null>(null);
   const [rate, setRate] = useState('');
@@ -173,78 +201,61 @@ const AuctionsPage = () => {
   // Skip initial draft restore flag
   const draftRestored = useRef(false);
 
-  // Load lots from arrivals
+  // Load buyers and lots from API
   useEffect(() => {
     contactApi.list().then(setBuyers);
     loadLots();
   }, []);
 
-  const loadLots = () => {
-    const arrivals = getStore<any>('mkt_arrival_records');
-    const lots: LotInfo[] = [];
-    arrivals.forEach((arr: any) => {
-      const vehicleNumber = arr.vehicle?.vehicle_number || 'Unknown';
-      (arr.sellers || []).forEach((seller: any) => {
-        (seller.lots || []).forEach((lot: any) => {
-          lots.push({
-            lot_id: lot.lot_id,
-            lot_name: lot.lot_name,
-            bag_count: lot.quantity,
-            original_bag_count: lot.quantity,
-            commodity_name: lot.commodity_name || '',
-            seller_name: seller.seller_name,
-            seller_mark: seller.seller_mark || '',
-            seller_vehicle_id: seller.seller_vehicle_id,
-            vehicle_number: vehicleNumber,
-            was_modified: false,
-          });
-        });
+  const loadLots = useCallback(async (opts?: { q?: string; status?: string }) => {
+    setLotsLoading(true);
+    try {
+      const list = await auctionApi.listLots({
+        page: 0,
+        size: 500,
+        q: opts?.q || undefined,
+        status: opts?.status || undefined,
       });
-    });
-    setAvailableLots(lots);
-    return lots;
-  };
-
-  // ── Restore draft on mount ──────────────────────────────
-  useEffect(() => {
-    if (draftRestored.current) return;
-    draftRestored.current = true;
-    const draft = loadDraft();
-    if (!draft || !draft.selectedLotId) return;
-
-    const arrivals = getStore<any>('mkt_arrival_records');
-    const lots: LotInfo[] = [];
-    arrivals.forEach((arr: any) => {
-      const vehicleNumber = arr.vehicle?.vehicle_number || 'Unknown';
-      (arr.sellers || []).forEach((seller: any) => {
-        (seller.lots || []).forEach((lot: any) => {
-          lots.push({
-            lot_id: lot.lot_id, lot_name: lot.lot_name, bag_count: lot.quantity,
-            original_bag_count: lot.quantity, commodity_name: lot.commodity_name || '',
-            seller_name: seller.seller_name, seller_mark: seller.seller_mark || '',
-            seller_vehicle_id: seller.seller_vehicle_id, vehicle_number: vehicleNumber,
-            was_modified: false,
-          });
-        });
-      });
-    });
-
-    const lot = lots.find(l => l.lot_id === draft.selectedLotId);
-    if (lot) {
-      setSelectedLot(lot);
-      setShowLotSelector(false);
-      setEntries(draft.entries || []);
-      setRate(draft.rate || '');
-      setQty(draft.qty || '');
-      setExtraRate(draft.extraRate || '');
-      setPreset(draft.preset || 0);
-      setPresetType(draft.presetType || 'PROFIT');
-      setShowExtraRate(draft.showExtraRate || false);
-      setEntryMode(draft.entryMode || 'scribble');
-      setScribbleMark(draft.scribbleMark || '');
-      toast.info('Draft restored from previous session');
+      const lots: LotInfo[] = list.map(lotSummaryToLotInfo);
+      setAvailableLots(lots);
+      return lots;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load lots');
+      setAvailableLots([]);
+      return [];
+    } finally {
+      setLotsLoading(false);
     }
   }, []);
+
+  // ── Restore draft after lots are loaded from API ─────────
+  useEffect(() => {
+    if (draftRestored.current || availableLots.length === 0) return;
+    const draft = loadDraft();
+    if (!draft || !draft.selectedLotId) return;
+    draftRestored.current = true;
+    const lot = availableLots.find(l => l.lot_id === draft.selectedLotId);
+    if (!lot) return;
+    setSelectedLot(lot);
+    setShowLotSelector(false);
+    setRate(draft.rate || '');
+    setQty(draft.qty || '');
+    setExtraRate(draft.extraRate || '');
+    setPreset(draft.preset || 0);
+    setPresetType(draft.presetType || 'PROFIT');
+    setShowExtraRate(draft.showExtraRate || false);
+    setEntryMode(draft.entryMode || 'scribble');
+    setScribbleMark(draft.scribbleMark || '');
+    setSessionLoading(true);
+    auctionApi
+      .getOrStartSession(lot.lot_id)
+      .then((session: AuctionSessionDTO) => {
+        setEntries(session.entries.map(sessionEntryToSaleEntry));
+      })
+      .catch(() => { /* entries stay empty from draft if API fails */ })
+      .finally(() => setSessionLoading(false));
+    toast.info('Draft restored from previous session');
+  }, [availableLots]);
 
   // ── Auto-save draft on state change ─────────────────────
   useEffect(() => {
@@ -281,7 +292,7 @@ const AuctionsPage = () => {
       result = result.filter(l => l.lot_name.toLowerCase().includes(q) || l.lot_id.toLowerCase().includes(q));
     }
     if (statusFilter !== 'all') {
-      result = result.filter(l => getLotStatus(l.lot_id, l.bag_count) === statusFilter);
+      result = result.filter(l => getLotStatus(l.lot_id, l.bag_count, l.status) === statusFilter);
     }
     return result;
   }, [availableLots, lotSearchQuery, lotNumberSearch, statusFilter]);
@@ -332,7 +343,7 @@ const AuctionsPage = () => {
   const statusCounts = useMemo(() => {
     const counts = { available: 0, sold: 0, partial: 0, pending: 0 };
     availableLots.forEach(l => {
-      const s = getLotStatus(l.lot_id, l.bag_count);
+      const s = getLotStatus(l.lot_id, l.bag_count, l.status);
       counts[s]++;
     });
     return counts;
@@ -381,67 +392,77 @@ const AuctionsPage = () => {
     finalizeEntry(entry);
   };
 
-  const finalizeEntry = (entry: Omit<SaleEntry, 'id' | 'bidNumber'>) => {
-    const newEntry: SaleEntry = {
-      ...entry,
-      id: crypto.randomUUID(),
-      bidNumber: getNextBidNumber(),
+  const finalizeEntry = useCallback(async (entry: Omit<SaleEntry, 'id' | 'bidNumber'>, allowLotIncrease?: boolean) => {
+    if (!selectedLot) return;
+    const allow = allowLotIncrease ?? addBidRetryAllowIncrease;
+    const body: AuctionBidCreateRequest = {
+      buyer_name: entry.buyerName,
+      buyer_mark: entry.buyerMark,
+      buyer_id: entry.buyerContactId ? parseInt(entry.buyerContactId, 10) : undefined,
+      rate: entry.rate,
+      quantity: entry.quantity,
+      is_scribble: entry.isScribble,
+      is_self_sale: entry.isSelfSale,
+      extra_rate: entry.extraRate ?? 0,
+      preset_applied: entry.presetApplied ?? 0,
+      preset_type: entry.presetType ?? 'PROFIT',
+      token_advance: entry.tokenAdvance ?? 0,
+      allow_lot_increase: allow,
     };
-    setEntries(prev => [...prev, newEntry]);
-    setRate('');
-    setQty('');
-    setExtraRate('');
-    setSelectedBuyer(null);
-    setBuyerSearch('');
-  };
-
-  const confirmQtyIncrease = () => {
-    if (!qtyIncreaseDialog || !selectedLot) return;
-    const newBagCount = qtyIncreaseDialog.currentTotal + qtyIncreaseDialog.attemptedQty;
-    setSelectedLot({
-      ...selectedLot,
-      bag_count: newBagCount,
-      was_modified: true,
-    });
-    updateLotInStorage(selectedLot.lot_id, newBagCount);
-    commitEntry(qtyIncreaseDialog.pendingEntry);
-    setQtyIncreaseDialog(null);
-    toast.success(`Lot quantity increased to ${newBagCount} bags*`);
-  };
-
-  const updateLotInStorage = (lotId: string, newQty: number) => {
-    const lots = getStore<any>('mkt_lots');
-    const idx = lots.findIndex((l: any) => l.lot_id === lotId);
-    if (idx !== -1) {
-      lots[idx].bag_count = newQty;
-      lots[idx].was_modified = true;
-      setStore('mkt_lots', lots);
+    try {
+      const session = await auctionApi.addBid(selectedLot.lot_id, body);
+      setEntries(session.entries.map(sessionEntryToSaleEntry));
+      setRate('');
+      setQty('');
+      setExtraRate('');
+      setSelectedBuyer(null);
+      setBuyerSearch('');
+      setAddBidRetryAllowIncrease(false);
+    } catch (err: unknown) {
+      const isConflict = err && typeof err === 'object' && (err as { isConflict?: boolean }).isConflict === true;
+      if (isConflict) {
+        setAddBidRetryAllowIncrease(true);
+        toast.error('Quantity exceeds lot. Tap "Add" again to allow lot increase and retry.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to add bid');
+      }
     }
-    const arrivals = getStore<any>('mkt_arrival_records');
-    arrivals.forEach((arr: any) => {
-      (arr.sellers || []).forEach((seller: any) => {
-        (seller.lots || []).forEach((lot: any) => {
-          if (lot.lot_id === lotId) {
-            lot.quantity = newQty;
-          }
-        });
-      });
-    });
-    setStore('mkt_arrival_records', arrivals);
+  }, [selectedLot, addBidRetryAllowIncrease]);
+
+  const confirmQtyIncrease = async () => {
+    if (!qtyIncreaseDialog || !selectedLot) return;
+    await finalizeEntry(qtyIncreaseDialog.pendingEntry, true);
+    setQtyIncreaseDialog(null);
+    toast.success('Bid added with lot increase allowed.');
   };
 
-  const handleDuplicateMerge = () => {
-    if (!duplicateMarkDialog) return;
+  const handleDuplicateMerge = async () => {
+    if (!duplicateMarkDialog || !selectedLot) return;
     const { existingEntry, rate: newRate, qty: newQty } = duplicateMarkDialog;
     if (existingEntry.rate === newRate) {
-      setEntries(prev => prev.map(e =>
-        e.id === existingEntry.id
-          ? { ...e, quantity: e.quantity + newQty, amount: e.rate * (e.quantity + newQty) }
-          : e
-      ));
-      toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
+      try {
+        await auctionApi.deleteBid(selectedLot.lot_id, Number(existingEntry.id));
+        const mergedQty = existingEntry.quantity + newQty;
+        const session = await auctionApi.addBid(selectedLot.lot_id, {
+          buyer_name: duplicateMarkDialog.buyerName,
+          buyer_mark: duplicateMarkDialog.mark,
+          buyer_id: duplicateMarkDialog.buyerContactId ? parseInt(duplicateMarkDialog.buyerContactId, 10) : undefined,
+          rate: newRate,
+          quantity: mergedQty,
+          is_scribble: duplicateMarkDialog.isScribble,
+          is_self_sale: false,
+          extra_rate: showExtraRate ? (parseInt(extraRate) || 0) : 0,
+          preset_applied: preset,
+          preset_type: presetType,
+          token_advance: existingEntry.tokenAdvance ?? 0,
+        });
+        setEntries(session.entries.map(sessionEntryToSaleEntry));
+        toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
+      }
     } else {
-      finalizeEntry({
+      await finalizeEntry({
         buyerName: duplicateMarkDialog.buyerName,
         buyerMark: duplicateMarkDialog.mark,
         buyerContactId: duplicateMarkDialog.buyerContactId,
@@ -567,16 +588,30 @@ const AuctionsPage = () => {
     });
   };
 
-  const removeEntry = (id: string) => setEntries(prev => prev.filter(e => e.id !== id));
+  const removeEntry = useCallback(async (id: string) => {
+    if (!selectedLot) return;
+    try {
+      const session = await auctionApi.deleteBid(selectedLot.lot_id, Number(id));
+      setEntries(session.entries.map(sessionEntryToSaleEntry));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove bid');
+    }
+  }, [selectedLot]);
 
-  const setTokenAdvanceAmount = (id: string, amount: number) => {
-    setEntries(prev => prev.map(e => e.id === id ? { ...e, tokenAdvance: amount } : e));
-    setShowTokenInput(null);
-  };
+  const setTokenAdvanceAmount = useCallback(async (id: string, amount: number) => {
+    if (!selectedLot) return;
+    try {
+      const session = await auctionApi.updateBid(selectedLot.lot_id, Number(id), { token_advance: amount });
+      setEntries(session.entries.map(sessionEntryToSaleEntry));
+      setShowTokenInput(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update token advance');
+    }
+  }, [selectedLot]);
 
   const applyPreset = (value: number) => setPreset(prev => prev === value ? 0 : value);
 
-  const selectLot = (lot: LotInfo) => {
+  const selectLot = useCallback((lot: LotInfo) => {
     setSelectedLot(lot);
     setShowLotSelector(false);
     setShowLotList(false);
@@ -584,7 +619,17 @@ const AuctionsPage = () => {
     setRate('');
     setQty('');
     setLotNumberSearch('');
-  };
+    setSessionLoading(true);
+    auctionApi
+      .getOrStartSession(lot.lot_id)
+      .then((session: AuctionSessionDTO) => {
+        const info = lotSummaryToLotInfo(session.lot);
+        setSelectedLot(info);
+        setEntries(session.entries.map(sessionEntryToSaleEntry));
+      })
+      .catch(() => toast.error('Failed to load session'))
+      .finally(() => setSessionLoading(false));
+  }, []);
 
   const goBackToSelector = () => {
     // Don't clear entries — they're auto-saved
@@ -742,7 +787,11 @@ const AuctionsPage = () => {
 
         {/* Lot List */}
         <div className="px-4 space-y-2">
-          {availableLots.length === 0 ? (
+          {lotsLoading ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <p className="text-sm text-muted-foreground font-medium">Loading lots…</p>
+            </div>
+          ) : availableLots.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center">
               <Gavel className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground font-medium">No lots available</p>
@@ -940,7 +989,7 @@ const AuctionsPage = () => {
                   ? availableLots.filter(l => l.lot_name.toLowerCase().includes(lotNumberSearch.toLowerCase()) || l.lot_id.toLowerCase().includes(lotNumberSearch.toLowerCase()))
                   : availableLots
                 ).map(lot => {
-                  const status = getLotStatus(lot.lot_id, lot.bag_count);
+                  const status = getLotStatus(lot.lot_id, lot.bag_count, lot.status);
                   const cfg = STATUS_CONFIG[status];
                   const isActive = selectedLot?.lot_id === lot.lot_id;
                   return (
@@ -1309,34 +1358,26 @@ const AuctionsPage = () => {
             {remaining <= 0 && (
               <>
                 <p className="text-[10px] text-success font-semibold mt-1">✓ All bags sold!</p>
-                <Button onClick={() => {
-                  if (!selectedLot) return;
-                  const results = getStore<any>('mkt_auction_results');
-                  if (results.some((r: any) => r.lotId === selectedLot.lot_id)) return;
-                  results.push({
-                    lotId: selectedLot.lot_id,
-                    lotName: selectedLot.lot_name,
-                    sellerName: selectedLot.seller_name,
-                    vehicleNumber: selectedLot.vehicle_number,
-                    commodityName: selectedLot.commodity_name,
-                    entries: entries.map(e => ({
-                      bidNumber: e.bidNumber,
-                      buyerMark: e.buyerMark,
-                      buyerName: e.buyerName,
-                      rate: e.rate,
-                      quantity: e.quantity,
-                      amount: e.amount,
-                      isSelfSale: e.isSelfSale,
-                      isScribble: e.isScribble,
-                    })),
-                    completedAt: new Date().toISOString(),
-                  });
-                  setStore('mkt_auction_results', results);
-                  clearDraft();
-                  toast.success('Auction saved! Navigate to Logistics or Weighing.');
-                }}
+                <Button
+                  disabled={completeLoading}
+                  onClick={async () => {
+                    if (!selectedLot) return;
+                    setCompleteLoading(true);
+                    try {
+                      await auctionApi.completeAuction(selectedLot.lot_id);
+                      clearDraft();
+                      setShowLotSelector(true);
+                      setSelectedLot(null);
+                      setEntries([]);
+                      toast.success('Auction saved! Navigate to Logistics or Weighing.');
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Failed to complete auction');
+                    } finally {
+                      setCompleteLoading(false);
+                    }
+                  }}
                   className="mt-2 w-full h-10 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-sm shadow-md">
-                  ✓ Save & Complete Auction
+                  {completeLoading ? 'Completing…' : '✓ Save & Complete Auction'}
                 </Button>
               </>
             )}
@@ -1415,7 +1456,7 @@ const AuctionsPage = () => {
 
 // ── Lot Row Component with Status Badge ──────────────────
 const LotRow = ({ lot, onSelect }: { lot: LotInfo; onSelect: (lot: LotInfo) => void }) => {
-  const status = getLotStatus(lot.lot_id, lot.bag_count);
+  const status = getLotStatus(lot.lot_id, lot.bag_count, lot.status);
   const cfg = STATUS_CONFIG[status];
 
   return (

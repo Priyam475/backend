@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Auction & Auction Entry schema
+        Aligned with client/src/types/models.ts (PART 6)
+        and AuctionsPage.tsx (Sales Pad) + downstream consumers (Billing, Weighing, Settlement, Logistics, Reports).
+    -->
+
+    <!-- 6.1 auction (session header per lot) -->
+    <changeSet id="20260228120000-1" author="mercotrace">
+        <createTable tableName="auction">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <!-- Optional multi-tenant scoping; aligns with other modules -->
+            <column name="trader_id" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <column name="lot_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="auction_datetime" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="conducted_by" type="varchar(50)"/>
+            <!-- Business timestamp for completion (separate from audit dates) -->
+            <column name="completed_at" type="${datetimeType}"/>
+            <!-- Business-level created_at as used elsewhere (e.g. lot, voucher, commodity) -->
+            <column name="created_at" type="${datetimeType}"/>
+            <!-- Standard JHipster auditing fields (AbstractAuditingEntity) -->
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="auction" baseColumnNames="lot_id"
+                                 referencedTableName="lot" referencedColumnNames="id"
+                                 constraintName="fk_auction_lot"/>
+
+        <!-- trader_id is a soft reference to trader; FK can be added later if needed -->
+
+        <createIndex tableName="auction" indexName="idx_auction_lot">
+            <column name="lot_id"/>
+        </createIndex>
+        <createIndex tableName="auction" indexName="idx_auction_trader">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="auction" indexName="idx_auction_datetime">
+            <column name="auction_datetime"/>
+        </createIndex>
+        <createIndex tableName="auction" indexName="idx_auction_completed_at">
+            <column name="completed_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- 6.2 auction_entry (partial sales / bids) -->
+    <changeSet id="20260228120000-2" author="mercotrace">
+        <createTable tableName="auction_entry">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="auction_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_id" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Global bid sequence per trader/day; used for cross-module lookups -->
+            <column name="bid_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Commercial fields -->
+            <column name="bid_rate" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="preset_margin" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="preset_type" type="varchar(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="seller_rate" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_rate" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_self_sale" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_scribble" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="token_advance" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="extra_rate" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Denormalized buyer details to match frontend mkt_auction_results usage -->
+            <column name="buyer_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_mark" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Business timestamp for when entry was created -->
+            <column name="created_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Standard JHipster auditing fields (AbstractAuditingEntity) -->
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="auction_entry" baseColumnNames="auction_id"
+                                 referencedTableName="auction" referencedColumnNames="id"
+                                 constraintName="fk_auction_entry_auction"/>
+
+        <addForeignKeyConstraint baseTableName="auction_entry" baseColumnNames="buyer_id"
+                                 referencedTableName="contact" referencedColumnNames="id"
+                                 constraintName="fk_auction_entry_buyer"/>
+
+        <createIndex tableName="auction_entry" indexName="idx_auction_entry_auction">
+            <column name="auction_id"/>
+        </createIndex>
+        <createIndex tableName="auction_entry" indexName="idx_auction_entry_buyer">
+            <column name="buyer_id"/>
+        </createIndex>
+        <createIndex tableName="auction_entry" indexName="idx_auction_entry_bid_number">
+            <column name="bid_number"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
+

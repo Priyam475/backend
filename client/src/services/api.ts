@@ -8,3 +8,16 @@ export { traderApi } from './api/trader';
 export { vehicleApi } from './api/vehicles';
 export { categoryApi } from './api/categories';
 export { rbacApi } from './api/mock';
+export { auctionApi, fetchAllAuctionResults } from './api/auction';
+export type {
+  LotSummaryDTO,
+  AuctionSessionDTO,
+  AuctionEntryDTO,
+  AuctionResultDTO,
+  AuctionResultEntryDTO,
+  AuctionBidCreateRequest,
+  AuctionBidUpdateRequest,
+  ListLotsParams,
+  ListResultsParams,
+  PresetType,
+} from './api/auction';

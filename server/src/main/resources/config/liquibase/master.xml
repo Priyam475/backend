@@ -31,5 +31,6 @@
     <include file="config/liquibase/changelog/20260226120000_commodity_config_and_audit.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260226130000_arrivals_logistics_and_finance.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260226135000_arrivals_audit_columns.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260228120000_auction_schema.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

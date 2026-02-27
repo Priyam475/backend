@@ -115,6 +115,9 @@ spring:
     jpa:
       repositories:
         bootstrap-mode: deferred
+    web:
+      pageable:
+        default-page-size: 10
   jpa:
     open-in-view: false
     properties:

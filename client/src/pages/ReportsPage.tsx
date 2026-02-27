@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 
@@ -102,7 +103,7 @@ const ReportsPage = () => {
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [viewingReport, setViewingReport] = useState<typeof reportTypes[0] | null>(null);
 
-  const auctionResults = getStore<any>('mkt_auction_results');
+  const { auctionResults } = useAuctionResults();
   const bills = getStore<any>('mkt_bills');
 
   // ── Daily Sales Summary data ──

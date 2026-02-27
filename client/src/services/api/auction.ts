@@ -1,0 +1,255 @@
+import { apiFetch } from './http';
+
+const BASE = '/module-auctions';
+
+// ─── Response types (match backend DTOs, snake_case where @JsonProperty) ───
+export interface LotSummaryDTO {
+  lot_id: number;
+  lot_name: string;
+  bag_count: number;
+  original_bag_count: number;
+  commodity_name: string;
+  seller_name: string;
+  seller_mark: string;
+  seller_vehicle_id: number;
+  vehicle_number: string;
+  was_modified: boolean;
+  status?: string;
+  sold_bags?: number;
+}
+
+export type PresetType = 'PROFIT' | 'LOSS';
+
+export interface AuctionEntryDTO {
+  auction_entry_id: number;
+  auction_id: number;
+  buyer_id?: number | null;
+  bid_number: number;
+  bid_rate: number;
+  preset_margin?: number;
+  preset_type?: PresetType;
+  seller_rate?: number;
+  buyer_rate?: number;
+  quantity: number;
+  amount: number;
+  is_self_sale?: boolean;
+  is_scribble?: boolean;
+  token_advance?: number;
+  extra_rate?: number;
+  buyer_name: string;
+  buyer_mark: string;
+  created_at?: string;
+}
+
+export interface AuctionSessionDTO {
+  auction_id: number;
+  lot: LotSummaryDTO;
+  entries: AuctionEntryDTO[];
+  total_sold_bags: number;
+  remaining_bags: number;
+  highest_bid_rate: number;
+  status: string;
+}
+
+export interface AuctionBidCreateRequest {
+  buyer_id?: number | null;
+  buyer_name: string;
+  buyer_mark: string;
+  is_scribble?: boolean;
+  is_self_sale?: boolean;
+  rate: number;
+  quantity: number;
+  extra_rate?: number;
+  preset_applied?: number;
+  preset_type?: PresetType;
+  token_advance?: number;
+  allow_lot_increase?: boolean;
+}
+
+export interface AuctionBidUpdateRequest {
+  token_advance?: number;
+  extra_rate?: number;
+  preset_applied?: number;
+  preset_type?: PresetType;
+}
+
+export interface AuctionResultEntryDTO {
+  bidNumber: number;
+  buyerId?: number | null;
+  buyerMark: string;
+  buyerName: string;
+  rate: number;
+  quantity: number;
+  amount: number;
+  isSelfSale?: boolean;
+  isScribble?: boolean;
+  presetApplied?: number;
+  presetType?: PresetType;
+}
+
+export interface AuctionResultDTO {
+  auction_id: number;
+  lotId: number;
+  lotName: string;
+  sellerName: string;
+  sellerVehicleId: number;
+  vehicleNumber: string;
+  commodityName: string;
+  auctionDatetime?: string;
+  conductedBy?: string;
+  completedAt?: string;
+  entries: AuctionResultEntryDTO[];
+}
+
+export interface ListLotsParams {
+  page?: number;
+  size?: number;
+  sort?: string;
+  status?: string;
+  q?: string;
+}
+
+export interface ListResultsParams {
+  page?: number;
+  size?: number;
+  sort?: string;
+}
+
+async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<never> {
+  let message = defaultMessage;
+  try {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const body = await res.json();
+      if (body?.message) message = body.message;
+      else if (body?.detail) message = body.detail;
+      else if (body?.title) message = body.title;
+      else if (Array.isArray(body?.errors) && body.errors[0]?.message) message = body.errors[0].message;
+    } else {
+      const text = await res.text();
+      if (text && text.length < 300) message = text;
+    }
+  } catch {
+    // ignore
+  }
+  throw new Error(message);
+}
+
+export const auctionApi = {
+  async listLots(params: ListLotsParams = {}): Promise<LotSummaryDTO[]> {
+    const searchParams = new URLSearchParams();
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    if (params.sort) searchParams.set('sort', params.sort);
+    if (params.status) searchParams.set('status', params.status);
+    if (params.q) searchParams.set('q', params.q);
+    const res = await apiFetch(`${BASE}/lots?${searchParams.toString()}`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load lots');
+    return res.json();
+  },
+
+  async getOrStartSession(lotId: string | number): Promise<AuctionSessionDTO> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session`, { method: 'GET' });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Lot not found');
+      await parseJsonOrThrow(res, 'Failed to get session');
+    }
+    return res.json();
+  },
+
+  async addBid(lotId: string | number, body: AuctionBidCreateRequest): Promise<AuctionSessionDTO> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session/bids`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (res.status === 409) {
+      const err = new Error('Adding this bid exceeds lot quantity. You can retry with "Allow lot increase".') as Error & { isConflict?: boolean };
+      err.isConflict = true;
+      throw err;
+    }
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Lot or session not found');
+      await parseJsonOrThrow(res, 'Failed to add bid');
+    }
+    return res.json();
+  },
+
+  async updateBid(lotId: string | number, bidId: number, body: AuctionBidUpdateRequest): Promise<AuctionSessionDTO> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session/bids/${bidId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Bid or lot not found');
+      await parseJsonOrThrow(res, 'Failed to update bid');
+    }
+    return res.json();
+  },
+
+  async deleteBid(lotId: string | number, bidId: number): Promise<AuctionSessionDTO> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session/bids/${bidId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Bid or lot not found');
+      await parseJsonOrThrow(res, 'Failed to delete bid');
+    }
+    return res.json();
+  },
+
+  async completeAuction(lotId: string | number): Promise<AuctionResultDTO> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/complete`, { method: 'POST' });
+    if (res.status === 409) throw new Error('Cannot complete: quantity conflict or no bids');
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Lot not found');
+      await parseJsonOrThrow(res, 'Failed to complete auction');
+    }
+    return res.json();
+  },
+
+  async listResults(params: ListResultsParams = {}): Promise<AuctionResultDTO[]> {
+    const searchParams = new URLSearchParams();
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    if (params.sort) searchParams.set('sort', params.sort);
+    const res = await apiFetch(`${BASE}/results?${searchParams.toString()}`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load results');
+    return res.json();
+  },
+
+  async getResultByLot(lotId: string | number): Promise<AuctionResultDTO | null> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/results/lots/${encodeURIComponent(id)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load result');
+    return res.json();
+  },
+
+  async getResultByBidNumber(bidNumber: number): Promise<AuctionResultDTO | null> {
+    const res = await apiFetch(`${BASE}/results/bids/${bidNumber}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load result');
+    return res.json();
+  },
+};
+
+/**
+ * Fetches all auction results (paginated) and returns a single array.
+ * Use this as a drop-in replacement for getStore('mkt_auction_results') so
+ * downstream pages (Billing, Weighing, Logistics, etc.) need minimal changes.
+ * Result shape is normalized to include lotId, entries[].bidNumber, etc.
+ */
+export async function fetchAllAuctionResults(maxPages = 20, pageSize = 100): Promise<AuctionResultDTO[]> {
+  const all: AuctionResultDTO[] = [];
+  let page = 0;
+  while (page < maxPages) {
+    const chunk = await auctionApi.listResults({ page, size: pageSize });
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    page += 1;
+  }
+  return all;
+}

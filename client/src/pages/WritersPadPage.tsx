@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -130,13 +131,14 @@ const WritersPadPage = () => {
     toast.success(`Connected to ${scale.name}`);
   };
 
+  const { auctionResults: auctionData } = useAuctionResults();
+
   // Req 5: Add bid card by bid number
   const addBidCard = () => {
     const num = parseInt(bidNumberInput);
     if (!num || num <= 0) { toast.error('Enter a valid bid number'); return; }
     if (bidCards.some(c => c.bidNumber === num)) { toast.error('Bid card already added'); return; }
 
-    const auctionData = getStore<any>('mkt_auction_results');
     let foundEntry: any = null;
     let foundAuction: any = null;
 
@@ -157,7 +159,7 @@ const WritersPadPage = () => {
       buyerName: foundEntry.buyerName,
       totalQuantity: foundEntry.quantity,
       weighedQuantity: 0,
-      lotId: foundAuction.lotId,
+      lotId: String(foundAuction.lotId),
       lotName: foundAuction.lotName || '',
       isComplete: false,
     };

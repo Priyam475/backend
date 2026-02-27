@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 
 // ── localStorage helpers ──────────────────────────────────
 function getStore<T>(key: string): T[] {
@@ -62,9 +63,10 @@ const LogisticsPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   
 
+  const { auctionResults: auctionData } = useAuctionResults();
+
   // REQ-LOG-004: Load bids from completed auctions
   useEffect(() => {
-    const auctionData = getStore<any>('mkt_auction_results');
     const arrivals = getStore<any>('mkt_arrival_records');
 
     const allBids: BidInfo[] = [];
@@ -80,7 +82,7 @@ const LogisticsPage = () => {
         arrivals.forEach((arr: any) => {
           (arr.sellers || []).forEach((seller: any) => {
             (seller.lots || []).forEach((lot: any) => {
-              if (lot.lot_id === auction.lotId) {
+              if (String(lot.lot_id) === String(auction.lotId)) {
                 sellerName = seller.seller_name;
                 vehicleNumber = arr.vehicle?.vehicle_number || vehicleNumber;
                 commodityName = lot.commodity_name || commodityName;
@@ -96,18 +98,18 @@ const LogisticsPage = () => {
           buyerName: entry.buyerName,
           quantity: entry.quantity,
           rate: entry.rate,
-          lotId: auction.lotId,
+          lotId: String(auction.lotId),
           lotName,
           sellerName,
           sellerSerial: getDailySellerSerial(sellerName),
-          lotNumber: getDailyLotNumber(auction.lotId),
+          lotNumber: getDailyLotNumber(String(auction.lotId)),
           vehicleNumber,
           commodityName,
         });
       });
     });
     setBids(allBids);
-  }, []);
+  }, [auctionData]);
 
   const filteredBids = useMemo(() => {
     if (!searchQuery) return bids;
