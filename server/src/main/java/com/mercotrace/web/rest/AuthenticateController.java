@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
@@ -63,8 +64,22 @@ public class AuthenticateController {
         Authentication authentication = authenticationManagerBuilder.getObject().authenticate(authenticationToken);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String jwt = this.createToken(authentication, loginVM.isRememberMe());
+
         HttpHeaders httpHeaders = new HttpHeaders();
+        // Preserve existing Authorization header for compatibility
         httpHeaders.setBearerAuth(jwt);
+
+        // Also issue JWT as secure, httpOnly cookie so the frontend never has
+        // to read or store the token directly.
+        ResponseCookie cookie = ResponseCookie
+            .from("ACCESS_TOKEN", jwt)
+            .httpOnly(true)
+            .secure(true)
+            .sameSite("Lax")
+            .path("/")
+            .build();
+        httpHeaders.add(HttpHeaders.SET_COOKIE, cookie.toString());
+
         return new ResponseEntity<>(new JWTToken(jwt), httpHeaders, HttpStatus.OK);
     }
 

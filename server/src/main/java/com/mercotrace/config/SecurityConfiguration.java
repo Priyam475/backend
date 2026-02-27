@@ -66,7 +66,9 @@ public class SecurityConfiguration {
                     .authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
                     .accessDeniedHandler(new BearerTokenAccessDeniedHandler())
             )
-            .oauth2ResourceServer(oauth2 -> oauth2.jwt(withDefaults()));
+            .oauth2ResourceServer(oauth2 ->
+                oauth2.jwt(jwt -> jwt.bearerTokenResolver(new CookieOrHeaderBearerTokenResolver()))
+            );
         return http.build();
     }
 

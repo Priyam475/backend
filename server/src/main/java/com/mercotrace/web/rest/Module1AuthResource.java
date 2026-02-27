@@ -106,11 +106,8 @@ public class Module1AuthResource {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication failed");
         }
 
-        String jwt = jwtResponse.getBody().getIdToken();
-
         // 4) Build Module1AuthDTO aligned with frontend AuthState
         Module1AuthDTO dto = new Module1AuthDTO();
-        dto.setToken(jwt);
 
         Module1AuthDTO.UserPayload userPayload = new Module1AuthDTO.UserPayload();
         if (account.getId() != null) {
@@ -153,10 +150,14 @@ public class Module1AuthResource {
         traderPayload.setShopPhotos(new String[0]);
         dto.setTrader(traderPayload);
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(dto);
+        // Forward authentication headers (including Set-Cookie) so the browser
+        // receives the httpOnly JWT cookie even on registration.
+        return ResponseEntity.status(HttpStatus.CREATED).headers(jwtResponse.getHeaders()).body(dto);
     }
 
-    /** Module 1 spec: POST /auth/login — Login User. Returns token + normalized user/trader payloads. */
+    /** Module 1 spec: POST /auth/login — Login User. Returns normalized user/trader payloads.
+     *  JWT is issued via secure httpOnly cookie, not used directly by the frontend.
+     */
     @PostMapping("/login")
     public ResponseEntity<Module1AuthDTO> login(@Valid @RequestBody LoginVM loginVM) {
         // Frontend sends an email and requires 6+ char password. Enforce that here.
@@ -184,8 +185,6 @@ public class Module1AuthResource {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication failed");
         }
 
-        String jwt = jwtResponse.getBody().getIdToken();
-
         // Fetch current authenticated user
         AdminUserDTO account = accountResource.getAccount();
 
@@ -195,7 +194,6 @@ public class Module1AuthResource {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured"));
 
         Module1AuthDTO dto = new Module1AuthDTO();
-        dto.setToken(jwt);
 
         // Map user
         Module1AuthDTO.UserPayload userPayload = new Module1AuthDTO.UserPayload();
@@ -246,10 +244,65 @@ public class Module1AuthResource {
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
     }
 
-    /** Module 1 spec: GET /auth/profile — Get current user profile. */
-    @GetMapping("/profile")
-    public com.mercotrace.service.dto.AdminUserDTO getProfile() {
-        return accountResource.getAccount();
+    /** Module 1 spec: GET /auth/me — Return current user + trader payload based on JWT cookie. */
+    @GetMapping("/me")
+    public Module1AuthDTO me() {
+        AdminUserDTO account = accountResource.getAccount();
+
+        // For now, reuse the same trader resolution strategy as login.
+        TraderDTO trader = traderService
+            .findOne(1L)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured"));
+
+        Module1AuthDTO dto = new Module1AuthDTO();
+
+        // Map user
+        Module1AuthDTO.UserPayload userPayload = new Module1AuthDTO.UserPayload();
+        if (account.getId() != null) {
+            userPayload.setUserId(account.getId().toString());
+        }
+        if (trader.getId() != null) {
+            userPayload.setTraderId(trader.getId().toString());
+        }
+        userPayload.setUsername(account.getLogin());
+        userPayload.setActive(account.isActivated());
+        userPayload.setCreatedAt(account.getCreatedDate() != null ? account.getCreatedDate().toString() : null);
+
+        StringBuilder nameBuilder = new StringBuilder();
+        if (account.getFirstName() != null) {
+            nameBuilder.append(account.getFirstName());
+        }
+        if (account.getLastName() != null) {
+            if (!nameBuilder.isEmpty()) {
+                nameBuilder.append(" ");
+            }
+            nameBuilder.append(account.getLastName());
+        }
+        userPayload.setName(nameBuilder.toString());
+        userPayload.setRole(account.getAuthorities() != null && !account.getAuthorities().isEmpty()
+            ? account.getAuthorities().iterator().next()
+            : "TRADER");
+
+        dto.setUser(userPayload);
+
+        // Map trader
+        Module1AuthDTO.TraderPayload traderPayload = new Module1AuthDTO.TraderPayload();
+        if (trader.getId() != null) {
+            traderPayload.setTraderId(trader.getId().toString());
+        }
+        traderPayload.setBusinessName(trader.getBusinessName());
+        traderPayload.setOwnerName(trader.getOwnerName());
+        traderPayload.setAddress(trader.getAddress());
+        traderPayload.setCategory(trader.getCategory());
+        traderPayload.setApprovalStatus(trader.getApprovalStatus() != null ? trader.getApprovalStatus().name() : "PENDING");
+        traderPayload.setBillPrefix(trader.getBillPrefix());
+        traderPayload.setCreatedAt(trader.getCreatedAt() != null ? trader.getCreatedAt().toString() : null);
+        traderPayload.setUpdatedAt(trader.getUpdatedAt() != null ? trader.getUpdatedAt().toString() : null);
+        traderPayload.setShopPhotos(new String[0]);
+
+        dto.setTrader(traderPayload);
+
+        return dto;
     }
 
     /** Module 1 spec: PUT /auth/profile — Update user profile. */
