@@ -9,6 +9,8 @@ export { vehicleApi } from './api/vehicles';
 export { categoryApi } from './api/categories';
 export { rbacApi } from './api/mock';
 export { auctionApi, fetchAllAuctionResults } from './api/auction';
+export { weighingApi } from './api/weighing';
+export { printLogApi } from './api/printLog';
 export type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -21,3 +23,5 @@ export type {
   ListResultsParams,
   PresetType,
 } from './api/auction';
+export type { WeighingSessionDTO, WeighingSessionCreateRequest } from './api/weighing';
+export type { PrintLogDTO, PrintLogCreateRequest } from './api/printLog';

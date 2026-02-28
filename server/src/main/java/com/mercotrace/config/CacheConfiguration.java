@@ -112,8 +112,10 @@ public class CacheConfiguration {
             // Auction module (Sales Pad)
             createCache(cm, com.mercotrace.domain.Auction.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.AuctionEntry.class.getName(), jcacheConfiguration);
-            // Weighing: by-bid lookup (TTL from Redis config)
+            // Weighing: entity L2 cache + by-bid lookup (TTL from Redis config)
+            createCache(cm, com.mercotrace.domain.WeighingSession.class.getName(), jcacheConfiguration);
             createCache(cm, "weighingSessionByBid", jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.PrintLog.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }
