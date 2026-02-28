@@ -116,6 +116,8 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.WeighingSession.class.getName(), jcacheConfiguration);
             createCache(cm, "weighingSessionByBid", jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.PrintLog.class.getName(), jcacheConfiguration);
+            // Self-Sale module
+            createCache(cm, com.mercotrace.domain.SelfSaleClosure.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }

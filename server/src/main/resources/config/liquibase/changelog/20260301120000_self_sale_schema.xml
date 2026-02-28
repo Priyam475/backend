@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Self-Sale module schema.
+        Aligned with database/merkotrace_database_schema.sql (Part 11) and client SelfSalePage.tsx.
+        business_mode_enum: COMMISSION | TRADING.
+    -->
+
+    <!-- self_sale_closure table (business_mode: COMMISSION | TRADING, varchar + check) -->
+    <changeSet id="20260301120000-1" author="mercotrace">
+        <createTable tableName="self_sale_closure">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="lot_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="auction_entry_id" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <column name="applied_rate" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="business_mode" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="voucher_id" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <column name="closed_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="closed_by" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <column name="reason" type="text">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(100)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="updated_at" type="${datetimeType}">
+                <constraints nullable="true"/>
+            </column>
+            <column name="updated_by" type="varchar(100)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="is_deleted" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="self_sale_closure" baseColumnNames="trader_id"
+                                 referencedTableName="trader" referencedColumnNames="id"
+                                 constraintName="fk_ssc_trader"/>
+
+        <addForeignKeyConstraint baseTableName="self_sale_closure" baseColumnNames="lot_id"
+                                 referencedTableName="lot" referencedColumnNames="id"
+                                 constraintName="fk_ssc_lot"/>
+
+        <addForeignKeyConstraint baseTableName="self_sale_closure" baseColumnNames="auction_entry_id"
+                                 referencedTableName="auction_entry" referencedColumnNames="id"
+                                 constraintName="fk_ssc_auction_entry"/>
+
+        <addForeignKeyConstraint baseTableName="self_sale_closure" baseColumnNames="voucher_id"
+                                 referencedTableName="voucher" referencedColumnNames="id"
+                                 constraintName="fk_ssc_voucher"/>
+
+        <addForeignKeyConstraint baseTableName="self_sale_closure" baseColumnNames="closed_by"
+                                 referencedTableName="jhi_user" referencedColumnNames="id"
+                                 constraintName="fk_ssc_closed_by"/>
+
+        <createIndex tableName="self_sale_closure" indexName="idx_ssc_trader_id">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="self_sale_closure" indexName="idx_ssc_lot_id">
+            <column name="lot_id"/>
+        </createIndex>
+        <createIndex tableName="self_sale_closure" indexName="idx_ssc_closed_at">
+            <column name="closed_at"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260301120000-2" author="mercotrace">
+        <sql dbms="postgresql">ALTER TABLE self_sale_closure ADD CONSTRAINT chk_ssc_business_mode CHECK (business_mode IN ('COMMISSION','TRADING'));</sql>
+    </changeSet>
+
+</databaseChangeLog>

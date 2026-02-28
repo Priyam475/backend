@@ -11,6 +11,7 @@ export { rbacApi } from './api/mock';
 export { auctionApi, fetchAllAuctionResults } from './api/auction';
 export { weighingApi } from './api/weighing';
 export { printLogApi } from './api/printLog';
+export { selfSaleApi } from './api/selfSale';
 export type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -25,3 +26,4 @@ export type {
 } from './api/auction';
 export type { WeighingSessionDTO, WeighingSessionCreateRequest } from './api/weighing';
 export type { PrintLogDTO, PrintLogCreateRequest } from './api/printLog';
+export type { OpenLotDTO, ClosureDTO, CreateClosureRequest } from './api/selfSale';

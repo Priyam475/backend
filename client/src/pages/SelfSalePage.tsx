@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, ShoppingBag, Search, Package, Truck, User, Hash,
-  Check, DollarSign, Tag, AlertTriangle, Sun, TrendingUp
+  Check, DollarSign, Tag, AlertTriangle, Sun, TrendingUp, Loader2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -12,14 +12,9 @@ import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { selfSaleApi, type OpenLotDTO, type ClosureDTO } from '@/services/api';
 
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
-function setStore<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-
+/** UI shape for an open lot (derived from OpenLotDTO). */
 interface LotInfo {
   lot_id: string;
   lot_name: string;
@@ -31,96 +26,110 @@ interface LotInfo {
   status: 'OPEN' | 'CLOSED';
 }
 
-interface SelfSaleRecord {
-  id: string;
-  lot_id: string;
-  lot_name: string;
-  commodity_name: string;
-  seller_name: string;
-  rate: number;
-  quantity: number;
-  amount: number;
-  mode: 'COMMISSION' | 'TRADING';
-  closed_at: string;
+function openLotToLotInfo(d: OpenLotDTO): LotInfo {
+  return {
+    lot_id: String(d.lotId),
+    lot_name: d.lotName,
+    bag_count: d.bagCount,
+    commodity_name: d.commodityName,
+    seller_name: d.sellerName,
+    seller_mark: d.sellerMark ?? '',
+    vehicle_number: d.vehicleNumber,
+    status: 'OPEN',
+  };
 }
 
 const SelfSalePage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const [lots, setLots] = useState<LotInfo[]>([]);
+  const [openLotsLoading, setOpenLotsLoading] = useState(true);
+  const [openLotsError, setOpenLotsError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [selectedLot, setSelectedLot] = useState<LotInfo | null>(null);
   const [rate, setRate] = useState('');
   const [mode, setMode] = useState<'COMMISSION' | 'TRADING'>('COMMISSION');
   const [showConfirm, setShowConfirm] = useState(false);
-  const [records, setRecords] = useState<SelfSaleRecord[]>([]);
+  const [records, setRecords] = useState<ClosureDTO[]>([]);
+  const [closuresPage, setClosuresPage] = useState(0);
+  const [closuresTotal, setClosuresTotal] = useState(0);
+  const [closuresLoading, setClosuresLoading] = useState(true);
+  const [closuresError, setClosuresError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadOpenLots = useCallback(async () => {
+    setOpenLotsLoading(true);
+    setOpenLotsError(null);
+    try {
+      const { content } = await selfSaleApi.getOpenLots({ page: 0, size: 100, search: searchInput || undefined });
+      setLots(content.map(openLotToLotInfo));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load open lots';
+      setOpenLotsError(msg);
+      setLots([]);
+      toast.error(msg);
+    } finally {
+      setOpenLotsLoading(false);
+    }
+  }, [searchInput]);
+
+  const loadClosures = useCallback(async () => {
+    setClosuresLoading(true);
+    setClosuresError(null);
+    try {
+      const { content, totalElements } = await selfSaleApi.getClosures({ page: closuresPage, size: 10 });
+      setRecords(content);
+      setClosuresTotal(totalElements);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load closed self-sales';
+      setClosuresError(msg);
+      setRecords([]);
+      toast.error(msg);
+    } finally {
+      setClosuresLoading(false);
+    }
+  }, [closuresPage]);
 
   useEffect(() => {
-    loadLots();
-    setRecords(getStore<SelfSaleRecord>('mkt_self_sales'));
-  }, []);
+    loadOpenLots();
+  }, [loadOpenLots]);
 
-  const loadLots = () => {
-    const arrivals = getStore<any>('mkt_arrival_records');
-    const closed = getStore<SelfSaleRecord>('mkt_self_sales').map(r => r.lot_id);
-    const result: LotInfo[] = [];
-    arrivals.forEach((arr: any) => {
-      const vn = arr.vehicle?.vehicle_number || 'Unknown';
-      (arr.sellers || []).forEach((s: any) => {
-        (s.lots || []).forEach((l: any) => {
-          result.push({
-            lot_id: l.lot_id,
-            lot_name: l.lot_name,
-            bag_count: l.quantity,
-            commodity_name: l.commodity_name || '',
-            seller_name: s.seller_name,
-            seller_mark: s.seller_mark || '',
-            vehicle_number: vn,
-            status: closed.includes(l.lot_id) ? 'CLOSED' : 'OPEN',
-          });
-        });
-      });
-    });
-    setLots(result);
-  };
+  useEffect(() => {
+    loadClosures();
+  }, [loadClosures]);
 
-  const filtered = useMemo(() => {
-    if (!search) return lots.filter(l => l.status === 'OPEN');
-    const q = search.toLowerCase();
-    return lots.filter(l => l.status === 'OPEN' && (
-      l.lot_name.toLowerCase().includes(q) ||
-      l.seller_name.toLowerCase().includes(q) ||
-      l.commodity_name.toLowerCase().includes(q) ||
-      l.vehicle_number.toLowerCase().includes(q)
-    ));
-  }, [lots, search]);
+  // Debounce search -> loadOpenLots
+  useEffect(() => {
+    const t = setTimeout(() => setSearchInput(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const handleCloseLot = () => {
+  const filtered = useMemo(() => lots, [lots]);
+
+  const handleCloseLot = async () => {
     if (!selectedLot || !rate) return;
     const r = parseFloat(rate);
     if (r <= 0) return;
-
-    const record: SelfSaleRecord = {
-      id: crypto.randomUUID(),
-      lot_id: selectedLot.lot_id,
-      lot_name: `${selectedLot.lot_name} {₹${r}}`,
-      commodity_name: selectedLot.commodity_name,
-      seller_name: selectedLot.seller_name,
-      rate: r,
-      quantity: selectedLot.bag_count,
-      amount: r * selectedLot.bag_count,
-      mode,
-      closed_at: new Date().toISOString(),
-    };
-
-    const updated = [...records, record];
-    setStore('mkt_self_sales', updated);
-    setRecords(updated);
-    setShowConfirm(false);
-    setSelectedLot(null);
-    setRate('');
-    loadLots();
-    toast.success(`Lot ${selectedLot.lot_name} closed as self-sale at ₹${r}`);
+    setSubmitting(true);
+    try {
+      await selfSaleApi.createClosure({
+        lotId: Number(selectedLot.lot_id),
+        rate: r,
+        mode,
+      });
+      toast.success(`Lot ${selectedLot.lot_name} closed as self-sale at ₹${r}`);
+      setShowConfirm(false);
+      setSelectedLot(null);
+      setRate('');
+      loadOpenLots();
+      loadClosures();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to create self-sale closure';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const totalAmount = useMemo(() => records.reduce((s, r) => s + r.amount, 0), [records]);
@@ -197,7 +206,17 @@ const SelfSalePage = () => {
         </div>
 
         {/* Open Lots */}
-        {filtered.length === 0 ? (
+        {openLotsLoading ? (
+          <div className="glass-card rounded-2xl p-10 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Loading open lots…</p>
+          </div>
+        ) : openLotsError ? (
+          <div className="glass-card rounded-2xl p-6 text-center">
+            <p className="text-sm text-destructive font-medium">{openLotsError}</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => loadOpenLots()}>Retry</Button>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="glass-card rounded-2xl p-10 text-center">
             <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/20 mx-auto mb-4 flex items-center justify-center">
               <ShoppingBag className="w-8 h-8 text-amber-500" />
@@ -235,14 +254,24 @@ const SelfSalePage = () => {
         )}
 
         {/* Closed Self-Sales History */}
-        {records.length > 0 && (
-          <div className="mt-6">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-1.5 h-5 rounded-full bg-gradient-to-b from-emerald-400 to-teal-500" />
-              <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Closed Self-Sales</h3>
-              <span className="ml-auto text-xs font-semibold text-emerald-600 dark:text-emerald-400">{records.length} entries</span>
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-5 rounded-full bg-gradient-to-b from-emerald-400 to-teal-500" />
+            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Closed Self-Sales</h3>
+            {!closuresLoading && <span className="ml-auto text-xs font-semibold text-emerald-600 dark:text-emerald-400">{closuresTotal} entries</span>}
+          </div>
+          {closuresLoading ? (
+            <div className="glass-card rounded-2xl p-6 text-center">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-500 mx-auto" />
+              <p className="text-xs text-muted-foreground mt-1">Loading…</p>
             </div>
-            {isDesktop ? (
+          ) : closuresError ? (
+            <div className="glass-card rounded-2xl p-4 text-center">
+              <p className="text-sm text-destructive">{closuresError}</p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => loadClosures()}>Retry</Button>
+            </div>
+          ) : records.length > 0 ? (
+            isDesktop ? (
               <div className="glass-card rounded-2xl overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
@@ -259,12 +288,12 @@ const SelfSalePage = () => {
                   <tbody>
                     {records.map(r => (
                       <tr key={r.id} className="border-b border-border/30 last:border-0 hover:bg-amber-50/30 dark:hover:bg-amber-900/5 transition-colors">
-                        <td className="p-3 font-semibold">{r.lot_name}</td>
-                        <td className="p-3 text-muted-foreground">{r.commodity_name}</td>
-                        <td className="p-3 text-muted-foreground">{r.seller_name}</td>
+                        <td className="p-3 font-semibold">{r.lotName}</td>
+                        <td className="p-3 text-muted-foreground">{r.commodityName}</td>
+                        <td className="p-3 text-muted-foreground">{r.sellerName}</td>
                         <td className="p-3 text-right font-bold text-amber-700 dark:text-amber-400">₹{r.rate}</td>
                         <td className="p-3 text-right">{r.quantity}</td>
-                        <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">₹{r.amount.toLocaleString()}</td>
+                        <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">₹{Number(r.amount).toLocaleString()}</td>
                         <td className="p-3 text-center">
                           <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-bold",
                             r.mode === 'COMMISSION' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -281,22 +310,26 @@ const SelfSalePage = () => {
                   <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="glass-card rounded-xl p-3 border-l-4 border-l-emerald-400">
                     <div className="flex items-center justify-between">
-                      <p className="font-bold text-sm">{r.lot_name}</p>
+                      <p className="font-bold text-sm">{r.lotName}</p>
                       <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold",
                         r.mode === 'COMMISSION' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                       )}>{r.mode}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">{r.commodity_name} · {r.seller_name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{r.commodityName} · {r.sellerName}</p>
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-xs text-muted-foreground">{r.quantity} bags × ₹{r.rate}</span>
-                      <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400">₹{r.amount.toLocaleString()}</span>
+                      <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400">₹{Number(r.amount).toLocaleString()}</span>
                     </div>
                   </motion.div>
                 ))}
               </div>
-            )}
-          </div>
-        )}
+            )
+          ) : (
+            <div className="glass-card rounded-2xl p-6 text-center">
+              <p className="text-sm text-muted-foreground">No closed self-sales yet</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Self-Sale Confirmation Dialog */}
@@ -358,10 +391,11 @@ const SelfSalePage = () => {
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button variant="outline" onClick={() => setShowConfirm(false)} className="flex-1 h-12 text-base">Cancel</Button>
-            <Button onClick={handleCloseLot} disabled={!rate || parseFloat(rate) <= 0}
+            <Button variant="outline" onClick={() => setShowConfirm(false)} className="flex-1 h-12 text-base" disabled={submitting}>Cancel</Button>
+            <Button onClick={handleCloseLot} disabled={!rate || parseFloat(rate) <= 0 || submitting}
               className="flex-1 h-12 text-base bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold shadow-lg">
-              <Check className="w-5 h-5 mr-1.5" /> Close Lot
+              {submitting ? <Loader2 className="w-5 h-5 mr-1.5 animate-spin" /> : <Check className="w-5 h-5 mr-1.5" />}
+              {submitting ? 'Closing…' : 'Close Lot'}
             </Button>
           </div>
         </DialogContent>

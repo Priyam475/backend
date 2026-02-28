@@ -34,5 +34,6 @@
     <include file="config/liquibase/changelog/20260228120000_auction_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260228140000_seed_auction_authorities.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260228160000_weighing_and_print_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260301120000_self_sale_schema.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>
