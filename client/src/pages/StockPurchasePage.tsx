@@ -10,14 +10,14 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { contactApi, stockPurchaseApi } from '@/services/api';
-import type { Contact } from '@/types/models';
+import { contactApi, stockPurchaseApi, commodityApi } from '@/services/api';
+import type { Contact, Commodity } from '@/types/models';
 import type { StockPurchaseDTO } from '@/services/api';
 import { toast } from 'sonner';
 
 interface PurchaseLineItem {
   id: string;
-  commodity: string;
+  commodityId: string;
   quantity: number;
   rate: number;
   amount: number;
@@ -42,11 +42,13 @@ const StockPurchasePage = () => {
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [commodities, setCommodities] = useState<Commodity[]>([]);
+  const [commoditiesLoading, setCommoditiesLoading] = useState(false);
 
   // Form state
   const [selectedVendor, setSelectedVendor] = useState<Contact | null>(null);
   const [vendorSearch, setVendorSearch] = useState('');
-  const [items, setItems] = useState<PurchaseLineItem[]>([{ id: crypto.randomUUID(), commodity: '', quantity: 0, rate: 0, amount: 0 }]);
+  const [items, setItems] = useState<PurchaseLineItem[]>([{ id: crypto.randomUUID(), commodityId: '', quantity: 0, rate: 0, amount: 0 }]);
   const [charges, setCharges] = useState<PurchaseCharge[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -81,6 +83,16 @@ const StockPurchasePage = () => {
   }, [showForm]);
 
   useEffect(() => {
+    if (!showForm) return;
+    setCommoditiesLoading(true);
+    commodityApi
+      .list()
+      .then(setCommodities)
+      .catch(() => setCommodities([]))
+      .finally(() => setCommoditiesLoading(false));
+  }, [showForm]);
+
+  useEffect(() => {
     loadPurchases(0);
   }, [search]);
 
@@ -104,7 +116,7 @@ const StockPurchasePage = () => {
     }));
   };
 
-  const addItem = () => setItems(prev => [...prev, { id: crypto.randomUUID(), commodity: '', quantity: 0, rate: 0, amount: 0 }]);
+  const addItem = () => setItems(prev => [...prev, { id: crypto.randomUUID(), commodityId: '', quantity: 0, rate: 0, amount: 0 }]);
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.id !== id));
   const addCharge = () => setCharges(prev => [...prev, { id: crypto.randomUUID(), name: '', amount: 0 }]);
   const removeCharge = (id: string) => setCharges(prev => prev.filter(c => c.id !== id));
@@ -114,17 +126,31 @@ const StockPurchasePage = () => {
       toast.error('Select vendor and add at least one item');
       return;
     }
+    const validItems = items.filter(i => i.amount > 0);
+    const missingCommodity = validItems.find(i => !i.commodityId || String(i.commodityId).trim() === '');
+    if (missingCommodity) {
+      toast.error('Select a commodity for every line item');
+      return;
+    }
     const vendorId = Number(selectedVendor.contact_id);
     if (!Number.isFinite(vendorId)) {
       toast.error('Invalid vendor');
       return;
     }
-    const validItems = items.filter(i => i.amount > 0);
     setSaving(true);
     stockPurchaseApi
       .create({
         vendorId,
-        items: validItems.map((i) => ({ commodity: i.commodity, quantity: i.quantity, rate: i.rate, amount: i.amount })),
+        items: validItems.map((i) => {
+          const commodity = commodities.find(c => String(c.commodity_id) === String(i.commodityId));
+          return {
+            commodityId: Number(i.commodityId),
+            commodity: commodity?.commodity_name,
+            quantity: i.quantity,
+            rate: i.rate,
+            amount: i.amount,
+          };
+        }),
         charges: charges.map((c) => ({ name: c.name, amount: c.amount })),
       })
       .then(() => {
@@ -142,7 +168,7 @@ const StockPurchasePage = () => {
   const resetForm = () => {
     setSelectedVendor(null);
     setVendorSearch('');
-    setItems([{ id: crypto.randomUUID(), commodity: '', quantity: 0, rate: 0, amount: 0 }]);
+    setItems([{ id: crypto.randomUUID(), commodityId: '', quantity: 0, rate: 0, amount: 0 }]);
     setCharges([]);
   };
 
@@ -368,7 +394,19 @@ const StockPurchasePage = () => {
                     </div>
                     <div className="grid grid-cols-12 gap-2 items-center">
                       <div className="col-span-5">
-                        <Input placeholder="Commodity name" value={item.commodity} onChange={e => updateItem(item.id, 'commodity', e.target.value)} className="text-xs h-9" />
+                        <label className="sr-only">Commodity</label>
+                        <select
+                          value={item.commodityId}
+                          onChange={e => updateItem(item.id, 'commodityId', e.target.value)}
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
+                          disabled={commoditiesLoading}
+                        >
+                          <option value="">{commoditiesLoading ? 'Loading…' : 'Select commodity'}</option>
+                          {commodities.map((c) => (
+                            <option key={c.commodity_id} value={c.commodity_id}>{c.commodity_name}</option>
+                          ))}
+                          {!commoditiesLoading && commodities.length === 0 && <option value="" disabled>No commodities</option>}
+                        </select>
                       </div>
                       <div className="col-span-2">
                         <Input type="number" placeholder="Qty" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', parseInt(e.target.value) || 0)} className="text-xs h-9" />

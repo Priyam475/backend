@@ -3,6 +3,7 @@ package com.mercotrace.web.rest;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.service.CommodityConfigService;
 import com.mercotrace.service.CommodityService;
+import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.CommodityDTO;
 import com.mercotrace.service.dto.FullCommodityConfigDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
@@ -43,14 +44,18 @@ public class CommodityResource {
 
     private final CommodityConfigService commodityConfigService;
 
+    private final TraderContextService traderContextService;
+
     public CommodityResource(
         CommodityService commodityService,
         CommodityRepository commodityRepository,
-        CommodityConfigService commodityConfigService
+        CommodityConfigService commodityConfigService,
+        TraderContextService traderContextService
     ) {
         this.commodityService = commodityService;
         this.commodityRepository = commodityRepository;
         this.commodityConfigService = commodityConfigService;
+        this.traderContextService = traderContextService;
     }
 
     /**
@@ -155,14 +160,16 @@ public class CommodityResource {
     }
 
     /**
-     * {@code GET  /commodities} : get all commodities.
+     * {@code GET  /commodities} : get all commodities for the current trader.
+     * Trader-scoped so that Stock Purchase and other modules only see commodities they can use.
      *
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of commodities in body.
      */
     @GetMapping("")
     public ResponseEntity<List<CommodityDTO>> getAllCommodities() {
-        LOG.debug("REST request to get all Commodities");
-        List<CommodityDTO> list = commodityService.findAll();
+        LOG.debug("REST request to get all Commodities for current trader");
+        Long traderId = traderContextService.getCurrentTraderId();
+        List<CommodityDTO> list = commodityService.findAllByTrader(traderId);
         return ResponseEntity.ok().body(list);
     }
 
@@ -238,7 +245,6 @@ public class CommodityResource {
         if (commodityDTO.getTraderId() != null) {
             return commodityDTO.getTraderId();
         }
-        // TODO: Integrate with authenticated trader context; for now assume trader 1.
-        return 1L;
+        return traderContextService.getCurrentTraderId();
     }
 }
