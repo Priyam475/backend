@@ -6,10 +6,9 @@ import { cn } from '@/lib/utils';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { VoucherHeader, VoucherLine, VoucherType, VoucherLifecycle, COALedger, PaymentModeType } from '@/types/accounting';
 import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccounts';
+import { voucherHeadersApi } from '@/services/api/voucherHeaders';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
-
-// TODO: Voucher and voucher-line create/post/reverse require backend APIs (e.g. POST/GET /api/vouchers, /api/voucher-lines). Until then, list is empty and create/post only update local state (not persisted).
 
 const VOUCHER_CONFIG: Record<VoucherType, { label: string; icon: typeof FileText; gradient: string; debitLabel: string; creditLabel: string }> = {
   SALES_BILL: { label: 'Sales Bill', icon: FileText, gradient: 'from-blue-400 to-cyan-500', debitLabel: 'Receivable', creditLabel: 'Income/Payable' },
@@ -34,15 +33,21 @@ const VouchersPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const [vouchers, setVouchers] = useState<VoucherHeader[]>([]);
-  const [voucherLines, setVoucherLines] = useState<VoucherLine[]>([]);
+  const [selectedVoucherLines, setSelectedVoucherLines] = useState<VoucherLine[]>([]);
   const [ledgers, setLedgers] = useState<COALedger[]>([]);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<VoucherType | 'ALL'>('ALL');
   const [showCreate, setShowCreate] = useState(false);
   const [selectedVoucher, setSelectedVoucher] = useState<VoucherHeader | null>(null);
+  const [loadingVouchers, setLoadingVouchers] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingLedgers, setLoadingLedgers] = useState(false);
 
+  // Load Chart of Accounts only when Create Voucher sheet is opened (for ledger dropdown)
   useEffect(() => {
+    if (!showCreate) return;
     let cancelled = false;
+    setLoadingLedgers(true);
     const load = async () => {
       try {
         const all: COALedger[] = [];
@@ -57,11 +62,36 @@ const VouchersPage = () => {
         if (!cancelled) setLedgers(all);
       } catch {
         if (!cancelled) setLedgers([]);
+      } finally {
+        if (!cancelled) setLoadingLedgers(false);
       }
     };
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [showCreate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingVouchers(true);
+    voucherHeadersApi
+      .getPage({
+        page: 0,
+        size: 50,
+        sort: 'createdDate,desc',
+        voucherType: filterType === 'ALL' ? '' : filterType,
+        search: search.trim() || undefined,
+      })
+      .then((res) => {
+        if (!cancelled) setVouchers(res.content);
+      })
+      .catch(() => {
+        if (!cancelled) setVouchers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingVouchers(false);
+      });
+    return () => { cancelled = true; };
+  }, [filterType, search]);
 
   // Create form state
   const [createType, setCreateType] = useState<VoucherType>('RECEIPT');
@@ -72,15 +102,7 @@ const VouchersPage = () => {
   ]);
   const [paymentMode, setPaymentMode] = useState<PaymentModeType>('CASH');
 
-  const filtered = useMemo(() => {
-    let list = vouchers;
-    if (filterType !== 'ALL') list = list.filter(v => v.voucher_type === filterType);
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(v => v.voucher_number.toLowerCase().includes(q) || v.narration.toLowerCase().includes(q));
-    }
-    return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [vouchers, filterType, search]);
+  const filtered = useMemo(() => vouchers, [vouchers]);
 
   const totalDebit = lines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0);
   const totalCredit = lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0);
@@ -89,55 +111,72 @@ const VouchersPage = () => {
   const addLine = () => setLines([...lines, { ledger_id: '', debit: '', credit: '' }]);
   const removeLine = (i: number) => { if (lines.length > 2) setLines(lines.filter((_, idx) => idx !== i)); };
 
-  const getNextNumber = (type: VoucherType) => {
-    const prefix = type === 'RECEIPT' ? 'RV' : type === 'PAYMENT' ? 'PV' : type === 'JOURNAL' ? 'JV' : type === 'CONTRA' ? 'CV' : type === 'ADVANCE' ? 'AV' : type === 'WRITE_OFF' ? 'WO' : type === 'SALES_BILL' ? 'SB' : 'SS';
-    const count = vouchers.filter(v => v.voucher_type === type).length + 1;
-    return `KT/${prefix}/${String(count).padStart(3, '0')}`;
+  const openVoucherDetail = (v: VoucherHeader) => {
+    setSelectedVoucher(v);
+    setLoadingDetail(true);
+    voucherHeadersApi
+      .getById(v.voucher_id)
+      .then(({ header, lines: ls }) => {
+        setSelectedVoucher(header);
+        setSelectedVoucherLines(ls);
+      })
+      .catch(() => {
+        setSelectedVoucher(null);
+        setSelectedVoucherLines([]);
+      })
+      .finally(() => setLoadingDetail(false));
   };
 
-  const handleCreate = () => {
+  /** Round to 2 decimals so floating-point noise is not sent to the API. */
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  const handleCreate = async () => {
     if (!isBalanced || !narration.trim()) return;
-    const voucherId = crypto.randomUUID();
-    const voucherNumber = getNextNumber(createType);
-    const newVoucher: VoucherHeader = {
-      voucher_id: voucherId,
-      trader_id: 'trader-001',
-      voucher_type: createType,
-      voucher_number: voucherNumber,
-      voucher_date: new Date().toISOString().split('T')[0],
-      narration: narration.trim(),
-      status: 'DRAFT',
-      total_debit: totalDebit,
-      total_credit: totalCredit,
-      is_migrated: false,
-      created_at: new Date().toISOString(),
-    };
-    const newLines: VoucherLine[] = lines
+    const payloadLines = lines
       .filter(l => l.ledger_id && (parseFloat(l.debit) || parseFloat(l.credit)))
       .map(l => ({
-        line_id: crypto.randomUUID(),
-        voucher_id: voucherId,
-        ledger_id: l.ledger_id,
-        ledger_name: ledgers.find(lg => lg.ledger_id === l.ledger_id)?.ledger_name || '',
-        debit: parseFloat(l.debit) || 0,
-        credit: parseFloat(l.credit) || 0,
+        ledgerId: parseInt(l.ledger_id, 10),
+        debit: round2(parseFloat(l.debit) || 0),
+        credit: round2(parseFloat(l.credit) || 0),
       }));
-
-    setVouchers(prev => [...prev, newVoucher]);
-    setVoucherLines(prev => [...prev, ...newLines]);
-    setShowCreate(false);
-    setNarration('');
-    setLines([{ ledger_id: '', debit: '', credit: '' }, { ledger_id: '', debit: '', credit: '' }]);
+    if (payloadLines.length === 0) return;
+    try {
+      await voucherHeadersApi.create({
+        voucherType: createType,
+        narration: narration.trim(),
+        voucherDate: new Date().toISOString().split('T')[0],
+        lines: payloadLines,
+      });
+      setShowCreate(false);
+      setNarration('');
+      setLines([{ ledger_id: '', debit: '', credit: '' }, { ledger_id: '', debit: '', credit: '' }]);
+      const res = await voucherHeadersApi.getPage({ page: 0, size: 50, sort: 'createdDate,desc', voucherType: filterType === 'ALL' ? '' : filterType, search: search.trim() || undefined });
+      setVouchers(res.content);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handlePost = (v: VoucherHeader) => {
-    setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? { ...x, status: 'POSTED' as VoucherLifecycle, posted_at: new Date().toISOString() } : x));
-    setSelectedVoucher(null);
+  const handlePost = async (v: VoucherHeader) => {
+    try {
+      const updated = await voucherHeadersApi.post(v.voucher_id);
+      setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? updated : x));
+      setSelectedVoucher(null);
+      setSelectedVoucherLines([]);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handleReverse = (v: VoucherHeader) => {
-    setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? { ...x, status: 'REVERSED' as VoucherLifecycle, reversed_at: new Date().toISOString() } : x));
-    setSelectedVoucher(null);
+  const handleReverse = async (v: VoucherHeader) => {
+    try {
+      const updated = await voucherHeadersApi.reverse(v.voucher_id);
+      setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? updated : x));
+      setSelectedVoucher(null);
+      setSelectedVoucherLines([]);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
@@ -246,13 +285,18 @@ const VouchersPage = () => {
 
       {/* Voucher List */}
       <div className="px-4 space-y-3">
-        {filtered.length === 0 && (
+        {loadingVouchers && (
+          <div className="text-center py-8">
+            <p className="text-sm text-muted-foreground">Loading vouchers…</p>
+          </div>
+        )}
+        {!loadingVouchers && filtered.length === 0 && (
           <div className="text-center py-12">
             <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No vouchers found</p>
           </div>
         )}
-        {filtered.map((v, i) => {
+        {!loadingVouchers && filtered.map((v, i) => {
           const cfg = VOUCHER_CONFIG[v.voucher_type];
           const borderColor = v.voucher_type === 'RECEIPT' ? 'border-emerald-200/30 dark:border-emerald-800/20'
             : v.voucher_type === 'PAYMENT' ? 'border-amber-200/30 dark:border-amber-800/20'
@@ -264,7 +308,7 @@ const VouchersPage = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
-              onClick={() => setSelectedVoucher(v)}
+              onClick={() => openVoucherDetail(v)}
               className={cn("w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all border", borderColor)}
             >
               <div className="flex items-start gap-3">
@@ -316,7 +360,7 @@ const VouchersPage = () => {
                   <span className="w-20 text-right">Debit</span>
                   <span className="w-20 text-right">Credit</span>
                 </div>
-                {voucherLines.filter(l => l.voucher_id === selectedVoucher.voucher_id).map(l => (
+                {(loadingDetail ? [] : selectedVoucherLines).map(l => (
                   <div key={l.line_id} className="px-3 py-2.5 flex items-center border-t border-border/50">
                     <span className="flex-1 text-xs text-foreground truncate">{l.ledger_name || l.ledger_id}</span>
                     <span className="w-20 text-right text-xs font-medium">{l.debit > 0 ? `₹${l.debit.toLocaleString()}` : '—'}</span>
@@ -400,8 +444,8 @@ const VouchersPage = () => {
                 <div className="space-y-2">
                   {lines.map((line, i) => (
                     <div key={i} className="flex gap-2 items-center">
-                      <select value={line.ledger_id} onChange={e => { const nl = [...lines]; nl[i].ledger_id = e.target.value; setLines(nl); }} className="flex-1 px-3 py-2.5 rounded-xl bg-muted text-foreground text-xs border border-border outline-none min-w-0">
-                        <option value="">Select Ledger</option>
+                      <select value={line.ledger_id} onChange={e => { const nl = [...lines]; nl[i].ledger_id = e.target.value; setLines(nl); }} disabled={loadingLedgers} className="flex-1 px-3 py-2.5 rounded-xl bg-muted text-foreground text-xs border border-border outline-none min-w-0 disabled:opacity-70">
+                        <option value="">{loadingLedgers ? 'Loading ledgers…' : 'Select Ledger'}</option>
                         {ledgers.filter(l => l.classification !== 'CONTROL').map(l => (
                           <option key={l.ledger_id} value={l.ledger_id}>{l.ledger_name}</option>
                         ))}

@@ -41,5 +41,6 @@
     <include file="config/liquibase/changelog/20260302140000_settlement_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260302160000_sales_bill_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260302180000_chart_of_account_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260302200000_voucher_header_schema.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

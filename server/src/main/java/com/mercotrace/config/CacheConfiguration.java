@@ -143,6 +143,9 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.SalesBillCommodityGroup.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.SalesBillLineItem.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.SalesBillVersion.class.getName(), jcacheConfiguration);
+            // Vouchers & Payments (accounting voucher header + lines)
+            createCache(cm, com.mercotrace.domain.VoucherHeader.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.VoucherLine.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }

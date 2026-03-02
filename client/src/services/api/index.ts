@@ -46,3 +46,10 @@ export type {
   ChartOfAccountCreateRequest,
   ChartOfAccountUpdateRequest,
 } from './chartOfAccounts';
+export { voucherHeadersApi } from './voucherHeaders';
+export type {
+  VoucherHeaderDTO,
+  VoucherLineDTO,
+  VoucherHeaderPage,
+  VoucherHeaderCreateRequest,
+} from './voucherHeaders';

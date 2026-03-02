@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Vouchers & Payments — accounting voucher header and lines.
+        Aligned with frontend VoucherHeader, VoucherLine in client/src/types/accounting.ts.
+        Distinct from existing 'voucher' table (reference-type vouchers).
+        Audit: created_by, created_date, last_modified_by, last_modified_date on voucher_header.
+    -->
+    <changeSet id="20260302200000-1" author="mercotrace">
+        <createTable tableName="voucher_header">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="voucher_type" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="voucher_number" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="voucher_date" type="date">
+                <constraints nullable="false"/>
+            </column>
+            <column name="narration" type="varchar(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_debit" type="numeric(19,2)" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_credit" type="numeric(19,2)" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_migrated" type="boolean" valueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="posted_at" type="${datetimeType}"/>
+            <column name="reversed_at" type="${datetimeType}"/>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="voucher_header" baseColumnNames="trader_id"
+            constraintName="fk_voucher_header_trader" referencedTableName="trader" referencedColumnNames="id"/>
+        <addUniqueConstraint tableName="voucher_header" columnNames="trader_id, voucher_number"
+            constraintName="ux_voucher_header_trader_number"/>
+        <createIndex tableName="voucher_header" indexName="idx_voucher_header_trader">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="voucher_header" indexName="idx_voucher_header_status">
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="voucher_header" indexName="idx_voucher_header_type">
+            <column name="voucher_type"/>
+        </createIndex>
+        <createIndex tableName="voucher_header" indexName="idx_voucher_header_created_date">
+            <column name="created_date"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302200000-2" author="mercotrace">
+        <createTable tableName="voucher_line">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="voucher_header_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ledger_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ledger_name" type="varchar(150)"/>
+            <column name="debit" type="numeric(19,2)" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="credit" type="numeric(19,2)" valueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="voucher_line" baseColumnNames="voucher_header_id"
+            constraintName="fk_voucher_line_header" referencedTableName="voucher_header" referencedColumnNames="id"/>
+        <addForeignKeyConstraint baseTableName="voucher_line" baseColumnNames="ledger_id"
+            constraintName="fk_voucher_line_ledger" referencedTableName="chart_of_account" referencedColumnNames="id"/>
+        <createIndex tableName="voucher_line" indexName="idx_voucher_line_header">
+            <column name="voucher_header_id"/>
+        </createIndex>
+        <createIndex tableName="voucher_line" indexName="idx_voucher_line_ledger">
+            <column name="ledger_id"/>
+        </createIndex>
+    </changeSet>
+</databaseChangeLog>
