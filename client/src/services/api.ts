@@ -15,6 +15,7 @@ export { selfSaleApi } from './api/selfSale';
 export { stockPurchaseApi } from './api/stockPurchase';
 export { cdnApi } from './api/cdn';
 export { settlementApi } from './api/settlement';
+export { billingApi } from './api/billing';
 export type {
   SellerSettlementDTO,
   SettlementLotDTO,
@@ -49,3 +50,4 @@ export type { WeighingSessionDTO, WeighingSessionCreateRequest } from './api/wei
 export type { PrintLogDTO, PrintLogCreateRequest } from './api/printLog';
 export type { OpenLotDTO, ClosureDTO, CreateClosureRequest } from './api/selfSale';
 export type { StockPurchaseDTO, StockPurchasePage, CreateStockPurchaseRequest } from './api/stockPurchase';
+export type { SalesBillDTO, SalesBillPage, SalesBillCreateOrUpdateRequest } from './api/billing';

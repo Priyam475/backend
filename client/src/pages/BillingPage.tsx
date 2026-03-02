@@ -15,16 +15,10 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { commodityApi, printLogApi, weighingApi } from '@/services/api';
+import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi } from '@/services/api';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
-
-// ── localStorage helpers (Billing backend not implemented: bills, vouchers, arrival detail) ──────────────────────────────────
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
-function setStore<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
+import type { SalesBillDTO } from '@/services/api/billing';
+import type { ArrivalDetail } from '@/services/api/arrivals';
 
 // ── Types ─────────────────────────────────────────────────
 interface BuyerPurchase {
@@ -94,11 +88,9 @@ interface BillData {
   versions: any[];
 }
 
-// REQ-BIL bill number generation (isolated by prefix)
-function generateBillNumber(prefix: string): string {
-  const counter = parseInt(localStorage.getItem(`mkt_bill_counter_${prefix}`) || '0') + 1;
-  localStorage.setItem(`mkt_bill_counter_${prefix}`, String(counter));
-  return `${prefix}-${String(counter).padStart(5, '0')}`;
+/** True if billId was issued by backend (numeric string). */
+function isBackendBillId(billId: string): boolean {
+  return /^\d+$/.test(billId);
 }
 
 const BillingPage = () => {
@@ -117,10 +109,12 @@ const BillingPage = () => {
 
   // Search mode for bill search
   const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
-  const [savedBills, setSavedBills] = useState<BillData[]>([]);
+  const [savedBills, setSavedBills] = useState<SalesBillDTO[]>([]);
+  const [savedBillsLoading, setSavedBillsLoading] = useState(false);
   const [commodities, setCommodities] = useState<any[]>([]);
   const [fullConfigs, setFullConfigs] = useState<FullCommodityConfigDto[]>([]);
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
 
   const { auctionResults: auctionData } = useAuctionResults();
 
@@ -133,24 +127,55 @@ const BillingPage = () => {
     weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
   }, []);
 
-  // Load buyer data from completed auctions (arrivals from store until arrivals API is primary; weighing from API)
+  // Load arrival details for buyer/lot enrichment (seller name, lot name, commodity from arrivals API)
   useEffect(() => {
-    const arrivals = getStore<any>('mkt_arrival_records');
+    let cancelled = false;
+    const load = async () => {
+      const all: ArrivalDetail[] = [];
+      for (let page = 0; page < 20; page++) {
+        const chunk = await arrivalsApi.listDetail(page, 100);
+        if (chunk.length === 0) break;
+        all.push(...chunk);
+        if (chunk.length < 100) break;
+      }
+      if (!cancelled) setArrivalDetails(all);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
 
+  // Load saved bills from backend
+  const loadSavedBills = useCallback(async () => {
+    setSavedBillsLoading(true);
+    try {
+      const page = await billingApi.getPage({ page: 0, size: 200, sort: 'billDate,desc' });
+      setSavedBills(page.content ?? []);
+    } catch {
+      setSavedBills([]);
+    } finally {
+      setSavedBillsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (billSearchMode === 'bill') loadSavedBills();
+  }, [billSearchMode, loadSavedBills]);
+
+  // Load buyer data from completed auctions (arrivals from API; weighing from API)
+  useEffect(() => {
     const buyerMap = new Map<string, BuyerPurchase>();
 
     auctionData.forEach((auction: any) => {
       let sellerName = auction.sellerName || 'Unknown';
       let lotName = auction.lotName || '';
-      let commodityName = auction.commodityName || '';
+      const commodityName = auction.commodityName || '';
 
-      arrivals.forEach((arr: any) => {
-        (arr.sellers || []).forEach((seller: any) => {
-          (seller.lots || []).forEach((lot: any) => {
-            if (lot.lot_id === auction.lotId) {
-              sellerName = seller.seller_name;
-              lotName = lot.lot_name || lotName;
-              commodityName = lot.commodity_name || commodityName;
+      arrivalDetails.forEach((arr) => {
+        (arr.sellers || []).forEach((seller) => {
+          (seller.lots || []).forEach((lot) => {
+            if (String(lot.id) === String(auction.lotId)) {
+              sellerName = seller.sellerName;
+              lotName = lot.lotName || lotName;
             }
           });
         });
@@ -188,8 +213,7 @@ const BillingPage = () => {
     });
 
     setBuyers(Array.from(buyerMap.values()));
-    setSavedBills(getStore<any>('mkt_bills'));
-  }, [auctionData, weighingSessions]);
+  }, [auctionData, weighingSessions, arrivalDetails]);
 
   // Generate Bill (commodity config from API)
   const generateBill = useCallback((buyer: BuyerPurchase) => {
@@ -341,59 +365,39 @@ const BillingPage = () => {
     toast.success('Global charges applied to all line items');
   };
 
-  // Save bill
-  const saveBill = () => {
+  // Save bill (backend assigns bill number; vouchers created by backend when coolie/freight > 0)
+  const saveBill = async () => {
     if (!bill) return;
-    // Bill number generated on print only
-    const billPrefix = trader?.bill_prefix || 'MT';
-    const billNumber = generateBillNumber(billPrefix);
-    const finalBill = { ...bill, billNumber, savedAt: new Date().toISOString() };
-    
-    const bills = getStore<any>('mkt_bills');
-    const existingIdx = bills.findIndex((b: any) => b.billId === bill.billId);
-    if (existingIdx >= 0) {
-      // Version history (Audit Trail)
-      if (!finalBill.versions) finalBill.versions = [];
-      finalBill.versions.push({
-        version: finalBill.versions.length + 1,
-        savedAt: bills[existingIdx].savedAt,
-        data: { ...bills[existingIdx] },
-      });
-      bills[existingIdx] = finalBill;
-    } else {
-      bills.push(finalBill);
+    const payload = {
+      buyerName: bill.buyerName,
+      buyerMark: bill.buyerMark,
+      billingName: bill.billingName,
+      billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
+      commodityGroups: bill.commodityGroups,
+      buyerCoolie: bill.buyerCoolie ?? 0,
+      outboundFreight: bill.outboundFreight ?? 0,
+      outboundVehicle: bill.outboundVehicle ?? '',
+      discount: bill.discount ?? 0,
+      discountType: bill.discountType ?? 'AMOUNT',
+      manualRoundOff: bill.manualRoundOff ?? 0,
+      grandTotal: bill.grandTotal,
+      brokerageType: bill.brokerageType ?? 'AMOUNT',
+      brokerageValue: bill.brokerageValue ?? 0,
+      globalOtherCharges: bill.globalOtherCharges ?? 0,
+      pendingBalance: bill.pendingBalance ?? bill.grandTotal,
+    };
+    try {
+      const isUpdate = bill.billId && isBackendBillId(bill.billId);
+      const result = isUpdate
+        ? await billingApi.update(bill.billId, payload)
+        : await billingApi.create(payload);
+      setBill(result as unknown as BillData);
+      toast.success(`Bill ${result.billNumber} saved!`);
+      setShowPrint(true);
+      loadSavedBills();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save bill');
     }
-    setStore('mkt_bills', bills);
-    
-    // REQ-BIL-008: Auto-create voucher for buyer coolie / outbound freight
-    if (finalBill.buyerCoolie > 0 || finalBill.outboundFreight > 0) {
-      const vouchers = getStore<any>('mkt_vouchers');
-      if (finalBill.buyerCoolie > 0) {
-        vouchers.push({
-          voucher_id: crypto.randomUUID(),
-          reference_type: 'BUYER_COOLIE',
-          reference_id: finalBill.billId,
-          amount: finalBill.buyerCoolie,
-          status: 'OPEN',
-          created_at: new Date().toISOString(),
-        });
-      }
-      if (finalBill.outboundFreight > 0) {
-        vouchers.push({
-          voucher_id: crypto.randomUUID(),
-          reference_type: 'OUTBOUND_FREIGHT',
-          reference_id: finalBill.billId,
-          amount: finalBill.outboundFreight,
-          status: 'OPEN',
-          created_at: new Date().toISOString(),
-        });
-      }
-      setStore('mkt_vouchers', vouchers);
-    }
-    
-    setBill(finalBill);
-    toast.success(`Bill ${billNumber} saved!`);
-    setShowPrint(true);
   };
 
   const filteredBuyers = useMemo(() => {

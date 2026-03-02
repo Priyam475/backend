@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, BarChart3, Search, FileText, Download, Calendar,
@@ -15,10 +15,8 @@ import { useDesktopMode } from '@/hooks/use-desktop';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
+import { billingApi } from '@/services/api';
+import type { SalesBillDTO } from '@/services/api/billing';
 
 /* ── Report Types ── */
 const reportTypes = [
@@ -102,9 +100,13 @@ const ReportsPage = () => {
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [viewingReport, setViewingReport] = useState<typeof reportTypes[0] | null>(null);
+  const [bills, setBills] = useState<SalesBillDTO[]>([]);
 
   const { auctionResults } = useAuctionResults();
-  const bills = getStore<any>('mkt_bills');
+
+  useEffect(() => {
+    billingApi.getPage({ page: 0, size: 500, sort: 'billDate,desc' }).then((p) => setBills(p.content ?? [])).catch(() => setBills([]));
+  }, []);
 
   // ── Daily Sales Summary data ──
   const dailySummary = useMemo(() => {
@@ -165,16 +167,19 @@ const ReportsPage = () => {
             ['Outstanding', `₹${dailySummary.outstanding.toLocaleString()}`],
           ]
         };
-      case 'bill_register':
+      case 'bill_register': {
+        const rows = bills.map(b => {
+          const bags = (b.commodityGroups ?? []).reduce((s, g) => s + (g.items ?? []).reduce((ss, i) => ss + (i.quantity ?? 0), 0), 0);
+          const comm = (b.commodityGroups ?? []).reduce((s, g) => s + (g.commissionAmount ?? 0), 0);
+          const uf = (b.commodityGroups ?? []).reduce((s, g) => s + (g.userFeeAmount ?? 0), 0);
+          return [b.billNumber, b.billingName || b.buyerMark, String(bags), String(b.grandTotal ?? 0), String(comm), String(uf), String(b.buyerCoolie ?? 0), '0', '0', String(b.pendingBalance ?? b.grandTotal ?? 0)];
+        });
         return {
           title: 'Bill Register',
           headers: ['Bill No', 'Party', 'Bags', 'Amount', 'Commission', 'User Fee', 'Coolie', 'Cash', 'Bank', 'Balance'],
-          rows: [
-            ['BIL-0042', 'Vijay Traders', '30', '24750', '1238', '495', '600', '15000', '5000', '4750'],
-            ['BIL-0043', 'Ganesh Mart', '25', '20125', '1006', '403', '500', '10000', '0', '10125'],
-            ['BIL-0044', 'Mahalaxmi Store', '20', '12000', '600', '240', '400', '12000', '0', '0'],
-          ]
+          rows,
         };
+      }
       case 'gst_report':
         return {
           title: 'GST Report',
@@ -269,7 +274,14 @@ const ReportsPage = () => {
           </div>
         );
 
-      case 'bill_register':
+      case 'bill_register': {
+        const billRows = bills.map(b => {
+          const bags = (b.commodityGroups ?? []).reduce((s, g) => s + (g.items ?? []).reduce((ss, i) => ss + (i.quantity ?? 0), 0), 0);
+          const comm = (b.commodityGroups ?? []).reduce((s, g) => s + (g.commissionAmount ?? 0), 0);
+          const uf = (b.commodityGroups ?? []).reduce((s, g) => s + (g.userFeeAmount ?? 0), 0);
+          const modDate = b.billDate ? new Date(b.billDate).toLocaleDateString() : today;
+          return { bill: b.billNumber, party: b.billingName || b.buyerMark, bags, amt: b.grandTotal ?? 0, comm, uf, cl: b.buyerCoolie ?? 0, cash: 0, bank: 0, bal: b.pendingBalance ?? b.grandTotal ?? 0, mod: modDate, by: '-' };
+        });
         return (
           <div className="overflow-x-auto rounded-xl border border-border/50">
             <table className={tableClass}>
@@ -279,30 +291,31 @@ const ReportsPage = () => {
                 ))}
               </tr></thead>
               <tbody>
-                {[
-                  { bill: 'BIL-0042', party: 'Vijay Traders', bags: 30, amt: 24750, comm: 1238, uf: 495, cl: 600, cash: 15000, bank: 5000, bal: 4750, mod: today, by: 'Admin' },
-                  { bill: 'BIL-0043', party: 'Ganesh Mart', bags: 25, amt: 20125, comm: 1006, uf: 403, cl: 500, cash: 10000, bank: 0, bal: 10125, mod: today, by: 'Admin' },
-                  { bill: 'BIL-0044', party: 'Mahalaxmi Store', bags: 20, amt: 12000, comm: 600, uf: 240, cl: 400, cash: 12000, bank: 0, bal: 0, mod: today, by: 'Admin' },
-                ].map(r => (
-                  <tr key={r.bill} className="hover:bg-muted/20 transition-colors">
-                    <td className={cn(tdClass, "font-mono text-xs text-primary font-semibold")}>{r.bill}</td>
-                    <td className={cn(tdClass, "font-medium")}>{r.party}</td>
-                    <td className={cn(tdClass, "text-right")}>{r.bags}</td>
-                    <td className={cn(tdClass, "text-right font-medium")}>₹{r.amt.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right")}>₹{r.comm.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right")}>₹{r.uf}</td>
-                    <td className={cn(tdClass, "text-right")}>₹{r.cl}</td>
-                    <td className={cn(tdClass, "text-right text-emerald-600 dark:text-emerald-400")}>₹{r.cash.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right text-sky-600 dark:text-sky-400")}>₹{r.bank.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right font-bold", r.bal > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>₹{r.bal.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-xs text-muted-foreground")}>{r.mod}</td>
-                    <td className={cn(tdClass, "text-xs")}>{r.by}</td>
-                  </tr>
-                ))}
+                {billRows.length === 0 ? (
+                  <tr><td colSpan={12} className={cn(tdClass, "text-center text-muted-foreground")}>No bills found</td></tr>
+                ) : (
+                  billRows.map(r => (
+                    <tr key={r.bill} className="hover:bg-muted/20 transition-colors">
+                      <td className={cn(tdClass, "font-mono text-xs text-primary font-semibold")}>{r.bill}</td>
+                      <td className={cn(tdClass, "font-medium")}>{r.party}</td>
+                      <td className={cn(tdClass, "text-right")}>{r.bags}</td>
+                      <td className={cn(tdClass, "text-right font-medium")}>₹{r.amt.toLocaleString()}</td>
+                      <td className={cn(tdClass, "text-right")}>₹{r.comm.toLocaleString()}</td>
+                      <td className={cn(tdClass, "text-right")}>₹{r.uf}</td>
+                      <td className={cn(tdClass, "text-right")}>₹{r.cl}</td>
+                      <td className={cn(tdClass, "text-right text-emerald-600 dark:text-emerald-400")}>₹{r.cash.toLocaleString()}</td>
+                      <td className={cn(tdClass, "text-right text-sky-600 dark:text-sky-400")}>₹{r.bank.toLocaleString()}</td>
+                      <td className={cn(tdClass, "text-right font-bold", r.bal > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>₹{r.bal.toLocaleString()}</td>
+                      <td className={cn(tdClass, "text-xs text-muted-foreground")}>{r.mod}</td>
+                      <td className={cn(tdClass, "text-xs")}>{r.by}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         );
+      }
 
       case 'gst_report':
         return (

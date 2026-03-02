@@ -11,6 +11,7 @@ export { weighingApi } from './weighing';
 export { printLogApi } from './printLog';
 export { stockPurchaseApi } from './stockPurchase';
 export { settlementApi } from './settlement';
+export { billingApi } from './billing';
 export type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -37,4 +38,5 @@ export type {
   ListSellersParams,
   ListPattisParams,
 } from './settlement';
+export type { SalesBillDTO, SalesBillPage, SalesBillCreateOrUpdateRequest } from './billing';
 

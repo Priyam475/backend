@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Billing (Sales Bill) module. Frontend: BillingPage.tsx.
+        Bill number per prefix; version history; audit on all tables.
+    -->
+
+    <changeSet id="20260302160000-1" author="mercotrace">
+        <createTable tableName="bill_number_sequence">
+            <column name="prefix" type="varchar(20)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="next_value" type="bigint" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="20260302160000-2" author="mercotrace">
+        <createTable tableName="sales_bill">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bill_number" type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_mark" type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="billing_name" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bill_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_coolie" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="outbound_freight" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="outbound_vehicle" type="varchar(50)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="discount" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="discount_type" type="varchar(10)" defaultValue="AMOUNT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="manual_round_off" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="grand_total" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="brokerage_type" type="varchar(10)" defaultValue="AMOUNT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="brokerage_value" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="global_other_charges" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="pending_balance" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(100)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_modified_by" type="varchar(100)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="last_modified_date" type="${datetimeType}">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_bill" baseColumnNames="trader_id"
+                                 referencedTableName="trader" referencedColumnNames="id"
+                                 constraintName="fk_sales_bill_trader"/>
+        <createIndex tableName="sales_bill" indexName="idx_sales_bill_trader_id">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="sales_bill" indexName="idx_sales_bill_bill_number">
+            <column name="bill_number"/>
+        </createIndex>
+        <createIndex tableName="sales_bill" indexName="idx_sales_bill_bill_date">
+            <column name="bill_date"/>
+        </createIndex>
+        <createIndex tableName="sales_bill" indexName="idx_sales_bill_buyer_mark">
+            <column name="buyer_mark"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302160000-3" author="mercotrace">
+        <createTable tableName="sales_bill_commodity_group">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="sales_bill_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="commodity_name" type="varchar(150)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="hsn_code" type="varchar(20)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="commission_percent" type="numeric(8,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="user_fee_percent" type="numeric(8,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="subtotal" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="commission_amount" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="user_fee_amount" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_charges" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_bill_commodity_group" baseColumnNames="sales_bill_id"
+                                 referencedTableName="sales_bill" referencedColumnNames="id"
+                                 constraintName="fk_sbcg_sales_bill" onDelete="CASCADE"/>
+        <createIndex tableName="sales_bill_commodity_group" indexName="idx_sbcg_sales_bill_id">
+            <column name="sales_bill_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302160000-4" author="mercotrace">
+        <createTable tableName="sales_bill_line_item">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="commodity_group_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bid_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="lot_name" type="varchar(150)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="seller_name" type="varchar(255)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="quantity" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="weight" type="numeric(12,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="base_rate" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="brokerage" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="other_charges" type="numeric(15,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="new_rate" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount" type="numeric(15,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_bill_line_item" baseColumnNames="commodity_group_id"
+                                 referencedTableName="sales_bill_commodity_group" referencedColumnNames="id"
+                                 constraintName="fk_sbli_commodity_group" onDelete="CASCADE"/>
+        <createIndex tableName="sales_bill_line_item" indexName="idx_sbli_commodity_group_id">
+            <column name="commodity_group_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302160000-5" author="mercotrace">
+        <createTable tableName="sales_bill_version">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="sales_bill_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="saved_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="snapshot_json" type="${clobType}">
+                <constraints nullable="true"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_bill_version" baseColumnNames="sales_bill_id"
+                                 referencedTableName="sales_bill" referencedColumnNames="id"
+                                 constraintName="fk_sbv_sales_bill" onDelete="CASCADE"/>
+        <createIndex tableName="sales_bill_version" indexName="idx_sbv_sales_bill_id">
+            <column name="sales_bill_id"/>
+        </createIndex>
+    </changeSet>
+</databaseChangeLog>

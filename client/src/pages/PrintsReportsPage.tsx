@@ -13,13 +13,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { contactApi, arrivalsApi } from '@/services/api';
+import { contactApi, arrivalsApi, billingApi, settlementApi } from '@/services/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
+import type { SalesBillDTO } from '@/services/api/billing';
+import type { PattiDTO } from '@/services/api/settlement';
 
 // ── Print Templates ─────────────────────────────────────
 const printTemplates = [
@@ -65,14 +63,22 @@ const PrintsReportsPage = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [contacts, setContacts] = useState<any[]>([]);
   const [arrivals, setArrivals] = useState<any[]>([]);
+  const [bills, setBills] = useState<SalesBillDTO[]>([]);
+  const [settlements, setSettlements] = useState<PattiDTO[]>([]);
 
   const { auctionResults } = useAuctionResults();
-  const bills = getStore<any>('mkt_bills');
-  const settlements = getStore<any>('mkt_settlements');
 
   useEffect(() => {
     contactApi.list().then(setContacts);
     arrivalsApi.list(0, 500).then(setArrivals);
+  }, []);
+
+  useEffect(() => {
+    billingApi.getPage({ page: 0, size: 500, sort: 'billDate,desc' }).then((p) => setBills(p.content ?? [])).catch(() => setBills([]));
+  }, []);
+
+  useEffect(() => {
+    settlementApi.listPattis({ page: 0, size: 500 }).then(setSettlements).catch(() => setSettlements([]));
   }, []);
 
   // Compute daily sales summary

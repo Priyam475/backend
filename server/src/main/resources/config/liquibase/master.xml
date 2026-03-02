@@ -39,5 +39,6 @@
     <include file="config/liquibase/changelog/20260301150000_contact_type_column_and_seed.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260302120000_cdn_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260302140000_settlement_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260302160000_sales_bill_schema.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

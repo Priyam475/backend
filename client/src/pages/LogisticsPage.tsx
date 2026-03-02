@@ -10,12 +10,8 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { printLogApi } from '@/services/api';
-
-// ── localStorage helpers ──────────────────────────────────
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
+import { printLogApi, arrivalsApi } from '@/services/api';
+import type { ArrivalDetail } from '@/services/api/arrivals';
 
 // ── Types ─────────────────────────────────────────────────
 interface BidInfo {
@@ -65,29 +61,29 @@ const LogisticsPage = () => {
   
 
   const { auctionResults: auctionData } = useAuctionResults();
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
 
-  // REQ-LOG-004: Load bids from completed auctions
   useEffect(() => {
-    const arrivals = getStore<any>('mkt_arrival_records');
+    arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
+  }, []);
 
+  // REQ-LOG-004: Load bids from completed auctions (arrival data from API)
+  useEffect(() => {
     const allBids: BidInfo[] = [];
     auctionData.forEach((auction: any) => {
       (auction.entries || []).forEach((entry: any) => {
-        // Find lot info from arrivals
         let sellerName = auction.sellerName || 'Unknown';
         let vehicleNumber = auction.vehicleNumber || 'Unknown';
-        let commodityName = auction.commodityName || '';
+        const commodityName = auction.commodityName || '';
         let lotName = auction.lotName || '';
 
-        // Try to enrich from arrivals
-        arrivals.forEach((arr: any) => {
-          (arr.sellers || []).forEach((seller: any) => {
-            (seller.lots || []).forEach((lot: any) => {
-              if (String(lot.lot_id) === String(auction.lotId)) {
-                sellerName = seller.seller_name;
-                vehicleNumber = arr.vehicle?.vehicle_number || vehicleNumber;
-                commodityName = lot.commodity_name || commodityName;
-                lotName = lot.lot_name || lotName;
+        arrivalDetails.forEach((arr) => {
+          (arr.sellers || []).forEach((seller) => {
+            (seller.lots || []).forEach((lot) => {
+              if (String(lot.id) === String(auction.lotId)) {
+                sellerName = seller.sellerName;
+                vehicleNumber = arr.vehicleNumber || vehicleNumber;
+                lotName = lot.lotName || lotName;
               }
             });
           });
@@ -110,7 +106,7 @@ const LogisticsPage = () => {
       });
     });
     setBids(allBids);
-  }, [auctionData]);
+  }, [auctionData, arrivalDetails]);
 
   const filteredBids = useMemo(() => {
     if (!searchQuery) return bids;

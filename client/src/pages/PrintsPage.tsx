@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Printer, Search, FileText, Download, Truck, DollarSign,
@@ -12,10 +12,8 @@ import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
+import { arrivalsApi } from '@/services/api';
+import type { ArrivalDetail } from '@/services/api/arrivals';
 
 /* ── Print Templates from SRS ── */
 const printTemplates = [
@@ -66,10 +64,36 @@ const FIRM = {
   bank: { name: 'State Bank of India', acc: '1234567890', ifsc: 'SBIN0001234', branch: 'Market Yard Branch' },
 };
 
+/* ── Flatten arrival details to sample lot rows for print templates ── */
+function flattenArrivalDetailsToSampleLots(details: ArrivalDetail[]): { lot_name: string; lot_no: string; seller: string; vehicle: string; qty: number }[] {
+  const out: { lot_name: string; lot_no: string; seller: string; vehicle: string; qty: number }[] = [];
+  details.forEach((arr) => {
+    (arr.sellers || []).forEach((seller) => {
+      (seller.lots || []).forEach((lot) => {
+        out.push({
+          lot_name: lot.lotName || 'Lot',
+          lot_no: String(lot.id),
+          seller: seller.sellerName || 'Seller',
+          vehicle: arr.vehicleNumber || 'MH-12-XX-0000',
+          qty: 0,
+        });
+      });
+    });
+  });
+  return out;
+}
+
 /* ── Generate template HTML for printing ── */
-function generateTemplateHTML(templateId: string): string {
+function generateTemplateHTML(templateId: string, arrivalDetails: ArrivalDetail[]): string {
   const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const arrivals = getStore<any>('mkt_arrival_records');
+  const flatLots = flattenArrivalDetailsToSampleLots(arrivalDetails);
+  const sampleLots = flatLots.length > 0
+    ? flatLots.slice(0, 5).map((l) => ({ ...l, lot_name: l.lot_name, lot_no: l.lot_no, seller: l.seller, vehicle: l.vehicle, qty: l.qty || 10 }))
+    : [
+        { lot_name: 'Onion A-Grade', lot_no: 'ONI/001/26', seller: 'Ramesh Kumar', vehicle: 'MH-12-AB-1234', qty: 30, rate: 825, weight: 1500 },
+        { lot_name: 'Onion B-Grade', lot_no: 'ONI/002/26', seller: 'Suresh Patil', vehicle: 'MH-14-CD-5678', qty: 25, rate: 805, weight: 1250 },
+        { lot_name: 'Tomato Fresh', lot_no: 'TOM/003/26', seller: 'Ramesh Kumar', vehicle: 'MH-12-AB-1234', qty: 20, rate: 600, weight: 1000 },
+      ];
 
   const commonHeader = `
     <div style="text-align:center; border-bottom:2px solid #222; padding-bottom:10px; margin-bottom:14px">
@@ -86,14 +110,6 @@ function generateTemplateHTML(templateId: string): string {
       <span>Page 1/1</span>
       <span>Authorized Signatory</span>
     </div>`;
-
-  const sampleLots = arrivals.length > 0
-    ? arrivals.slice(0, 5).flatMap((a: any) => (a.lots || []).map((l: any) => ({ ...l, seller: a.seller_name || 'Seller', vehicle: a.vehicle_number || 'MH-12-AB-1234', qty: a.bags || l.quantity || 10 })))
-    : [
-      { lot_name: 'Onion A-Grade', lot_no: 'ONI/001/26', seller: 'Ramesh Kumar', vehicle: 'MH-12-AB-1234', qty: 30, rate: 825, weight: 1500 },
-      { lot_name: 'Onion B-Grade', lot_no: 'ONI/002/26', seller: 'Suresh Patil', vehicle: 'MH-14-CD-5678', qty: 25, rate: 805, weight: 1250 },
-      { lot_name: 'Tomato Fresh', lot_no: 'TOM/003/26', seller: 'Ramesh Kumar', vehicle: 'MH-12-AB-1234', qty: 20, rate: 600, weight: 1000 },
-    ];
 
   const sampleBuyer = { name: 'Vijay Traders', mark: 'VT', address: 'Shop 42, Market Area', phone: '+91 98765 11111' };
 
@@ -394,7 +410,12 @@ const PrintsPage = () => {
   const [search, setSearch] = useState('');
   const [selectedPrint, setSelectedPrint] = useState<typeof printTemplates[0] | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const printRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    arrivalsApi.listDetail(0, 100).then(setArrivalDetails).catch(() => setArrivalDetails([]));
+  }, []);
 
   const filteredPrints = useMemo(() => {
     if (!search) return printTemplates;
@@ -432,7 +453,7 @@ const PrintsPage = () => {
     toast.info('Use "Save as PDF" in the print dialog to export as PDF');
   };
 
-  const templateHTML = selectedPrint ? generateTemplateHTML(selectedPrint.id) : '';
+  const templateHTML = selectedPrint ? generateTemplateHTML(selectedPrint.id, arrivalDetails) : '';
 
   return (
     <div className="min-h-[100dvh] bg-background pb-28 lg:pb-6">

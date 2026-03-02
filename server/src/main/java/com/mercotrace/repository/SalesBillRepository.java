@@ -1,0 +1,35 @@
+package com.mercotrace.repository;
+
+import com.mercotrace.domain.SalesBill;
+import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
+
+    @EntityGraph(attributePaths = { "commodityGroups", "commodityGroups.items", "versions" })
+    @Query("SELECT s FROM SalesBill s WHERE s.id = :id")
+    Optional<SalesBill> findByIdWithGroupsAndVersions(@Param("id") Long id);
+
+    Page<SalesBill> findAllByTraderId(Long traderId, Pageable pageable);
+
+    @Query("SELECT s FROM SalesBill s WHERE s.traderId = :traderId " +
+           "AND (:billNumber IS NULL OR :billNumber = '' OR LOWER(s.billNumber) LIKE LOWER(CONCAT('%', :billNumber, '%'))) " +
+           "AND (:buyerName IS NULL OR :buyerName = '' OR LOWER(s.buyerName) LIKE LOWER(CONCAT('%', :buyerName, '%')) OR LOWER(s.buyerMark) LIKE LOWER(CONCAT('%', :buyerName, '%')) OR LOWER(s.billingName) LIKE LOWER(CONCAT('%', :buyerName, '%'))) " +
+           "AND (:dateFrom IS NULL OR s.billDate >= :dateFrom) " +
+           "AND (:dateTo IS NULL OR s.billDate <= :dateTo)")
+    Page<SalesBill> findByTraderIdAndFilters(
+        @Param("traderId") Long traderId,
+        @Param("billNumber") String billNumber,
+        @Param("buyerName") String buyerName,
+        @Param("dateFrom") java.time.Instant dateFrom,
+        @Param("dateTo") java.time.Instant dateTo,
+        Pageable pageable
+    );
+}
