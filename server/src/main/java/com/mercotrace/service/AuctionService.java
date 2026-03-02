@@ -22,6 +22,7 @@ import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
+import java.util.Collection;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -366,6 +367,22 @@ public class AuctionService {
     @Transactional(readOnly = true)
     public Page<AuctionResultDTO> listResults(Pageable pageable) {
         Page<Auction> page = auctionRepository.findByCompletedAtIsNotNull(pageable);
+        return buildResultsPage(page, pageable);
+    }
+
+    /**
+     * Completed auction results for the given lot IDs (trader-scoped, e.g. for Settlement sellers).
+     */
+    @Transactional(readOnly = true)
+    public Page<AuctionResultDTO> listResultsByLotIds(Collection<Long> lotIds, Pageable pageable) {
+        if (lotIds == null || lotIds.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(lotIds, pageable);
+        return buildResultsPage(page, pageable);
+    }
+
+    private Page<AuctionResultDTO> buildResultsPage(Page<Auction> page, Pageable pageable) {
         List<Auction> auctions = page.getContent();
         if (auctions.isEmpty()) {
             return Page.empty(pageable);

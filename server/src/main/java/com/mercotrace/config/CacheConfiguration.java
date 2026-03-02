@@ -129,6 +129,10 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.CdnItem.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.CdnTransfer.class.getName(), jcacheConfiguration);
             createCache(cm, "cdnListByTrader", jcacheConfiguration);
+            // Settlement (Sales Patti)
+            createCache(cm, com.mercotrace.domain.Patti.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.PattiRateCluster.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.PattiDeduction.class.getName(), jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }

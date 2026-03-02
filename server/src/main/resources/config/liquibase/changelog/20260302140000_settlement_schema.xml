@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Sales Patti (Settlement). Aligned with SettlementPage.tsx PattiData. -->
+    <changeSet id="20260302140000-1" author="mercotrace">
+        <createTable tableName="sales_patti">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint"/>
+            <column name="patti_id" type="varchar(32)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+            <column name="seller_id" type="varchar(128)"/>
+            <column name="seller_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="gross_amount" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_deductions" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="net_payable" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="use_average_weight" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+        <createIndex tableName="sales_patti" indexName="idx_sales_patti_trader">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="sales_patti" indexName="idx_sales_patti_patti_id">
+            <column name="patti_id"/>
+        </createIndex>
+        <createIndex tableName="sales_patti" indexName="idx_sales_patti_created_date">
+            <column name="created_date"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302140000-2" author="mercotrace">
+        <createTable tableName="sales_patti_rate_cluster">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="patti_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="rate" type="numeric(19,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_quantity" type="integer" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_weight" type="numeric(19,4)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="integer"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_patti_rate_cluster" baseColumnNames="patti_id"
+            constraintName="fk_patti_rate_cluster_patti" referencedTableName="sales_patti" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="sales_patti_rate_cluster" indexName="idx_patti_rate_cluster_patti">
+            <column name="patti_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260302140000-3" author="mercotrace">
+        <createTable tableName="sales_patti_deduction">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="patti_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deduction_key" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="label" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="amount" type="numeric(19,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="editable" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="auto_pulled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="integer"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="sales_patti_deduction" baseColumnNames="patti_id"
+            constraintName="fk_patti_deduction_patti" referencedTableName="sales_patti" referencedColumnNames="id" onDelete="CASCADE"/>
+        <createIndex tableName="sales_patti_deduction" indexName="idx_patti_deduction_patti">
+            <column name="patti_id"/>
+        </createIndex>
+    </changeSet>
+</databaseChangeLog>

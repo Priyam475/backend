@@ -12,16 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
-import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { printLogApi, weighingApi } from '@/services/api';
-
-// ── localStorage helpers ──────────────────────────────────
-function getStore<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
-}
-function setStore<T>(key: string, data: T[]) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
+import { printLogApi, settlementApi, type PattiDTO } from '@/services/api';
 
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
@@ -75,13 +66,43 @@ interface PattiData {
   useAverageWeight: boolean;
 }
 
-// REQ-PUT-008: Auto-generate unique Patti ID
-function generatePattiId(): string {
-  const counter = parseInt(localStorage.getItem('mkt_patti_counter') || '0') + 1;
-  localStorage.setItem('mkt_patti_counter', String(counter));
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-  return `PT-${dateStr}-${String(counter).padStart(4, '0')}`;
+/** Map backend PattiDTO to form PattiData (numbers and ISO date). */
+function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
+  const toNum = (v: unknown): number => (typeof v === 'number' && !Number.isNaN(v) ? v : Number(v) || 0);
+  const rateClusters = (dto.rateClusters ?? []).map((c: { rate?: unknown; totalQuantity?: unknown; totalWeight?: unknown; amount?: unknown }) => ({
+    rate: toNum(c.rate),
+    totalQuantity: toNum(c.totalQuantity),
+    totalWeight: toNum(c.totalWeight),
+    amount: toNum(c.amount),
+  }));
+  const deductions: DeductionItem[] = (dto.deductions ?? []).map((d: { key?: string; label?: string; amount?: unknown; editable?: boolean; autoPulled?: boolean }) => ({
+    key: d.key ?? `ded_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    label: d.label ?? 'Deduction',
+    amount: toNum(d.amount),
+    editable: d.editable ?? true,
+    autoPulled: d.autoPulled ?? false,
+  }));
+  const grossAmount = toNum(dto.grossAmount);
+  const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
+  const netPayable = toNum(dto.netPayable);
+  let createdAt = '';
+  if (dto.createdAt != null) {
+    if (typeof dto.createdAt === 'string') createdAt = dto.createdAt;
+    else createdAt = new Date(dto.createdAt as number | Date).toISOString();
+  } else {
+    createdAt = new Date().toISOString();
+  }
+  return {
+    pattiId: dto.pattiId ?? '',
+    sellerName: dto.sellerName ?? '',
+    rateClusters,
+    grossAmount,
+    deductions,
+    totalDeductions,
+    netPayable,
+    createdAt,
+    useAverageWeight: dto.useAverageWeight ?? false,
+  };
 }
 
 const SettlementPage = () => {
@@ -93,6 +114,9 @@ const SettlementPage = () => {
   
   // Patti state
   const [pattiData, setPattiData] = useState<PattiData | null>(null);
+  const [existingPattiId, setExistingPattiId] = useState<number | null>(null);
+  const [savedPattis, setSavedPattis] = useState<PattiDTO[]>([]);
+  const [loadingPattis, setLoadingPattis] = useState(false);
   const [masterEditMode, setMasterEditMode] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
   const [hamaliEnabled, setHamaliEnabled] = useState(false);
@@ -103,82 +127,40 @@ const SettlementPage = () => {
   const [manualVoucherLabel, setManualVoucherLabel] = useState('');
   const [manualVoucherAmount, setManualVoucherAmount] = useState('');
 
-  const { auctionResults: auctionData } = useAuctionResults();
-  const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
-
+  // Load sellers from backend only (no localStorage or mock data).
   useEffect(() => {
-    weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
+    settlementApi
+      .listSellers({ page: 0, size: 500 })
+      .then((apiSellers: SellerSettlement[]) => {
+        setSellers(Array.isArray(apiSellers) ? apiSellers : []);
+      })
+      .catch(() => {
+        setSellers([]);
+        toast.error('Failed to load settlement sellers');
+      });
   }, []);
 
-  // Load seller data from completed auctions (weighing from API)
-  useEffect(() => {
-    const arrivals = getStore<any>('mkt_arrival_records');
-    
-    const sellerMap = new Map<string, SellerSettlement>();
-    
-    auctionData.forEach((auction: any) => {
-      let sellerName = auction.sellerName || 'Unknown';
-      let sellerMark = '';
-      let vehicleNumber = auction.vehicleNumber || '';
-      let sellerId = '';
-      
-      arrivals.forEach((arr: any) => {
-        (arr.sellers || []).forEach((seller: any) => {
-          (seller.lots || []).forEach((lot: any) => {
-            if (String(lot.lot_id) === String(auction.lotId)) {
-              sellerName = seller.seller_name;
-              sellerMark = seller.seller_mark || '';
-              vehicleNumber = arr.vehicle?.vehicle_number || vehicleNumber;
-              sellerId = seller.seller_vehicle_id || sellerName;
-            }
-          });
-        });
-      });
-      
-      if (!sellerMap.has(sellerId || sellerName)) {
-        sellerMap.set(sellerId || sellerName, {
-          sellerId: sellerId || sellerName,
-          sellerName,
-          sellerMark,
-          vehicleNumber,
-          lots: [],
-        });
-      }
-      
-      const seller = sellerMap.get(sellerId || sellerName)!;
-      
-      const entries: SettlementEntry[] = (auction.entries || []).map((entry: any) => {
-        const ws = weighingSessions.find((s: any) => s.bid_number === entry.bidNumber);
-        const weight = ws ? ws.net_weight : entry.quantity * 50;
-        return {
-          bidNumber: entry.bidNumber,
-          buyerMark: entry.buyerMark,
-          buyerName: entry.buyerName,
-          rate: entry.rate,
-          quantity: entry.quantity,
-          weight,
-        };
-      });
-      
-      const lotIdStr = String(auction.lotId);
-      const existingLot = seller.lots.find(l => l.lotId === lotIdStr);
-      if (existingLot) {
-        existingLot.entries.push(...entries);
-      } else {
-        seller.lots.push({
-          lotId: lotIdStr,
-          lotName: auction.lotName || '',
-          commodityName: auction.commodityName || '',
-          entries,
-        });
-      }
-    });
-    
-    setSellers(Array.from(sellerMap.values()));
-  }, [auctionData, weighingSessions]);
+  // Load saved pattis when on seller list (no patti open).
+  const loadSavedPattis = useCallback(() => {
+    setLoadingPattis(true);
+    settlementApi
+      .listPattis({ page: 0, size: 20 })
+      .then((list: PattiDTO[]) => {
+        setSavedPattis(Array.isArray(list) ? list : []);
+      })
+      .catch(() => setSavedPattis([]))
+      .finally(() => setLoadingPattis(false));
+  }, []);
 
-  // Generate Patti when seller is selected
+  useEffect(() => {
+    if (selectedSeller == null && pattiData == null) {
+      loadSavedPattis();
+    }
+  }, [selectedSeller, pattiData, loadSavedPattis]);
+
+  // Generate Patti when seller is selected (new patti; clear edit id).
   const generatePatti = useCallback((seller: SellerSettlement) => {
+    setExistingPattiId(null);
     setSelectedSeller(seller);
     
     // REQ-PUT-001: Cluster by rate
@@ -209,30 +191,19 @@ const SettlementPage = () => {
     // REQ-PUT-002: GA = Σ (NW × SR)
     const grossAmount = rateClusters.reduce((sum, c) => sum + c.amount, 0);
     
-    // REQ-PUT-003: Auto-pull vouchers / deductions
-    const vouchers = getStore<any>('mkt_vouchers');
-    const freightVoucher = vouchers.find((v: any) => 
-      v.reference_type === 'FREIGHT' && v.status === 'OPEN'
-    );
-    const advanceVoucher = vouchers.find((v: any) =>
-      v.reference_type === 'ADVANCE' && v.status === 'OPEN'
-    );
-    
+    // REQ-PUT-003: Deductions (freight/advance from backend when available; default 0).
     const totalBags = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
-    
-    // REQ-PUT-005: All editable
-    // Coolie: Flat = per bag count, Recalculated = recalculate count based on weight (REQ-CNF-005)
-    const coolieAmount = coolieMode === 'FLAT' 
-      ? totalBags * 5 
-      : Math.round(totalWeight / 50) * 5; // Recalculated: bags = totalWeight / avgBagWeight
+    const coolieAmount = coolieMode === 'FLAT'
+      ? totalBags * 5
+      : Math.round(totalWeight / 50) * 5;
 
     const deductions: DeductionItem[] = [
       {
         key: 'freight',
         label: 'Freight',
-        amount: freightVoucher ? freightVoucher.amount : 0,
+        amount: 0,
         editable: true,
-        autoPulled: !!freightVoucher,
+        autoPulled: false,
       },
       {
         key: 'coolie',
@@ -251,9 +222,9 @@ const SettlementPage = () => {
       {
         key: 'advance',
         label: 'Cash Advance',
-        amount: advanceVoucher ? advanceVoucher.amount : 0,
+        amount: 0,
         editable: true,
-        autoPulled: !!advanceVoucher,
+        autoPulled: false,
       },
       {
         key: 'gunnies',
@@ -269,7 +240,7 @@ const SettlementPage = () => {
     const netPayable = grossAmount - totalDeductions;
     
     setPattiData({
-      pattiId: generatePattiId(),
+      pattiId: '', // Server assigns pattiId on save (PT-YYYYMMDD-NNNN).
       sellerName: seller.sellerName,
       rateClusters,
       grossAmount,
@@ -336,18 +307,72 @@ const SettlementPage = () => {
     });
   };
 
-  // Save patti
-  const savePatti = () => {
+  // Open a saved patti for edit: fetch by id and pre-fill form.
+  const openPattiForEdit = useCallback(async (id: number) => {
+    try {
+      const dto = await settlementApi.getPattiById(id);
+      if (!dto) {
+        toast.error('Patti not found');
+        return;
+      }
+      const data = mapPattiDTOToPattiData(dto);
+      setPattiData(data);
+      setExistingPattiId(dto.id ?? id);
+      setSelectedSeller({
+        sellerId: dto.sellerId ?? '',
+        sellerName: dto.sellerName ?? '',
+        sellerMark: '',
+        vehicleNumber: '',
+        lots: [],
+      });
+    } catch {
+      toast.error('Failed to load patti');
+    }
+  }, []);
+
+  // Save patti via backend: update if editing existing, else create.
+  const savePatti = async () => {
     if (!pattiData) return;
-    const pattis = getStore<any>('mkt_pattis');
-    pattis.push({
-      ...pattiData,
+    const payload = {
       sellerId: selectedSeller?.sellerId,
-      savedAt: new Date().toISOString(),
-    });
-    setStore('mkt_pattis', pattis);
-    toast.success(`Sales Patti ${pattiData.pattiId} saved!`);
-    setShowPrint(true);
+      sellerName: pattiData.sellerName,
+      rateClusters: pattiData.rateClusters,
+      grossAmount: pattiData.grossAmount,
+      deductions: pattiData.deductions,
+      totalDeductions: pattiData.totalDeductions,
+      netPayable: pattiData.netPayable,
+      useAverageWeight: pattiData.useAverageWeight,
+    };
+    try {
+      if (existingPattiId != null) {
+        const updated = await settlementApi.updatePatti(existingPattiId, payload);
+        if (updated) {
+          setPattiData(prev =>
+            prev ? { ...prev, pattiId: updated.pattiId ?? prev.pattiId, createdAt: updated.createdAt ?? prev.createdAt } : null
+          );
+          toast.success(`Sales Patti ${updated.pattiId} updated!`);
+          setShowPrint(true);
+          loadSavedPattis();
+        } else {
+          toast.error('Failed to update patti');
+        }
+      } else {
+        const created = await settlementApi.createPatti(payload);
+        if (created?.pattiId) {
+          setPattiData(prev =>
+            prev ? { ...prev, pattiId: created.pattiId, createdAt: created.createdAt ?? prev.createdAt } : null
+          );
+          if (created?.id != null) setExistingPattiId(created.id);
+          toast.success(`Sales Patti ${created.pattiId} saved!`);
+          setShowPrint(true);
+          loadSavedPattis();
+        } else {
+          toast.error('Failed to save patti');
+        }
+      }
+    } catch {
+      toast.error(existingPattiId != null ? 'Failed to update patti' : 'Failed to save patti');
+    }
   };
 
   const filteredSellers = useMemo(() => {
@@ -375,7 +400,7 @@ const SettlementPage = () => {
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <Printer className="w-5 h-5" /> Sales Patti Print
               </h1>
-              <p className="text-white/70 text-xs">{pattiData.pattiId}</p>
+              <p className="text-white/70 text-xs">{pattiData.pattiId || '(New Patti)'}</p>
             </div>
           </div>
         </div>
@@ -402,7 +427,7 @@ const SettlementPage = () => {
             </div>
 
             <div className="border-b border-dashed border-border pb-2 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Patti ID</span><span className="font-bold text-foreground">{pattiData.pattiId}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Patti ID</span><span className="font-bold text-foreground">{pattiData.pattiId || '(New Patti)'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Seller</span><span className="font-bold text-foreground">{pattiData.sellerName}</span></div>
               {pattiData.useAverageWeight && <div className="flex justify-between"><span className="text-muted-foreground">Mode</span><span className="font-bold text-amber-500">AVG WEIGHT (Quick Close)</span></div>}
             </div>
@@ -470,7 +495,7 @@ const SettlementPage = () => {
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold shadow-lg">
               <Printer className="w-5 h-5 mr-2" /> Print Patti
             </Button>
-            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); }}
+            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setExistingPattiId(null); }}
               variant="outline" className="h-12 rounded-xl px-6">
               Done
             </Button>
@@ -502,7 +527,7 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setPattiData(null); }}
+              <button onClick={() => { setSelectedSeller(null); setPattiData(null); setExistingPattiId(null); }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -510,7 +535,7 @@ const SettlementPage = () => {
                 <h1 className="text-lg font-bold text-white flex items-center gap-2">
                   <FileText className="w-5 h-5" /> Sales Patti
                 </h1>
-                <p className="text-white/70 text-xs">{pattiData.pattiId}</p>
+                <p className="text-white/70 text-xs">{pattiData.pattiId || '(New Patti)'}</p>
               </div>
               {/* REQ-PUT-009: Master Edit Mode */}
               <button onClick={() => setMasterEditMode(!masterEditMode)}
@@ -546,14 +571,14 @@ const SettlementPage = () => {
         ) : (
         <div className="px-8 py-5">
           <div className="flex items-center gap-4 mb-4">
-            <Button onClick={() => { setSelectedSeller(null); setPattiData(null); }} variant="outline" size="sm" className="rounded-xl h-9">
+            <Button onClick={() => { setSelectedSeller(null); setPattiData(null); setExistingPattiId(null); }} variant="outline" size="sm" className="rounded-xl h-9">
               <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
             </Button>
             <div className="flex-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <FileText className="w-5 h-5 text-rose-500" /> Sales Patti — {selectedSeller.sellerName}
               </h2>
-              <p className="text-sm text-muted-foreground">{pattiData.pattiId} · {selectedSeller.vehicleNumber} · {totalBags} bags</p>
+              <p className="text-sm text-muted-foreground">{pattiData.pattiId || '(New Patti)'} · {selectedSeller.vehicleNumber} · {totalBags} bags</p>
             </div>
             <button onClick={() => setMasterEditMode(!masterEditMode)}
               className={cn("px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all",
@@ -592,7 +617,7 @@ const SettlementPage = () => {
               </div>
               <button onClick={() => {
                 setUseAvgWeight(!useAvgWeight);
-                if (selectedSeller) {
+                if (selectedSeller?.lots?.length) {
                   setTimeout(() => generatePatti(selectedSeller), 50);
                 }
               }}
@@ -643,7 +668,7 @@ const SettlementPage = () => {
             <div className="mb-3">
               <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">Coolie Calculation Mode</p>
               <div className="flex gap-2">
-                <button onClick={() => { setCoolieMode('FLAT'); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+                <button onClick={() => { setCoolieMode('FLAT'); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
                   className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
                     coolieMode === 'FLAT'
                       ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
@@ -651,7 +676,7 @@ const SettlementPage = () => {
                   <span>Flat Rate</span>
                   <span className={cn("text-[9px]", coolieMode === 'FLAT' ? 'text-white/70' : 'text-muted-foreground/60')}>Per bag count</span>
                 </button>
-                <button onClick={() => { setCoolieMode('RECALCULATED'); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+                <button onClick={() => { setCoolieMode('RECALCULATED'); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
                   className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
                     coolieMode === 'RECALCULATED'
                       ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-md'
@@ -668,7 +693,7 @@ const SettlementPage = () => {
                 <p className="text-xs font-semibold text-foreground">⚖️ Weighing Charges</p>
                 <p className="text-[9px] text-muted-foreground">Separate from unloading. Charged per weighment session.</p>
               </div>
-              <button onClick={() => { setHamaliEnabled(!hamaliEnabled); setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50); }}
+              <button onClick={() => { setHamaliEnabled(!hamaliEnabled); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
                 className={cn("w-11 h-6 rounded-full transition-all relative",
                   hamaliEnabled ? "bg-gradient-to-r from-emerald-500 to-green-500" : "bg-muted/40")}>
                 <div className={cn("w-4 h-4 rounded-full bg-white shadow-sm absolute top-1 transition-all",
@@ -718,7 +743,7 @@ const SettlementPage = () => {
                 <Input type="number" value={gunniesAmount || ''}
                   onChange={e => {
                     setGunniesAmount(parseInt(e.target.value) || 0);
-                    setTimeout(() => selectedSeller && generatePatti(selectedSeller), 50);
+                    setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50);
                   }}
                   className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-transparent border-amber-400/30"
                 />
@@ -778,8 +803,14 @@ const SettlementPage = () => {
 
             <Button onClick={savePatti}
               className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-base shadow-lg">
-              <Save className="w-5 h-5 mr-2" /> Save & Close Patti
+              <Save className="w-5 h-5 mr-2" /> {existingPattiId != null ? 'Update' : 'Save'} & Close Patti
             </Button>
+            {selectedSeller?.lots?.length ? (
+              <Button onClick={() => { setExistingPattiId(null); generatePatti(selectedSeller); }} variant="outline"
+                className="w-full mt-2 h-10 rounded-xl text-sm">
+                Start new patti (same seller)
+              </Button>
+            ) : null}
           </motion.div>
         </div>
         {!isDesktop && <BottomNav />}
@@ -841,7 +872,47 @@ const SettlementPage = () => {
       </div>
       )}
 
-      <div className="px-4 mt-4 space-y-2">
+      <div className="px-4 mt-4 space-y-4">
+        {/* Saved pattis — open for edit */}
+        {savedPattis.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Receipt className="w-3.5 h-3.5" /> Saved pattis
+            </p>
+            {loadingPattis ? (
+              <div className="glass-card rounded-2xl p-4 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : (
+              <div className="space-y-2">
+                {savedPattis.map((p) => (
+                  <motion.button
+                    key={p.id ?? p.pattiId}
+                    type="button"
+                    onClick={() => p.id != null && openPattiForEdit(p.id)}
+                    className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group flex items-center gap-3"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow flex-shrink-0">
+                      <Edit3 className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{p.pattiId || '(No ID)'}</p>
+                      <p className="text-xs text-muted-foreground truncate">{p.sellerName}</p>
+                      {p.createdAt && (
+                        <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                          {new Date(p.createdAt).toLocaleDateString()} {new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-primary">Open</span>
+                  </motion.button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <User className="w-3.5 h-3.5" /> Sellers (new patti)
+        </p>
         {filteredSellers.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center">
             <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />

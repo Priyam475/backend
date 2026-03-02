@@ -10,6 +10,7 @@ export { auctionApi, fetchAllAuctionResults } from './auction';
 export { weighingApi } from './weighing';
 export { printLogApi } from './printLog';
 export { stockPurchaseApi } from './stockPurchase';
+export { settlementApi } from './settlement';
 export type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -25,4 +26,15 @@ export type {
 export type { WeighingSessionDTO, WeighingSessionCreateRequest } from './weighing';
 export type { PrintLogDTO, PrintLogCreateRequest } from './printLog';
 export type { StockPurchaseDTO, StockPurchasePage, CreateStockPurchaseRequest } from './stockPurchase';
+export type {
+  SellerSettlementDTO,
+  SettlementLotDTO,
+  SettlementEntryDTO,
+  PattiDTO,
+  PattiSaveRequest,
+  RateClusterDTO,
+  DeductionItemDTO,
+  ListSellersParams,
+  ListPattisParams,
+} from './settlement';
 

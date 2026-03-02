@@ -27,5 +27,10 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
      * Completed auctions only (used for "results" list).
      */
     Page<Auction> findByCompletedAtIsNotNull(Pageable pageable);
+
+    /**
+     * Completed auctions for the given lot IDs (used by Settlement sellers list).
+     */
+    Page<Auction> findByCompletedAtIsNotNullAndLotIdIn(java.util.Collection<Long> lotIds, Pageable pageable);
 }
 

@@ -14,6 +14,18 @@ export { printLogApi } from './api/printLog';
 export { selfSaleApi } from './api/selfSale';
 export { stockPurchaseApi } from './api/stockPurchase';
 export { cdnApi } from './api/cdn';
+export { settlementApi } from './api/settlement';
+export type {
+  SellerSettlementDTO,
+  SettlementLotDTO,
+  SettlementEntryDTO,
+  PattiDTO,
+  PattiSaveRequest,
+  RateClusterDTO,
+  DeductionItemDTO,
+  ListSellersParams,
+  ListPattisParams,
+} from './api/settlement';
 export type {
   CDNResponseDTO,
   CDNLineItemDTO,
