@@ -1,11 +1,90 @@
+import { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart3, TrendingUp, Truck, Gavel, Receipt, HandCoins, Sparkles, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-// TODO: Daily summary from backend API. Placeholder until endpoint exists.
-const DEFAULT_DAILY_SUMMARY = { totalArrivals: 0, totalLots: 0, totalAuctions: 0, totalBills: 0, totalRevenue: 0, totalCollected: 0, totalPending: 0 };
+import { reportsApi, type AdminDailySummaryDTO } from '@/services/api/reports';
+import { toast } from 'sonner';
 
 const AdminReportsPage = () => {
-  const s = DEFAULT_DAILY_SUMMARY;
+  const [summary, setSummary] = useState<AdminDailySummaryDTO | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [revenueSeries, setRevenueSeries] = useState<{ label: string; totalRevenue: number }[]>([]);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setSummaryLoading(true);
+        const res = await reportsApi.getAdminDailySummary(today, today);
+        if (!cancelled) setSummary(res);
+      } catch (err) {
+        if (!cancelled) {
+          toast.error((err as Error)?.message ?? 'Failed to load admin reports');
+        }
+      } finally {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    // Build a 7-day revenue series using existing admin daily summary endpoint.
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setRevenueLoading(true);
+        const today = new Date();
+        const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const dates: { label: string; from: string; to: string }[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - i);
+          const iso = d.toISOString().split('T')[0];
+          dates.push({ label: dayLabels[d.getDay()], from: iso, to: iso });
+        }
+        const results = await Promise.all(
+          dates.map(d => reportsApi.getAdminDailySummary(d.from, d.to).catch(() => null))
+        );
+        if (cancelled) return;
+        const series = results.map((res, idx) => ({
+          label: dates[idx].label,
+          totalRevenue: res?.totalRevenue ?? 0,
+        }));
+        setRevenueSeries(series);
+      } finally {
+        if (!cancelled) {
+          setRevenueLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const s = useMemo(
+    () =>
+      summary ?? {
+        totalArrivals: 0,
+        totalLots: 0,
+        totalAuctions: 0,
+        totalBills: 0,
+        totalRevenue: 0,
+        totalCollected: 0,
+        totalPending: 0,
+      },
+    [summary]
+  );
+
+  const maxRevenue = revenueSeries.reduce((max, p) => (p.totalRevenue > max ? p.totalRevenue : max), 0);
+  const revenueHeights = maxRevenue > 0 ? revenueSeries.map(p => (Number(p.totalRevenue) / Number(maxRevenue)) * 100) : [];
 
   const metrics = [
     { label: 'Total Arrivals', value: s.totalArrivals, icon: Truck, gradient: 'from-blue-500 via-blue-400 to-cyan-400', glow: 'shadow-blue-500/20' },
@@ -38,6 +117,9 @@ const AdminReportsPage = () => {
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10">
+        {summaryLoading && (
+          <p className="col-span-full text-xs text-muted-foreground px-1">Loading admin summary…</p>
+        )}
         {metrics.map((m, i) => (
           <motion.div
             key={m.label}
@@ -71,24 +153,38 @@ const AdminReportsPage = () => {
             </div>
             Revenue Overview
           </h3>
-          <div className="h-48 flex items-end justify-between gap-2 px-4">
-            {[65, 45, 80, 55, 90, 70, 85].map((h, i) => (
-              <motion.div
-                key={i}
-                initial={{ height: 0 }}
-                animate={{ height: `${h}%` }}
-                transition={{ delay: 0.6 + i * 0.08, duration: 0.5 }}
-                className="flex-1 bg-gradient-to-t from-primary via-blue-500 to-accent rounded-t-xl min-w-[2rem] relative group shadow-md shadow-primary/10"
-              >
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap glass-card px-2 py-0.5 rounded-lg">
-                  ₹{(h * 3.5).toFixed(0)}K
-                </div>
-              </motion.div>
-            ))}
-          </div>
-          <div className="flex justify-between px-4 mt-2 text-[10px] text-muted-foreground">
-            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => <span key={d}>{d}</span>)}
-          </div>
+          {revenueLoading && (
+            <p className="text-xs text-muted-foreground px-4">Loading weekly revenue…</p>
+          )}
+          {!revenueLoading && revenueHeights.length === 0 && (
+            <p className="text-xs text-muted-foreground px-4">
+              No revenue data available for the recent days.
+            </p>
+          )}
+          {revenueHeights.length > 0 && (
+            <>
+              <div className="h-48 flex items-end justify-between gap-2 px-4">
+                {revenueHeights.map((h, i) => (
+                  <motion.div
+                    key={revenueSeries[i].label}
+                    initial={{ height: 0 }}
+                    animate={{ height: `${h || 2}%` }}
+                    transition={{ delay: 0.6 + i * 0.08, duration: 0.5 }}
+                    className="flex-1 bg-gradient-to-t from-primary via-blue-500 to-accent rounded-t-xl min-w-[2rem] relative group shadow-md shadow-primary/10"
+                  >
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap glass-card px-2 py-0.5 rounded-lg">
+                      ₹{(Number(revenueSeries[i].totalRevenue) / 1000).toFixed(1)}K
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+              <div className="flex justify-between px-4 mt-2 text-[10px] text-muted-foreground">
+                {revenueSeries.map(p => (
+                  <span key={p.label}>{p.label}</span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </motion.div>
     </div>

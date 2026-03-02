@@ -12,11 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
-import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { billingApi } from '@/services/api';
 import type { SalesBillDTO } from '@/services/api/billing';
+import { reportsApi, type DailySalesSummaryDTO, type PartyExposureRowDTO } from '@/services/api/reports';
 
 /* ── Report Types ── */
 const reportTypes = [
@@ -101,42 +101,56 @@ const ReportsPage = () => {
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [viewingReport, setViewingReport] = useState<typeof reportTypes[0] | null>(null);
   const [bills, setBills] = useState<SalesBillDTO[]>([]);
-
-  const { auctionResults } = useAuctionResults();
+  const [dailySummary, setDailySummary] = useState<DailySalesSummaryDTO | null>(null);
+  const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
+  const [partyExposure, setPartyExposure] = useState<PartyExposureRowDTO[]>([]);
+  const [partyExposureLoading, setPartyExposureLoading] = useState(false);
 
   useEffect(() => {
     billingApi.getPage({ page: 0, size: 500, sort: 'billDate,desc' }).then((p) => setBills(p.content ?? [])).catch(() => setBills([]));
   }, []);
 
-  // ── Daily Sales Summary data ──
-  const dailySummary = useMemo(() => {
-    const totalBills = bills.length || 12;
-    const totalBags = auctionResults.reduce((s: number, a: any) => s + (a.entries || []).reduce((ss: number, e: any) => ss + (e.quantity || 0), 0), 0) || 75;
-    const grossSale = 245000;
-    const commission = 12250;
-    const userFee = 4900;
-    const coolie = 1500;
-    const netSales = grossSale - commission - userFee - coolie;
-    const cashReceived = 120000;
-    const bankReceived = 60000;
-    const totalCollected = cashReceived + bankReceived;
-    const outstanding = grossSale - totalCollected;
-    return { totalBills, totalBags, grossSale, commission, userFee, coolie, netSales, cashReceived, bankReceived, totalCollected, outstanding };
-  }, [bills, auctionResults]);
+  // ── Backend-backed analytics ──
+  useEffect(() => {
+    if (!dateFrom || !dateTo) {
+      setDailySummary(null);
+      setPartyExposure([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setDailySummaryLoading(true);
+        setPartyExposureLoading(true);
+        const [summaryRes, exposureRes] = await Promise.all([
+          reportsApi.getDailySalesSummary(dateFrom, dateTo),
+          reportsApi.getPartyExposure(dateFrom, dateTo),
+        ]);
+        if (!cancelled) {
+          setDailySummary(summaryRes);
+          setPartyExposure(exposureRes);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDailySummary(null);
+          setPartyExposure([]);
+          toast.error((err as Error)?.message ?? 'Failed to load analytics reports');
+        }
+      } finally {
+        if (!cancelled) {
+          setDailySummaryLoading(false);
+          setPartyExposureLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [dateFrom, dateTo]);
 
-  const partyExposure = useMemo(() => [
-    { party: 'Vijay Traders', totalSale: 125000, totalCollected: 80000, outstanding: 45000, oldestDue: '2026-02-10', riskLevel: 'Medium' },
-    { party: 'Mahalaxmi Store', totalSale: 89000, totalCollected: 89000, outstanding: 0, oldestDue: '-', riskLevel: 'Low' },
-    { party: 'Ganesh Mart', totalSale: 56000, totalCollected: 20000, outstanding: 36000, oldestDue: '2026-01-25', riskLevel: 'High' },
-    { party: 'Shree Enterprises', totalSale: 42000, totalCollected: 10000, outstanding: 32000, oldestDue: '2026-01-15', riskLevel: 'Critical' },
-  ], []);
-
-  const lotReconciliation = useMemo(() => [
-    { seller: 'Ramesh Kumar', arrivalDate: '2026-02-20', commodity: 'Onion', arrivedBags: 30, soldBags: 30, pendingBags: 0, avgRate: 825, grossSale: 24750, status: 'Complete' },
-    { seller: 'Suresh Patil', arrivalDate: '2026-02-20', commodity: 'Onion', arrivedBags: 25, soldBags: 25, pendingBags: 0, avgRate: 805, grossSale: 20125, status: 'Complete' },
-    { seller: 'Ramesh Kumar', arrivalDate: '2026-02-20', commodity: 'Tomato', arrivedBags: 20, soldBags: 18, pendingBags: 2, avgRate: 600, grossSale: 10800, status: 'Partial' },
-    { seller: 'Kiran Jadhav', arrivalDate: '2026-02-19', commodity: 'Potato', arrivedBags: 40, soldBags: 40, pendingBags: 0, avgRate: 450, grossSale: 18000, status: 'Complete' },
-  ], []);
+  const lotReconciliation: { seller: string; arrivalDate: string; commodity: string; arrivedBags: number; soldBags: number; pendingBags: number; avgRate: number; grossSale: number; status: string }[] =
+    [];
 
   const riskColor = (level: string) => {
     if (level === 'Low') return 'text-emerald-700 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300';
@@ -155,17 +169,29 @@ const ReportsPage = () => {
   const getReportExportData = useCallback((reportId: string): { headers: string[]; rows: string[][]; title: string } => {
     switch (reportId) {
       case 'daily_sales':
+        if (!dailySummary) {
+          return {
+            title: 'Daily Sales Summary',
+            headers: ['Metric', 'Value'],
+            rows: [['Status', 'No data for selected range']],
+          };
+        }
         return {
           title: 'Daily Sales Summary',
           headers: ['Metric', 'Value'],
           rows: [
-            ['Total Bills', String(dailySummary.totalBills)], ['Total Bags', String(dailySummary.totalBags)],
-            ['Gross Sale', `₹${dailySummary.grossSale.toLocaleString()}`], ['Commission', `₹${dailySummary.commission.toLocaleString()}`],
-            ['User Fee', `₹${dailySummary.userFee.toLocaleString()}`], ['Coolie', `₹${dailySummary.coolie.toLocaleString()}`],
-            ['Net Sales', `₹${dailySummary.netSales.toLocaleString()}`], ['Cash Received', `₹${dailySummary.cashReceived.toLocaleString()}`],
-            ['Bank Received', `₹${dailySummary.bankReceived.toLocaleString()}`], ['Total Collected', `₹${dailySummary.totalCollected.toLocaleString()}`],
+            ['Total Bills', String(dailySummary.totalBills)],
+            ['Total Bags', String(dailySummary.totalBags ?? 0)],
+            ['Gross Sale', `₹${dailySummary.grossSale.toLocaleString()}`],
+            ['Commission', `₹${dailySummary.commission.toLocaleString()}`],
+            ['User Fee', `₹${dailySummary.userFee.toLocaleString()}`],
+            ['Coolie', `₹${dailySummary.coolie.toLocaleString()}`],
+            ['Net Sales', `₹${dailySummary.netSales.toLocaleString()}`],
+            ['Cash Received', `₹${dailySummary.cashReceived.toLocaleString()}`],
+            ['Bank Received', `₹${dailySummary.bankReceived.toLocaleString()}`],
+            ['Total Collected', `₹${dailySummary.totalCollected.toLocaleString()}`],
             ['Outstanding', `₹${dailySummary.outstanding.toLocaleString()}`],
-          ]
+          ],
         };
       case 'bill_register': {
         const rows = bills.map(b => {
@@ -184,10 +210,7 @@ const ReportsPage = () => {
         return {
           title: 'GST Report',
           headers: ['HSN/SAC', 'UQC', 'Total Qty', 'Total Value', 'Rate', 'Taxable Value', 'IGST', 'CGST', 'SGST'],
-          rows: [
-            ['07031019', 'Bags', '55', '44875', '5%', '44875', '-', '1122', '1122'],
-            ['07020000', 'Bags', '20', '12000', '5%', '12000', '-', '300', '300'],
-          ]
+          rows: [],
         };
       case 'lot_reconciliation':
         return {
@@ -199,7 +222,14 @@ const ReportsPage = () => {
         return {
           title: 'Party Exposure Summary',
           headers: ['Party', 'Total Sale', 'Collected', 'Outstanding', 'Oldest Due', 'Risk Level'],
-          rows: partyExposure.map(p => [p.party, String(p.totalSale), String(p.totalCollected), String(p.outstanding), p.oldestDue, p.riskLevel]),
+          rows: partyExposure.map(p => [
+            p.party,
+            String(p.totalSale),
+            String(p.totalCollected),
+            String(p.outstanding),
+            p.oldestDue,
+            p.riskLevel,
+          ]),
         };
       default:
         return { title: reportId, headers: ['Data'], rows: [['No data']] };
@@ -234,19 +264,22 @@ const ReportsPage = () => {
   }, [viewingReport, getReportExportData, dateFrom, dateTo]);
 
   /* ── KPI card config with icons and gradient colors ── */
-  const kpiCards = useMemo(() => [
-    { label: 'Total Bills', value: dailySummary.totalBills, icon: FileText, gradient: 'from-blue-500/15 to-blue-400/5', iconBg: 'bg-blue-500', border: 'border-blue-200 dark:border-blue-800/40' },
-    { label: 'Total Bags', value: dailySummary.totalBags, icon: Package, gradient: 'from-indigo-500/15 to-indigo-400/5', iconBg: 'bg-indigo-500', border: 'border-indigo-200 dark:border-indigo-800/40' },
-    { label: 'Gross Sale', value: `₹${dailySummary.grossSale.toLocaleString()}`, icon: IndianRupee, gradient: 'from-emerald-500/15 to-emerald-400/5', iconBg: 'bg-emerald-500', border: 'border-emerald-200 dark:border-emerald-800/40' },
-    { label: 'Commission', value: `₹${dailySummary.commission.toLocaleString()}`, icon: TrendingUp, gradient: 'from-violet-500/15 to-violet-400/5', iconBg: 'bg-violet-500', border: 'border-violet-200 dark:border-violet-800/40' },
-    { label: 'User Fee', value: `₹${dailySummary.userFee.toLocaleString()}`, icon: Shield, gradient: 'from-cyan-500/15 to-cyan-400/5', iconBg: 'bg-cyan-500', border: 'border-cyan-200 dark:border-cyan-800/40' },
-    { label: 'Coolie', value: `₹${dailySummary.coolie.toLocaleString()}`, icon: Users, gradient: 'from-orange-500/15 to-orange-400/5', iconBg: 'bg-orange-500', border: 'border-orange-200 dark:border-orange-800/40' },
-    { label: 'Net Sales', value: `₹${dailySummary.netSales.toLocaleString()}`, icon: Wallet, gradient: 'from-primary/15 to-primary/5', iconBg: 'bg-primary', border: 'border-primary/20' },
-    { label: 'Cash Received', value: `₹${dailySummary.cashReceived.toLocaleString()}`, icon: IndianRupee, gradient: 'from-green-500/15 to-green-400/5', iconBg: 'bg-green-500', border: 'border-green-200 dark:border-green-800/40' },
-    { label: 'Bank Received', value: `₹${dailySummary.bankReceived.toLocaleString()}`, icon: CreditCard, gradient: 'from-sky-500/15 to-sky-400/5', iconBg: 'bg-sky-500', border: 'border-sky-200 dark:border-sky-800/40' },
-    { label: 'Total Collected', value: `₹${dailySummary.totalCollected.toLocaleString()}`, icon: DollarSign, gradient: 'from-teal-500/15 to-teal-400/5', iconBg: 'bg-teal-500', border: 'border-teal-200 dark:border-teal-800/40' },
-    { label: 'Outstanding', value: `₹${dailySummary.outstanding.toLocaleString()}`, icon: AlertTriangle, gradient: 'from-red-500/15 to-red-400/5', iconBg: 'bg-red-500', border: 'border-red-200 dark:border-red-800/40' },
-  ], [dailySummary]);
+  const kpiCards = useMemo(() => {
+    if (!dailySummary) return [];
+    return [
+      { label: 'Total Bills', value: dailySummary.totalBills, icon: FileText, gradient: 'from-blue-500/15 to-blue-400/5', iconBg: 'bg-blue-500', border: 'border-blue-200 dark:border-blue-800/40' },
+      { label: 'Total Bags', value: dailySummary.totalBags ?? 0, icon: Package, gradient: 'from-indigo-500/15 to-indigo-400/5', iconBg: 'bg-indigo-500', border: 'border-indigo-200 dark:border-indigo-800/40' },
+      { label: 'Gross Sale', value: `₹${dailySummary.grossSale.toLocaleString()}`, icon: IndianRupee, gradient: 'from-emerald-500/15 to-emerald-400/5', iconBg: 'bg-emerald-500', border: 'border-emerald-200 dark:border-emerald-800/40' },
+      { label: 'Commission', value: `₹${dailySummary.commission.toLocaleString()}`, icon: TrendingUp, gradient: 'from-violet-500/15 to-violet-400/5', iconBg: 'bg-violet-500', border: 'border-violet-200 dark:border-violet-800/40' },
+      { label: 'User Fee', value: `₹${dailySummary.userFee.toLocaleString()}`, icon: Shield, gradient: 'from-cyan-500/15 to-cyan-400/5', iconBg: 'bg-cyan-500', border: 'border-cyan-200 dark:border-cyan-800/40' },
+      { label: 'Coolie', value: `₹${dailySummary.coolie.toLocaleString()}`, icon: Users, gradient: 'from-orange-500/15 to-orange-400/5', iconBg: 'bg-orange-500', border: 'border-orange-200 dark:border-orange-800/40' },
+      { label: 'Net Sales', value: `₹${dailySummary.netSales.toLocaleString()}`, icon: Wallet, gradient: 'from-primary/15 to-primary/5', iconBg: 'bg-primary', border: 'border-primary/20' },
+      { label: 'Cash Received', value: `₹${dailySummary.cashReceived.toLocaleString()}`, icon: IndianRupee, gradient: 'from-green-500/15 to-green-400/5', iconBg: 'bg-green-500', border: 'border-green-200 dark:border-green-800/40' },
+      { label: 'Bank Received', value: `₹${dailySummary.bankReceived.toLocaleString()}`, icon: CreditCard, gradient: 'from-sky-500/15 to-sky-400/5', iconBg: 'bg-sky-500', border: 'border-sky-200 dark:border-sky-800/40' },
+      { label: 'Total Collected', value: `₹${dailySummary.totalCollected.toLocaleString()}`, icon: DollarSign, gradient: 'from-teal-500/15 to-teal-400/5', iconBg: 'bg-teal-500', border: 'border-teal-200 dark:border-teal-800/40' },
+      { label: 'Outstanding', value: `₹${dailySummary.outstanding.toLocaleString()}`, icon: AlertTriangle, gradient: 'from-red-500/15 to-red-400/5', iconBg: 'bg-red-500', border: 'border-red-200 dark:border-red-800/40' },
+    ];
+  }, [dailySummary]);
 
   // ── Generate report view content ──
   const renderReportView = () => {
@@ -258,6 +291,12 @@ const ReportsPage = () => {
 
     switch (viewingReport.id) {
       case 'daily_sales':
+        if (dailySummaryLoading) {
+          return <p className="text-muted-foreground text-sm p-4">Loading daily sales summary…</p>;
+        }
+        if (!dailySummary || kpiCards.length === 0) {
+          return <p className="text-muted-foreground text-sm p-4">No daily sales data for the selected range.</p>;
+        }
         return (
           <div className={cn("grid gap-3", isDesktop ? "grid-cols-4" : "grid-cols-2")}>
             {kpiCards.map(m => (
@@ -319,93 +358,28 @@ const ReportsPage = () => {
 
       case 'gst_report':
         return (
-          <div className="overflow-x-auto rounded-xl border border-border/50">
-            <table className={tableClass}>
-              <thead><tr>
-                {['HSN/SAC', 'UQC', 'Total Qty', 'Total Value', 'Rate', 'Taxable Value', 'IGST', 'CGST', 'SGST'].map(h => (
-                  <th key={h} className={thClass}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                <tr className="hover:bg-muted/20">
-                  <td className={cn(tdClass, "font-mono text-primary")}>07031019</td><td className={tdClass}>Bags</td><td className={cn(tdClass, "text-right")}>55</td><td className={cn(tdClass, "text-right font-medium")}>₹44,875</td><td className={tdClass}>5%</td><td className={cn(tdClass, "text-right font-medium")}>₹44,875</td><td className={cn(tdClass, "text-right text-muted-foreground")}>-</td><td className={cn(tdClass, "text-right")}>₹1,122</td><td className={cn(tdClass, "text-right")}>₹1,122</td>
-                </tr>
-                <tr className="hover:bg-muted/20">
-                  <td className={cn(tdClass, "font-mono text-primary")}>07020000</td><td className={tdClass}>Bags</td><td className={cn(tdClass, "text-right")}>20</td><td className={cn(tdClass, "text-right font-medium")}>₹12,000</td><td className={tdClass}>5%</td><td className={cn(tdClass, "text-right font-medium")}>₹12,000</td><td className={cn(tdClass, "text-right text-muted-foreground")}>-</td><td className={cn(tdClass, "text-right")}>₹300</td><td className={cn(tdClass, "text-right")}>₹300</td>
-                </tr>
-                <tr className="font-bold bg-muted/30">
-                  <td className={cn(tdClass)} colSpan={5}>Grand Total</td><td className={cn(tdClass, "text-right")}>₹56,875</td><td className={cn(tdClass, "text-right")}>-</td><td className={cn(tdClass, "text-right")}>₹1,422</td><td className={cn(tdClass, "text-right")}>₹1,422</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              GST operational report will be powered by backend GST aggregates in a future release. No mock rows are shown here.
+            </p>
           </div>
         );
 
       case 'arrival_report':
         return (
-          <div className="space-y-4">
-            <div className="overflow-x-auto rounded-xl border border-border/50">
-              <table className={tableClass}>
-                <thead><tr>
-                  {['Farmer Name', 'Place', 'Bags', 'Freight', 'Advance', 'Lot No'].map(h => (
-                    <th key={h} className={thClass}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {[
-                    { farmer: 'Ramesh Kumar', place: 'Nashik', bags: 50, freight: 2000, advance: 5000, lot: 'ONI/001, TOM/003' },
-                    { farmer: 'Suresh Patil', place: 'Pune', bags: 25, freight: 1500, advance: 3000, lot: 'ONI/002' },
-                    { farmer: 'Kiran Jadhav', place: 'Satara', bags: 40, freight: 2500, advance: 4000, lot: 'POT/004' },
-                  ].map(r => (
-                    <tr key={r.farmer} className="hover:bg-muted/20">
-                      <td className={cn(tdClass, "font-medium")}>{r.farmer}</td>
-                      <td className={tdClass}>{r.place}</td>
-                      <td className={cn(tdClass, "text-right font-medium")}>{r.bags}</td>
-                      <td className={cn(tdClass, "text-right")}>₹{r.freight.toLocaleString()}</td>
-                      <td className={cn(tdClass, "text-right")}>₹{r.advance.toLocaleString()}</td>
-                      <td className={cn(tdClass, "font-mono text-xs text-primary")}>{r.lot}</td>
-                    </tr>
-                  ))}
-                  <tr className="font-bold bg-muted/30">
-                    <td className={tdClass} colSpan={2}>Total</td>
-                    <td className={cn(tdClass, "text-right")}>115</td>
-                    <td className={cn(tdClass, "text-right")}>₹6,000</td>
-                    <td className={cn(tdClass, "text-right")}>₹12,000</td>
-                    <td className={tdClass}></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              Arrival report layout is ready. Backend arrival aggregates will be wired here; until then, no sample rows are displayed.
+            </p>
           </div>
         );
 
       case 'patti_register':
         return (
-          <div className="overflow-x-auto rounded-xl border border-border/50">
-            <table className={tableClass}>
-              <thead><tr>
-                {['Date', 'Party', 'Bags', 'Gross Amount', 'Deductions', 'Net Amount', 'Status'].map(h => (
-                  <th key={h} className={thClass}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[
-                  { date: '21/02/2026', party: 'Ramesh Kumar', bags: 50, gross: 36750, ded: 5513, net: 31237, status: 'Settled' },
-                  { date: '21/02/2026', party: 'Suresh Patil', bags: 25, gross: 20125, ded: 3019, net: 17106, status: 'Settled' },
-                  { date: '20/02/2026', party: 'Kiran Jadhav', bags: 40, gross: 18000, ded: 2700, net: 15300, status: 'Pending' },
-                ].map(r => (
-                  <tr key={r.party} className="hover:bg-muted/20">
-                    <td className={tdClass}>{r.date}</td>
-                    <td className={cn(tdClass, "font-medium")}>{r.party}</td>
-                    <td className={cn(tdClass, "text-right")}>{r.bags}</td>
-                    <td className={cn(tdClass, "text-right font-medium")}>₹{r.gross.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right text-destructive")}>₹{r.ded.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right font-bold")}>₹{r.net.toLocaleString()}</td>
-                    <td className={tdClass}><span className={cn("px-2.5 py-1 rounded-full text-xs font-semibold", r.status === 'Settled' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300')}>{r.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              Patti register will show real seller settlement data once backend aggregates are in place. No mock pattis are rendered.
+            </p>
           </div>
         );
 
@@ -414,31 +388,10 @@ const ReportsPage = () => {
 
       case 'collection_report':
         return (
-          <div className="overflow-x-auto rounded-xl border border-border/50">
-            <table className={tableClass}>
-              <thead><tr>
-                {['Date', 'Bill No', 'Party', 'Cash', 'Bank', 'Total', 'Balance'].map(h => (
-                  <th key={h} className={thClass}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[
-                  { date: '21/02/2026', bill: 'BIL-0042', party: 'Vijay Traders', cash: 15000, bank: 5000, total: 20000, bal: 4750 },
-                  { date: '21/02/2026', bill: 'BIL-0043', party: 'Ganesh Mart', cash: 10000, bank: 0, total: 10000, bal: 10125 },
-                  { date: '21/02/2026', bill: 'BIL-0044', party: 'Mahalaxmi Store', cash: 12000, bank: 0, total: 12000, bal: 0 },
-                ].map(r => (
-                  <tr key={r.bill} className="hover:bg-muted/20">
-                    <td className={tdClass}>{r.date}</td>
-                    <td className={cn(tdClass, "font-mono text-xs text-primary font-semibold")}>{r.bill}</td>
-                    <td className={cn(tdClass, "font-medium")}>{r.party}</td>
-                    <td className={cn(tdClass, "text-right text-emerald-600 dark:text-emerald-400")}>₹{r.cash.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right text-sky-600 dark:text-sky-400")}>₹{r.bank.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right font-bold")}>₹{r.total.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right", r.bal > 0 ? "text-amber-600 font-semibold" : "text-emerald-600")}>₹{r.bal.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              Collection report will be connected to real collection entries. Until then, this view intentionally shows no sample rows.
+            </p>
           </div>
         );
 
@@ -447,71 +400,19 @@ const ReportsPage = () => {
 
       case 'commission_income':
         return (
-          <div className="space-y-4">
-            <div className="overflow-x-auto rounded-xl border border-border/50">
-              <table className={tableClass}>
-                <thead><tr>
-                  {['Party', 'Bags', 'Gross Sale', 'Commission %', 'Commission Earned', 'Preset Charges'].map(h => (
-                    <th key={h} className={thClass}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {[
-                    { party: 'Vijay Traders', bags: 30, gross: 24750, pct: '5%', comm: 1238, preset: 495 },
-                    { party: 'Ganesh Mart', bags: 25, gross: 20125, pct: '5%', comm: 1006, preset: 403 },
-                    { party: 'Mahalaxmi Store', bags: 20, gross: 12000, pct: '5%', comm: 600, preset: 240 },
-                  ].map(r => (
-                    <tr key={r.party} className="hover:bg-muted/20">
-                      <td className={cn(tdClass, "font-medium")}>{r.party}</td>
-                      <td className={cn(tdClass, "text-right")}>{r.bags}</td>
-                      <td className={cn(tdClass, "text-right font-medium")}>₹{r.gross.toLocaleString()}</td>
-                      <td className={tdClass}>{r.pct}</td>
-                      <td className={cn(tdClass, "text-right font-bold text-primary")}>₹{r.comm.toLocaleString()}</td>
-                      <td className={cn(tdClass, "text-right")}>₹{r.preset}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex gap-4 p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 text-sm">
-              <div><span className="text-muted-foreground text-xs">Total Commission:</span> <strong className="text-primary">₹2,844</strong></div>
-              <div><span className="text-muted-foreground text-xs">Avg/Bag:</span> <strong className="text-primary">₹37.92</strong></div>
-            </div>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              Commission income analytics will be derived from brokerage and commission ledgers. This card does not show mock commission rows.
+            </p>
           </div>
         );
 
       case 'market_fee_report':
         return (
-          <div className="overflow-x-auto rounded-xl border border-border/50">
-            <table className={tableClass}>
-              <thead><tr>
-                {['Bill No', 'Purchaser', 'Quantity', 'Amount', 'Market Fee', 'W/Fee'].map(h => (
-                  <th key={h} className={thClass}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {[
-                  { bill: 'BIL-0042', party: 'Vijay Traders', qty: 30, amt: 24750, fee: 495, wfee: 124 },
-                  { bill: 'BIL-0043', party: 'Ganesh Mart', qty: 25, amt: 20125, fee: 403, wfee: 101 },
-                ].map(r => (
-                  <tr key={r.bill} className="hover:bg-muted/20">
-                    <td className={cn(tdClass, "font-mono text-xs text-primary")}>{r.bill}</td>
-                    <td className={cn(tdClass, "font-medium")}>{r.party}</td>
-                    <td className={cn(tdClass, "text-right")}>{r.qty}</td>
-                    <td className={cn(tdClass, "text-right font-medium")}>₹{r.amt.toLocaleString()}</td>
-                    <td className={cn(tdClass, "text-right font-bold")}>₹{r.fee}</td>
-                    <td className={cn(tdClass, "text-right")}>₹{r.wfee}</td>
-                  </tr>
-                ))}
-                <tr className="font-bold bg-muted/30">
-                  <td className={tdClass} colSpan={2}>Total</td>
-                  <td className={cn(tdClass, "text-right")}>55</td>
-                  <td className={cn(tdClass, "text-right")}>₹44,875</td>
-                  <td className={cn(tdClass, "text-right")}>₹898</td>
-                  <td className={cn(tdClass, "text-right")}>₹225</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="rounded-xl border border-border/50 p-4">
+            <p className="text-sm text-muted-foreground">
+              Market fee report will reflect liabilities from the market fee ledger. No illustrative bill rows are rendered.
+            </p>
           </div>
         );
 

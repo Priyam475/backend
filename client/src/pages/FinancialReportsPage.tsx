@@ -14,6 +14,7 @@ import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccoun
 import { voucherHeadersApi } from '@/services/api/voucherHeaders';
 import { voucherLinesApi } from '@/services/api/voucherLines';
 import { arapDocumentsApi } from '@/services/api/arapDocuments';
+import { reportsApi } from '@/services/api/reports';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { toast } from 'sonner';
@@ -46,6 +47,12 @@ const FinancialReportsPage = () => {
   const [vouchers, setVouchers] = useState<VoucherHeader[]>([]);
   const [voucherLines, setVoucherLines] = useState<VoucherLine[]>([]);
   const [arapDocs, setArapDocs] = useState<ARAPDocument[]>([]);
+  const [trialBalance, setTrialBalance] = useState<TrialBalanceRow[]>([]);
+  const [plRows, setPlRows] = useState<PLRow[]>([]);
+  const [bsRows, setBsRows] = useState<BalanceSheetRow[]>([]);
+  const [arAging, setArAging] = useState<AgingBucket[]>([]);
+  const [apAging, setApAging] = useState<AgingBucket[]>([]);
+  const [commodityProfit, setCommodityProfit] = useState<CommodityProfitRow[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +102,8 @@ const FinancialReportsPage = () => {
     if (!dateFrom || !dateTo) {
       setVouchers([]);
       setVoucherLines([]);
+      setTrialBalance([]);
+      setCommodityProfit([]);
       return;
     }
     let cancelled = false;
@@ -117,12 +126,23 @@ const FinancialReportsPage = () => {
         }
         if (cancelled) return;
         setVouchers(allVouchers);
-        const lines = await voucherLinesApi.getByDateRange(dateFrom, dateTo);
-        if (!cancelled) setVoucherLines(lines);
-      } catch {
+        const [lines, tb, cp] = await Promise.all([
+          voucherLinesApi.getByDateRange(dateFrom, dateTo),
+          reportsApi.getTrialBalance(dateFrom, dateTo),
+          reportsApi.getCommodityProfit(dateFrom, dateTo),
+        ]);
+        if (!cancelled) {
+          setVoucherLines(lines);
+          setTrialBalance(tb);
+          setCommodityProfit(cp);
+        }
+      } catch (err) {
         if (!cancelled) {
           setVouchers([]);
           setVoucherLines([]);
+          setTrialBalance([]);
+          setCommodityProfit([]);
+          toast.error((err as Error)?.message ?? 'Failed to load financial reports');
         }
       }
     };
@@ -132,105 +152,49 @@ const FinancialReportsPage = () => {
 
   const filteredVoucherLines = useMemo(() => {
     if (!dateFrom && !dateTo) return voucherLines;
-    return voucherLines.filter(vl => {
-      const v = vouchers.find(vh => vh.voucher_id === vl.voucher_id);
-      if (!v) return false;
-      if (dateFrom && v.voucher_date < dateFrom) return false;
-      if (dateTo && v.voucher_date > dateTo) return false;
-      return true;
-    });
-  }, [voucherLines, vouchers, dateFrom, dateTo]);
+    return voucherLines;
+  }, [voucherLines, dateFrom, dateTo]);
 
-  const trialBalance = useMemo((): TrialBalanceRow[] => {
-    return ledgers.filter(l => l.classification !== 'CONTROL').map(l => {
-      const relatedLines = filteredVoucherLines.filter(vl => vl.ledger_id === l.ledger_id);
-      const totalDebit = relatedLines.reduce((s, vl) => s + vl.debit, 0);
-      const totalCredit = relatedLines.reduce((s, vl) => s + vl.credit, 0);
-      const isDebitNature = l.accounting_class === 'ASSET' || l.accounting_class === 'EXPENSE';
-      const closingBalance = isDebitNature
-        ? l.opening_balance + totalDebit - totalCredit
-        : l.opening_balance + totalCredit - totalDebit;
-      return {
-        ledger_id: l.ledger_id,
-        ledger_name: l.ledger_name,
-        accounting_class: l.accounting_class,
-        debit: isDebitNature && closingBalance > 0 ? closingBalance : (!isDebitNature && closingBalance < 0 ? Math.abs(closingBalance) : 0),
-        credit: !isDebitNature && closingBalance > 0 ? closingBalance : (isDebitNature && closingBalance < 0 ? Math.abs(closingBalance) : 0),
-      };
-    }).filter(r => r.debit > 0 || r.credit > 0);
-  }, [ledgers, filteredVoucherLines]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [pl, bs, ar, ap] = await Promise.all([
+          reportsApi.getProfitAndLoss(),
+          reportsApi.getBalanceSheet(),
+          reportsApi.getAging('AR'),
+          reportsApi.getAging('AP'),
+        ]);
+        if (!cancelled) {
+          setPlRows(pl);
+          setBsRows(bs);
+          setArAging(ar);
+          setApAging(ap);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPlRows([]);
+          setBsRows([]);
+          setArAging([]);
+          setApAging([]);
+          toast.error((err as Error)?.message ?? 'Failed to load analytics');
+        }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
 
   const tbTotalDebit = trialBalance.reduce((s, r) => s + r.debit, 0);
   const tbTotalCredit = trialBalance.reduce((s, r) => s + r.credit, 0);
-
-  const plRows = useMemo((): PLRow[] => {
-    return ledgers
-      .filter(l => l.accounting_class === 'INCOME' || l.accounting_class === 'EXPENSE')
-      .filter(l => l.current_balance > 0)
-      .map(l => ({ category: l.accounting_class as 'INCOME' | 'EXPENSE', ledger_name: l.ledger_name, amount: l.current_balance }));
-  }, [ledgers]);
 
   const totalIncome = plRows.filter(r => r.category === 'INCOME').reduce((s, r) => s + r.amount, 0);
   const totalExpenses = plRows.filter(r => r.category === 'EXPENSE').reduce((s, r) => s + r.amount, 0);
   const netProfit = totalIncome - totalExpenses;
 
-  const bsRows = useMemo((): BalanceSheetRow[] => {
-    return ledgers
-      .filter(l => l.accounting_class === 'ASSET' || l.accounting_class === 'LIABILITY' || l.accounting_class === 'EQUITY')
-      .filter(l => l.current_balance > 0 && l.classification !== 'CONTROL')
-      .map(l => ({ category: l.accounting_class as 'ASSET' | 'LIABILITY' | 'EQUITY', ledger_name: l.ledger_name, amount: l.current_balance }));
-  }, [ledgers]);
-
   const totalAssets = bsRows.filter(r => r.category === 'ASSET').reduce((s, r) => s + r.amount, 0);
   const totalLiabilities = bsRows.filter(r => r.category === 'LIABILITY').reduce((s, r) => s + r.amount, 0);
   const totalEquity = bsRows.filter(r => r.category === 'EQUITY').reduce((s, r) => s + r.amount, 0);
-
-  const buildAging = (type: 'AR' | 'AP'): AgingBucket[] => {
-    const docs = arapDocs.filter(d => d.type === type && d.outstanding_balance > 0);
-    const byContact: Record<string, AgingBucket> = {};
-    const now = Date.now();
-    docs.forEach(d => {
-      if (!byContact[d.contact_name || '']) {
-        byContact[d.contact_name || ''] = { contact_name: d.contact_name || '', current: 0, days_30: 0, days_60: 0, days_90: 0, over_90: 0, total: 0 };
-      }
-      const days = Math.floor((now - new Date(d.document_date).getTime()) / 86400000);
-      const b = byContact[d.contact_name || ''];
-      if (days <= 0) b.current += d.outstanding_balance;
-      else if (days <= 30) b.days_30 += d.outstanding_balance;
-      else if (days <= 60) b.days_60 += d.outstanding_balance;
-      else if (days <= 90) b.days_90 += d.outstanding_balance;
-      else b.over_90 += d.outstanding_balance;
-      b.total += d.outstanding_balance;
-    });
-    return Object.values(byContact);
-  };
-
-  const arAging = useMemo(() => buildAging('AR'), [arapDocs]);
-  const apAging = useMemo(() => buildAging('AP'), [arapDocs]);
-
-  const commodityProfit = useMemo((): CommodityProfitRow[] => {
-    const commodityVoucherMap: Record<string, Set<string>> = {};
-    filteredVoucherLines.filter(l => l.commodity_name).forEach(l => {
-      if (!commodityVoucherMap[l.commodity_name!]) commodityVoucherMap[l.commodity_name!] = new Set();
-      commodityVoucherMap[l.commodity_name!].add(l.voucher_id);
-    });
-    const byComm: Record<string, { income: number; expenses: number }> = {};
-    Object.entries(commodityVoucherMap).forEach(([name, voucherIds]) => {
-      if (!byComm[name]) byComm[name] = { income: 0, expenses: 0 };
-      voucherIds.forEach(vid => {
-        const allLines = filteredVoucherLines.filter(l => l.voucher_id === vid);
-        allLines.forEach(l => {
-          const ledger = ledgers.find(lg => lg.ledger_id === l.ledger_id);
-          if (!ledger) return;
-          if (ledger.accounting_class === 'INCOME') byComm[name].income += l.credit;
-          else if (ledger.accounting_class === 'EXPENSE') byComm[name].expenses += l.debit;
-        });
-      });
-    });
-    return Object.entries(byComm).map(([name, d]) => ({
-      commodity_name: name, income: d.income, expenses: d.expenses, profit: d.income - d.expenses,
-    }));
-  }, [filteredVoucherLines, ledgers]);
 
   const gstInput = ledgers.find(l => l.ledger_id === 'ledger-gst-input')?.current_balance || 0;
   const gstOutput = ledgers.find(l => l.ledger_id === 'ledger-gst-output')?.current_balance || 0;

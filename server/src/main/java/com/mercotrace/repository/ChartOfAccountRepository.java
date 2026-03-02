@@ -29,6 +29,8 @@ public interface ChartOfAccountRepository extends JpaRepository<ChartOfAccount, 
         Pageable pageable
     );
 
+    Page<ChartOfAccount> findAllByTraderId(Long traderId, Pageable pageable);
+
     Optional<ChartOfAccount> findOneByTraderIdAndId(Long traderId, Long id);
 
     Optional<ChartOfAccount> findOneByTraderIdAndLedgerNameIgnoreCase(Long traderId, String ledgerName);

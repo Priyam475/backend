@@ -1,6 +1,7 @@
 package com.mercotrace.repository;
 
 import com.mercotrace.domain.SalesBill;
+import java.math.BigDecimal;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -12,6 +13,17 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
+
+    /**
+     * Aggregate row for sales bill metrics used by high-level reports.
+     */
+    interface SalesBillAggregate {
+        Long getTotalBills();
+
+        BigDecimal getGrossSale();
+
+        BigDecimal getPendingBalance();
+    }
 
     @EntityGraph(attributePaths = { "commodityGroups", "commodityGroups.items", "versions" })
     @Query("SELECT s FROM SalesBill s WHERE s.id = :id")
@@ -31,5 +43,20 @@ public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
         @Param("dateFrom") java.time.Instant dateFrom,
         @Param("dateTo") java.time.Instant dateTo,
         Pageable pageable
+    );
+
+    @Query(
+        "SELECT COUNT(s) AS totalBills, " +
+        "COALESCE(SUM(s.grandTotal), 0) AS grossSale, " +
+        "COALESCE(SUM(s.pendingBalance), 0) AS pendingBalance " +
+        "FROM SalesBill s " +
+        "WHERE s.traderId = :traderId " +
+        "AND s.billDate >= :dateFrom " +
+        "AND s.billDate <= :dateTo"
+    )
+    SalesBillAggregate aggregateByTraderAndBillDateRange(
+        @Param("traderId") Long traderId,
+        @Param("dateFrom") java.time.Instant dateFrom,
+        @Param("dateTo") java.time.Instant dateTo
     );
 }

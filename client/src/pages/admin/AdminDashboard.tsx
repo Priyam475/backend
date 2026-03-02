@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users, Store, Package, Truck, Gavel, Receipt,
@@ -5,34 +6,48 @@ import {
   Sparkles, Zap, Crown, Gem, ShieldCheck, CircleDollarSign
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-// TODO: Daily summary from backend API. Placeholder until endpoint exists.
-const DEFAULT_DAILY_SUMMARY = { date: '', totalArrivals: 0, totalLots: 0, totalAuctions: 0, totalBills: 0, totalRevenue: 0, totalCollected: 0, totalPending: 0 };
-
-const statCards = [
-  { label: 'Total Traders', value: '24', change: '+3', up: true, icon: Crown, gradient: 'from-blue-500 via-blue-400 to-cyan-400', glow: 'shadow-blue-500/30' },
-  { label: 'Active Categories', value: '7', change: '+1', up: true, icon: Gem, gradient: 'from-violet-500 via-purple-500 to-fuchsia-500', glow: 'shadow-violet-500/30' },
-  { label: 'Commodities', value: '42', change: '+5', up: true, icon: Sparkles, gradient: 'from-amber-400 via-orange-500 to-rose-500', glow: 'shadow-orange-500/30' },
-  { label: "Today's Revenue", value: '₹2.45L', change: '+12%', up: true, icon: CircleDollarSign, gradient: 'from-emerald-400 via-green-500 to-teal-500', glow: 'shadow-emerald-500/30' },
-];
-
-const recentTraders = [
-  { name: 'Raj Vegetable Mart', owner: 'Rajesh Kumar', status: 'PENDING', date: '2 hours ago' },
-  { name: 'Patel Onion Traders', owner: 'Vikram Patel', status: 'APPROVED', date: '1 day ago' },
-  { name: 'Krishna Spice Hub', owner: 'Krishna Das', status: 'APPROVED', date: '2 days ago' },
-  { name: 'Ganesh Fruits Co.', owner: 'Ganesh Patil', status: 'PENDING', date: '3 days ago' },
-  { name: 'Lakshmi Grain Store', owner: 'Suresh Rao', status: 'REJECTED', date: '4 days ago' },
-];
-
-const recentActivity = [
-  { action: 'Trader approved', detail: 'Patel Onion Traders', time: '1h ago', type: 'success' },
-  { action: 'New registration', detail: 'Raj Vegetable Mart', time: '2h ago', type: 'info' },
-  { action: 'Category added', detail: 'Dry Fruits', time: '5h ago', type: 'info' },
-  { action: 'Trader rejected', detail: 'Unknown Traders', time: '1d ago', type: 'error' },
-  { action: 'System update', detail: 'v3.0.1 deployed', time: '2d ago', type: 'info' },
-];
+import { reportsApi, type AdminDailySummaryDTO } from '@/services/api/reports';
+import { toast } from 'sonner';
 
 const AdminDashboard = () => {
-  const summary = DEFAULT_DAILY_SUMMARY;
+  const [summary, setSummary] = useState<AdminDailySummaryDTO | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setLoading(true);
+        const res = await reportsApi.getAdminDailySummary(today, today);
+        if (!cancelled) {
+          setSummary(res);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          toast.error((err as Error)?.message ?? 'Failed to load admin overview');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const effectiveSummary = summary ?? {
+    totalArrivals: 0,
+    totalLots: 0,
+    totalAuctions: 0,
+    totalBills: 0,
+    totalRevenue: 0,
+    totalCollected: 0,
+    totalPending: 0,
+  };
 
   return (
     <div className="space-y-6 relative">
@@ -66,7 +81,23 @@ const AdminDashboard = () => {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-10">
-        {statCards.map((stat, i) => (
+        {loading && (
+          <p className="col-span-full text-xs text-muted-foreground px-1">Loading admin KPIs…</p>
+        )}
+        {[
+          { label: 'Total Traders', value: '—', change: '', up: true, icon: Crown, gradient: 'from-blue-500 via-blue-400 to-cyan-400', glow: 'shadow-blue-500/30' },
+          { label: 'Active Categories', value: '—', change: '', up: true, icon: Gem, gradient: 'from-violet-500 via-purple-500 to-fuchsia-500', glow: 'shadow-violet-500/30' },
+          { label: 'Commodities', value: '—', change: '', up: true, icon: Sparkles, gradient: 'from-amber-400 via-orange-500 to-rose-500', glow: 'shadow-orange-500/30' },
+          {
+            label: "Today's Revenue",
+            value: summary ? `₹${(Number(summary.totalRevenue) / 100000).toFixed(2)}L` : '—',
+            change: '',
+            up: true,
+            icon: CircleDollarSign,
+            gradient: 'from-emerald-400 via-green-500 to-teal-500',
+            glow: 'shadow-emerald-500/30',
+          },
+        ].map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
@@ -81,12 +112,17 @@ const AdminDashboard = () => {
                 <div className={cn('w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center shadow-lg', stat.gradient, stat.glow)}>
                   <stat.icon className="w-6 h-6 text-white" />
                 </div>
-                <div className={cn('flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-xl',
-                  stat.up ? 'text-success bg-success/10' : 'text-destructive bg-destructive/10'
-                )}>
-                  {stat.up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                  {stat.change}
-                </div>
+                {stat.change && (
+                  <div
+                    className={cn(
+                      'flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-xl',
+                      stat.up ? 'text-success bg-success/10' : 'text-destructive bg-destructive/10'
+                    )}
+                  >
+                    {stat.up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                    {stat.change}
+                  </div>
+                )}
               </div>
               <p className="text-3xl font-bold text-foreground">{stat.value}</p>
               <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
@@ -116,10 +152,10 @@ const AdminDashboard = () => {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: 'Arrivals', value: summary.totalArrivals ?? 0, icon: Truck, gradient: 'from-blue-500 to-cyan-400', glow: 'shadow-blue-500/20' },
-                { label: 'Lots', value: summary.totalLots ?? 0, icon: Package, gradient: 'from-violet-500 to-fuchsia-500', glow: 'shadow-violet-500/20' },
-                { label: 'Auctions', value: summary.totalAuctions ?? 0, icon: Gavel, gradient: 'from-amber-400 to-orange-500', glow: 'shadow-amber-500/20' },
-                { label: 'Bills', value: summary.totalBills ?? 0, icon: Receipt, gradient: 'from-emerald-400 to-teal-500', glow: 'shadow-emerald-500/20' },
+                { label: 'Arrivals', value: effectiveSummary.totalArrivals, icon: Truck, gradient: 'from-blue-500 to-cyan-400', glow: 'shadow-blue-500/20' },
+                { label: 'Lots', value: effectiveSummary.totalLots, icon: Package, gradient: 'from-violet-500 to-fuchsia-500', glow: 'shadow-violet-500/20' },
+                { label: 'Auctions', value: effectiveSummary.totalAuctions, icon: Gavel, gradient: 'from-amber-400 to-orange-500', glow: 'shadow-amber-500/20' },
+                { label: 'Bills', value: effectiveSummary.totalBills, icon: Receipt, gradient: 'from-emerald-400 to-teal-500', glow: 'shadow-emerald-500/20' },
               ].map((item) => (
                 <motion.div
                   key={item.label}
@@ -140,19 +176,28 @@ const AdminDashboard = () => {
             <div className="mt-5 space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Collected</span>
-                <span className="font-semibold text-success">₹{((summary.totalCollected ?? 0) / 1000).toFixed(0)}K</span>
+                <span className="font-semibold text-success">
+                  ₹{((effectiveSummary.totalCollected ?? 0) / 1000).toFixed(0)}K
+                </span>
               </div>
               <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden">
                 <motion.div
                   initial={{ width: 0 }}
-                  animate={{ width: `${((summary.totalCollected ?? 0) / ((summary.totalRevenue ?? 1) || 1)) * 100}%` }}
+                  animate={{
+                    width: `${
+                      ((effectiveSummary.totalCollected ?? 0) /
+                        ((effectiveSummary.totalRevenue && Number(effectiveSummary.totalRevenue) !== 0
+                          ? effectiveSummary.totalRevenue
+                          : 1) as number)) * 100
+                    }%`,
+                  }}
                   transition={{ delay: 0.5, duration: 0.8 }}
                   className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
                 />
               </div>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Pending: ₹{((summary.totalPending ?? 0) / 1000).toFixed(0)}K</span>
-                <span>Total: ₹{((summary.totalRevenue ?? 0) / 1000).toFixed(0)}K</span>
+                <span>Pending: ₹{((effectiveSummary.totalPending ?? 0) / 1000).toFixed(0)}K</span>
+                <span>Total: ₹{((effectiveSummary.totalRevenue ?? 0) / 1000).toFixed(0)}K</span>
               </div>
             </div>
           </div>
@@ -174,30 +219,9 @@ const AdminDashboard = () => {
               Recent Activity
             </h3>
             <div className="space-y-3">
-              {recentActivity.map((item, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.5 + i * 0.08 }}
-                  className="flex items-start gap-3"
-                >
-                  <div className={cn(
-                    'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5',
-                    item.type === 'success' ? 'bg-success/15' : item.type === 'error' ? 'bg-destructive/15' : 'bg-primary/15'
-                  )}>
-                    <div className={cn(
-                      'w-2 h-2 rounded-full',
-                      item.type === 'success' ? 'bg-success' : item.type === 'error' ? 'bg-destructive' : 'bg-primary'
-                    )} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-foreground font-medium">{item.action}</p>
-                    <p className="text-xs text-muted-foreground truncate">{item.detail}</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground flex-shrink-0">{item.time}</span>
-                </motion.div>
-              ))}
+              <p className="text-xs text-muted-foreground">
+                Recent admin activity feed will be wired to backend audit and registration events. No mock events are shown here.
+              </p>
             </div>
           </div>
         </motion.div>
@@ -235,29 +259,12 @@ const AdminDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {recentTraders.map((t, i) => (
-                  <motion.tr
-                    key={i}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.55 + i * 0.05 }}
-                    className="border-b border-border/20 hover:bg-primary/5 transition-colors"
-                  >
-                    <td className="py-3 px-4 font-medium text-foreground">{t.name}</td>
-                    <td className="py-3 px-4 text-muted-foreground">{t.owner}</td>
-                    <td className="py-3 px-4">
-                      <span className={cn(
-                        'px-2.5 py-1 rounded-lg text-xs font-semibold',
-                        t.status === 'APPROVED' ? 'bg-success/10 text-success' :
-                        t.status === 'PENDING' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                        'bg-destructive/10 text-destructive'
-                      )}>
-                        {t.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-muted-foreground">{t.date}</td>
-                  </motion.tr>
-                ))}
+                <tr className="border-b border-border/20">
+                  <td className="py-3 px-4 text-sm text-muted-foreground" colSpan={4}>
+                    Recent trader registrations will appear here once backend admin listing APIs are connected. No sample
+                    traders are shown.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>

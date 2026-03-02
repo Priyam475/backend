@@ -12,8 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
-import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { contactApi, arrivalsApi, billingApi, settlementApi } from '@/services/api';
+import { reportsApi, type DailySalesSummaryDTO } from '@/services/api/reports';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { SalesBillDTO } from '@/services/api/billing';
@@ -65,8 +65,8 @@ const PrintsReportsPage = () => {
   const [arrivals, setArrivals] = useState<any[]>([]);
   const [bills, setBills] = useState<SalesBillDTO[]>([]);
   const [settlements, setSettlements] = useState<PattiDTO[]>([]);
-
-  const { auctionResults } = useAuctionResults();
+  const [dailySummary, setDailySummary] = useState<DailySalesSummaryDTO | null>(null);
+  const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
 
   useEffect(() => {
     contactApi.list().then(setContacts);
@@ -81,30 +81,59 @@ const PrintsReportsPage = () => {
     settlementApi.listPattis({ page: 0, size: 500 }).then(setSettlements).catch(() => setSettlements([]));
   }, []);
 
-  // Compute daily sales summary
-  const dailySummary = useMemo(() => {
-    const totalBills = bills.length || 12;
-    const totalBags = auctionResults.reduce((s: number, a: any) => s + (a.entries || []).reduce((ss: number, e: any) => ss + (e.quantity || 0), 0), 0) || 75;
-    const grossSale = 245000;
-    const commission = 12250;
-    const userFee = 4900;
-    const coolie = 1500;
-    const netSales = grossSale - commission - userFee - coolie;
-    const cashReceived = 120000;
-    const bankReceived = 60000;
-    const totalCollected = cashReceived + bankReceived;
-    const outstanding = grossSale - totalCollected;
-    return { totalBills, totalBags, grossSale, commission, userFee, coolie, netSales, cashReceived, bankReceived, totalCollected, outstanding };
-  }, [bills, auctionResults]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await reportsApi.getPartyExposure(dateFrom, dateTo);
+        if (!cancelled) {
+          setPartyExposure(res);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPartyExposure([]);
+          toast.error((err as Error)?.message ?? 'Failed to load party exposure');
+        }
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [dateFrom, dateTo]);
 
-  // TODO: Party exposure from backend API (e.g. AR/AP aging or settlement). No mock data.
-  const partyExposure = useMemo(() => [], []);
+  // Backend-backed daily summary for prints reports tab
+  useEffect(() => {
+    if (!dateFrom || !dateTo) {
+      setDailySummary(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setDailySummaryLoading(true);
+        const res = await reportsApi.getDailySalesSummary(dateFrom, dateTo);
+        if (!cancelled) {
+          setDailySummary(res);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDailySummary(null);
+          toast.error((err as Error)?.message ?? 'Failed to load daily sales summary');
+        }
+      } finally {
+        if (!cancelled) {
+          setDailySummaryLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [dateFrom, dateTo]);
 
-  const lotReconciliation = useMemo(() => [
-    { seller: 'Ramesh Kumar', arrivalDate: '2026-02-20', commodity: 'Onion', arrivedBags: 30, soldBags: 30, pendingBags: 0, avgRate: 825, grossSale: 24750, status: 'Complete' },
-    { seller: 'Suresh Patil', arrivalDate: '2026-02-20', commodity: 'Onion', arrivedBags: 25, soldBags: 25, pendingBags: 0, avgRate: 805, grossSale: 20125, status: 'Complete' },
-    { seller: 'Ramesh Kumar', arrivalDate: '2026-02-20', commodity: 'Tomato', arrivedBags: 20, soldBags: 20, pendingBags: 0, avgRate: 600, grossSale: 12000, status: 'Complete' },
-  ], []);
+  const [partyExposure, setPartyExposure] = useState<any[]>([]);
+  const lotReconciliation: { seller: string; arrivalDate: string; commodity: string; arrivedBags: number; soldBags: number; pendingBags: number; avgRate: number; grossSale: number; status: string }[] =
+    [];
 
   const filteredPrints = useMemo(() => {
     if (!search) return printTemplates;
@@ -129,8 +158,7 @@ const PrintsReportsPage = () => {
   };
 
   const handleExport = (format: 'pdf' | 'excel' | 'tally') => {
-    toast.success(`Exporting as ${format.toUpperCase()}…`);
-    // In production this would trigger actual export
+    toast.info(`Exports from Prints & Reports will be powered by backend data in a future release (requested: ${format.toUpperCase()}).`);
   };
 
   const triggerPrint = () => {
@@ -178,9 +206,15 @@ const PrintsReportsPage = () => {
             <Input placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => handleExport('pdf')}><Download className="w-3 h-3 mr-1" /> PDF</Button>
-            <Button variant="outline" size="sm" onClick={() => handleExport('excel')}><Download className="w-3 h-3 mr-1" /> Excel</Button>
-            <Button variant="outline" size="sm" onClick={() => handleExport('tally')}><Download className="w-3 h-3 mr-1" /> Tally</Button>
+            <Button variant="outline" size="sm" disabled title="Exports will be enabled once backend export flows are wired.">
+              <Download className="w-3 h-3 mr-1" /> PDF
+            </Button>
+            <Button variant="outline" size="sm" disabled title="Exports will be enabled once backend export flows are wired.">
+              <Download className="w-3 h-3 mr-1" /> Excel
+            </Button>
+            <Button variant="outline" size="sm" disabled title="Exports will be enabled once backend export flows are wired.">
+              <Download className="w-3 h-3 mr-1" /> Tally
+            </Button>
           </div>
         </div>
       )}
@@ -233,23 +267,31 @@ const PrintsReportsPage = () => {
               <h3 className="font-bold text-sm text-foreground mb-3 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-primary" /> Daily Sales Summary
               </h3>
-              <div className={cn("grid gap-3", isDesktop ? "grid-cols-4" : "grid-cols-2")}>
-                {[
-                  { label: 'Total Bills', value: dailySummary.totalBills },
-                  { label: 'Total Bags', value: dailySummary.totalBags },
-                  { label: 'Gross Sale', value: `₹${dailySummary.grossSale.toLocaleString()}` },
-                  { label: 'Commission', value: `₹${dailySummary.commission.toLocaleString()}` },
-                  { label: 'User Fee', value: `₹${dailySummary.userFee.toLocaleString()}` },
-                  { label: 'Coolie', value: `₹${dailySummary.coolie.toLocaleString()}` },
-                  { label: 'Total Collected', value: `₹${dailySummary.totalCollected.toLocaleString()}` },
-                  { label: 'Outstanding', value: `₹${dailySummary.outstanding.toLocaleString()}` },
-                ].map(m => (
-                  <div key={m.label} className="bg-muted/30 rounded-xl p-3">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{m.label}</p>
-                    <p className="text-lg font-bold text-foreground mt-0.5">{m.value}</p>
-                  </div>
-                ))}
-              </div>
+              {dailySummaryLoading && (
+                <p className="text-xs text-muted-foreground">Loading daily sales summary…</p>
+              )}
+              {!dailySummaryLoading && !dailySummary && (
+                <p className="text-xs text-muted-foreground">No daily sales data for the selected range.</p>
+              )}
+              {dailySummary && (
+                <div className={cn("grid gap-3", isDesktop ? "grid-cols-4" : "grid-cols-2")}>
+                  {[
+                    { label: 'Total Bills', value: dailySummary.totalBills },
+                    { label: 'Total Bags', value: dailySummary.totalBags ?? 0 },
+                    { label: 'Gross Sale', value: `₹${dailySummary.grossSale.toLocaleString()}` },
+                    { label: 'Commission', value: `₹${dailySummary.commission.toLocaleString()}` },
+                    { label: 'User Fee', value: `₹${dailySummary.userFee.toLocaleString()}` },
+                    { label: 'Coolie', value: `₹${dailySummary.coolie.toLocaleString()}` },
+                    { label: 'Total Collected', value: `₹${dailySummary.totalCollected.toLocaleString()}` },
+                    { label: 'Outstanding', value: `₹${dailySummary.outstanding.toLocaleString()}` },
+                  ].map(m => (
+                    <div key={m.label} className="bg-muted/30 rounded-xl p-3">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{m.label}</p>
+                      <p className="text-lg font-bold text-foreground mt-0.5">{m.value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Party Exposure */}
@@ -302,50 +344,9 @@ const PrintsReportsPage = () => {
               <h3 className="font-bold text-sm text-foreground mb-3 flex items-center gap-2">
                 <Package className="w-4 h-4 text-indigo-500" /> Lot Reconciliation
               </h3>
-              {isDesktop ? (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border/50">
-                      <th className="text-left p-2 text-muted-foreground font-medium">Seller</th>
-                      <th className="text-left p-2 text-muted-foreground font-medium">Date</th>
-                      <th className="text-left p-2 text-muted-foreground font-medium">Commodity</th>
-                      <th className="text-right p-2 text-muted-foreground font-medium">Arrived</th>
-                      <th className="text-right p-2 text-muted-foreground font-medium">Sold</th>
-                      <th className="text-right p-2 text-muted-foreground font-medium">Pending</th>
-                      <th className="text-right p-2 text-muted-foreground font-medium">Avg Rate</th>
-                      <th className="text-right p-2 text-muted-foreground font-medium">Gross Sale</th>
-                      <th className="text-center p-2 text-muted-foreground font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lotReconciliation.map((l, i) => (
-                      <tr key={i} className="border-b border-border/30 last:border-0">
-                        <td className="p-2 font-medium">{l.seller}</td>
-                        <td className="p-2 text-muted-foreground">{l.arrivalDate}</td>
-                        <td className="p-2">{l.commodity}</td>
-                        <td className="p-2 text-right">{l.arrivedBags}</td>
-                        <td className="p-2 text-right">{l.soldBags}</td>
-                        <td className="p-2 text-right font-semibold">{l.pendingBags}</td>
-                        <td className="p-2 text-right">₹{l.avgRate}</td>
-                        <td className="p-2 text-right font-semibold text-primary">₹{l.grossSale.toLocaleString()}</td>
-                        <td className="p-2 text-center"><span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-300">{l.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="space-y-2">
-                  {lotReconciliation.map((l, i) => (
-                    <div key={i} className="p-2 rounded-lg bg-muted/20">
-                      <div className="flex justify-between">
-                        <p className="text-sm font-medium">{l.seller} — {l.commodity}</p>
-                        <span className="text-xs font-semibold text-primary">₹{l.grossSale.toLocaleString()}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">Arrived: {l.arrivedBags} · Sold: {l.soldBags} · Pending: {l.pendingBags}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <p className="text-xs text-muted-foreground">
+                Lot reconciliation analytics will be wired to arrivals, auctions, and billing data. This preview intentionally shows no sample rows.
+              </p>
             </div>
 
             {/* Report Type Cards */}
@@ -412,7 +413,9 @@ const PrintsReportsPage = () => {
 
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowPreview(false)}>Close</Button>
-            <Button variant="outline" onClick={() => handleExport('pdf')}><Download className="w-4 h-4 mr-1" /> Export PDF</Button>
+            <Button variant="outline" disabled title="Exports will be enabled once backend export flows are wired.">
+              <Download className="w-4 h-4 mr-1" /> Export PDF
+            </Button>
             <Button onClick={triggerPrint} className="bg-gradient-to-r from-primary to-accent text-white">
               <Printer className="w-4 h-4 mr-1" /> Print
             </Button>

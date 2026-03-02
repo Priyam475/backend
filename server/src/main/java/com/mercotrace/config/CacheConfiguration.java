@@ -21,6 +21,8 @@ import org.springframework.cache.interceptor.KeyGenerator;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.WeighingSessionCreateRequest;
 import com.mercotrace.service.impl.ChartOfAccountServiceImpl;
+import com.mercotrace.service.impl.HighLevelReportsServiceImpl;
+import com.mercotrace.service.impl.ReportsServiceImpl;
 import org.springframework.context.annotation.*;
 import org.springframework.data.domain.Pageable;
 import org.springframework.context.annotation.Bean;
@@ -148,6 +150,14 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.VoucherLine.class.getName(), jcacheConfiguration);
             // Financial Reports / AR-AP aging
             createCache(cm, com.mercotrace.domain.ArApDocument.class.getName(), jcacheConfiguration);
+            createCache(cm, ReportsServiceImpl.CACHE_TRIAL_BALANCE_BY_TRADER_AND_DATE_RANGE, jcacheConfiguration);
+            createCache(cm, ReportsServiceImpl.CACHE_PL_BY_TRADER, jcacheConfiguration);
+            createCache(cm, ReportsServiceImpl.CACHE_BALANCE_SHEET_BY_TRADER, jcacheConfiguration);
+            createCache(cm, ReportsServiceImpl.CACHE_AGING_BY_TRADER_AND_TYPE, jcacheConfiguration);
+            createCache(cm, ReportsServiceImpl.CACHE_COMMODITY_PROFIT_BY_TRADER_AND_DATE_RANGE, jcacheConfiguration);
+            createCache(cm, HighLevelReportsServiceImpl.CACHE_DAILY_SALES_SUMMARY_BY_TRADER_AND_DATE_RANGE, jcacheConfiguration);
+            createCache(cm, HighLevelReportsServiceImpl.CACHE_PARTY_EXPOSURE_BY_TRADER_AND_DATE_RANGE, jcacheConfiguration);
+            createCache(cm, HighLevelReportsServiceImpl.CACHE_ADMIN_DAILY_SUMMARY_BY_TRADER_AND_DATE_RANGE, jcacheConfiguration);
             // jhipster-needle-redis-add-entry
         };
     }
@@ -254,6 +264,28 @@ public class CacheConfiguration {
                 classification = params[3].toString().trim();
             }
             return traderId + "::" + page + "::" + size + "::" + sort + "::" + search + "::" + accountingClass + "::" + classification;
+        };
+    }
+
+    /**
+     * Key generator for reports caches:
+     * key = "traderId::methodName[::param1::param2::…]".
+     * Ensures all analytics caches are tenant-scoped and parameter-sensitive.
+     */
+    @Bean(name = "reportsKeyGenerator")
+    public KeyGenerator reportsKeyGenerator() {
+        return (target, method, params) -> {
+            Long traderId = traderContextService != null ? traderContextService.getCurrentTraderId() : null;
+            StringBuilder key = new StringBuilder();
+            key.append(traderId != null ? traderId : "default");
+            key.append("::").append(method.getName());
+            if (params != null) {
+                for (Object param : params) {
+                    key.append("::");
+                    key.append(param != null ? param.toString().trim() : "null");
+                }
+            }
+            return key.toString();
         };
     }
 }
