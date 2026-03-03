@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Writers Pad: scale-connected bid weighing console.
+         Aligned with WritersPadPage.tsx (in-memory weight log) and Auction results DTOs.
+         This schema only persists operational writer sessions and weight events; it does NOT
+         change financial or settlement entities. -->
+
+    <!-- 1. writer_pad_session: header per writer's active scale/bid weighing context -->
+    <changeSet id="20260304110000-1" author="mercotrace">
+        <createTable tableName="writer_pad_session">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <!-- Optional multi-tenant scoping; aligns with other modules -->
+            <column name="trader_id" type="bigint">
+                <constraints nullable="true"/>
+            </column>
+            <!-- Stable session identifier (e.g. per device/day) -->
+            <column name="session_key" type="varchar(64)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Linked auction lot and bid; matches AuctionResultDTO.lotId and AuctionResultEntryDTO.bidNumber -->
+            <column name="lot_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="bid_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Denormalized buyer and lot info for fast lookup -->
+            <column name="buyer_mark" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="lot_name" type="varchar(255)"/>
+            <!-- Total expected bags for this bid (AuctionResultEntryDTO.quantity) -->
+            <column name="total_bags" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Number of bags weighed so far in this session (writer-side view) -->
+            <column name="weighed_bags" type="integer" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Scale/device metadata -->
+            <column name="scale_id" type="varchar(64)"/>
+            <column name="scale_name" type="varchar(128)"/>
+            <!-- Business timestamps -->
+            <column name="started_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ended_at" type="${datetimeType}"/>
+            <!-- Standard JHipster auditing fields (AbstractAuditingEntity) -->
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <!-- trader_id is a soft reference to trader; FK can be tightened later if needed -->
+
+        <createIndex tableName="writer_pad_session" indexName="idx_writer_pad_session_trader">
+            <column name="trader_id"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_session" indexName="idx_writer_pad_session_session_key">
+            <column name="session_key"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_session" indexName="idx_writer_pad_session_lot">
+            <column name="lot_id"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_session" indexName="idx_writer_pad_session_bid_number">
+            <column name="bid_number"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_session" indexName="idx_writer_pad_session_started_at">
+            <column name="started_at"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- 2. writer_pad_weight_entry: individual weight events captured by the writer -->
+    <changeSet id="20260304110000-2" author="mercotrace">
+        <createTable tableName="writer_pad_weight_entry">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="session_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Denormalized bid reference for fast search and robustness if session is pruned -->
+            <column name="bid_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+            <column name="buyer_mark" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Raw and considered weights (rounded) in kg -->
+            <column name="raw_weight" type="numeric(19,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="considered_weight" type="numeric(19,3)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Scale metadata -->
+            <column name="scale_id" type="varchar(64)"/>
+            <!-- Timestamp of when weighing occurred -->
+            <column name="weighed_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Administrative and audit flags -->
+            <column name="retagged_from_bid" type="integer"/>
+            <column name="deleted" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="${datetimeType}"/>
+            <column name="deleted_by" type="varchar(50)"/>
+            <!-- Standard JHipster auditing fields (AbstractAuditingEntity) -->
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="writer_pad_weight_entry" baseColumnNames="session_id"
+                                 referencedTableName="writer_pad_session" referencedColumnNames="id"
+                                 constraintName="fk_writer_pad_weight_entry_session"/>
+
+        <createIndex tableName="writer_pad_weight_entry" indexName="idx_writer_pad_weight_entry_session">
+            <column name="session_id"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_weight_entry" indexName="idx_writer_pad_weight_entry_bid_number">
+            <column name="bid_number"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_weight_entry" indexName="idx_writer_pad_weight_entry_weighed_at">
+            <column name="weighed_at"/>
+        </createIndex>
+        <createIndex tableName="writer_pad_weight_entry" indexName="idx_writer_pad_weight_entry_deleted">
+            <column name="deleted"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
+

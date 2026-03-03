@@ -12,6 +12,7 @@ export { printLogApi } from './printLog';
 export { stockPurchaseApi } from './stockPurchase';
 export { settlementApi } from './settlement';
 export { billingApi } from './billing';
+export { writersPadApi } from './writersPad';
 export type {
   LotSummaryDTO,
   AuctionSessionDTO,
