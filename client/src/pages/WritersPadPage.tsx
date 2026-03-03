@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
+import { writersPadApi, type WriterPadSessionDTO } from '@/services/api';
 
 // Optional UI pref only (last cleanup date). Weight log is in-memory; no mkt_* for business data.
 
@@ -33,6 +34,7 @@ interface BidCard {
   lotId: string;
   lotName: string;
   isComplete: boolean;
+  sessionId?: number;
 }
 
 interface WeightLogEntry {
@@ -127,7 +129,7 @@ const WritersPadPage = () => {
   const { auctionResults: auctionData } = useAuctionResults();
 
   // Req 5: Add bid card by bid number
-  const addBidCard = () => {
+  const addBidCard = async () => {
     const num = parseInt(bidNumberInput);
     if (!num || num <= 0) { toast.error('Enter a valid bid number'); return; }
     if (bidCards.some(c => c.bidNumber === num)) { toast.error('Bid card already added'); return; }
@@ -146,79 +148,110 @@ const WritersPadPage = () => {
 
     if (!foundEntry) { toast.error(`Bid #${num} not found`); return; }
 
-    const card: BidCard = {
-      bidNumber: num,
-      buyerMark: foundEntry.buyerMark,
-      buyerName: foundEntry.buyerName,
-      totalQuantity: foundEntry.quantity,
-      weighedQuantity: 0,
-      lotId: String(foundAuction.lotId),
-      lotName: foundAuction.lotName || '',
-      isComplete: false,
-    };
-    setBidCards(prev => [...prev, card]);
-    setBidNumberInput('');
-    toast.success(`Bid #${num} added — ${foundEntry.buyerMark}`);
+    try {
+      const session: WriterPadSessionDTO = await writersPadApi.loadOrCreateSession({
+        lotId: foundAuction.lotId,
+        bidNumber: num,
+        buyerMark: foundEntry.buyerMark,
+        buyerName: foundEntry.buyerName,
+        lotName: foundAuction.lotName || '',
+        totalBags: foundEntry.quantity,
+        scaleId: connectedScale?.id,
+        scaleName: connectedScale?.name,
+      });
+
+      const card: BidCard = {
+        bidNumber: num,
+        buyerMark: foundEntry.buyerMark,
+        buyerName: foundEntry.buyerName,
+        totalQuantity: foundEntry.quantity,
+        weighedQuantity: session.weighedBags ?? 0,
+        lotId: String(foundAuction.lotId),
+        lotName: foundAuction.lotName || '',
+        isComplete: (session.weighedBags ?? 0) >= foundEntry.quantity,
+        sessionId: session.id,
+      };
+      setBidCards(prev => [...prev, card]);
+      setBidNumberInput('');
+      toast.success(`Bid #${num} added — ${foundEntry.buyerMark}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to start Writer\'s Pad session';
+      toast.error(msg);
+    }
   };
 
   // Req 8: Tap card to attach weight
-  const attachWeight = (card: BidCard) => {
+  const attachWeight = async (card: BidCard) => {
     if (card.isComplete) { toast.error('All bags weighed for this bid'); return; }
     if (currentWeight <= 0) { toast.error('No load on scale'); return; }
     if (weightLocked) { toast.error('Weight recorded — remove load to reset'); return; }
+    if (!card.sessionId) { toast.error('Session not initialized for this bid'); return; }
 
     const cw = consideredWt(currentWeight);
-    const logEntry: WeightLogEntry = {
-      id: crypto.randomUUID(),
-      bidNumber: card.bidNumber,
-      buyerMark: card.buyerMark,
-      weight: currentWeight,
-      consideredWeight: cw,
-      timestamp: new Date().toISOString(),
-      scaleId: connectedScale?.id || '',
-    };
+    try {
+      const saved = await writersPadApi.attachWeight(card.sessionId, currentWeight, cw, connectedScale?.id);
 
-    setWeightLog(prev => [logEntry, ...prev]);
+      const logEntry: WeightLogEntry = {
+        id: String(saved.id),
+        bidNumber: saved.bidNumber,
+        buyerMark: saved.buyerMark,
+        weight: saved.rawWeight,
+        consideredWeight: saved.consideredWeight,
+        timestamp: saved.weighedAt,
+        scaleId: saved.scaleId || connectedScale?.id || '',
+      };
 
-    // Req 7: Update weighed quantity
-    setBidCards(prev => prev.map(c => {
-      if (c.bidNumber !== card.bidNumber) return c;
-      const newWeighed = c.weighedQuantity + 1;
-      return { ...c, weighedQuantity: newWeighed, isComplete: newWeighed >= c.totalQuantity };
-    }));
+      setWeightLog(prev => [logEntry, ...prev]);
 
-    // Req 9: Lock until load removed
-    setWeightLocked(true);
+      // Req 7: Update weighed quantity
+      setBidCards(prev => prev.map(c => {
+        if (c.bidNumber !== card.bidNumber) return c;
+        const newWeighed = c.weighedQuantity + 1;
+        return { ...c, weighedQuantity: newWeighed, isComplete: newWeighed >= c.totalQuantity };
+      }));
 
-    toast.success(`${currentWeight}kg (→${cw}kg) → #${card.bidNumber} (${card.buyerMark})`);
+      // Req 9: Lock until load removed
+      setWeightLocked(true);
+
+      toast.success(`${currentWeight}kg (→${cw}kg) → #${card.bidNumber} (${card.buyerMark})`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to attach weight';
+      toast.error(msg);
+    }
   };
 
   // Req 10: Retag weight
-  const confirmRetag = () => {
+  const confirmRetag = async () => {
     if (!retagEntry || !retagTarget) return;
     const newBidNum = parseInt(retagTarget);
     const targetCard = bidCards.find(c => c.bidNumber === newBidNum);
     if (!targetCard) { toast.error('Target bid not found'); return; }
+    try {
+      await writersPadApi.retag(Number(retagEntry.id), newBidNum);
 
-    setWeightLog(prev => prev.map(l =>
-      l.id === retagEntry.id ? { ...l, bidNumber: newBidNum, buyerMark: targetCard.buyerMark } : l
-    ));
+      setWeightLog(prev => prev.map(l =>
+        l.id === retagEntry.id ? { ...l, bidNumber: newBidNum, buyerMark: targetCard.buyerMark } : l
+      ));
 
-    setBidCards(prev => prev.map(c => {
-      if (c.bidNumber === retagEntry.bidNumber) {
-        const nw = Math.max(0, c.weighedQuantity - 1);
-        return { ...c, weighedQuantity: nw, isComplete: nw >= c.totalQuantity };
-      }
-      if (c.bidNumber === newBidNum) {
-        const nw = c.weighedQuantity + 1;
-        return { ...c, weighedQuantity: nw, isComplete: nw >= c.totalQuantity };
-      }
-      return c;
-    }));
+      setBidCards(prev => prev.map(c => {
+        if (c.bidNumber === retagEntry.bidNumber) {
+          const nw = Math.max(0, c.weighedQuantity - 1);
+          return { ...c, weighedQuantity: nw, isComplete: nw >= c.totalQuantity };
+        }
+        if (c.bidNumber === newBidNum) {
+          const nw = c.weighedQuantity + 1;
+          return { ...c, weighedQuantity: nw, isComplete: nw >= c.totalQuantity };
+        }
+        return c;
+      }));
 
-    toast.info(`Retagged to Bid #${newBidNum}`);
-    setRetagEntry(null);
-    setRetagTarget('');
+      toast.info(`Retagged to Bid #${newBidNum}`);
+      setRetagEntry(null);
+      setRetagTarget('');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to retag weight';
+      toast.error(msg);
+    }
   };
 
   // Req 9: Load controls
@@ -226,11 +259,17 @@ const WritersPadPage = () => {
   const placeLoad = () => { setIsLoadOnScale(true); setWeightLocked(false); };
 
   // Req 12: End of day cleanup
-  const endOfDayCleanup = () => {
-    setBidCards([]);
-    setWeightLog([]);
-    localStorage.setItem('mercotrace_writer_last_cleanup', new Date().toISOString().split('T')[0]);
-    toast.success('All bid cards cleared for end of day');
+  const endOfDayCleanup = async () => {
+    try {
+      await writersPadApi.endOfDayCleanup();
+      setBidCards([]);
+      setWeightLog([]);
+      localStorage.setItem('mercotrace_writer_last_cleanup', new Date().toISOString().split('T')[0]);
+      toast.success('All bid cards cleared for end of day');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to clear Writer\'s Pad cards';
+      toast.error(msg);
+    }
   };
 
   const filteredCards = useMemo(() => {

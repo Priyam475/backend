@@ -17,6 +17,7 @@ export { cdnApi } from './api/cdn';
 export { settlementApi } from './api/settlement';
 export { billingApi } from './api/billing';
 export { chartOfAccountsApi } from './api/chartOfAccounts';
+export { writersPadApi } from './api/writersPad';
 export type {
   SellerSettlementDTO,
   SettlementLotDTO,
@@ -65,3 +66,8 @@ export type {
   VoucherHeaderPage,
   VoucherHeaderCreateRequest,
 } from './api/voucherHeaders';
+export type {
+  WriterPadSessionDTO,
+  WriterPadWeightEntryDTO,
+  WriterPadSessionWithLogDTO,
+} from './api/writersPad';
