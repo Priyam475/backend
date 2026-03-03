@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -244,7 +245,7 @@ class VoucherHeaderServiceImplTest {
         assertThat(result.getStatus()).isEqualTo(VoucherLifecycleStatus.DRAFT);
         assertThat(result.getLines()).hasSize(2);
         verify(voucherHeaderRepository).save(any(VoucherHeader.class));
-        verify(voucherLineRepository).save(any(VoucherLine.class));
+        verify(voucherLineRepository, times(2)).save(any(VoucherLine.class));
     }
 
     @Test

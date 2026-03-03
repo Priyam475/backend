@@ -267,7 +267,6 @@ class StockPurchaseServiceImplTest {
         baseDto.setCreatedAt(Instant.now());
         when(stockPurchaseMapper.toDto(any(StockPurchase.class))).thenReturn(baseDto);
         when(stockPurchaseItemMapper.toDto(any(StockPurchaseItem.class))).thenReturn(new PurchaseLineItemDTO());
-        when(stockPurchaseChargeMapper.toDto(any(StockPurchaseCharge.class))).thenReturn(new PurchaseChargeDTO());
 
         CreateStockPurchaseRequestDTO request = new CreateStockPurchaseRequestDTO();
         request.setVendorId(VENDOR_ID);

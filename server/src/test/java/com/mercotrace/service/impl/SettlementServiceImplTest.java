@@ -2,6 +2,7 @@ package com.mercotrace.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,7 +38,7 @@ class SettlementServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        lenient().when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
 
         saveRequest = new PattiSaveRequest();
         saveRequest.setSellerId("S1");

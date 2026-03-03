@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,7 +78,7 @@ class CdnServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        lenient().when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
 
         cdnEntity = new Cdn();
         cdnEntity.setId(CDN_ID);
@@ -101,6 +102,7 @@ class CdnServiceImplTest {
         transferEntity.setSenderTraderId(TRADER_ID);
         transferEntity.setIsUsed(false);
         transferEntity.setPinExpiry(Instant.now().plusSeconds(86400));
+        transferEntity.setPinHash("HASHED_PIN");
     }
 
     @Test

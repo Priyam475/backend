@@ -172,7 +172,9 @@ public class StockPurchaseServiceImpl implements StockPurchaseService {
 
     private StockPurchaseDTO toDto(StockPurchase purchase) {
         StockPurchaseDTO dto = stockPurchaseMapper.toDto(purchase);
-        dto.setGrandTotal(purchase.getTotalAmount().add(purchase.getTotalCharges()));
+        BigDecimal totalAmount = purchase.getTotalAmount() != null ? purchase.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal totalCharges = purchase.getTotalCharges() != null ? purchase.getTotalCharges() : BigDecimal.ZERO;
+        dto.setGrandTotal(totalAmount.add(totalCharges));
 
         contactRepository.findById(purchase.getVendorId()).ifPresent(c -> dto.setVendorName(c.getName()));
 
@@ -198,8 +200,8 @@ public class StockPurchaseServiceImpl implements StockPurchaseService {
             .collect(Collectors.toCollection(ArrayList::new)));
 
         List<String> lotNumbers = new ArrayList<>();
-        BigDecimal st = purchase.getTotalAmount();
-        BigDecimal tc = purchase.getTotalCharges();
+        BigDecimal st = totalAmount;
+        BigDecimal tc = totalCharges;
         long ts = purchase.getCreatedDate() != null ? purchase.getCreatedDate().toEpochMilli() : System.currentTimeMillis();
         int idx = 1;
         for (StockPurchaseItem it : activeItems) {

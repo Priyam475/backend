@@ -24,6 +24,7 @@ import com.mercotrace.repository.VoucherRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -67,8 +68,16 @@ class ArrivalServiceTest {
     @Mock
     private ContactRepository contactRepository;
 
+    @Mock
+    private TraderContextService traderContextService;
+
     @InjectMocks
     private ArrivalService arrivalService;
+
+    @BeforeEach
+    void setUp() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(1L);
+    }
 
     @Test
     void listArrivalsReturnsEmptyPageWhenNoVehicles() {
