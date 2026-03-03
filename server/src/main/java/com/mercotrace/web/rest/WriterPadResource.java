@@ -45,7 +45,7 @@ public class WriterPadResource {
     @PostMapping("/sessions/load-or-create")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
     @Operation(summary = "Load or create writer pad session for lot/bid")
-    public ResponseEntity<WriterPadSessionDTO> loadOrCreateSession(@Valid @RequestBody Map<String, Object> payload) {
+    public ResponseEntity<?> loadOrCreateSession(@Valid @RequestBody Map<String, Object> payload) {
         LOG.debug("REST request to loadOrCreate WriterPad session: {}", payload);
         try {
             Long lotId = ((Number) payload.get("lotId")).longValue();
@@ -77,7 +77,7 @@ public class WriterPadResource {
     @PostMapping("/sessions/{sessionId}/weights")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
     @Operation(summary = "Attach weight entry to session")
-    public ResponseEntity<WriterPadWeightEntryDTO> attachWeight(
+    public ResponseEntity<?> attachWeight(
         @PathVariable Long sessionId,
         @RequestParam("rawWeight") @NotNull BigDecimal rawWeight,
         @RequestParam("consideredWeight") @NotNull BigDecimal consideredWeight,
@@ -95,7 +95,7 @@ public class WriterPadResource {
     @PostMapping("/weights/{entryId}/retag")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
     @Operation(summary = "Retag a weight entry to another bid")
-    public ResponseEntity<WriterPadWeightEntryDTO> retag(
+    public ResponseEntity<?> retag(
         @PathVariable Long entryId,
         @RequestParam("targetBidNumber") @Min(1) Integer targetBidNumber
     ) {

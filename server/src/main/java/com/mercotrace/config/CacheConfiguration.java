@@ -131,6 +131,9 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.WeighingSession.class.getName(), jcacheConfiguration);
             createCache(cm, "weighingSessionByBid", jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.PrintLog.class.getName(), jcacheConfiguration);
+            // Writer's Pad: session + weight entries (operational log, no method-level caches)
+            createCache(cm, com.mercotrace.domain.WriterPadSession.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.WriterPadWeightEntry.class.getName(), jcacheConfiguration);
             // Self-Sale module
             createCache(cm, com.mercotrace.domain.SelfSaleClosure.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.StockPurchase.class.getName(), jcacheConfiguration);
