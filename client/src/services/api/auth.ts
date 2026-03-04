@@ -13,6 +13,9 @@ export const authApi = {
     state: string;
     pin_code: string;
     category: string;
+    gst_number?: string;
+    rmc_apmc_code?: string;
+    shop_photos?: string[];
   }): Promise<{ trader: Trader; user: User }> {
     const res = await apiFetch('/auth/register', {
       method: 'POST',
@@ -70,12 +73,14 @@ export const authApi = {
       bill_prefix: dataRes.trader.bill_prefix ?? '',
       created_at: dataRes.trader.created_at ?? new Date().toISOString(),
       updated_at: dataRes.trader.updated_at ?? new Date().toISOString(),
-      mobile: data.mobile,
-      email: data.email,
-      city: data.city,
-      state: data.state,
-      pin_code: data.pin_code,
-      shop_photos: dataRes.trader.shop_photos ?? [],
+      mobile: dataRes.trader.mobile ?? data.mobile,
+      email: dataRes.trader.email ?? data.email,
+      city: dataRes.trader.city ?? data.city,
+      state: dataRes.trader.state ?? data.state,
+      pin_code: dataRes.trader.pin_code ?? data.pin_code,
+      gst_number: dataRes.trader.gst_number ?? data.gst_number,
+      rmc_apmc_code: dataRes.trader.rmc_apmc_code ?? data.rmc_apmc_code,
+      shop_photos: dataRes.trader.shop_photos ?? data.shop_photos ?? [],
     };
 
     return { trader, user };
@@ -141,6 +146,8 @@ export const authApi = {
       city: data.trader.city,
       state: data.trader.state,
       pin_code: data.trader.pin_code,
+      gst_number: data.trader.gst_number,
+      rmc_apmc_code: data.trader.rmc_apmc_code,
       shop_photos: data.trader.shop_photos ?? [],
     };
 
@@ -187,6 +194,102 @@ export const authApi = {
       city: data.trader.city,
       state: data.trader.state,
       pin_code: data.trader.pin_code,
+      gst_number: data.trader.gst_number,
+      rmc_apmc_code: data.trader.rmc_apmc_code,
+      shop_photos: data.trader.shop_photos ?? [],
+    };
+
+    return { trader, user };
+  },
+
+  async requestOtp(mobile: string): Promise<void> {
+    const res = await apiFetch('/auth/otp/request', {
+      method: 'POST',
+      body: JSON.stringify({ mobile }),
+    });
+
+    if (!res.ok) {
+      let message = 'Failed to send OTP. Please try again.';
+      try {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const problem = await res.json();
+          if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
+            message = problem.detail;
+          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
+            message = problem.title;
+          }
+        } else {
+          const text = await res.text();
+          if (text && text.length < 200) {
+            message = text;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+  },
+
+  async verifyOtp(mobile: string, otp: string): Promise<{ trader: Trader; user: User }> {
+    const res = await apiFetch('/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ mobile, otp }),
+    });
+
+    if (!res.ok) {
+      let message = 'OTP verification failed. Please try again.';
+      try {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const problem = await res.json();
+          if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
+            message = problem.detail;
+          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
+            message = problem.title;
+          }
+        } else {
+          const text = await res.text();
+          if (text && text.length < 200) {
+            message = text;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+
+    const user: User = {
+      user_id: data.user.user_id,
+      trader_id: data.user.trader_id,
+      username: data.user.username,
+      is_active: data.user.is_active,
+      created_at: data.user.created_at ?? new Date().toISOString(),
+      name: data.user.name,
+      role: data.user.role,
+    };
+
+    const trader: Trader = {
+      trader_id: data.trader.trader_id,
+      business_name: data.trader.business_name,
+      owner_name: data.trader.owner_name,
+      address: data.trader.address ?? '',
+      category: data.trader.category ?? '',
+      approval_status: data.trader.approval_status ?? 'PENDING',
+      bill_prefix: data.trader.bill_prefix ?? '',
+      created_at: data.trader.created_at ?? new Date().toISOString(),
+      updated_at: data.trader.updated_at ?? new Date().toISOString(),
+      mobile: data.trader.mobile,
+      email: data.trader.email,
+      city: data.trader.city,
+      state: data.trader.state,
+      pin_code: data.trader.pin_code,
+      gst_number: data.trader.gst_number,
+      rmc_apmc_code: data.trader.rmc_apmc_code,
       shop_photos: data.trader.shop_photos ?? [],
     };
 

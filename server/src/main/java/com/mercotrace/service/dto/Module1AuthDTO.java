@@ -161,6 +161,12 @@ public class Module1AuthDTO {
         @JsonProperty("pin_code")
         private String pinCode;
 
+        @JsonProperty("gst_number")
+        private String gstNumber;
+
+        @JsonProperty("rmc_apmc_code")
+        private String rmcApmcCode;
+
         @JsonProperty("shop_photos")
         private String[] shopPhotos;
 
@@ -274,6 +280,22 @@ public class Module1AuthDTO {
 
         public void setPinCode(String pinCode) {
             this.pinCode = pinCode;
+        }
+
+        public String getGstNumber() {
+            return gstNumber;
+        }
+
+        public void setGstNumber(String gstNumber) {
+            this.gstNumber = gstNumber;
+        }
+
+        public String getRmcApmcCode() {
+            return rmcApmcCode;
+        }
+
+        public void setRmcApmcCode(String rmcApmcCode) {
+            this.rmcApmcCode = rmcApmcCode;
         }
 
         public String[] getShopPhotos() {

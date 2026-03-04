@@ -181,7 +181,11 @@ public class AuctionService {
      * Get or start an auction session for a lot.
      */
     public AuctionSessionDTO getOrStartSession(Long lotId) {
+        Long traderId = resolveTraderId();
         Lot lot = lotRepository.findById(lotId).orElseThrow(() -> new EntityNotFoundException("Lot not found: " + lotId));
+        if (!isLotOwnedByTrader(lot, traderId)) {
+            throw new EntityNotFoundException("Lot not found: " + lotId);
+        }
 
         Auction auction = auctionRepository
             .findFirstByLotIdOrderByAuctionDatetimeDesc(lotId)
@@ -203,7 +207,11 @@ public class AuctionService {
      * Add a bid to the current auction for the lot.
      */
     public AuctionSessionDTO addBid(Long lotId, @Valid AuctionBidCreateRequest request) {
+        Long traderId = resolveTraderId();
         Lot lot = lotRepository.findById(lotId).orElseThrow(() -> new EntityNotFoundException("Lot not found: " + lotId));
+        if (!isLotOwnedByTrader(lot, traderId)) {
+            throw new EntityNotFoundException("Lot not found: " + lotId);
+        }
         Auction auction = auctionRepository
             .findFirstByLotIdOrderByAuctionDatetimeDesc(lotId)
             .orElseGet(() -> {
@@ -292,7 +300,11 @@ public class AuctionService {
      * Update editable fields on an existing bid.
      */
     public AuctionSessionDTO updateBid(Long lotId, Long bidId, AuctionBidUpdateRequest request) {
+        Long traderId = resolveTraderId();
         Lot lot = lotRepository.findById(lotId).orElseThrow(() -> new EntityNotFoundException("Lot not found: " + lotId));
+        if (!isLotOwnedByTrader(lot, traderId)) {
+            throw new EntityNotFoundException("Lot not found: " + lotId);
+        }
         AuctionEntry entry = auctionEntryRepository.findById(bidId).orElseThrow(() -> new EntityNotFoundException("Bid not found: " + bidId));
         Auction auction = auctionRepository
             .findById(entry.getAuctionId())
@@ -326,7 +338,11 @@ public class AuctionService {
      * Delete a bid from the auction session.
      */
     public AuctionSessionDTO deleteBid(Long lotId, Long bidId) {
+        Long traderId = resolveTraderId();
         Lot lot = lotRepository.findById(lotId).orElseThrow(() -> new EntityNotFoundException("Lot not found: " + lotId));
+        if (!isLotOwnedByTrader(lot, traderId)) {
+            throw new EntityNotFoundException("Lot not found: " + lotId);
+        }
         AuctionEntry entry = auctionEntryRepository.findById(bidId).orElseThrow(() -> new EntityNotFoundException("Bid not found: " + bidId));
         Auction auction = auctionRepository
             .findById(entry.getAuctionId())
@@ -341,7 +357,11 @@ public class AuctionService {
      * Complete an auction for a lot and generate AuctionResultDTO.
      */
     public AuctionResultDTO completeAuction(Long lotId) {
+        Long traderId = resolveTraderId();
         Lot lot = lotRepository.findById(lotId).orElseThrow(() -> new EntityNotFoundException("Lot not found: " + lotId));
+        if (!isLotOwnedByTrader(lot, traderId)) {
+            throw new EntityNotFoundException("Lot not found: " + lotId);
+        }
 
         Auction auction = auctionRepository
             .findFirstByLotIdOrderByAuctionDatetimeDesc(lotId)
@@ -366,7 +386,13 @@ public class AuctionService {
 
     @Transactional(readOnly = true)
     public Page<AuctionResultDTO> listResults(Pageable pageable) {
-        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNull(pageable);
+        Long traderId = resolveTraderId();
+        Page<Lot> traderLots = lotRepository.findAllByTraderId(traderId, Pageable.unpaged());
+        if (traderLots.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        java.util.List<Long> lotIds = traderLots.getContent().stream().map(Lot::getId).toList();
+        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(lotIds, pageable);
         return buildResultsPage(page, pageable);
     }
 
@@ -378,7 +404,18 @@ public class AuctionService {
         if (lotIds == null || lotIds.isEmpty()) {
             return Page.empty(pageable);
         }
-        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(lotIds, pageable);
+        Long traderId = resolveTraderId();
+        java.util.List<Long> traderLotIds = lotRepository.findAllByTraderId(traderId, Pageable.unpaged())
+            .getContent()
+            .stream()
+            .map(Lot::getId)
+            .toList();
+        java.util.Set<Long> allowedLotIds = new java.util.HashSet<>(traderLotIds);
+        java.util.List<Long> filteredLotIds = lotIds.stream().filter(allowedLotIds::contains).toList();
+        if (filteredLotIds.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(filteredLotIds, pageable);
         return buildResultsPage(page, pageable);
     }
 
@@ -405,18 +442,23 @@ public class AuctionService {
 
     @Transactional(readOnly = true)
     public Optional<AuctionResultDTO> getResultByLot(Long lotId) {
+        Long traderId = resolveTraderId();
         Optional<Auction> auctionOpt = auctionRepository.findFirstByLotIdOrderByAuctionDatetimeDesc(lotId);
         if (auctionOpt.isEmpty()) {
             return Optional.empty();
         }
         Auction auction = auctionOpt.get();
         Lot lot = lotRepository.findById(lotId).orElse(null);
+        if (lot == null || !isLotOwnedByTrader(lot, traderId)) {
+            return Optional.empty();
+        }
         List<AuctionEntry> entries = auctionEntryRepository.findAllByAuctionId(auction.getId());
         return Optional.of(buildResultDTO(auction, lot, entries));
     }
 
     @Transactional(readOnly = true)
     public Optional<AuctionResultDTO> getResultByBidNumber(Integer bidNumber) {
+        Long traderId = resolveTraderId();
         Optional<AuctionEntry> entryOpt = auctionEntryRepository.findFirstByBidNumber(bidNumber);
         if (entryOpt.isEmpty()) {
             return Optional.empty();
@@ -426,6 +468,9 @@ public class AuctionService {
             .findById(entry.getAuctionId())
             .orElseThrow(() -> new EntityNotFoundException("Auction not found for bid: " + bidNumber));
         Lot lot = lotRepository.findById(auction.getLotId()).orElse(null);
+        if (lot == null || !isLotOwnedByTrader(lot, traderId)) {
+            return Optional.empty();
+        }
         List<AuctionEntry> entries = auctionEntryRepository.findAllByAuctionId(auction.getId());
         return Optional.of(buildResultDTO(auction, lot, entries));
     }
@@ -510,6 +555,26 @@ public class AuctionService {
 
         dto.setEntries(resultEntries);
         return dto;
+    }
+
+    private boolean isLotOwnedByTrader(Lot lot, Long traderId) {
+        if (lot == null || traderId == null) {
+            return false;
+        }
+        Long lotTraderId = resolveLotTraderId(lot);
+        return lotTraderId != null && Objects.equals(lotTraderId, traderId);
+    }
+
+    private Long resolveLotTraderId(Lot lot) {
+        if (lot == null || lot.getSellerVehicleId() == null) {
+            return null;
+        }
+        SellerInVehicle siv = sellerInVehicleRepository.findById(lot.getSellerVehicleId()).orElse(null);
+        if (siv == null || siv.getVehicleId() == null) {
+            return null;
+        }
+        Vehicle vehicle = vehicleRepository.findById(siv.getVehicleId()).orElse(null);
+        return vehicle != null ? vehicle.getTraderId() : null;
     }
 
     private Long resolveTraderId() {

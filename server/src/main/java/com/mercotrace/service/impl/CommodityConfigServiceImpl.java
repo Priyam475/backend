@@ -3,6 +3,7 @@ package com.mercotrace.service.impl;
 import com.mercotrace.domain.*;
 import com.mercotrace.repository.*;
 import com.mercotrace.service.CommodityConfigService;
+import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.*;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.persistence.EntityManager;
@@ -33,6 +34,7 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
     private final DeductionRuleRepository deductionRuleRepository;
     private final HamaliSlabRepository hamaliSlabRepository;
     private final DynamicChargeRepository dynamicChargeRepository;
+    private final TraderContextService traderContextService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -42,19 +44,24 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         CommodityConfigRepository commodityConfigRepository,
         DeductionRuleRepository deductionRuleRepository,
         HamaliSlabRepository hamaliSlabRepository,
-        DynamicChargeRepository dynamicChargeRepository
+        DynamicChargeRepository dynamicChargeRepository,
+        TraderContextService traderContextService
     ) {
         this.commodityRepository = commodityRepository;
         this.commodityConfigRepository = commodityConfigRepository;
         this.deductionRuleRepository = deductionRuleRepository;
         this.hamaliSlabRepository = hamaliSlabRepository;
         this.dynamicChargeRepository = dynamicChargeRepository;
+        this.traderContextService = traderContextService;
     }
 
     @Override
     @Transactional(readOnly = true)
     public java.util.List<FullCommodityConfigDTO> getAllFullConfigs() {
-        return commodityRepository.findAll().stream()
+        Long traderId = traderContextService.getCurrentTraderId();
+        return commodityRepository
+            .findAllByTraderId(traderId)
+            .stream()
             .map(c -> getFullConfig(c.getId()))
             .collect(java.util.stream.Collectors.toList());
     }
@@ -62,7 +69,13 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
     @Override
     @Transactional(readOnly = true)
     public FullCommodityConfigDTO getFullConfig(Long commodityId) {
-        if (!commodityRepository.existsById(commodityId)) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (
+            commodityRepository
+                .findById(commodityId)
+                .filter(c -> traderId.equals(c.getTraderId()))
+                .isEmpty()
+        ) {
             throw new BadRequestAlertException("Commodity not found", ENTITY_NAME, "commoditynotfound");
         }
         FullCommodityConfigDTO out = new FullCommodityConfigDTO();
@@ -104,7 +117,13 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         if (commodityId == null) {
             throw new BadRequestAlertException("commodityId is required", ENTITY_NAME, "idnull");
         }
-        if (!commodityRepository.existsById(commodityId)) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (
+            commodityRepository
+                .findById(commodityId)
+                .filter(c -> traderId.equals(c.getTraderId()))
+                .isEmpty()
+        ) {
             throw new BadRequestAlertException("Commodity not found", ENTITY_NAME, "commoditynotfound");
         }
 

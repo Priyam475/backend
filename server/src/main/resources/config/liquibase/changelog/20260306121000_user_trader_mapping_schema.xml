@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260306121000-1" author="cursor-fe2be">
+        <createTable tableName="user_trader">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="role_in_trader" type="varchar(50)"/>
+            <column name="primary_mapping" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- Auditing columns -->
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="timestamp"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="timestamp"/>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="user_trader"
+            baseColumnNames="user_id"
+            constraintName="fk_user_trader_user"
+            referencedTableName="jhi_user"
+            referencedColumnNames="id"/>
+
+        <addForeignKeyConstraint
+            baseTableName="user_trader"
+            baseColumnNames="trader_id"
+            constraintName="fk_user_trader_trader"
+            referencedTableName="trader"
+            referencedColumnNames="id"/>
+
+        <createIndex tableName="user_trader" indexName="idx_user_trader_user">
+            <column name="user_id"/>
+            <column name="primary_mapping"/>
+        </createIndex>
+
+        <createIndex tableName="user_trader" indexName="idx_user_trader_trader">
+            <column name="trader_id"/>
+            <column name="primary_mapping"/>
+        </createIndex>
+
+        <addUniqueConstraint
+            tableName="user_trader"
+            columnNames="user_id, trader_id"
+            constraintName="uk_user_trader_user_trader"/>
+    </changeSet>
+
+</databaseChangeLog>
+

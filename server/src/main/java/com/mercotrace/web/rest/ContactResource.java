@@ -2,6 +2,7 @@ package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.service.ContactService;
+import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
@@ -40,9 +41,16 @@ public class ContactResource {
 
     private final ContactRepository contactRepository;
 
-    public ContactResource(ContactService contactService, ContactRepository contactRepository) {
+    private final TraderContextService traderContextService;
+
+    public ContactResource(
+        ContactService contactService,
+        ContactRepository contactRepository,
+        TraderContextService traderContextService
+    ) {
         this.contactService = contactService;
         this.contactRepository = contactRepository;
+        this.traderContextService = traderContextService;
     }
 
     /**
@@ -60,8 +68,8 @@ public class ContactResource {
             throw new BadRequestAlertException("A new contact cannot already have an ID", ENTITY_NAME, "idexists");
         }
 
-        // Resolve trader ownership (for module 1 we default to trader 1 when not provided)
-        Long traderId = resolveTraderId(contactDTO);
+        // Resolve trader ownership from authenticated user
+        Long traderId = resolveTraderId();
         contactDTO.setTraderId(traderId);
 
         // Enforce phone uniqueness per trader, aligned with frontend validation
@@ -98,11 +106,15 @@ public class ContactResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!contactRepository.existsById(id)) {
-            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
-        }
+        Long traderId = resolveTraderId();
+        contactService
+            .findOne(id)
+            .ifPresent(existing -> {
+                if (!Objects.equals(existing.getTraderId(), traderId)) {
+                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
+                }
+            });
 
-        Long traderId = resolveTraderId(contactDTO);
         contactDTO.setTraderId(traderId);
 
         // Enforce phone uniqueness per trader, excluding the current record
@@ -144,9 +156,14 @@ public class ContactResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!contactRepository.existsById(id)) {
-            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
-        }
+        Long traderId = resolveTraderId();
+        contactService
+            .findOne(id)
+            .ifPresent(existing -> {
+                if (!Objects.equals(existing.getTraderId(), traderId)) {
+                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
+                }
+            });
 
         Optional<ContactDTO> result = contactService.partialUpdate(contactDTO);
 
@@ -165,11 +182,9 @@ public class ContactResource {
      */
     @GetMapping("")
     public ResponseEntity<List<ContactDTO>> getAllContacts() {
-        LOG.debug("REST request to get all Contacts");
-        // For now just return all; later we can introduce criteria or trader scoping in the service.
-        List<ContactDTO> list = contactRepository.findAll().stream().map(contactEntity ->
-            contactService.findOne(contactEntity.getId()).orElse(null)
-        ).filter(java.util.Objects::nonNull).toList();
+        LOG.debug("REST request to get all Contacts for current trader");
+        Long traderId = resolveTraderId();
+        List<ContactDTO> list = contactService.findAllByTrader(traderId);
         return ResponseEntity.ok().body(list);
     }
 
@@ -182,16 +197,15 @@ public class ContactResource {
     @GetMapping("/{id}")
     public ResponseEntity<ContactDTO> getContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Contact : {}", id);
-        Optional<ContactDTO> contactDTO = contactService.findOne(id);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contactDTO = contactService
+            .findOne(id)
+            .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
         return ResponseUtil.wrapOrNotFound(contactDTO);
     }
 
-    private Long resolveTraderId(ContactDTO contactDTO) {
-        if (contactDTO.getTraderId() != null) {
-            return contactDTO.getTraderId();
-        }
-        // TODO: Integrate with authenticated trader context; for module 1 we assume trader 1.
-        return 1L;
+    private Long resolveTraderId() {
+        return traderContextService.getCurrentTraderId();
     }
 
     /**
@@ -203,6 +217,11 @@ public class ContactResource {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to delete Contact : {}", id);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> existing = contactService.findOne(id);
+        if (existing.isEmpty() || !Objects.equals(existing.get().getTraderId(), traderId)) {
+            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
+        }
         contactService.delete(id);
         return ResponseEntity.noContent()
             .headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id.toString()))
@@ -217,29 +236,10 @@ public class ContactResource {
      * @return the list of matching contacts.
      */
     @GetMapping("/search")
-    public ResponseEntity<List<ContactDTO>> searchContactsByMark(
-        @RequestParam(value = "traderId", required = false) Long traderId,
-        @RequestParam("mark") String mark
-    ) {
-        LOG.debug("REST request to search Contacts by mark. traderId={}, mark={}", traderId, mark);
-        List<ContactDTO> list;
-        if (traderId == null) {
-            // Fallback: generic search across all traders by name, phone, or mark.
-            final String lower = mark.toLowerCase();
-            list = contactRepository
-                .findAll()
-                .stream()
-                .filter(c ->
-                    (c.getName() != null && c.getName().toLowerCase().contains(lower)) ||
-                    (c.getPhone() != null && c.getPhone().contains(mark)) ||
-                    (c.getMark() != null && c.getMark().toLowerCase().contains(lower))
-                )
-                .map(c -> contactService.findOne(c.getId()).orElse(null))
-                .filter(java.util.Objects::nonNull)
-                .toList();
-        } else {
-            list = contactService.searchByMark(traderId, mark);
-        }
+    public ResponseEntity<List<ContactDTO>> searchContactsByMark(@RequestParam("mark") String mark) {
+        Long traderId = resolveTraderId();
+        LOG.debug("REST request to search Contacts by mark for current trader. traderId={}, mark={}", traderId, mark);
+        List<ContactDTO> list = contactService.searchByMark(traderId, mark);
         return ResponseEntity.ok().body(list);
     }
 }

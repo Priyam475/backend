@@ -46,5 +46,9 @@
     <include file="config/liquibase/changelog/20260303121000_rbac_settings_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260304110000_writers_pad_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260305120000_seed_default_trader.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260306100000_trader_gst_rmc.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260306120000_otp_token_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260306121000_user_trader_mapping_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260306130000_trader_module_authorities.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

@@ -19,7 +19,6 @@ import org.springframework.boot.info.GitProperties;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.interceptor.KeyGenerator;
 import com.mercotrace.service.RoleQueryService;
-import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.WeighingSessionCreateRequest;
 import com.mercotrace.service.impl.ChartOfAccountServiceImpl;
 import com.mercotrace.service.impl.HighLevelReportsServiceImpl;
@@ -38,9 +37,6 @@ public class CacheConfiguration {
 
     private GitProperties gitProperties;
     private BuildProperties buildProperties;
-
-    @Autowired(required = false)
-    private TraderContextService traderContextService;
 
     @Bean
     public javax.cache.configuration.Configuration<Object, Object> jcacheConfiguration(JHipsterProperties jHipsterProperties) {
@@ -95,6 +91,8 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.Authority.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.User.class.getName() + ".authorities", jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Trader.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.UserTrader.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.OtpToken.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Role.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Role.class.getName() + ".permissions", jcacheConfiguration);
             // Settings / RBAC: Role & UserRole caches
@@ -207,8 +205,6 @@ public class CacheConfiguration {
     @Bean(name = "weighingByBidKeyGenerator")
     public KeyGenerator weighingByBidKeyGenerator() {
         return (target, method, params) -> {
-            if (traderContextService == null) return "default::" + (params.length > 0 ? params[0] : "");
-            Long traderId = traderContextService.getCurrentTraderId();
             Integer bidNumber = null;
             if (params.length > 0) {
                 if (params[0] instanceof Integer) {
@@ -217,7 +213,7 @@ public class CacheConfiguration {
                     bidNumber = ((WeighingSessionCreateRequest) params[0]).getBidNumber();
                 }
             }
-            return (bidNumber != null) ? (traderId + "::" + bidNumber) : (traderId + "::");
+            return (bidNumber != null) ? ("bid::" + bidNumber) : "bid::";
         };
     }
 
@@ -228,8 +224,6 @@ public class CacheConfiguration {
     @Bean(name = "cdnListByTraderKeyGenerator")
     public KeyGenerator cdnListByTraderKeyGenerator() {
         return (target, method, params) -> {
-            if (traderContextService == null) return "default::0::10::::";
-            Long traderId = traderContextService.getCurrentTraderId();
             int page = 0, size = 10;
             String sort = "";
             String search = "";
@@ -241,7 +235,7 @@ public class CacheConfiguration {
             if (params != null && params.length >= 2 && params[1] != null) {
                 search = params[1].toString().trim();
             }
-            return traderId + "::" + page + "::" + size + "::" + sort + "::" + search;
+            return page + "::" + size + "::" + sort + "::" + search;
         };
     }
 
@@ -252,8 +246,6 @@ public class CacheConfiguration {
     @Bean(name = "chartOfAccountsPageKeyGenerator")
     public KeyGenerator chartOfAccountsPageKeyGenerator() {
         return (target, method, params) -> {
-            if (traderContextService == null) return "default::0::10::::::";
-            Long traderId = traderContextService.getCurrentTraderId();
             int page = 0, size = 10;
             String sort = "";
             String search = "";
@@ -273,22 +265,20 @@ public class CacheConfiguration {
             if (params != null && params.length >= 4 && params[3] != null) {
                 classification = params[3].toString().trim();
             }
-            return traderId + "::" + page + "::" + size + "::" + sort + "::" + search + "::" + accountingClass + "::" + classification;
+            return page + "::" + size + "::" + sort + "::" + search + "::" + accountingClass + "::" + classification;
         };
     }
 
     /**
      * Key generator for reports caches:
-     * key = "traderId::methodName[::param1::param2::…]".
-     * Ensures all analytics caches are tenant-scoped and parameter-sensitive.
+     * key = "methodName[::param1::param2::…]".
+     * Ensures analytics caches are parameter-sensitive.
      */
     @Bean(name = "reportsKeyGenerator")
     public KeyGenerator reportsKeyGenerator() {
         return (target, method, params) -> {
-            Long traderId = traderContextService != null ? traderContextService.getCurrentTraderId() : null;
             StringBuilder key = new StringBuilder();
-            key.append(traderId != null ? traderId : "default");
-            key.append("::").append(method.getName());
+            key.append(method.getName());
             if (params != null) {
                 for (Object param : params) {
                     key.append("::");

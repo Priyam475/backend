@@ -84,6 +84,14 @@ public class Trader implements Serializable {
     @Column(name = "shop_photos")
     private String shopPhotos; // comma-separated URLs/paths
 
+    @Size(max = 15)
+    @Column(name = "gst_number", length = 15)
+    private String gstNumber;
+
+    @Size(max = 64)
+    @Column(name = "rmc_apmc_code", length = 64)
+    private String rmcApmcCode;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public Long getId() {
@@ -262,6 +270,22 @@ public class Trader implements Serializable {
 
     public void setShopPhotos(String shopPhotos) {
         this.shopPhotos = shopPhotos;
+    }
+
+    public String getGstNumber() {
+        return gstNumber;
+    }
+
+    public void setGstNumber(String gstNumber) {
+        this.gstNumber = gstNumber;
+    }
+
+    public String getRmcApmcCode() {
+        return rmcApmcCode;
+    }
+
+    public void setRmcApmcCode(String rmcApmcCode) {
+        this.rmcApmcCode = rmcApmcCode;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

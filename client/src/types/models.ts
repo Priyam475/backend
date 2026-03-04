@@ -37,6 +37,8 @@ export interface Trader {
   city?: string;
   state?: string;
   pin_code?: string;
+  gst_number?: string;
+  rmc_apmc_code?: string;
   shop_photos?: string[];
 }
 
