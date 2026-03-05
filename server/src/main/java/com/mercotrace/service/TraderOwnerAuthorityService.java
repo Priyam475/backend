@@ -39,17 +39,27 @@ public class TraderOwnerAuthorityService {
     /**
      * Ensure that the given user has the full set of trader-module authorities required
      * for an OWNER, plus {@code ROLE_USER}. Does not grant any global admin authority.
+     * <p>
+     * This method is transactional and always works on a managed {@link User} with its
+     * {@code authorities} collection initialized to avoid {@link org.hibernate.LazyInitializationException}.
      *
-     * @param user the JHipster {@link User} to upgrade
+     * @param user the (possibly detached) JHipster {@link User} to upgrade
      */
     public void ensureTraderOwnerAuthorities(User user) {
         if (user == null) {
             return;
         }
-        Set<Authority> currentAuthorities = user.getAuthorities();
+
+        User target = user;
+
+        if (user.getId() != null) {
+            target = userRepository.findOneWithAuthoritiesById(user.getId()).orElse(user);
+        }
+
+        Set<Authority> currentAuthorities = target.getAuthorities();
         if (currentAuthorities == null) {
             currentAuthorities = new HashSet<>();
-            user.setAuthorities(currentAuthorities);
+            target.setAuthorities(currentAuthorities);
         }
 
         Set<String> existingNames = currentAuthorities.stream().map(Authority::getName).collect(Collectors.toSet());
@@ -67,15 +77,15 @@ public class TraderOwnerAuthorityService {
             LOG.warn(
                 "No trader-owner authorities found in database for names {}. User {} will not be upgraded.",
                 missingNames,
-                user.getLogin()
+                target.getLogin()
             );
             return;
         }
 
         currentAuthorities.addAll(toAdd);
-        userRepository.save(user);
+        userRepository.save(target);
 
-        LOG.info("Upgraded user {} with trader-owner authorities: {}", user.getLogin(), missingNames);
+        LOG.info("Upgraded user {} with trader-owner authorities: {}", target.getLogin(), missingNames);
     }
 
     private static Set<String> buildTraderOwnerAuthorityNames() {

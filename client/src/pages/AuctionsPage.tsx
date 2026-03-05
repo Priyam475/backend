@@ -23,6 +23,8 @@ import type {
 } from '@/services/api/auction';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 // ── Types ─────────────────────────────────────────────────
 interface LotInfo {
@@ -148,6 +150,11 @@ function sessionEntryToSaleEntry(e: AuctionEntryDTO): SaleEntry {
 const AuctionsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Auctions');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Auctions" />;
+  }
   const [buyers, setBuyers] = useState<Contact[]>([]);
   const [entries, setEntries] = useState<SaleEntry[]>([]);
   const [showExtraRate, setShowExtraRate] = useState(false);
@@ -354,6 +361,10 @@ const AuctionsPage = () => {
 
   // REQ-AUC-009: Allow quantity increase with confirmation
   const tryAddEntry = (entry: Omit<SaleEntry, 'id' | 'bidNumber'>) => {
+    if (!can('Auctions', 'Create')) {
+      toast.error('You do not have permission to add auction bids.');
+      return;
+    }
     if (!selectedLot) return;
     const currentSold = entries.reduce((s, e) => s + e.quantity, 0);
     const newTotal = currentSold + entry.quantity;
@@ -587,6 +598,10 @@ const AuctionsPage = () => {
 
   const removeEntry = useCallback(async (id: string) => {
     if (!selectedLot) return;
+    if (!can('Auctions', 'Delete')) {
+      toast.error('You do not have permission to delete auction bids.');
+      return;
+    }
     try {
       const session = await auctionApi.deleteBid(selectedLot.lot_id, Number(id));
       setEntries(session.entries.map(sessionEntryToSaleEntry));
@@ -597,6 +612,10 @@ const AuctionsPage = () => {
 
   const setTokenAdvanceAmount = useCallback(async (id: string, amount: number) => {
     if (!selectedLot) return;
+    if (!can('Auctions', 'Edit')) {
+      toast.error('You do not have permission to edit auction bids.');
+      return;
+    }
     try {
       const session = await auctionApi.updateBid(selectedLot.lot_id, Number(id), { token_advance: amount });
       setEntries(session.entries.map(sessionEntryToSaleEntry));
@@ -1360,6 +1379,10 @@ const AuctionsPage = () => {
                   onClick={async () => {
                     if (!selectedLot) return;
                     setCompleteLoading(true);
+                    if (!can('Auctions', 'Approve')) {
+                      toast.error('You do not have permission to complete auctions.');
+                      return;
+                    }
                     try {
                       await auctionApi.completeAuction(selectedLot.lot_id);
                       clearDraft();

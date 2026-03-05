@@ -14,7 +14,8 @@ import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Role, ModulePermissions } from '@/types/rbac';
 import { AVAILABLE_MODULES } from '@/types/rbac';
-import { rbacApi } from '@/services/api';
+import { rbacApi, traderRbacApi } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
 
 const emptyPermissions = (): ModulePermissions => {
   const perms: ModulePermissions = {};
@@ -26,6 +27,8 @@ const emptyPermissions = (): ModulePermissions => {
 };
 
 const RoleManagementPage = () => {
+  const { trader } = useAuth();
+  const api = trader ? traderRbacApi : rbacApi;
   const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +45,7 @@ const RoleManagementPage = () => {
   const fetchRoles = async () => {
     try {
       setLoading(true);
-      const data = await rbacApi.listRoles();
+      const data = await api.listRoles();
       setRoles((data || []).map(r => ({ ...r, permissions: (r.permissions as any) || {} })) as Role[]);
     } catch (error) {
       console.error(error);
@@ -52,7 +55,7 @@ const RoleManagementPage = () => {
     }
   };
 
-  useEffect(() => { fetchRoles(); }, []);
+  useEffect(() => { fetchRoles(); }, [trader?.trader_id]);
 
   const openCreate = () => {
     setEditingRole(null);
@@ -117,7 +120,7 @@ const RoleManagementPage = () => {
     const payload = { name: formName.trim(), description: formDesc.trim(), permissions: formPerms as any };
     try {
       if (editingRole) {
-        await rbacApi.updateRole(editingRole.id, payload);
+        await api.updateRole(editingRole.id, payload);
         toast.success('Role updated');
       } else {
         await rbacApi.createRole(payload);
@@ -135,7 +138,7 @@ const RoleManagementPage = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await rbacApi.deleteRole(id);
+      await api.deleteRole(id);
       toast.success('Role deleted');
       setDeleteConfirm(null);
       fetchRoles();

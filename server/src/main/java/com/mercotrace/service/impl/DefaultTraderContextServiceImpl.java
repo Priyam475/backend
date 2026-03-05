@@ -3,6 +3,7 @@ package com.mercotrace.service.impl;
 import com.mercotrace.repository.UserTraderRepository;
 import com.mercotrace.security.SecurityUtils;
 import com.mercotrace.service.TraderContextService;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -34,5 +35,14 @@ public class DefaultTraderContextServiceImpl implements TraderContextService {
                 return mapping.getTrader().getId();
             })
             .orElseThrow(() -> new IllegalStateException("No primary trader mapping found for user " + userId));
+    }
+
+    @Override
+    public Optional<Long> getCurrentTraderIdOptional() {
+        return SecurityUtils
+            .getCurrentUserId()
+            .flatMap(userTraderRepository::findFirstByUserIdAndPrimaryMappingTrue)
+            .filter(mapping -> mapping.getTrader() != null && mapping.getTrader().getId() != null)
+            .map(mapping -> mapping.getTrader().getId());
     }
 }

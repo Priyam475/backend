@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.StockPurchaseService;
 import com.mercotrace.service.dto.StockPurchaseDTOs.CreateStockPurchaseRequestDTO;
 import com.mercotrace.service.dto.StockPurchaseDTOs.StockPurchaseDTO;
@@ -16,6 +17,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -45,6 +47,7 @@ public class StockPurchaseResource {
      * {@code GET  /api/stock-purchases} : Get paginated stock purchases. Optional vendor search.
      */
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.STOCK_PURCHASE_VIEW + "\")")
     public ResponseEntity<Page<StockPurchaseDTO>> getPurchases(
         @org.springdoc.core.annotations.ParameterObject @PageableDefault(size = 10, sort = "createdDate", direction = Sort.Direction.DESC) Pageable pageable,
         @RequestParam(required = false) String vendorSearch
@@ -59,6 +62,7 @@ public class StockPurchaseResource {
      * {@code GET  /api/stock-purchases/:id} : Get one stock purchase by id.
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.STOCK_PURCHASE_VIEW + "\")")
     public ResponseEntity<StockPurchaseDTO> getPurchase(@PathVariable Long id) {
         LOG.debug("REST request to get stock purchase: {}", id);
         try {
@@ -73,6 +77,7 @@ public class StockPurchaseResource {
      * {@code POST  /api/stock-purchases} : Create a stock purchase.
      */
     @PostMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.STOCK_PURCHASE_CREATE + "\")")
     public ResponseEntity<StockPurchaseDTO> createStockPurchase(@Valid @RequestBody CreateStockPurchaseRequestDTO request) throws URISyntaxException {
         LOG.debug("REST request to create stock purchase: vendorId={}", request.getVendorId());
         try {

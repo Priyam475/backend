@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { contactApi } from '@/services/api';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
+import { usePermissions } from '@/lib/permissions';
+import ForbiddenPage from '@/components/ForbiddenPage';
 
 /** Ledger backend not implemented; no-op. See NOT_IMPLEMENTED.md. */
 function createLedgerForContact(_contact: Contact) {
@@ -21,6 +23,11 @@ type ModalMode = 'add' | 'view' | 'edit' | null;
 const ContactsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Contacts');
+  const canCreate = can('Contacts', 'Create');
+  const canEdit = can('Contacts', 'Edit');
+  const canDelete = can('Contacts', 'Delete');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [modalMode, setModalMode] = useState<ModalMode>(null);
@@ -30,7 +37,10 @@ const ContactsPage = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const loadContacts = () => { contactApi.list().then(setContacts); };
+  const loadContacts = () => {
+    if (!canView) return;
+    contactApi.list().then(setContacts);
+  };
   useEffect(() => { loadContacts(); }, []);
 
   const filtered = contacts.filter(c => {
@@ -43,6 +53,10 @@ const ContactsPage = () => {
   });
 
   const openAdd = () => {
+    if (!canCreate) {
+      toast.error('You do not have permission to create contacts.');
+      return;
+    }
     setFormData({ name: '', phone: '', mark: '', address: '' });
     setErrors({});
     setModalMode('add');
@@ -54,6 +68,10 @@ const ContactsPage = () => {
   };
 
   const openEdit = (c: Contact) => {
+    if (!canEdit) {
+      toast.error('You do not have permission to edit contacts.');
+      return;
+    }
     setSelectedContact(c);
     setFormData({ name: c.name, phone: c.phone, mark: c.mark || '', address: c.address || '' });
     setErrors({});
@@ -81,6 +99,10 @@ const ContactsPage = () => {
   };
 
   const handleAdd = async () => {
+    if (!canCreate) {
+      toast.error('You do not have permission to create contacts.');
+      return;
+    }
     if (!validateForm()) return;
     try {
       const created = await contactApi.create({
@@ -101,6 +123,10 @@ const ContactsPage = () => {
   };
 
   const handleEdit = async () => {
+    if (!canEdit) {
+      toast.error('You do not have permission to edit contacts.');
+      return;
+    }
     if (!selectedContact || !validateForm(true)) return;
     try {
       const updated = await contactApi.update(selectedContact.contact_id, {
@@ -119,6 +145,10 @@ const ContactsPage = () => {
   };
 
   const handleDelete = async (contactId: string) => {
+    if (!canDelete) {
+      toast.error('You do not have permission to delete contacts.');
+      return;
+    }
     const contact = contacts.find(c => c.contact_id === contactId);
     try {
       await contactApi.remove(contactId);
@@ -130,6 +160,10 @@ const ContactsPage = () => {
       toast.error('Failed to delete contact');
     }
   };
+
+  if (!canView) {
+    return <ForbiddenPage moduleName="Contacts" />;
+  }
 
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-emerald-50/20 dark:to-emerald-950/10 pb-28 lg:pb-6">

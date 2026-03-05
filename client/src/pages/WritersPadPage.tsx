@@ -14,6 +14,8 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { writersPadApi, type WriterPadSessionDTO } from '@/services/api';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 // Optional UI pref only (last cleanup date). Weight log is in-memory; no mkt_* for business data.
 
@@ -63,6 +65,12 @@ function consideredWt(w: number): number {
 const WritersPadPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+
+  const canView = canAccessModule("Writer's Pad");
+  if (!canView) {
+    return <ForbiddenPage moduleName="Writer's Pad" />;
+  }
 
   // Req 1, 2: Scale connection
   const [scales, setScales] = useState<ScaleDevice[]>(SIMULATED_SCALES);
@@ -148,6 +156,11 @@ const WritersPadPage = () => {
 
     if (!foundEntry) { toast.error(`Bid #${num} not found`); return; }
 
+    if (!can("Writer's Pad", 'Create')) {
+      toast.error('You do not have permission to create Writer\'s Pad sessions.');
+      return;
+    }
+
     try {
       const session: WriterPadSessionDTO = await writersPadApi.loadOrCreateSession({
         lotId: foundAuction.lotId,
@@ -188,6 +201,11 @@ const WritersPadPage = () => {
     if (!card.sessionId) { toast.error('Session not initialized for this bid'); return; }
 
     const cw = consideredWt(currentWeight);
+    if (!can("Writer's Pad", 'Edit')) {
+      toast.error('You do not have permission to record Writer\'s Pad weights.');
+      return;
+    }
+
     try {
       const saved = await writersPadApi.attachWeight(card.sessionId, currentWeight, cw, connectedScale?.id);
 
@@ -226,6 +244,11 @@ const WritersPadPage = () => {
     const newBidNum = parseInt(retagTarget);
     const targetCard = bidCards.find(c => c.bidNumber === newBidNum);
     if (!targetCard) { toast.error('Target bid not found'); return; }
+    if (!can("Writer's Pad", 'Edit')) {
+      toast.error('You do not have permission to retag Writer\'s Pad weights.');
+      return;
+    }
+
     try {
       await writersPadApi.retag(Number(retagEntry.id), newBidNum);
 
@@ -260,6 +283,11 @@ const WritersPadPage = () => {
 
   // Req 12: End of day cleanup
   const endOfDayCleanup = async () => {
+    if (!can("Writer's Pad", 'Edit')) {
+      toast.error('You do not have permission to clear Writer\'s Pad cards.');
+      return;
+    }
+
     try {
       await writersPadApi.endOfDayCleanup();
       setBidCards([]);

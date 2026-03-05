@@ -1,21 +1,23 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.domain.Authority;
+import com.mercotrace.domain.User;
 import com.mercotrace.repository.TraderRepository;
 import com.mercotrace.repository.UserRepository;
 import com.mercotrace.repository.UserTraderRepository;
 import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.MailService;
 import com.mercotrace.service.OtpService;
+import com.mercotrace.service.TraderOwnerAuthorityService;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.UserService;
-import com.mercotrace.service.TraderOwnerAuthorityService;
 import com.mercotrace.service.dto.AdminUserDTO;
 import com.mercotrace.service.dto.Module1AuthDTO;
 import com.mercotrace.service.dto.TraderDTO;
 import com.mercotrace.web.rest.vm.LoginVM;
+import com.mercotrace.web.rest.vm.ManagedUserVM;
 import com.mercotrace.web.rest.vm.Module1OtpRequestVM;
 import com.mercotrace.web.rest.vm.Module1OtpVerifyVM;
-import com.mercotrace.web.rest.vm.ManagedUserVM;
 import com.mercotrace.web.rest.vm.Module1RegisterVM;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -23,6 +25,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -201,6 +204,7 @@ public class Module1AuthResource {
         }
         userPayload.setName(nameBuilder.toString());
         userPayload.setRole(computeDisplayRole(account, traderDTO));
+        userPayload.setAuthorities(account.getAuthorities());
         dto.setUser(userPayload);
 
         Module1AuthDTO.TraderPayload traderPayload = new Module1AuthDTO.TraderPayload();
@@ -261,6 +265,7 @@ public class Module1AuthResource {
 
         // Fetch current authenticated user
         AdminUserDTO account = accountResource.getAccount();
+        account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
 
         java.util.Optional<TraderDTO> traderOpt = resolveTraderForUser(account);
         TraderDTO trader = traderOpt.orElse(null);
@@ -276,6 +281,7 @@ public class Module1AuthResource {
     @GetMapping("/me")
     public Module1AuthDTO me() {
         AdminUserDTO account = accountResource.getAccount();
+        account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
 
         java.util.Optional<TraderDTO> traderOpt = resolveTraderForUser(account);
         TraderDTO trader = traderOpt.orElse(null);
@@ -370,7 +376,49 @@ public class Module1AuthResource {
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
     }
 
+    private AdminUserDTO upgradeTraderOwnerAuthoritiesIfNeeded(AdminUserDTO account) {
+        if (account == null || account.getId() == null) {
+            return account;
+        }
+
+        return userTraderRepository
+            .findFirstByUserIdAndPrimaryMappingTrue(account.getId())
+            .filter(mapping -> {
+                String roleInTrader = mapping.getRoleInTrader();
+                return roleInTrader != null && "OWNER".equalsIgnoreCase(roleInTrader.trim());
+            })
+            .map(mapping -> {
+                Optional<User> userOpt = userRepository.findById(account.getId());
+                if (userOpt.isEmpty()) {
+                    return account;
+                }
+                User user = userOpt.get();
+                // Idempotent upgrade – safe to call repeatedly.
+                traderOwnerAuthorityService.ensureTraderOwnerAuthorities(user);
+
+                // After upgrade, re-read a managed User with initialized authorities.
+                Optional<User> managedUserOpt = userRepository.findOneWithAuthoritiesById(account.getId());
+                if (managedUserOpt.isEmpty()) {
+                    return account;
+                }
+                User managedUser = managedUserOpt.get();
+
+                Set<String> updatedAuthorities =
+                    managedUser
+                        .getAuthorities()
+                        .stream()
+                        .map(Authority::getName)
+                        .collect(Collectors.toSet());
+                account.setAuthorities(updatedAuthorities);
+                return account;
+            })
+            .orElse(account);
+    }
+
     private Module1AuthDTO buildAuthDto(AdminUserDTO account, TraderDTO trader) {
+        // Ensure OWNER authorities are always up-to-date when we serialize the auth payload.
+        account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
+
         Module1AuthDTO dto = new Module1AuthDTO();
 
         // Map user
@@ -397,6 +445,7 @@ public class Module1AuthResource {
         }
         userPayload.setName(nameBuilder.toString());
         userPayload.setRole(computeDisplayRole(account, trader));
+        userPayload.setAuthorities(account.getAuthorities());
 
         dto.setUser(userPayload);
 

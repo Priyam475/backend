@@ -42,6 +42,8 @@ export const AVAILABLE_MODULES: Record<string, string[]> = {
   'Weighing': ['View', 'Create', 'Edit'],
   "Writer's Pad": ['View', 'Create', 'Edit'],
   'Logistics': ['View', 'Create', 'Edit', 'Delete'],
+  // Print Hub (Print Logs) is the operational module behind Logistics.
+  'Print Hub': ['View', 'Create', 'Edit', 'Delete'],
   'Self-Sale': ['View', 'Create', 'Edit'],
   'Stock Purchase': ['View', 'Create', 'Edit'],
   'CDN': ['View', 'Create', 'Edit', 'Delete'],

@@ -50,5 +50,6 @@
     <include file="config/liquibase/changelog/20260306120000_otp_token_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306121000_user_trader_mapping_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306130000_trader_module_authorities.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260306140000_trader_scoped_roles.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

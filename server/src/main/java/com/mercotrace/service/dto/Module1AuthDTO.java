@@ -1,6 +1,7 @@
 package com.mercotrace.service.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Set;
 
 /**
  * Module 1 auth response payload, aligned to frontend AuthState expectations.
@@ -67,6 +68,9 @@ public class Module1AuthDTO {
         private String name;
         private String role;
 
+        @JsonProperty("authorities")
+        private Set<String> authorities;
+
         public String getUserId() {
             return userId;
         }
@@ -121,6 +125,14 @@ public class Module1AuthDTO {
 
         public void setRole(String role) {
             this.role = role;
+        }
+
+        public Set<String> getAuthorities() {
+            return authorities;
+        }
+
+        public void setAuthorities(Set<String> authorities) {
+            this.authorities = authorities;
         }
     }
 

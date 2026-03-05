@@ -2,6 +2,7 @@ package com.mercotrace.web.rest;
 
 import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.domain.enumeration.VoucherType;
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.VoucherHeaderService;
 import java.time.LocalDate;
 import com.mercotrace.service.dto.VoucherHeaderCreateRequest;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -44,6 +46,7 @@ public class VoucherHeaderResource {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.VOUCHERS_VIEW + "\")")
     public ResponseEntity<Page<VoucherHeaderDTO>> getAll(
         @org.springdoc.core.annotations.ParameterObject
         @PageableDefault(size = 20, sort = "voucherDate", direction = Sort.Direction.DESC) Pageable pageable,
@@ -60,6 +63,7 @@ public class VoucherHeaderResource {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.VOUCHERS_VIEW + "\")")
     public ResponseEntity<VoucherHeaderDTO> getById(@PathVariable Long id) {
         LOG.debug("REST request to get voucher header: {}", id);
         try {
@@ -71,6 +75,7 @@ public class VoucherHeaderResource {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.VOUCHERS_CREATE + "\")")
     public ResponseEntity<VoucherHeaderDTO> create(@Valid @RequestBody VoucherHeaderCreateRequest request) {
         LOG.debug("REST request to create voucher header: type={}", request.getVoucherType());
         try {
@@ -85,6 +90,7 @@ public class VoucherHeaderResource {
     }
 
     @PostMapping("/{id}/post")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.VOUCHERS_APPROVE + "\")")
     public ResponseEntity<VoucherHeaderDTO> post(@PathVariable Long id) {
         LOG.debug("REST request to post voucher header: {}", id);
         try {
@@ -98,6 +104,7 @@ public class VoucherHeaderResource {
     }
 
     @PostMapping("/{id}/reverse")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.VOUCHERS_APPROVE + "\")")
     public ResponseEntity<VoucherHeaderDTO> reverse(@PathVariable Long id) {
         LOG.debug("REST request to reverse voucher header: {}", id);
         try {

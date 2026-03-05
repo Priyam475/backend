@@ -16,6 +16,8 @@ import { cdnApi, contactApi } from '@/services/api';
 import type { CDNResponseDTO } from '@/services/api';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 function apiToRecord(dto: CDNResponseDTO): CDNRecord {
   return {
@@ -69,6 +71,11 @@ interface CDNRecord {
 const CDNPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('CDN');
+  if (!canView) {
+    return <ForbiddenPage moduleName="CDN" />;
+  }
   const [records, setRecords] = useState<CDNRecord[]>([]);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -125,6 +132,11 @@ const CDNPage = () => {
       return;
     }
 
+    if (!can('CDN', 'Create')) {
+      toast.error('You do not have permission to create CDNs.');
+      return;
+    }
+
     cdnApi
       .create({
         receivingParty,
@@ -149,6 +161,11 @@ const CDNPage = () => {
   };
 
   const handleReceive = () => {
+    if (!can('CDN', 'Create')) {
+      toast.error('You do not have permission to receive CDNs.');
+      return;
+    }
+
     cdnApi
       .receiveByPin({ pin: receivePin })
       .then((result) => {

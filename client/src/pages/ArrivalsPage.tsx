@@ -14,6 +14,8 @@ import type { ArrivalSummary, ArrivalCreatePayload } from '@/services/api/arriva
 import type { Vehicle, Contact, FreightMethod } from '@/types/models';
 import { toast } from 'sonner';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 /**
  * ArrivalsPage — SRS Part 2: Inward Logistics (REQ-ARR-001 to REQ-ARR-013)
@@ -83,6 +85,12 @@ const NARRATION_PRESETS = [
 const ArrivalsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Arrivals');
+
+  if (!canView) {
+    return <ForbiddenPage moduleName="Arrivals" />;
+  }
   const [apiArrivals, setApiArrivals] = useState<ArrivalSummary[]>([]);
   const [apiArrivalsLoading, setApiArrivalsLoading] = useState(true);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -287,6 +295,11 @@ const ArrivalsPage = () => {
     const warnings = validateWeightOutliers();
     if (warnings.length > 0) {
       warnings.forEach(w => toast.warning(w));
+    }
+
+    if (!can('Arrivals', 'Create')) {
+      toast.error('You do not have permission to create arrivals.');
+      return;
     }
 
     try {

@@ -43,7 +43,7 @@ public class WriterPadResource {
     }
 
     @PostMapping("/sessions/load-or-create")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_CREATE + "\")")
     @Operation(summary = "Load or create writer pad session for lot/bid")
     public ResponseEntity<?> loadOrCreateSession(@Valid @RequestBody Map<String, Object> payload) {
         LOG.debug("REST request to loadOrCreate WriterPad session: {}", payload);
@@ -75,7 +75,7 @@ public class WriterPadResource {
     }
 
     @PostMapping("/sessions/{sessionId}/weights")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_EDIT + "\")")
     @Operation(summary = "Attach weight entry to session")
     public ResponseEntity<?> attachWeight(
         @PathVariable Long sessionId,
@@ -93,7 +93,7 @@ public class WriterPadResource {
     }
 
     @PostMapping("/weights/{entryId}/retag")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_EDIT + "\")")
     @Operation(summary = "Retag a weight entry to another bid")
     public ResponseEntity<?> retag(
         @PathVariable Long entryId,
@@ -109,7 +109,7 @@ public class WriterPadResource {
     }
 
     @PostMapping("/cleanup/end-of-day")
-    @PreAuthorize("hasAnyAuthority(\"" + AuthoritiesConstants.AUCTIONS_DELETE + "\", \"" + AuthoritiesConstants.ADMIN + "\")")
+    @PreAuthorize("hasAnyAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_EDIT + "\", \"" + AuthoritiesConstants.ADMIN + "\")")
     @Operation(summary = "End-of-day cleanup for Writer's Pad")
     public ResponseEntity<Void> endOfDayCleanup() {
         LOG.debug("REST request to perform WriterPad end-of-day cleanup");
@@ -118,7 +118,7 @@ public class WriterPadResource {
     }
 
     @GetMapping("/sessions")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_VIEW + "\")")
     @Operation(summary = "List writer pad sessions for current trader")
     public ResponseEntity<Page<WriterPadSessionDTO>> listSessions(
         @org.springdoc.core.annotations.ParameterObject Pageable pageable
@@ -129,7 +129,7 @@ public class WriterPadResource {
     }
 
     @GetMapping("/sessions/{sessionId}")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WRITERS_PAD_VIEW + "\")")
     @Operation(summary = "Get writer pad session with recent weight log")
     public ResponseEntity<WriterPadSessionWithLogDTO> getSessionWithLog(
         @PathVariable Long sessionId,

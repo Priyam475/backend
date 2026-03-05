@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Trader-scoped RBAC support:
+        - Add nullable trader_id column to role table.
+        - Relax global unique constraint on role_name so that different traders
+          can use the same role names (e.g. "Cashier").
+        - Introduce a composite unique constraint on (trader_id, role_name).
+    -->
+
+    <changeSet id="20260306140000-1" author="mercotrace">
+        <addColumn tableName="role">
+            <column name="trader_id" type="bigint"/>
+        </addColumn>
+
+        <addForeignKeyConstraint
+            baseTableName="role"
+            baseColumnNames="trader_id"
+            constraintName="fk_role_trader"
+            referencedTableName="trader"
+            referencedColumnNames="id"
+            deferrable="false"
+            initiallyDeferred="false"/>
+    </changeSet>
+
+    <changeSet id="20260306140000-2" author="mercotrace">
+        <!-- Drop the global unique constraint on role_name -->
+        <dropUniqueConstraint
+            tableName="role"
+            constraintName="ux_role__role_name"/>
+
+        <!-- Enforce uniqueness per trader + role_name combination -->
+        <addUniqueConstraint
+            tableName="role"
+            columnNames="trader_id, role_name"
+            constraintName="ux_role__trader_role_name"/>
+    </changeSet>
+
+</databaseChangeLog>
+

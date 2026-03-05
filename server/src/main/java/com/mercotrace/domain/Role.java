@@ -36,6 +36,14 @@ public class Role extends AbstractAuditingEntity<Long> implements Serializable {
     @Column(name = "description", length = 255)
     private String description;
 
+    /**
+     * Optional trader scope for this role. When null, the role is considered
+     * global/admin-managed. When non-null, the role belongs to a specific
+     * trader and is only visible/assignable within that trader context.
+     */
+    @Column(name = "trader_id")
+    private Long traderId;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -92,6 +100,19 @@ public class Role extends AbstractAuditingEntity<Long> implements Serializable {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getTraderId() {
+        return this.traderId;
+    }
+
+    public Role traderId(Long traderId) {
+        this.setTraderId(traderId);
+        return this;
+    }
+
+    public void setTraderId(Long traderId) {
+        this.traderId = traderId;
     }
 
     public Instant getCreatedAt() {

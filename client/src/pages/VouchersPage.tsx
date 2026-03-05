@@ -7,6 +7,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { VoucherHeader, VoucherLine, VoucherType, VoucherLifecycle, COALedger, PaymentModeType } from '@/types/accounting';
 import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccounts';
 import { voucherHeadersApi } from '@/services/api/voucherHeaders';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 
@@ -32,6 +34,11 @@ const STATUS_COLORS: Record<VoucherLifecycle, string> = {
 const VouchersPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Vouchers');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Vouchers" />;
+  }
   const [vouchers, setVouchers] = useState<VoucherHeader[]>([]);
   const [selectedVoucherLines, setSelectedVoucherLines] = useState<VoucherLine[]>([]);
   const [ledgers, setLedgers] = useState<COALedger[]>([]);
@@ -140,6 +147,10 @@ const VouchersPage = () => {
         credit: round2(parseFloat(l.credit) || 0),
       }));
     if (payloadLines.length === 0) return;
+    if (!can('Vouchers', 'Create')) {
+      toast.error('You do not have permission to create vouchers.');
+      return;
+    }
     try {
       await voucherHeadersApi.create({
         voucherType: createType,
@@ -158,6 +169,10 @@ const VouchersPage = () => {
   };
 
   const handlePost = async (v: VoucherHeader) => {
+    if (!can('Vouchers', 'Approve')) {
+      toast.error('You do not have permission to approve vouchers.');
+      return;
+    }
     try {
       const updated = await voucherHeadersApi.post(v.voucher_id);
       setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? updated : x));
@@ -169,6 +184,10 @@ const VouchersPage = () => {
   };
 
   const handleReverse = async (v: VoucherHeader) => {
+    if (!can('Vouchers', 'Approve')) {
+      toast.error('You do not have permission to reverse vouchers.');
+      return;
+    }
     try {
       const updated = await voucherHeadersApi.reverse(v.voucher_id);
       setVouchers(prev => prev.map(x => x.voucher_id === v.voucher_id ? updated : x));

@@ -74,6 +74,8 @@ export interface User {
   // Extended fields for UI
   name?: string;
   role?: UserRole;
+  // Spring Security authorities, e.g. ROLE_CONTACTS_VIEW. Populated from backend auth/profile responses.
+  authorities?: string[];
 }
 
 /** 2.6 User_Roles */

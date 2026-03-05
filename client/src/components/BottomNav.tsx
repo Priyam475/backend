@@ -1,6 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Truck, Gavel, Receipt, Printer, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePermissions, getModuleKeyForRoute } from '@/lib/permissions';
 const tabs = [
   { icon: Truck, label: 'Arrivals', path: '/arrivals' },
   { icon: Gavel, label: 'Auctions', path: '/auctions' },
@@ -12,11 +13,16 @@ const tabs = [
 const BottomNav = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { canAccessModule } = usePermissions();
 
   return (
     <nav className="bottom-nav z-50 w-full max-w-[56rem] left-1/2 -translate-x-1/2 lg:hidden">
       <div className="flex items-center justify-around h-14 px-2 md:px-6">
         {tabs.map((tab) => {
+          const moduleKey = getModuleKeyForRoute(tab.path);
+          if (moduleKey && !canAccessModule(moduleKey)) {
+            return null;
+          }
           const isActive = location.pathname === tab.path;
           return (
             <button

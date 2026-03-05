@@ -1,11 +1,14 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.domain.Role;
 import com.mercotrace.repository.RoleRepository;
 import com.mercotrace.service.RoleQueryService;
 import com.mercotrace.service.RoleService;
+import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.criteria.RoleCriteria;
 import com.mercotrace.service.dto.PermissionDTO;
 import com.mercotrace.service.dto.RoleDTO;
+import com.mercotrace.service.mapper.RoleMapper;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -22,6 +25,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -49,14 +53,27 @@ public class RoleResource {
 
     private final RoleQueryService roleQueryService;
 
-    public RoleResource(RoleService roleService, RoleRepository roleRepository, RoleQueryService roleQueryService) {
+    private final TraderContextService traderContextService;
+
+    private final RoleMapper roleMapper;
+
+    public RoleResource(
+        RoleService roleService,
+        RoleRepository roleRepository,
+        RoleQueryService roleQueryService,
+        TraderContextService traderContextService,
+        RoleMapper roleMapper
+    ) {
         this.roleService = roleService;
         this.roleRepository = roleRepository;
         this.roleQueryService = roleQueryService;
+        this.traderContextService = traderContextService;
+        this.roleMapper = roleMapper;
     }
 
     /**
      * {@code POST  /roles} : Create a new role.
+     * When the current user has a trader context, the role is scoped to that trader.
      *
      * @param roleDTO the roleDTO to create.
      * @return the {@link ResponseEntity} with status {@code 201 (Created)} and with body the new roleDTO, or with status {@code 400 (Bad Request)} if the role has already an ID.
@@ -68,6 +85,7 @@ public class RoleResource {
         if (roleDTO.getId() != null) {
             throw new BadRequestAlertException("A new role cannot already have an ID", ENTITY_NAME, "idexists");
         }
+        traderContextService.getCurrentTraderIdOptional().ifPresent(roleDTO::setTraderId);
         roleDTO = roleService.save(roleDTO);
         return ResponseEntity.created(new URI("/api/roles/" + roleDTO.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, roleDTO.getId().toString()))
@@ -99,6 +117,15 @@ public class RoleResource {
 
         if (!roleRepository.existsById(id)) {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
+        }
+
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Role existing = roleRepository.findById(id).orElseThrow();
+            if (existing.getTraderId() == null || !existing.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            roleDTO.setTraderId(traderIdOpt.get());
         }
 
         roleDTO = roleService.update(roleDTO);
@@ -135,6 +162,14 @@ public class RoleResource {
             throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
         }
 
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Role existing = roleRepository.findById(id).orElseThrow();
+            if (existing.getTraderId() == null || !existing.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+        }
+
         Optional<RoleDTO> result = roleService.partialUpdate(roleDTO);
 
         return ResponseUtil.wrapOrNotFound(
@@ -145,6 +180,7 @@ public class RoleResource {
 
     /**
      * {@code GET  /roles} : get all the roles.
+     * When the current user has a trader context, only roles for that trader are returned.
      *
      * @param pageable the pagination information.
      * @param criteria the criteria which the requested entities should match.
@@ -157,6 +193,14 @@ public class RoleResource {
     ) {
         LOG.debug("REST request to get Roles by criteria: {}", criteria);
 
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            // When called in a trader context, eagerly fetch permissions to avoid LazyInitializationException.
+            List<Role> roles = roleRepository.fetchBagRelationships(roleRepository.findByTraderId(traderIdOpt.get()));
+            List<RoleDTO> content = roles.stream().map(roleMapper::toDto).collect(Collectors.toList());
+            return ResponseEntity.ok().body(content);
+        }
+
         Page<RoleDTO> page = roleQueryService.findByCriteria(criteria, pageable);
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
         return ResponseEntity.ok().headers(headers).body(page.getContent());
@@ -164,6 +208,7 @@ public class RoleResource {
 
     /**
      * {@code GET  /roles/count} : count all the roles.
+     * When the current user has a trader context, only roles for that trader are counted.
      *
      * @param criteria the criteria which the requested entities should match.
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the count in body.
@@ -171,31 +216,61 @@ public class RoleResource {
     @GetMapping("/count")
     public ResponseEntity<Long> countRoles(RoleCriteria criteria) {
         LOG.debug("REST request to count Roles by criteria: {}", criteria);
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            long count = roleRepository.findByTraderId(traderIdOpt.get()).size();
+            return ResponseEntity.ok().body(count);
+        }
         return ResponseEntity.ok().body(roleQueryService.countByCriteria(criteria));
     }
 
     /**
      * {@code GET  /roles/:id} : get the "id" role.
+     * When the current user has a trader context, returns 403 if the role belongs to another trader.
      *
      * @param id the id of the roleDTO to retrieve.
-     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the roleDTO, or with status {@code 404 (Not Found)}.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the roleDTO, or with status {@code 404 (Not Found)} or {@code 403 (Forbidden)}.
      */
     @GetMapping("/{id}")
     public ResponseEntity<RoleDTO> getRole(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Role : {}", id);
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Optional<Role> roleOpt = roleRepository.findById(id);
+            if (roleOpt.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            Role role = roleOpt.get();
+            if (role.getTraderId() == null || !role.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            return ResponseEntity.ok(roleMapper.toDto(role));
+        }
         Optional<RoleDTO> roleDTO = roleService.findOne(id);
         return ResponseUtil.wrapOrNotFound(roleDTO);
     }
 
     /**
      * {@code DELETE  /roles/:id} : delete the "id" role.
+     * When the current user has a trader context, returns 403 if the role belongs to another trader.
      *
      * @param id the id of the roleDTO to delete.
-     * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
+     * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)} or {@code 403 (Forbidden)}.
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteRole(@PathVariable("id") Long id) {
         LOG.debug("REST request to delete Role : {}", id);
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Optional<Role> roleOpt = roleRepository.findById(id);
+            if (roleOpt.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            Role role = roleOpt.get();
+            if (role.getTraderId() == null || !role.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+        }
         roleService.delete(id);
         return ResponseEntity.noContent()
             .headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id.toString()))
@@ -204,9 +279,19 @@ public class RoleResource {
 
     /**
      * {@code GET  /roles/:id/permissions} : get permissions for role — Module 1 spec.
+     * When the current user has a trader context, returns 403 if the role belongs to another trader.
      */
     @GetMapping("/{id}/permissions")
     public ResponseEntity<Set<PermissionDTO>> getRolePermissions(@PathVariable("id") Long id) {
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Optional<Role> roleOpt = roleRepository.findById(id);
+            if (roleOpt.isEmpty()) return ResponseEntity.notFound().build();
+            Role role = roleOpt.get();
+            if (role.getTraderId() == null || !role.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+        }
         return roleService
             .findOne(id)
             .map(RoleDTO::getPermissions)
@@ -216,6 +301,7 @@ public class RoleResource {
 
     /**
      * {@code POST  /roles/:id/permissions} : assign permissions to role — Module 1 spec. Body: array of permission ids.
+     * When the current user has a trader context, returns 403 if the role belongs to another trader.
      */
     @PostMapping("/{id}/permissions")
     public ResponseEntity<RoleDTO> assignPermissionsToRole(
@@ -225,6 +311,13 @@ public class RoleResource {
         if (!roleRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Role role = roleRepository.findById(id).orElseThrow();
+            if (role.getTraderId() == null || !role.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+        }
         Set<Long> ids = permissionIds != null ? permissionIds.stream().filter(Objects::nonNull).collect(Collectors.toSet()) : Set.of();
         RoleDTO updated = roleService.addPermissionsToRole(id, ids);
         return ResponseEntity.ok(updated);
@@ -232,11 +325,19 @@ public class RoleResource {
 
     /**
      * {@code DELETE  /roles/:id/permissions/:permId} : remove permission from role — Module 1 spec.
+     * When the current user has a trader context, returns 403 if the role belongs to another trader.
      */
     @DeleteMapping("/{id}/permissions/{permId}")
     public ResponseEntity<Void> removePermissionFromRole(@PathVariable("id") Long id, @PathVariable("permId") Long permId) {
         if (!roleRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
+        }
+        Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isPresent()) {
+            Role role = roleRepository.findById(id).orElseThrow();
+            if (role.getTraderId() == null || !role.getTraderId().equals(traderIdOpt.get())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
         }
         roleService.removePermissionFromRole(id, permId);
         return ResponseEntity.noContent().build();

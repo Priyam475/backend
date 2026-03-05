@@ -14,6 +14,8 @@ import { contactApi, stockPurchaseApi, commodityApi } from '@/services/api';
 import type { Contact, Commodity } from '@/types/models';
 import type { StockPurchaseDTO } from '@/services/api';
 import { toast } from 'sonner';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 interface PurchaseLineItem {
   id: string;
@@ -32,6 +34,11 @@ interface PurchaseCharge {
 const StockPurchasePage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Stock Purchase');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Stock Purchase" />;
+  }
   const [vendors, setVendors] = useState<Contact[]>([]);
   const [records, setRecords] = useState<StockPurchaseDTO[]>([]);
   const [totalElements, setTotalElements] = useState(0);
@@ -135,6 +142,10 @@ const StockPurchasePage = () => {
     const vendorId = Number(selectedVendor.contact_id);
     if (!Number.isFinite(vendorId)) {
       toast.error('Invalid vendor');
+      return;
+    }
+    if (!can('Stock Purchase', 'Create')) {
+      toast.error('You do not have permission to create stock purchases.');
       return;
     }
     setSaving(true);

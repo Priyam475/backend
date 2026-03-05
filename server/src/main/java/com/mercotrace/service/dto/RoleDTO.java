@@ -45,6 +45,11 @@ public class RoleDTO implements Serializable {
      */
     private Map<String, ModulePermissionEntry> modulePermissions = new HashMap<>();
 
+    /**
+     * When non-null, this role is scoped to a specific trader. When null, the role is global/admin.
+     */
+    private Long traderId;
+
     public Long getId() {
         return id;
     }
@@ -91,6 +96,14 @@ public class RoleDTO implements Serializable {
 
     public void setModulePermissions(Map<String, ModulePermissionEntry> modulePermissions) {
         this.modulePermissions = modulePermissions;
+    }
+
+    public Long getTraderId() {
+        return traderId;
+    }
+
+    public void setTraderId(Long traderId) {
+        this.traderId = traderId;
     }
 
     public static class ModulePermissionEntry implements Serializable {

@@ -37,7 +37,7 @@ public class PrintLogResource {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.PRINT_LOGS_VIEW + "\")")
     @Operation(summary = "Log print event", description = "Record a print event (sales bill, weighing slip, etc.)")
     public ResponseEntity<PrintLogDTO> create(@Valid @RequestBody PrintLogCreateRequest request) {
         LOG.debug("REST request to create PrintLog: {} {}", request.getPrintType(), request.getReferenceType());
@@ -46,7 +46,7 @@ public class PrintLogResource {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.PRINT_LOGS_VIEW + "\")")
     @Operation(summary = "List print logs", description = "Paginated list of print events for current trader")
     public ResponseEntity<List<PrintLogDTO>> list(
         @org.springdoc.core.annotations.ParameterObject Pageable pageable

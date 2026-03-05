@@ -1,6 +1,7 @@
 package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ContactDTO;
@@ -16,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
@@ -62,6 +64,7 @@ public class ContactResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PostMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_CREATE + "\")")
     public ResponseEntity<ContactDTO> createContact(@Valid @RequestBody ContactDTO contactDTO) throws URISyntaxException {
         LOG.debug("REST request to save Contact : {}", contactDTO);
         if (contactDTO.getId() != null) {
@@ -94,6 +97,7 @@ public class ContactResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_EDIT + "\")")
     public ResponseEntity<ContactDTO> updateContact(
         @PathVariable(value = "id", required = false) final Long id,
         @Valid @RequestBody ContactDTO contactDTO
@@ -144,6 +148,7 @@ public class ContactResource {
      * @throws URISyntaxException if the Location URI syntax is incorrect.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_EDIT + "\")")
     public ResponseEntity<ContactDTO> partialUpdateContact(
         @PathVariable(value = "id", required = false) final Long id,
         @NotNull @RequestBody ContactDTO contactDTO
@@ -181,6 +186,7 @@ public class ContactResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of contacts in body.
      */
     @GetMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\")")
     public ResponseEntity<List<ContactDTO>> getAllContacts() {
         LOG.debug("REST request to get all Contacts for current trader");
         Long traderId = resolveTraderId();
@@ -195,6 +201,7 @@ public class ContactResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the contactDTO, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\")")
     public ResponseEntity<ContactDTO> getContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Contact : {}", id);
         Long traderId = resolveTraderId();
@@ -215,6 +222,7 @@ public class ContactResource {
      * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_DELETE + "\")")
     public ResponseEntity<Void> deleteContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to delete Contact : {}", id);
         Long traderId = resolveTraderId();

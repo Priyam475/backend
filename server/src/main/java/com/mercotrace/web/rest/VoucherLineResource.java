@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.VoucherLineService;
 import com.mercotrace.service.dto.VoucherLineDTO;
 import java.time.LocalDate;
@@ -7,6 +8,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -30,6 +32,7 @@ public class VoucherLineResource {
      * Trader-scoped. For Financial Reports trial balance and commodity P&L.
      */
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.FINANCIAL_REPORTS_VIEW + "\")")
     public ResponseEntity<List<VoucherLineDTO>> getByDateRange(
         @RequestParam LocalDate dateFrom,
         @RequestParam LocalDate dateTo

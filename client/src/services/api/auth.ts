@@ -61,6 +61,7 @@ export const authApi = {
       created_at: dataRes.user.created_at ?? new Date().toISOString(),
       name: dataRes.user.name,
       role: dataRes.user.role,
+      authorities: dataRes.user.authorities ?? [],
     };
 
     const trader: Trader = {
@@ -129,6 +130,7 @@ export const authApi = {
       created_at: data.user.created_at ?? new Date().toISOString(),
       name: data.user.name,
       role: data.user.role,
+      authorities: data.user.authorities ?? [],
     };
 
     const trader: Trader = {
@@ -177,6 +179,7 @@ export const authApi = {
       created_at: data.user.created_at ?? new Date().toISOString(),
       name: data.user.name,
       role: data.user.role,
+      authorities: data.user.authorities ?? [],
     };
 
     const trader: Trader = {
@@ -271,6 +274,7 @@ export const authApi = {
       created_at: data.user.created_at ?? new Date().toISOString(),
       name: data.user.name,
       role: data.user.role,
+      authorities: data.user.authorities ?? [],
     };
 
     const trader: Trader = {

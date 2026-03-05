@@ -38,6 +38,9 @@ function mapRoleDtoToRole(dto: RoleDTO): RbacRole {
 async function handleRes<T>(res: Response, msg: string): Promise<T> {
   if (res.ok) return res.json() as Promise<T>;
   let detail = msg;
+  if (res.status === 401 || res.status === 403) {
+    detail = "You don't have permission to perform this action.";
+  }
   try {
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
@@ -111,7 +114,7 @@ export const rbacApi = {
     }
   },
 
-  async createProfile(data: { full_name: string; email: string; mobile: string | null }): Promise<RbacProfile> {
+  async createProfile(data: { full_name: string; email: string; mobile?: string | null; password?: string }): Promise<RbacProfile> {
     const [first, ...rest] = (data.full_name || '').trim().split(/\s+/);
     const res = await apiFetch('/admin/users', {
       method: 'POST',
@@ -190,5 +193,161 @@ export const rbacApi = {
       method: 'PUT',
       body: JSON.stringify(numericIds),
     });
+  },
+};
+
+// --- Trader-scoped RBAC (Settings when user has a trader: only that trader's roles and staff) ---
+
+type TraderRbacUserVM = {
+  id?: number;
+  login?: string;
+  email?: string;
+  fullName?: string;
+  activated?: boolean;
+  roleInTrader?: string;
+  roleIds?: number[];
+};
+
+function traderUserToProfile(u: TraderRbacUserVM): RbacProfile {
+  return {
+    id: String(u.id ?? ''),
+    user_id: String(u.id ?? ''),
+    full_name: u.fullName ?? u.login ?? '',
+    email: u.email ?? '',
+    mobile: null,
+    status: u.activated ? 'active' : 'inactive',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Use this when the current user has a trader (e.g. from useAuth().trader).
+ * All methods hit /api/trader/rbac/* so each trader sees only their own roles and staff.
+ */
+export const traderRbacApi = {
+  async listRoles(): Promise<RbacRole[]> {
+    const res = await apiFetch('/trader/rbac/roles', { method: 'GET' });
+    const data = await handleRes<RoleDTO[]>(res, 'Failed to load roles');
+    return Array.isArray(data) ? data.map(mapRoleDtoToRole) : [];
+  },
+
+  async listProfiles(): Promise<RbacProfile[]> {
+    const res = await apiFetch('/trader/rbac/users', { method: 'GET' });
+    const data = await handleRes<TraderRbacUserVM[]>(res, 'Failed to load users');
+    if (!Array.isArray(data)) return [];
+    return data.map(traderUserToProfile);
+  },
+
+  async listUserRoles(): Promise<UserRole[]> {
+    const res = await apiFetch('/trader/rbac/users', { method: 'GET' });
+    const users = await handleRes<TraderRbacUserVM[]>(res, 'Failed to load users');
+    if (!Array.isArray(users)) return [];
+    const out: UserRole[] = [];
+    for (const u of users) {
+      const uid = String(u.id ?? '');
+      const roleIds = u.roleIds ?? [];
+      for (const rid of roleIds) {
+        out.push({
+          id: `${uid}-${rid}`,
+          user_id: uid,
+          role_id: String(rid),
+          assigned_by: null,
+          created_at: new Date().toISOString(),
+        });
+      }
+    }
+    return out;
+  },
+
+  async setUserRoles(profileId: string, roleIds: string[]): Promise<void> {
+    const numericIds = roleIds.map((r) => Number(r)).filter((n) => !Number.isNaN(n));
+    await apiFetch(`/trader/rbac/users/${encodeURIComponent(profileId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds: numericIds }),
+    });
+  },
+
+  async createProfile(data: {
+    full_name: string;
+    email: string;
+    mobile?: string | null;
+    password: string;
+    roleInTrader?: string;
+  }): Promise<RbacProfile> {
+    const res = await apiFetch('/trader/rbac/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        fullName: data.full_name,
+        email: data.email,
+        password: data.password,
+        roleInTrader: data.roleInTrader ?? 'STAFF',
+        activated: true,
+      }),
+    });
+    const u = await handleRes<TraderRbacUserVM>(res, 'Failed to create user');
+    return traderUserToProfile(u);
+  },
+
+  async updateProfile(
+    profileId: string,
+    data: { full_name?: string; email?: string; mobile?: string | null }
+  ): Promise<RbacProfile> {
+    const res = await apiFetch(`/trader/rbac/users/${encodeURIComponent(profileId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        fullName: data.full_name,
+        email: data.email,
+      }),
+    });
+    const u = await handleRes<TraderRbacUserVM>(res, 'Failed to update user');
+    return traderUserToProfile(u);
+  },
+
+  async setProfileStatus(profileId: string, status: 'active' | 'inactive'): Promise<void> {
+    await apiFetch(`/trader/rbac/users/${encodeURIComponent(profileId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ activated: status === 'active' }),
+    });
+  },
+
+  // Trader RBAC uses same /api/roles for CRUD when caller has trader context; for consistency we could use trader/rbac/roles here too.
+  async createRole(data: {
+    name: string;
+    description: string;
+    permissions: RbacRole['permissions'];
+  }): Promise<RbacRole> {
+    const res = await apiFetch('/trader/rbac/roles', {
+      method: 'POST',
+      body: JSON.stringify({
+        roleName: data.name,
+        description: data.description,
+        modulePermissions: data.permissions,
+      }),
+    });
+    const dto = await handleRes<RoleDTO>(res, 'Failed to create role');
+    return mapRoleDtoToRole(dto);
+  },
+
+  async updateRole(
+    roleId: string,
+    data: { name: string; description: string; permissions: RbacRole['permissions'] }
+  ): Promise<RbacRole> {
+    const res = await apiFetch(`/trader/rbac/roles/${encodeURIComponent(roleId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: Number(roleId),
+        roleName: data.name,
+        description: data.description,
+        modulePermissions: data.permissions,
+      }),
+    });
+    const dto = await handleRes<RoleDTO>(res, 'Failed to update role');
+    return mapRoleDtoToRole(dto);
+  },
+
+  async deleteRole(roleId: string): Promise<void> {
+    const res = await apiFetch(`/trader/rbac/roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' });
+    if (!res.ok) await handleRes<unknown>(res, 'Failed to delete role');
   },
 };

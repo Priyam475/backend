@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.CdnService;
 import com.mercotrace.service.dto.CDNDTOs.CDNCreateDTO;
 import com.mercotrace.service.dto.CDNDTOs.CDNResponseDTO;
@@ -17,6 +18,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -45,6 +47,7 @@ public class CDNResource {
      * {@code POST  /api/cdns} : Create a new CDN. Returns body with generated PIN.
      */
     @PostMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CDN_CREATE + "\")")
     public ResponseEntity<CDNResponseDTO> createCdn(@Valid @RequestBody CDNCreateDTO request) throws URISyntaxException {
         LOG.debug("REST request to create CDN : {}", request.getReceivingParty());
         try {
@@ -62,6 +65,7 @@ public class CDNResource {
      * {@code GET  /api/cdns/:id} : Get CDN by id (trader-scoped).
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CDN_VIEW + "\")")
     public ResponseEntity<CDNResponseDTO> getCdn(@PathVariable Long id) {
         LOG.debug("REST request to get CDN : {}", id);
         CDNResponseDTO dto = cdnService.getById(id);
@@ -75,6 +79,7 @@ public class CDNResource {
      * {@code GET  /api/cdns} : List CDNs with pagination and optional search.
      */
     @GetMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CDN_VIEW + "\")")
     public ResponseEntity<List<CDNResponseDTO>> getAllCdns(
         @org.springdoc.core.annotations.ParameterObject
         @PageableDefault(size = 10, sort = "cdnDate", direction = Sort.Direction.DESC) Pageable pageable,
@@ -90,6 +95,7 @@ public class CDNResource {
      * {@code POST  /api/cdns/receive} : Receive CDN by PIN.
      */
     @PostMapping("/receive")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CDN_CREATE + "\")")
     public ResponseEntity<CDNResponseDTO> receiveByPin(@Valid @RequestBody ReceiveByPINDTO request) {
         LOG.debug("REST request to receive CDN by PIN");
         try {

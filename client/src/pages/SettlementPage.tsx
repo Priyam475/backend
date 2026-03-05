@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { printLogApi, settlementApi, type PattiDTO } from '@/services/api';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
@@ -108,6 +110,11 @@ function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
 const SettlementPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Settlement');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Settlement" />;
+  }
   const [sellers, setSellers] = useState<SellerSettlement[]>([]);
   const [selectedSeller, setSelectedSeller] = useState<SellerSettlement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -343,6 +350,10 @@ const SettlementPage = () => {
       netPayable: pattiData.netPayable,
       useAverageWeight: pattiData.useAverageWeight,
     };
+    if (!can('Settlement', existingPattiId != null ? 'Edit' : 'Create')) {
+      toast.error('You do not have permission to save settlements.');
+      return;
+    }
     try {
       if (existingPattiId != null) {
         const updated = await settlementApi.updatePatti(existingPattiId, payload);
