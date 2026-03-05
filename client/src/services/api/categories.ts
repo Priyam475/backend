@@ -49,7 +49,10 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
   throw new Error(message);
 }
 
+const ADMIN_CATEGORIES_BASE = '/admin/categories';
+
 export const categoryApi = {
+  /** List categories (trader context: /api/business-categories). */
   async list(): Promise<BusinessCategory[]> {
     const params = new URLSearchParams({ page: '0', size: '1000' });
     const res = await apiFetch(`/business-categories?${params.toString()}`, {
@@ -59,8 +62,31 @@ export const categoryApi = {
     return data.map(mapDtoToCategory);
   },
 
+  /** List categories (admin context: /api/admin/categories). Use from Admin UI so admin JWT/cookie is used. */
+  async adminList(): Promise<BusinessCategory[]> {
+    const params = new URLSearchParams({ page: '0', size: '1000' });
+    const res = await apiFetch(`${ADMIN_CATEGORIES_BASE}?${params.toString()}`, {
+      method: 'GET',
+    });
+    const data = await handleResponse<BusinessCategoryDto[]>(res, 'Failed to load categories');
+    return data.map(mapDtoToCategory);
+  },
+
   async create(payload: { category_name: string; is_active?: boolean }): Promise<BusinessCategory> {
     const res = await apiFetch('/business-categories', {
+      method: 'POST',
+      body: JSON.stringify({
+        categoryName: payload.category_name,
+        isActive: payload.is_active ?? true,
+      }),
+    });
+    const dto = await handleResponse<BusinessCategoryDto>(res, 'Failed to create category');
+    return mapDtoToCategory(dto);
+  },
+
+  /** Create category (admin context). */
+  async adminCreate(payload: { category_name: string; is_active?: boolean }): Promise<BusinessCategory> {
+    const res = await apiFetch(ADMIN_CATEGORIES_BASE, {
       method: 'POST',
       body: JSON.stringify({
         categoryName: payload.category_name,
@@ -84,8 +110,28 @@ export const categoryApi = {
     return mapDtoToCategory(dto);
   },
 
+  /** Update category (admin context). */
+  async adminUpdate(id: string, payload: { category_name: string; is_active?: boolean }): Promise<BusinessCategory> {
+    const res = await apiFetch(`${ADMIN_CATEGORIES_BASE}/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: Number(id),
+        categoryName: payload.category_name,
+        isActive: payload.is_active,
+      }),
+    });
+    const dto = await handleResponse<BusinessCategoryDto>(res, 'Failed to update category');
+    return mapDtoToCategory(dto);
+  },
+
   async delete(id: string): Promise<void> {
     const res = await apiFetch(`/business-categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) await handleResponse<unknown>(res, 'Failed to delete category');
+  },
+
+  /** Delete category (admin context). */
+  async adminDelete(id: string): Promise<void> {
+    const res = await apiFetch(`${ADMIN_CATEGORIES_BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' });
     if (!res.ok) await handleResponse<unknown>(res, 'Failed to delete category');
   },
 };

@@ -2,20 +2,30 @@ package com.mercotrace.config;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
-import com.mercotrace.security.*;
+import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.security.CookieOrHeaderBearerTokenResolver;
+import com.mercotrace.security.SecurityUtils;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.servlet.util.matcher.MvcRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.web.servlet.handler.HandlerMappingIntrospector;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import tech.jhipster.config.JHipsterProperties;
 
 @Configuration
@@ -33,8 +43,59 @@ public class SecurityConfiguration {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Handles public API paths without JWT so that unauthenticated flows (trader
+     * setup/registration) work. Runs before the trader chain so no Bearer token is
+     * validated (avoids 401 when an invalid/expired cookie is sent with the request).
+     * - GET /api/business-categories(/**): load categories anonymously
+     * - POST /api/auth/register: trader registration (user not logged in)
+     */
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
+    @Order(0)
+    public SecurityFilterChain businessCategoriesPublicFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
+        http
+            .securityMatcher(new OrRequestMatcher(
+                mvc.pattern(HttpMethod.GET, "/api/business-categories"),
+                mvc.pattern(HttpMethod.GET, "/api/business-categories/**"),
+                mvc.pattern(HttpMethod.POST, "/api/auth/register")
+            ))
+            .cors(withDefaults())
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authz -> authz.anyRequest().permitAll())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        return http.build();
+    }
+
+    @Bean
+    @Order(1)
+    public SecurityFilterChain adminSecurityFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
+        http
+            .securityMatcher("/api/admin/**", "/admin/**")
+            .cors(withDefaults())
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authz ->
+                // prettier-ignore
+                authz
+                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/api/admin/auth/login")).permitAll()
+                    .requestMatchers(mvc.pattern("/api/admin/**")).hasAuthority(AuthoritiesConstants.ADMIN)
+            )
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(exceptions ->
+                exceptions
+                    .authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
+                    .accessDeniedHandler(new BearerTokenAccessDeniedHandler())
+            )
+            .oauth2ResourceServer(oauth2 ->
+                oauth2
+                    .bearerTokenResolver(new CookieOrHeaderBearerTokenResolver())
+                    .jwt(jwt -> jwt.jwtAuthenticationConverter(adminJwtAuthenticationConverter()))
+            );
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
+    public SecurityFilterChain traderSecurityFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
         http
             .cors(withDefaults())
             .csrf(csrf -> csrf.disable())
@@ -49,8 +110,6 @@ public class SecurityConfiguration {
                     .requestMatchers(mvc.pattern("/api/activate")).permitAll()
                     .requestMatchers(mvc.pattern("/api/account/reset-password/init")).permitAll()
                     .requestMatchers(mvc.pattern("/api/account/reset-password/finish")).permitAll()
-                    .requestMatchers(mvc.pattern("/api/admin/**")).hasAuthority(AuthoritiesConstants.ADMIN)
-                    .requestMatchers(mvc.pattern("/api/**")).authenticated()
                     .requestMatchers(mvc.pattern("/v3/api-docs/**")).permitAll()
                     .requestMatchers(mvc.pattern("/swagger-ui/**")).permitAll()
                     .requestMatchers(mvc.pattern("/swagger-ui.html")).permitAll()
@@ -59,6 +118,9 @@ public class SecurityConfiguration {
                     .requestMatchers(mvc.pattern("/management/info")).permitAll()
                     .requestMatchers(mvc.pattern("/management/prometheus")).permitAll()
                     .requestMatchers(mvc.pattern("/management/**")).hasAuthority(AuthoritiesConstants.ADMIN)
+                    // GET /api/business-categories(*) handled by businessCategoriesPublicFilterChain (Order 0)
+                    // everything else under /api/** requires an authenticated trader
+                    .requestMatchers(mvc.pattern("/api/**")).authenticated()
             )
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .exceptionHandling(exceptions ->
@@ -69,7 +131,7 @@ public class SecurityConfiguration {
             .oauth2ResourceServer(oauth2 ->
                 oauth2
                     .bearerTokenResolver(new CookieOrHeaderBearerTokenResolver())
-                    .jwt(withDefaults())
+                    .jwt(jwt -> jwt.jwtAuthenticationConverter(traderJwtAuthenticationConverter()))
             );
         return http.build();
     }
@@ -77,5 +139,45 @@ public class SecurityConfiguration {
     @Bean
     MvcRequestMatcher.Builder mvc(HandlerMappingIntrospector introspector) {
         return new MvcRequestMatcher.Builder(introspector);
+    }
+
+    private Converter<Jwt, ? extends AbstractAuthenticationToken> adminJwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter delegate = new JwtGrantedAuthoritiesConverter();
+        delegate.setAuthoritiesClaimName(SecurityUtils.AUTHORITIES_CLAIM);
+        delegate.setAuthorityPrefix("");
+
+        return jwt -> {
+            String tokenType = getTokenType(jwt);
+            if (!SecurityUtils.TOKEN_TYPE_ADMIN.equals(tokenType)) {
+                throw new JwtException("Invalid token_type for admin resources");
+            }
+            var authorities = delegate.convert(jwt);
+            String principalName = jwt.getSubject();
+            return new JwtAuthenticationToken(jwt, authorities, principalName);
+        };
+    }
+
+    private Converter<Jwt, ? extends AbstractAuthenticationToken> traderJwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter delegate = new JwtGrantedAuthoritiesConverter();
+        delegate.setAuthoritiesClaimName(SecurityUtils.AUTHORITIES_CLAIM);
+        delegate.setAuthorityPrefix("");
+
+        return jwt -> {
+            String tokenType = getTokenType(jwt);
+            if (!SecurityUtils.TOKEN_TYPE_TRADER.equals(tokenType)) {
+                throw new JwtException("Invalid token_type for trader resources");
+            }
+            var authorities = delegate.convert(jwt);
+            String principalName = jwt.getSubject();
+            return new JwtAuthenticationToken(jwt, authorities, principalName);
+        };
+    }
+
+    private String getTokenType(Jwt jwt) {
+        Object raw = jwt.getClaim(SecurityUtils.TOKEN_TYPE_CLAIM);
+        if (raw == null) {
+            throw new JwtException("Missing token_type claim");
+        }
+        return raw.toString();
     }
 }

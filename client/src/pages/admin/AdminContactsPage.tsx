@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { contactApi } from '@/services/api';
 import type { Contact, ContactType } from '@/types/models';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const typeStyles: Record<ContactType, { bg: string; text: string; gradient: string; icon: typeof UserCheck }> = {
   SELLER: { bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', gradient: 'from-emerald-400 to-teal-500', icon: UserCheck },
@@ -13,11 +15,18 @@ const typeStyles: Record<ContactType, { bg: string; text: string; gradient: stri
 };
 
 const AdminContactsPage = () => {
+  const { canAccessModule } = useAdminPermissions();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<ContactType | 'ALL'>('ALL');
 
-  useEffect(() => { contactApi.list().then(setContacts); }, []);
+  useEffect(() => {
+    contactApi.adminList().then(setContacts);
+  }, []);
+
+  if (!canAccessModule('Contacts')) {
+    return <AdminForbiddenPage moduleName="Contacts" />;
+  }
 
   const filtered = contacts.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);

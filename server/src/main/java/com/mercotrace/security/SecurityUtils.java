@@ -23,6 +23,12 @@ public final class SecurityUtils {
 
     public static final String USER_ID_CLAIM = "userId";
 
+    public static final String TOKEN_TYPE_CLAIM = "token_type";
+
+    public static final String TOKEN_TYPE_TRADER = "TRADER";
+
+    public static final String TOKEN_TYPE_ADMIN = "ADMIN";
+
     private SecurityUtils() {}
 
     /**

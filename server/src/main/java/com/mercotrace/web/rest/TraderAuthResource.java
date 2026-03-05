@@ -9,16 +9,20 @@ import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.MailService;
 import com.mercotrace.service.OtpService;
 import com.mercotrace.service.TraderOwnerAuthorityService;
+import com.mercotrace.service.EmailAlreadyUsedException;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.UserService;
+import com.mercotrace.service.UsernameAlreadyUsedException;
 import com.mercotrace.service.dto.AdminUserDTO;
-import com.mercotrace.service.dto.Module1AuthDTO;
+import com.mercotrace.service.dto.TraderAuthDTO;
 import com.mercotrace.service.dto.TraderDTO;
 import com.mercotrace.web.rest.vm.LoginVM;
 import com.mercotrace.web.rest.vm.ManagedUserVM;
-import com.mercotrace.web.rest.vm.Module1OtpRequestVM;
-import com.mercotrace.web.rest.vm.Module1OtpVerifyVM;
-import com.mercotrace.web.rest.vm.Module1RegisterVM;
+import com.mercotrace.web.rest.vm.TraderOtpRequestVM;
+import com.mercotrace.web.rest.vm.TraderOtpVerifyVM;
+import com.mercotrace.web.rest.errors.TraderEmailAlreadyRegisteredException;
+import com.mercotrace.web.rest.errors.TraderMobileAlreadyRegisteredException;
+import com.mercotrace.web.rest.vm.TraderRegisterVM;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.HashSet;
@@ -39,14 +43,18 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Module 1 spec — auth paths: /api/auth/register, /api/auth/login, /api/auth/profile.
- * Delegates to existing JHipster auth/account.
+ * Trader auth API (formerly Module 1 spec) — auth paths:
+ * /api/auth/register, /api/auth/login, /api/auth/me, /api/auth/profile,
+ * /api/auth/otp/request, /api/auth/otp/verify.
+ *
+ * Delegates to existing JHipster auth/account while shaping responses as
+ * {@link TraderAuthDTO} to match the mobile/web frontend expectations.
  */
 @RestController
 @RequestMapping("/api/auth")
-public class Module1AuthResource {
+public class TraderAuthResource {
 
-    private static final Logger log = LoggerFactory.getLogger(Module1AuthResource.class);
+    private static final Logger log = LoggerFactory.getLogger(TraderAuthResource.class);
 
     private final UserService userService;
     private final MailService mailService;
@@ -59,7 +67,7 @@ public class Module1AuthResource {
     private final OtpService otpService;
     private final TraderOwnerAuthorityService traderOwnerAuthorityService;
 
-    public Module1AuthResource(
+    public TraderAuthResource(
         UserService userService,
         MailService mailService,
         UserRepository userRepository,
@@ -83,9 +91,9 @@ public class Module1AuthResource {
         this.traderOwnerAuthorityService = traderOwnerAuthorityService;
     }
 
-    /** Module 1 spec: POST /auth/register — Register Trader (Directory Listing only) + auto-login for module 1 UI. */
+    /** POST /auth/register — Register Trader (Directory Listing only) + auto-login for trader UI. */
     @PostMapping("/register")
-    public ResponseEntity<Module1AuthDTO> register(@Valid @RequestBody Module1RegisterVM vm) {
+    public ResponseEntity<TraderAuthDTO> register(@Valid @RequestBody TraderRegisterVM vm) {
         // Enforce same password policy as frontend (min 6 chars)
         if (vm.getPassword() == null || vm.getPassword().length() < 6) {
             throw new com.mercotrace.service.InvalidPasswordException();
@@ -101,6 +109,15 @@ public class Module1AuthResource {
                 }
                 normalizedPinCode = trimmed;
             }
+        }
+
+        // Duplicate checks before creating trader or user — return 409 to avoid duplicate entries and re-registration
+        if (userRepository.findOneByEmailIgnoreCase(vm.getEmail()).isPresent()) {
+            throw new TraderEmailAlreadyRegisteredException();
+        }
+        String mobile = vm.getMobile() != null ? vm.getMobile().trim() : null;
+        if (mobile != null && !mobile.isEmpty() && traderRepository.findOneByMobile(mobile).isPresent()) {
+            throw new TraderMobileAlreadyRegisteredException();
         }
 
         // 1) Create Trader (directory listing, pending approval)
@@ -142,8 +159,14 @@ public class Module1AuthResource {
         auths.add(AuthoritiesConstants.USER);
         userDTO.setAuthorities(auths);
 
-        var user = userService.registerUser(userDTO, vm.getPassword());
-        // Auto-activate user for module 1 (no email activation flow in UI)
+        com.mercotrace.domain.User user;
+        try {
+            user = userService.registerUser(userDTO, vm.getPassword());
+        } catch (UsernameAlreadyUsedException | EmailAlreadyUsedException e) {
+            // Race or bypass: translate to 409 so client gets consistent conflict message
+            throw new TraderEmailAlreadyRegisteredException();
+        }
+        // Auto-activate user for trader flows (no email activation flow in UI)
         user.setActivated(true);
         user.setActivationKey(null);
         userRepository.save(user);
@@ -151,7 +174,7 @@ public class Module1AuthResource {
         // Ensure trader owners receive full trader-module authorities (no global admin).
         traderOwnerAuthorityService.ensureTraderOwnerAuthorities(user);
 
-        // Link this user and trader as primary mapping for module 1
+        // Link this user and trader as primary mapping for trader auth
         com.mercotrace.domain.UserTrader mapping = new com.mercotrace.domain.UserTrader();
         mapping.setUser(user);
         com.mercotrace.domain.Trader traderRef = new com.mercotrace.domain.Trader();
@@ -162,83 +185,37 @@ public class Module1AuthResource {
         userTraderRepository.save(mapping);
 
         AdminUserDTO account = new AdminUserDTO(user);
+        TraderAuthDTO dto = buildAuthDto(account, traderDTO);
 
-        // 3) Authenticate to generate JWT token
+        // 3) Best-effort auto-login via authorize(); registration already succeeded.
         LoginVM loginVM = new LoginVM();
-        loginVM.setUsername(vm.getEmail());
+        loginVM.setUsername(user.getLogin());
         loginVM.setPassword(vm.getPassword());
         loginVM.setRememberMe(false);
-
-        ResponseEntity<com.mercotrace.web.rest.AuthenticateController.JWTToken> jwtResponse;
         try {
-            jwtResponse = authenticateController.authorize(loginVM);
-        } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
-        }
-        if (jwtResponse.getBody() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication failed");
-        }
-
-        // 4) Build Module1AuthDTO aligned with frontend AuthState
-        Module1AuthDTO dto = new Module1AuthDTO();
-
-        Module1AuthDTO.UserPayload userPayload = new Module1AuthDTO.UserPayload();
-        if (account.getId() != null) {
-            userPayload.setUserId(account.getId().toString());
-        }
-        if (traderDTO.getId() != null) {
-            userPayload.setTraderId(traderDTO.getId().toString());
-        }
-        userPayload.setUsername(account.getLogin());
-        userPayload.setActive(account.isActivated());
-        userPayload.setCreatedAt(account.getCreatedDate() != null ? account.getCreatedDate().toString() : null);
-        StringBuilder nameBuilder = new StringBuilder();
-        if (account.getFirstName() != null) {
-            nameBuilder.append(account.getFirstName());
-        }
-        if (account.getLastName() != null) {
-            if (!nameBuilder.isEmpty()) {
-                nameBuilder.append(" ");
+            ResponseEntity<com.mercotrace.web.rest.AuthenticateController.JWTToken> jwtResponse =
+                authenticateController.authorize(loginVM);
+            if (jwtResponse.getBody() != null && jwtResponse.getHeaders() != null) {
+                AdminUserDTO authenticatedAccount = accountResource.getAccount();
+                authenticatedAccount = upgradeTraderOwnerAuthoritiesIfNeeded(authenticatedAccount);
+                TraderDTO resolvedTrader = resolveTraderForUser(authenticatedAccount).orElse(traderDTO);
+                TraderAuthDTO authDto = buildAuthDto(authenticatedAccount, resolvedTrader);
+                return ResponseEntity.status(HttpStatus.CREATED).headers(jwtResponse.getHeaders()).body(authDto);
             }
-            nameBuilder.append(account.getLastName());
+        } catch (Exception ex) {
+            // Do not throw 401: registration succeeded; return 201 with needsLogin so client can redirect to login.
+            log.debug("Registration succeeded but auto-login failed: {}", ex.getMessage());
         }
-        userPayload.setName(nameBuilder.toString());
-        userPayload.setRole(computeDisplayRole(account, traderDTO));
-        userPayload.setAuthorities(account.getAuthorities());
-        dto.setUser(userPayload);
-
-        Module1AuthDTO.TraderPayload traderPayload = new Module1AuthDTO.TraderPayload();
-        if (traderDTO.getId() != null) {
-            traderPayload.setTraderId(traderDTO.getId().toString());
-        }
-        traderPayload.setBusinessName(traderDTO.getBusinessName());
-        traderPayload.setOwnerName(traderDTO.getOwnerName());
-        traderPayload.setAddress(traderDTO.getAddress());
-        traderPayload.setMobile(traderDTO.getMobile());
-        traderPayload.setEmail(traderDTO.getEmail());
-        traderPayload.setCity(traderDTO.getCity());
-        traderPayload.setState(traderDTO.getState());
-        traderPayload.setPinCode(traderDTO.getPinCode());
-        traderPayload.setCategory(traderDTO.getCategory());
-        traderPayload.setApprovalStatus(traderDTO.getApprovalStatus() != null ? traderDTO.getApprovalStatus().name() : "PENDING");
-        traderPayload.setBillPrefix(traderDTO.getBillPrefix());
-        traderPayload.setCreatedAt(traderDTO.getCreatedAt() != null ? traderDTO.getCreatedAt().toString() : null);
-        traderPayload.setUpdatedAt(traderDTO.getUpdatedAt() != null ? traderDTO.getUpdatedAt().toString() : null);
-        traderPayload.setGstNumber(traderDTO.getGstNumber());
-        traderPayload.setRmcApmcCode(traderDTO.getRmcApmcCode());
-        traderPayload.setShopPhotos(splitShopPhotos(traderDTO.getShopPhotos()));
-        dto.setTrader(traderPayload);
-
-        // Forward authentication headers (including Set-Cookie) so the browser
-        // receives the httpOnly JWT cookie even on registration.
-        return ResponseEntity.status(HttpStatus.CREATED).headers(jwtResponse.getHeaders()).body(dto);
+        dto.setNeedsLogin(true);
+        return ResponseEntity.status(HttpStatus.CREATED).body(dto);
     }
 
-    /** Module 1 spec: POST /auth/login — Login User. Returns normalized user/trader payloads.
-     *  JWT is issued via secure httpOnly cookie, not used directly by the frontend.
+    /**
+     * POST /auth/login — Login trader user. Returns normalized user/trader payloads.
+     * JWT is issued via secure httpOnly cookie, not used directly by the frontend.
      */
     @PostMapping("/login")
-    public ResponseEntity<Module1AuthDTO> login(@Valid @RequestBody LoginVM loginVM) {
+    public ResponseEntity<TraderAuthDTO> login(@Valid @RequestBody LoginVM loginVM) {
         // Frontend sends an email and requires 6+ char password. Enforce that here.
         if (loginVM.getPassword() == null || loginVM.getPassword().length() < 6) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
@@ -265,6 +242,14 @@ public class Module1AuthResource {
 
         // Fetch current authenticated user
         AdminUserDTO account = accountResource.getAccount();
+        // Prevent global admin-only accounts from using trader auth endpoints.
+        if (isAdminAccount(account)) {
+            // If there is no trader mapping for this admin account, force them to use /api/admin/auth/login instead.
+            java.util.Optional<TraderDTO> traderOptForAdmin = resolveTraderForUser(account);
+            if (traderOptForAdmin.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin accounts must log in via /admin/login");
+            }
+        }
         account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
 
         java.util.Optional<TraderDTO> traderOpt = resolveTraderForUser(account);
@@ -272,26 +257,33 @@ public class Module1AuthResource {
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
         }
-        Module1AuthDTO dto = buildAuthDto(account, trader);
+        TraderAuthDTO dto = buildAuthDto(account, trader);
 
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
     }
 
-    /** Module 1 spec: GET /auth/me — Return current user + trader payload based on JWT cookie. */
+    /** GET /auth/me — Return current user + trader payload based on JWT cookie. */
     @GetMapping("/me")
-    public Module1AuthDTO me() {
+    public TraderAuthDTO me() {
         AdminUserDTO account = accountResource.getAccount();
         account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
 
         java.util.Optional<TraderDTO> traderOpt = resolveTraderForUser(account);
         TraderDTO trader = traderOpt.orElse(null);
+        if (isAdminAccount(account)) {
+            // Admin-only accounts must never resolve trader context via /api/auth/me; they should use /api/admin/auth/me instead.
+            java.util.Optional<TraderDTO> traderOptForAdmin = resolveTraderForUser(account);
+            if (traderOptForAdmin.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin accounts must log in via /admin/login");
+            }
+        }
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
         }
         return buildAuthDto(account, trader);
     }
 
-    /** Module 1 spec: PUT /auth/profile — Update user profile. */
+    /** PUT /auth/profile — Update user profile. */
     @PutMapping("/profile")
     public void updateProfile(@RequestBody com.mercotrace.service.dto.AdminUserDTO userDTO) {
         // Delegate to AccountResource without triggering bean validation on AdminUserDTO here.
@@ -299,10 +291,10 @@ public class Module1AuthResource {
         accountResource.saveAccount(userDTO);
     }
 
-    /** Module 1 spec: POST /auth/otp/request — Request OTP for phone-based login. */
+    /** POST /auth/otp/request — Request OTP for phone-based login. */
     @PostMapping("/otp/request")
     public ResponseEntity<Map<String, String>> requestOtp(
-        @Valid @RequestBody Module1OtpRequestVM vm,
+        @Valid @RequestBody TraderOtpRequestVM vm,
         HttpServletRequest request
     ) {
         String mobile = vm.getMobile();
@@ -322,9 +314,9 @@ public class Module1AuthResource {
         return ResponseEntity.ok(Map.of("status", "OK"));
     }
 
-    /** Module 1 spec: POST /auth/otp/verify — Verify OTP and perform login. */
+    /** POST /auth/otp/verify — Verify OTP and perform login. */
     @PostMapping("/otp/verify")
-    public ResponseEntity<Module1AuthDTO> verifyOtp(@Valid @RequestBody Module1OtpVerifyVM vm) {
+    public ResponseEntity<TraderAuthDTO> verifyOtp(@Valid @RequestBody TraderOtpVerifyVM vm) {
         String mobile = vm.getMobile();
         String otp = vm.getOtp();
 
@@ -371,7 +363,7 @@ public class Module1AuthResource {
             .findOne(traderEntity.getId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Trader not configured"));
 
-        Module1AuthDTO dto = buildAuthDto(account, trader);
+        TraderAuthDTO dto = buildAuthDto(account, trader);
 
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
     }
@@ -415,14 +407,14 @@ public class Module1AuthResource {
             .orElse(account);
     }
 
-    private Module1AuthDTO buildAuthDto(AdminUserDTO account, TraderDTO trader) {
+    private TraderAuthDTO buildAuthDto(AdminUserDTO account, TraderDTO trader) {
         // Ensure OWNER authorities are always up-to-date when we serialize the auth payload.
         account = upgradeTraderOwnerAuthoritiesIfNeeded(account);
 
-        Module1AuthDTO dto = new Module1AuthDTO();
+        TraderAuthDTO dto = new TraderAuthDTO();
 
         // Map user
-        Module1AuthDTO.UserPayload userPayload = new Module1AuthDTO.UserPayload();
+        TraderAuthDTO.UserPayload userPayload = new TraderAuthDTO.UserPayload();
         if (account.getId() != null) {
             userPayload.setUserId(account.getId().toString());
         }
@@ -451,7 +443,7 @@ public class Module1AuthResource {
 
         // Map trader when available (trader users). Admin/superadmin without a trader mapping receive trader = null.
         if (trader != null) {
-            Module1AuthDTO.TraderPayload traderPayload = new Module1AuthDTO.TraderPayload();
+            TraderAuthDTO.TraderPayload traderPayload = new TraderAuthDTO.TraderPayload();
             if (trader.getId() != null) {
                 traderPayload.setTraderId(trader.getId().toString());
             }
@@ -606,3 +598,4 @@ public class Module1AuthResource {
         return user;
     }
 }
+

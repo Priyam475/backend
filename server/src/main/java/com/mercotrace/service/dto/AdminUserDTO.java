@@ -1,6 +1,7 @@
 package com.mercotrace.service.dto;
 
 import com.mercotrace.config.Constants;
+import com.mercotrace.admin.identity.AdminUser;
 import com.mercotrace.domain.Authority;
 import com.mercotrace.domain.User;
 import jakarta.validation.constraints.*;
@@ -69,6 +70,23 @@ public class AdminUserDTO implements Serializable {
         this.lastModifiedBy = user.getLastModifiedBy();
         this.lastModifiedDate = user.getLastModifiedDate();
         this.authorities = user.getAuthorities().stream().map(Authority::getName).collect(Collectors.toSet());
+    }
+
+    public AdminUserDTO(AdminUser user) {
+        this.id = user.getId();
+        this.login = user.getLogin();
+        this.firstName = user.getFirstName();
+        this.lastName = user.getLastName();
+        this.email = user.getEmail();
+        this.activated = user.isActivated();
+        this.imageUrl = null;
+        this.langKey = null;
+        this.createdBy = user.getCreatedBy();
+        this.createdDate = user.getCreatedDate();
+        this.lastModifiedBy = user.getLastModifiedBy();
+        this.lastModifiedDate = user.getLastModifiedDate();
+        this.authorities =
+            user.getAuthorities().stream().map(com.mercotrace.admin.identity.AdminAuthority::getName).collect(Collectors.toSet());
     }
 
     public Long getId() {

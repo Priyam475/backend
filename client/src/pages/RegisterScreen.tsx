@@ -25,6 +25,7 @@ const RegisterScreen = () => {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [form, setForm] = useState({
     businessName: '',
@@ -105,10 +106,16 @@ const RegisterScreen = () => {
     if (step === 1) { handleNext(); return; }
     setTouched(p => ({ ...p, address: true, city: true, state: true, pinCode: true, categoryName: true }));
     if (!step2Valid) return;
+    if (isLoading || isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await register({ ...form, shopPhotos: photoPreviews });
       navigate('/home', { replace: true });
-    } catch {}
+    } catch {
+      // error shown via AuthContext error state
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const inputClass = "pl-12 h-12 sm:h-14 text-base rounded-xl bg-white/90 border-0 text-blue-900 placeholder:text-blue-400";
@@ -329,10 +336,10 @@ const RegisterScreen = () => {
 
             <Button
               type="submit"
-              disabled={isLoading || (step === 1 ? !step1Valid : !step2Valid)}
+              disabled={(isLoading || isSubmitting) || (step === 1 ? !step1Valid : !step2Valid)}
               className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70"
             >
-              {isLoading ? (
+              {(isLoading || isSubmitting) ? (
                 <motion.div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} />
               ) : (
                 <>

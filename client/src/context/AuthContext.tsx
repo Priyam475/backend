@@ -42,6 +42,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     let cancelled = false;
+
+    // Skip trader bootstrap entirely when user is in the admin portal.
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      setHasBootstrapped(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const bootstrap = async () => {
       try {
         let profile = await authApi.getProfile();

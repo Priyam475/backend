@@ -11,12 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Profile, Role, UserRole } from '@/types/rbac';
-import { rbacApi, traderRbacApi } from '@/services/api';
-import { useAuth } from '@/context/AuthContext';
+import { traderRbacApi } from '@/services/api';
 
 const UserManagementPage = () => {
-  const { trader } = useAuth();
-  const api = trader ? traderRbacApi : rbacApi;
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState<(Profile & { roles: string[] })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,9 +31,9 @@ const UserManagementPage = () => {
     try {
       setLoading(true);
       const [profilesData, userRoles, roles] = await Promise.all([
-        api.listProfiles(),
-        api.listUserRoles(),
-        api.listRoles(),
+        traderRbacApi.listProfiles(),
+        traderRbacApi.listUserRoles(),
+        traderRbacApi.listRoles(),
       ]);
 
       const roleMap = new Map(roles.map((r: Role) => [r.id, r.name]));
@@ -59,7 +56,9 @@ const UserManagementPage = () => {
     }
   };
 
-  useEffect(() => { fetchProfiles(); }, [trader?.trader_id]);
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
 
   const openCreate = () => {
     setEditingProfile(null);
@@ -81,23 +80,23 @@ const UserManagementPage = () => {
     setSaving(true);
     try {
       if (editingProfile) {
-        await api.updateProfile(editingProfile.id, {
+        await traderRbacApi.updateProfile(editingProfile.id, {
           full_name: formName.trim(),
           email: formEmail.trim(),
           mobile: formMobile.trim() || null,
         });
         toast.success('User updated');
       } else {
-        if (trader && (!formPassword || formPassword.length < 6)) {
+        if (!formPassword || formPassword.length < 6) {
           toast.error('Password must be at least 6 characters');
           setSaving(false);
           return;
         }
-        await api.createProfile({
+        await traderRbacApi.createProfile({
           full_name: formName.trim(),
           email: formEmail.trim(),
           mobile: formMobile.trim() || null,
-          ...(trader && { password: formPassword }),
+          password: formPassword,
         });
         toast.success('User created successfully');
       }
@@ -114,7 +113,7 @@ const UserManagementPage = () => {
   const toggleStatus = async (profile: Profile) => {
     const newStatus = profile.status === 'active' ? 'inactive' : 'active';
     try {
-      await api.setProfileStatus(profile.id, newStatus);
+      await traderRbacApi.setProfileStatus(profile.id, newStatus);
       toast.success(`User ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
       fetchProfiles();
     } catch (error) {

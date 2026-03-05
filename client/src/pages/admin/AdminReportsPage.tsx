@@ -4,8 +4,17 @@ import { BarChart3, TrendingUp, Truck, Gavel, Receipt, HandCoins, Sparkles, Zap 
 import { cn } from '@/lib/utils';
 import { reportsApi, type AdminDailySummaryDTO } from '@/services/api/reports';
 import { toast } from 'sonner';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const AdminReportsPage = () => {
+  const { canAccessModule } = useAdminPermissions();
+  const canView = canAccessModule('Reports');
+
+  if (!canView) {
+    return <AdminForbiddenPage moduleName="Reports" />;
+  }
+
   const [summary, setSummary] = useState<AdminDailySummaryDTO | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [revenueSeries, setRevenueSeries] = useState<{ label: string; totalRevenue: number }[]>([]);

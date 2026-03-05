@@ -134,6 +134,14 @@ export const commodityApi = {
     return data.map(mapDtoToCommodity);
   },
 
+  async adminList(): Promise<Commodity[]> {
+    const res = await apiFetch('/admin/commodities', {
+      method: 'GET',
+    });
+    const data = await handleResponse<CommodityDto[]>(res, 'Failed to load commodities');
+    return data.map(mapDtoToCommodity);
+  },
+
   async create(data: Partial<Commodity>): Promise<Commodity> {
     const res = await apiFetch('/commodities', {
       method: 'POST',

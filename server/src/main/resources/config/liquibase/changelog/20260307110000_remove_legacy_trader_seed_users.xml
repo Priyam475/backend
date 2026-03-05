@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Cleanup legacy Module 1 trader-side seed users.
+
+        Historically, jhi_user was pre-populated from data/user.csv with:
+          - id=1, login=admin, email=admin@localhost
+          - id=2, login=user,  email=user@localhost
+          - id=3, login=superadmin@mercotrace.com
+
+        After 20260307100000_trader_and_admin_identity.xml these rows live in trader_user
+        / trader_user_authority. Admin login now uses dedicated admin_user/admin_authority
+        tables seeded with a single superadmin account.
+
+        This change set removes the legacy trader_user rows so that:
+          - There is no trader-side "superadmin" user seeded by default.
+          - Demo admin/user logins are not present in trader identity by default.
+    -->
+    <changeSet id="20260307110000-1-remove-legacy-trader-seed-users" author="cursor" context="!test">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="trader_user"/>
+        </preConditions>
+
+        <!-- Remove any user_trader mappings for the legacy seed users (defensive). -->
+        <delete tableName="user_trader">
+            <where>user_id in (1, 2, 3)</where>
+        </delete>
+
+        <!-- Remove authority links for the legacy trader users. -->
+        <delete tableName="trader_user_authority">
+            <where>user_id in (1, 2, 3)</where>
+        </delete>
+
+        <!-- Remove the legacy trader users themselves. -->
+        <delete tableName="trader_user">
+            <where>id in (1, 2, 3)</where>
+        </delete>
+    </changeSet>
+
+</databaseChangeLog>
+

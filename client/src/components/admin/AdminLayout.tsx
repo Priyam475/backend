@@ -2,23 +2,43 @@ import { useState } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  LayoutDashboard, Users, Store, Package, BookUser, Settings,
-  ChevronLeft, ChevronRight, LogOut, Moon, Sun, Bell,
-  ShieldCheck, BarChart3
+  LayoutDashboard,
+  Users,
+  Store,
+  Package,
+  BookUser,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Moon,
+  Sun,
+  Bell,
+  ShieldCheck,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
-import { useAuth } from '@/context/AuthContext';
+import { useAdminAuth } from '@/context/AdminAuthContext';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import type { AdminModuleKey } from '@/admin/types/rbac';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
-  { icon: Users, label: 'Traders', path: '/admin/traders' },
-  { icon: Store, label: 'Categories', path: '/admin/categories' },
-  { icon: Package, label: 'Commodities', path: '/admin/commodities' },
-  { icon: BookUser, label: 'Contacts', path: '/admin/contacts' },
-  { icon: BarChart3, label: 'Reports', path: '/admin/reports' },
-  { icon: Settings, label: 'Settings', path: '/admin/settings' },
+type AdminNavItem = {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  path: string;
+  moduleKey?: AdminModuleKey;
+};
+
+const navItems: AdminNavItem[] = [
+  { icon: LayoutDashboard, label: 'Dashboard', path: '/admin', moduleKey: 'Dashboard' },
+  { icon: Users, label: 'Traders', path: '/admin/traders', moduleKey: 'Traders' },
+  { icon: Store, label: 'Categories', path: '/admin/categories', moduleKey: 'Categories' },
+  { icon: Package, label: 'Commodities', path: '/admin/commodities', moduleKey: 'Commodities' },
+  { icon: BookUser, label: 'Contacts', path: '/admin/contacts', moduleKey: 'Contacts' },
+  { icon: BarChart3, label: 'Reports', path: '/admin/reports', moduleKey: 'Reports' },
+  { icon: Settings, label: 'Settings', path: '/admin/settings', moduleKey: 'Settings' },
 ];
 
 const AdminLayout = () => {
@@ -26,7 +46,12 @@ const AdminLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout } = useAdminAuth();
+  const { canAccessModule } = useAdminPermissions();
+
+  const visibleNavItems = navItems.filter((item) =>
+    item.moduleKey ? canAccessModule(item.moduleKey) : false
+  );
 
   const handleLogout = () => {
     logout();
@@ -64,8 +89,11 @@ const AdminLayout = () => {
 
         {/* Nav Items */}
         <nav className="relative z-10 flex-1 py-3 px-2 space-y-1 overflow-y-auto no-scrollbar">
-          {navItems.map((item) => {
-            const isActive = location.pathname === item.path || (item.path !== '/admin' && location.pathname.startsWith(item.path + '/')) || (item.path !== '/admin' && location.pathname === item.path);
+          {visibleNavItems.map((item) => {
+            const isActive =
+              location.pathname === item.path ||
+              (item.path !== '/admin' && location.pathname.startsWith(item.path + '/')) ||
+              (item.path !== '/admin' && location.pathname === item.path);
             return (
               <button
                 key={item.path}
@@ -165,7 +193,7 @@ const AdminLayout = () => {
         >
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold text-foreground">
-              {navItems.find(n => location.pathname === n.path || (n.path !== '/admin' && location.pathname.startsWith(n.path)))?.label || 'Admin'}
+              {visibleNavItems.find(n => location.pathname === n.path || (n.path !== '/admin' && location.pathname.startsWith(n.path)))?.label || 'Admin'}
             </h2>
           </div>
           <div className="flex items-center gap-3">

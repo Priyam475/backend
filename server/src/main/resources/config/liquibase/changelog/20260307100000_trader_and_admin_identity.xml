@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Phase 1–2: trader_user rename + dedicated admin identity tables -->
+
+    <changeSet id="20260307100000-1-trader-user-rename" author="cursor">
+        <!-- Rename legacy JHipster user tables to trader_* to reflect trader-facing identity -->
+        <renameTable oldTableName="jhi_user" newTableName="trader_user"/>
+        <renameTable oldTableName="jhi_user_authority" newTableName="trader_user_authority"/>
+    </changeSet>
+
+    <changeSet id="20260307100000-2-admin-identity-tables" author="cursor">
+        <createTable tableName="admin_user">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="login" type="varchar(50)">
+                <constraints unique="true" nullable="false" uniqueConstraintName="ux_admin_user_login"/>
+            </column>
+            <column name="password_hash" type="varchar(60)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="first_name" type="varchar(50)"/>
+            <column name="last_name" type="varchar(50)"/>
+            <column name="email" type="varchar(191)">
+                <constraints unique="true" nullable="true" uniqueConstraintName="ux_admin_user_email"/>
+            </column>
+            <column name="activated" type="boolean" valueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="${datetimeType}">
+                <constraints nullable="true"/>
+            </column>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <createTable tableName="admin_authority">
+            <column name="name" type="varchar(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+        </createTable>
+
+        <createTable tableName="admin_user_authority">
+            <column name="admin_user_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="authority_name" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey columnNames="admin_user_id, authority_name" tableName="admin_user_authority" constraintName="pk_admin_user_authority"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_user_authority"
+            baseColumnNames="authority_name"
+            referencedTableName="admin_authority"
+            referencedColumnNames="name"
+            constraintName="fk_admin_authority_name"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_user_authority"
+            baseColumnNames="admin_user_id"
+            referencedTableName="admin_user"
+            referencedColumnNames="id"
+            constraintName="fk_admin_user_id"/>
+    </changeSet>
+
+    <changeSet id="20260307100000-3-admin-rbac-tables" author="cursor">
+        <createTable tableName="admin_role">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(100)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="ux_admin_role_name"/>
+            </column>
+            <column name="description" type="varchar(255)"/>
+            <column name="created_at" type="${datetimeType}"/>
+            <column name="created_by" type="varchar(50)"/>
+            <column name="created_date" type="${datetimeType}"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="${datetimeType}"/>
+        </createTable>
+
+        <createTable tableName="admin_user_role">
+            <column name="admin_user_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="role_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey columnNames="admin_user_id, role_id" tableName="admin_user_role" constraintName="pk_admin_user_role"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_user_role"
+            baseColumnNames="admin_user_id"
+            referencedTableName="admin_user"
+            referencedColumnNames="id"
+            constraintName="fk_admin_user_role_user"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_user_role"
+            baseColumnNames="role_id"
+            referencedTableName="admin_role"
+            referencedColumnNames="id"
+            constraintName="fk_admin_user_role_role"/>
+    </changeSet>
+
+    <changeSet id="20260307100000-5-admin-role-authorities" author="cursor">
+        <createTable tableName="admin_role_authority">
+            <column name="role_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="authority_name" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addPrimaryKey
+            columnNames="role_id, authority_name"
+            tableName="admin_role_authority"
+            constraintName="pk_admin_role_authority"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_role_authority"
+            baseColumnNames="role_id"
+            referencedTableName="admin_role"
+            referencedColumnNames="id"
+            constraintName="fk_admin_role_authority_role"/>
+
+        <addForeignKeyConstraint
+            baseTableName="admin_role_authority"
+            baseColumnNames="authority_name"
+            referencedTableName="admin_authority"
+            referencedColumnNames="name"
+            constraintName="fk_admin_role_authority_name"/>
+    </changeSet>
+
+    <changeSet id="20260307100000-4-seed-superadmin" author="cursor" context="!test">
+        <!-- Seed an initial superadmin admin_user with ROLE_ADMIN and ROLE_SUPER_ADMIN -->
+        <insert tableName="admin_user">
+            <column name="id" valueNumeric="1"/>
+            <column name="login" value="superadmin"/>
+            <!-- BCrypt hash for plaintext password: SuperAdmin@123 -->
+            <column name="password_hash" value="$2a$12$Qaw.HDMlGE6KSUzgQib.w.D32SkleR9jBNKEI9EEwlP5ZRJnOVqei"/>
+            <column name="first_name" value="Super"/>
+            <column name="last_name" value="Admin"/>
+            <column name="email" value="superadmin@mercotrace.com"/>
+            <column name="activated" valueBoolean="true"/>
+            <column name="created_by" value="system"/>
+            <column name="created_date" valueDate="2025-01-01T00:00:00"/>
+            <column name="last_modified_by" value="system"/>
+            <column name="last_modified_date" valueDate="2025-01-01T00:00:00"/>
+        </insert>
+
+        <insert tableName="admin_authority">
+            <column name="name" value="ROLE_ADMIN"/>
+        </insert>
+        <insert tableName="admin_authority">
+            <column name="name" value="ROLE_SUPER_ADMIN"/>
+        </insert>
+
+        <insert tableName="admin_user_authority">
+            <column name="admin_user_id" valueNumeric="1"/>
+            <column name="authority_name" value="ROLE_ADMIN"/>
+        </insert>
+        <insert tableName="admin_user_authority">
+            <column name="admin_user_id" valueNumeric="1"/>
+            <column name="authority_name" value="ROLE_SUPER_ADMIN"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>
+

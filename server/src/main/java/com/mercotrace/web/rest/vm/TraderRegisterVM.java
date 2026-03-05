@@ -7,14 +7,14 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * ViewModel for Module 1 Trader registration.
+ * ViewModel for trader registration used by /api/auth/register.
  * Aligned with frontend payload used in RegisterScreen/AuthContext:
  * {
  *   business_name, owner_name, mobile, email, password,
  *   address, city, state, pin_code, category
  * }
  */
-public class Module1RegisterVM {
+public class TraderRegisterVM {
 
     @JsonProperty("business_name")
     @NotBlank

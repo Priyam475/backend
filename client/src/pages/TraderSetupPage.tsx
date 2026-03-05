@@ -48,7 +48,7 @@ interface FormData {
 const TraderSetupPage = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
-  const { register, isLoading } = useAuth();
+  const { register, isLoading, error, clearError } = useAuth();
 
   const [categories, setCategories] = useState<BusinessCategory[]>([]);
 
@@ -90,6 +90,7 @@ const TraderSetupPage = () => {
 
   const updateField = (field: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
+    clearError();
     if (errors[field]) setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
   };
 
@@ -220,8 +221,12 @@ const TraderSetupPage = () => {
       });
       toast.success('Trader profile saved successfully!');
       navigate('/home', { replace: true });
-    } catch { toast.error('Failed to save profile. Please try again.'); }
-    finally { setIsSubmitting(false); }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save profile. Please try again.';
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const FieldError = ({ field }: { field: string }) => {
@@ -273,6 +278,17 @@ const TraderSetupPage = () => {
           <p className="text-white/70 text-sm mb-5">
             Create your Mercotrace account and set up your business profile
           </p>
+
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="w-full max-w-4xl mb-4 p-3 rounded-xl bg-red-500/20 border border-red-400/30"
+              role="alert"
+            >
+              <p className="text-sm text-white text-center">{error}</p>
+            </motion.div>
+          )}
 
           {/* Form */}
           <motion.div

@@ -13,7 +13,6 @@
 
     <include file="config/liquibase/changelog/00000000000000_initial_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260223090408_added_entity_Trader.xml" relativeToChangelogFile="false"/>
-    <include file="config/liquibase/changelog/20260223111000_seed_module1_traders.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260223090409_added_entity_Role.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260223090410_added_entity_Permission.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260223090411_added_entity_BusinessCategory.xml" relativeToChangelogFile="false"/>
@@ -45,11 +44,13 @@
     <include file="config/liquibase/changelog/20260302210000_financial_reports_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260303121000_rbac_settings_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260304110000_writers_pad_schema.xml" relativeToChangelogFile="false"/>
-    <include file="config/liquibase/changelog/20260305120000_seed_default_trader.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306100000_trader_gst_rmc.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306120000_otp_token_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306121000_user_trader_mapping_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306130000_trader_module_authorities.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260306140000_trader_scoped_roles.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260307100000_trader_and_admin_identity.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260307110000_remove_legacy_trader_seed_users.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260307120000_add_admin_user_mobile.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
 </databaseChangeLog>

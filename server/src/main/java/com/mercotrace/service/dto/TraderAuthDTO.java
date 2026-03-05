@@ -4,7 +4,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Set;
 
 /**
- * Module 1 auth response payload, aligned to frontend AuthState expectations.
+ * Auth response payload, aligned to frontend AuthState expectations, for both
+ * trader and admin flows.
  *
  * Shape on the wire:
  * {
@@ -13,15 +14,27 @@ import java.util.Set;
  *   "trader": { ... }
  * }
  */
-public class Module1AuthDTO {
+public class TraderAuthDTO {
 
     private String token;
+
+    /** When true, registration succeeded but auto-login failed; client should prompt sign-in. */
+    @JsonProperty("needs_login")
+    private Boolean needsLogin;
 
     @JsonProperty("user")
     private UserPayload user;
 
     @JsonProperty("trader")
     private TraderPayload trader;
+
+    public Boolean getNeedsLogin() {
+        return needsLogin;
+    }
+
+    public void setNeedsLogin(Boolean needsLogin) {
+        this.needsLogin = needsLogin;
+    }
 
     public String getToken() {
         return token;

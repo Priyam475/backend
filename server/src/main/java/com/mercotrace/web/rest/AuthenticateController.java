@@ -2,6 +2,8 @@ package com.mercotrace.web.rest;
 
 import static com.mercotrace.security.SecurityUtils.AUTHORITIES_CLAIM;
 import static com.mercotrace.security.SecurityUtils.JWT_ALGORITHM;
+import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_CLAIM;
+import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_TRADER;
 import static com.mercotrace.security.SecurityUtils.USER_ID_CLAIM;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -84,6 +86,24 @@ public class AuthenticateController {
     }
 
     /**
+     * Build HTTP headers with Bearer token and httpOnly cookie for a JWT.
+     * Used by register (and similar flows) that issue a token without going through login.
+     */
+    public HttpHeaders buildAuthHeaders(String jwt) {
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.setBearerAuth(jwt);
+        ResponseCookie cookie = ResponseCookie
+            .from("ACCESS_TOKEN", jwt)
+            .httpOnly(true)
+            .secure(true)
+            .sameSite("Lax")
+            .path("/")
+            .build();
+        httpHeaders.add(HttpHeaders.SET_COOKIE, cookie.toString());
+        return httpHeaders;
+    }
+
+    /**
      * {@code GET /authenticate} : check if the user is authenticated.
      *
      * @return the {@link ResponseEntity} with status {@code 204 (No Content)},
@@ -96,6 +116,10 @@ public class AuthenticateController {
     }
 
     public String createToken(Authentication authentication, boolean rememberMe) {
+        return createToken(authentication, rememberMe, TOKEN_TYPE_TRADER);
+    }
+
+    public String createToken(Authentication authentication, boolean rememberMe, String tokenType) {
         String authorities = authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority).collect(Collectors.joining(" "));
 
         Instant now = Instant.now();
@@ -111,7 +135,8 @@ public class AuthenticateController {
             .issuedAt(now)
             .expiresAt(validity)
             .subject(authentication.getName())
-            .claim(AUTHORITIES_CLAIM, authorities);
+            .claim(AUTHORITIES_CLAIM, authorities)
+            .claim(TOKEN_TYPE_CLAIM, tokenType);
         if (authentication.getPrincipal() instanceof UserWithId user) {
             builder.claim(USER_ID_CLAIM, user.getId());
         }

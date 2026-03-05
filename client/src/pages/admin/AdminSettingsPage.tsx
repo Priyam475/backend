@@ -2,6 +2,8 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Users, UserCog, Cog, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const settingsCards = [
   {
@@ -32,6 +34,14 @@ const settingsCards = [
 
 const AdminSettingsPage = () => {
   const navigate = useNavigate();
+  const { canAccessModule, can } = useAdminPermissions();
+
+  const canView = canAccessModule('Settings');
+  const canManageRbac = can('Settings', 'Manage RBAC');
+
+  if (!canView) {
+    return <AdminForbiddenPage moduleName="Settings" />;
+  }
 
   return (
     <div className="space-y-6">
@@ -46,7 +56,12 @@ const AdminSettingsPage = () => {
       </motion.div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {settingsCards.map((card, i) => (
+        {settingsCards.map((card, i) => {
+          const isRbacCard = card.path.startsWith('/admin/settings/');
+          if (isRbacCard && !canManageRbac) {
+            return null;
+          }
+          return (
           <motion.button
             key={card.title}
             initial={{ opacity: 0, y: 15, scale: 0.95 }}
@@ -68,7 +83,8 @@ const AdminSettingsPage = () => {
               </div>
             </div>
           </motion.button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

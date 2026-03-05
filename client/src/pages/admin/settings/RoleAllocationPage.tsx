@@ -11,12 +11,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Profile, Role, UserRole } from '@/types/rbac';
-import { rbacApi, traderRbacApi } from '@/services/api';
-import { useAuth } from '@/context/AuthContext';
+import { traderRbacApi } from '@/services/api';
 
 const RoleAllocationPage = () => {
-  const { trader } = useAuth();
-  const api = trader ? traderRbacApi : rbacApi;
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -32,9 +29,9 @@ const RoleAllocationPage = () => {
     try {
       setLoading(true);
       const [profilesData, rolesData, userRolesData] = await Promise.all([
-        api.listProfiles(),
-        api.listRoles(),
-        api.listUserRoles(),
+        traderRbacApi.listProfiles(),
+        traderRbacApi.listRoles(),
+        traderRbacApi.listUserRoles(),
       ]);
       setProfiles(profilesData as Profile[]);
       setRoles(rolesData.map((r: Role) => ({ ...r, permissions: r.permissions || {} })) as Role[]);
@@ -72,7 +69,7 @@ const RoleAllocationPage = () => {
     setSaving(true);
     const newRoleIds = [...selectedRoleIds];
     try {
-      await api.setUserRoles(selectedProfile.id, newRoleIds);
+      await traderRbacApi.setUserRoles(selectedProfile.id, newRoleIds);
       toast.success('Roles updated successfully');
       setDialogOpen(false);
       fetchAll();

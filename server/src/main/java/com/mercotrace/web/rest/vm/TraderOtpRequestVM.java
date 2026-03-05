@@ -4,12 +4,12 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
 /**
- * ViewModel for Module 1 OTP request:
+ * ViewModel for trader OTP request:
  * {
  *   "mobile": "9876543210"
  * }
  */
-public class Module1OtpRequestVM {
+public class TraderOtpRequestVM {
 
     @NotBlank
     @Pattern(regexp = "^[6-9]\\d{9}$", message = "Invalid mobile number")

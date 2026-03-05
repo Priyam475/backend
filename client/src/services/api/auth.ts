@@ -1,6 +1,68 @@
 import type { Trader, User } from '@/types/models';
 import { apiFetch } from './http';
 
+/** Default message when we cannot show a specific validation message. */
+const REGISTRATION_FAILED = 'Registration failed. Please try again.';
+
+/** User-friendly message for duplicate email/login (no sensitive data). */
+const EMAIL_ALREADY_REGISTERED =
+  'A trader is already registered with this email address. Please sign in or use a different email.';
+
+/**
+ * Parses error response for registration: 409 Conflict or 400 with "already used" / "already registered".
+ * Returns a safe, user-facing message (no technical jargon or sensitive data).
+ */
+async function parseRegistrationError(res: Response): Promise<string> {
+  const status = res.status;
+  try {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const problem = await res.json();
+      const detail =
+        typeof problem.detail === 'string' ? problem.detail.trim() : '';
+      const title =
+        typeof problem.title === 'string' ? problem.title.trim() : '';
+
+      // 409 Conflict or 400 with duplicate-identity semantics: show exact validation message when safe
+      const isConflict = status === 409;
+      const isDuplicate =
+        status === 400 &&
+        (detail.toLowerCase().includes('already used') ||
+          detail.toLowerCase().includes('already registered') ||
+          detail.toLowerCase().includes('already in use') ||
+          title.toLowerCase().includes('already used') ||
+          title.toLowerCase().includes('already in use'));
+
+      if (isConflict || isDuplicate) {
+        // Prefer server message if it looks like a validation message (short, no stack traces)
+        if (detail && detail.length > 0 && detail.length < 300 && !/stack|exception|at\s+\w+\./.i.test(detail)) {
+          return detail;
+        }
+        if (title && title.length > 0 && title.length < 300 && !/stack|exception|at\s+\w+\./.i.test(title)) {
+          return title;
+        }
+        return EMAIL_ALREADY_REGISTERED;
+      }
+
+      // Other 4xx: use detail/title when safe
+      if (detail && detail.length < 300 && !/stack|exception|at\s+\w+\./.i.test(detail)) {
+        return detail;
+      }
+      if (title && title.length < 300 && !/stack|exception|at\s+\w+\./.i.test(title)) {
+        return title;
+      }
+    } else {
+      const text = await res.text();
+      if (text && text.length < 200 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+        return text;
+      }
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return REGISTRATION_FAILED;
+}
+
 export const authApi = {
   async register(data: {
     business_name: string;
@@ -23,31 +85,7 @@ export const authApi = {
     });
 
     if (!res.ok) {
-      let message = 'Registration failed. Please try again.';
-      try {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const problem = await res.json();
-          if (typeof problem.detail === 'string' && problem.detail.includes('login already used')) {
-            message = 'Email is already registered';
-          } else if (typeof problem.detail === 'string' && problem.detail.includes('email address already used')) {
-            message = 'Email is already registered';
-          } else if (typeof problem.detail === 'string' && problem.detail.includes('Password must be at least 6 characters')) {
-            message = 'Password must be at least 6 characters';
-          } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
-            message = problem.detail;
-          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
-            message = problem.title;
-          }
-        } else {
-          const text = await res.text();
-          if (text && text.length < 200) {
-            message = text;
-          }
-        }
-      } catch {
-        // ignore parse errors and keep default message
-      }
+      const message = await parseRegistrationError(res);
       throw new Error(message);
     }
 

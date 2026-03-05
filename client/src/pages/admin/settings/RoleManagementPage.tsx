@@ -14,8 +14,7 @@ import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Role, ModulePermissions } from '@/types/rbac';
 import { AVAILABLE_MODULES } from '@/types/rbac';
-import { rbacApi, traderRbacApi } from '@/services/api';
-import { useAuth } from '@/context/AuthContext';
+import { traderRbacApi } from '@/services/api';
 
 const emptyPermissions = (): ModulePermissions => {
   const perms: ModulePermissions = {};
@@ -27,8 +26,6 @@ const emptyPermissions = (): ModulePermissions => {
 };
 
 const RoleManagementPage = () => {
-  const { trader } = useAuth();
-  const api = trader ? traderRbacApi : rbacApi;
   const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +42,7 @@ const RoleManagementPage = () => {
   const fetchRoles = async () => {
     try {
       setLoading(true);
-      const data = await api.listRoles();
+      const data = await traderRbacApi.listRoles();
       setRoles((data || []).map(r => ({ ...r, permissions: (r.permissions as any) || {} })) as Role[]);
     } catch (error) {
       console.error(error);
@@ -55,7 +52,9 @@ const RoleManagementPage = () => {
     }
   };
 
-  useEffect(() => { fetchRoles(); }, [trader?.trader_id]);
+  useEffect(() => {
+    fetchRoles();
+  }, []);
 
   const openCreate = () => {
     setEditingRole(null);
@@ -120,10 +119,10 @@ const RoleManagementPage = () => {
     const payload = { name: formName.trim(), description: formDesc.trim(), permissions: formPerms as any };
     try {
       if (editingRole) {
-        await api.updateRole(editingRole.id, payload);
+        await traderRbacApi.updateRole(editingRole.id, payload);
         toast.success('Role updated');
       } else {
-        await rbacApi.createRole(payload);
+        await traderRbacApi.createRole(payload);
         toast.success('Role created');
       }
       setDialogOpen(false);
@@ -138,7 +137,7 @@ const RoleManagementPage = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await api.deleteRole(id);
+      await traderRbacApi.deleteRole(id);
       toast.success('Role deleted');
       setDeleteConfirm(null);
       fetchRoles();
