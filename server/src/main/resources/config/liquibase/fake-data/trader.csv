@@ -1,4 +1,0 @@
-id;business_name;owner_name;address;category;approval_status;business_mode;bill_prefix;created_at;updated_at
-1;Green Valley Mandi;Ramesh Kumar;123 Market St - City;Agriculture;PENDING;COMMISSION;GV;2026-02-23T00:00:00;2026-02-23T00:00:00
-2;Sharma Traders;Vikram Sharma;456 APMC Road;Retail;APPROVED;TRADING;ST;2026-02-23T00:00:00;2026-02-23T00:00:00
-3;Test Trader Shop;Test Owner;789 Test Ave;Agriculture;PENDING;COMMISSION;TS;2026-02-23T00:00:00;2026-02-23T00:00:00

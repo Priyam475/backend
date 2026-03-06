@@ -9,6 +9,7 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.PaginationUtil;
@@ -19,6 +20,7 @@ import tech.jhipster.web.util.ResponseUtil;
  */
 @RestController
 @RequestMapping("/api/admin/traders")
+@PreAuthorize("hasAuthority(\"" + com.mercotrace.security.AuthoritiesConstants.ADMIN + "\")")
 public class AdminTraderSpecResource {
 
     private final TraderService traderService;

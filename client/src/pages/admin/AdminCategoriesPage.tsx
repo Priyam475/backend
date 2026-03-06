@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { categoryApi } from '@/services/api';
 import type { BusinessCategory } from '@/types/models';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const cardGradients = ['from-blue-500 via-blue-400 to-cyan-400','from-violet-500 via-purple-500 to-fuchsia-500','from-amber-400 via-orange-500 to-rose-500','from-emerald-400 via-green-500 to-teal-500','from-pink-400 via-rose-500 to-red-500','from-indigo-500 via-blue-500 to-cyan-500'];
 
@@ -15,14 +17,35 @@ const AdminCategoriesPage = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ category_name: '' });
+  const { canAccessModule, can } = useAdminPermissions();
 
-  useEffect(() => { categoryApi.list().then(setCategories); }, []);
+  const canView = canAccessModule('Categories');
+  const canCreate = can('Categories', 'Create');
+  const canEdit = can('Categories', 'Edit');
+  const canDelete = can('Categories', 'Delete');
+
+  if (!canView) {
+    return <AdminForbiddenPage moduleName="Categories" />;
+  }
+
+  useEffect(() => {
+    categoryApi
+      .adminList()
+      .then(setCategories)
+      .catch(e => {
+        console.error('Failed to load categories', e);
+        setCategories([]);
+      });
+  }, []);
 
   const filtered = categories.filter(c => c.category_name.toLowerCase().includes(search.toLowerCase()));
 
   const handleAdd = async () => {
+    if (!canCreate) {
+      return;
+    }
     try {
-      const created = await categoryApi.create({ category_name: form.category_name, is_active: true });
+      const created = await categoryApi.adminCreate({ category_name: form.category_name, is_active: true });
       setCategories(prev => [...prev, created]);
       setForm({ category_name: '' });
       setShowAdd(false);
@@ -32,9 +55,12 @@ const AdminCategoriesPage = () => {
   };
 
   const handleUpdate = async (id: string) => {
+    if (!canEdit) {
+      return;
+    }
     try {
       const cat = categories.find(c => c.category_id === id);
-      const updated = await categoryApi.update(id, { category_name: form.category_name, is_active: cat?.is_active ?? true });
+      const updated = await categoryApi.adminUpdate(id, { category_name: form.category_name, is_active: cat?.is_active ?? true });
       setCategories(prev => prev.map(c => c.category_id === id ? updated : c));
       setEditId(null);
       setForm({ category_name: '' });
@@ -44,8 +70,11 @@ const AdminCategoriesPage = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) {
+      return;
+    }
     try {
-      await categoryApi.delete(id);
+      await categoryApi.adminDelete(id);
       setCategories(prev => prev.filter(c => c.category_id !== id));
     } catch (e) {
       console.error('Failed to delete category', e);
@@ -53,10 +82,13 @@ const AdminCategoriesPage = () => {
   };
 
   const handleToggle = async (id: string) => {
+    if (!canEdit) {
+      return;
+    }
     const cat = categories.find(c => c.category_id === id);
     if (!cat) return;
     try {
-      const updated = await categoryApi.update(id, { category_name: cat.category_name, is_active: !cat.is_active });
+      const updated = await categoryApi.adminUpdate(id, { category_name: cat.category_name, is_active: !cat.is_active });
       setCategories(prev => prev.map(c => c.category_id === id ? updated : c));
     } catch (e) {
       console.error('Failed to toggle category', e);
@@ -80,7 +112,15 @@ const AdminCategoriesPage = () => {
             <p className="text-sm text-muted-foreground">Master list managed by Super Admin</p>
           </div>
         </div>
-        <Button onClick={() => { setShowAdd(true); setForm({ category_name: '' }); }} className="bg-gradient-to-r from-primary to-accent text-white rounded-xl h-10 shadow-lg shadow-primary/20">
+        <Button
+          onClick={() => {
+            if (!canCreate) return;
+            setShowAdd(true);
+            setForm({ category_name: '' });
+          }}
+          disabled={!canCreate}
+          className="bg-gradient-to-r from-primary to-accent text-white rounded-xl h-10 shadow-lg shadow-primary/20 disabled:opacity-50"
+        >
           <Plus className="w-4 h-4 mr-2" /> Add Category
         </Button>
       </motion.div>
@@ -113,10 +153,22 @@ const AdminCategoriesPage = () => {
                         <Store className="w-5 h-5 text-white" />
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditId(cat.category_id); setForm({ category_name: cat.category_name }); }} className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground">
+                        <button
+                          onClick={() => {
+                            if (!canEdit) return;
+                            setEditId(cat.category_id);
+                            setForm({ category_name: cat.category_name });
+                          }}
+                          disabled={!canEdit}
+                          className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDelete(cat.category_id)} className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                        <button
+                          onClick={() => handleDelete(cat.category_id)}
+                          disabled={!canDelete}
+                          className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-40"
+                        >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -126,7 +178,11 @@ const AdminCategoriesPage = () => {
                       <span className={cn('px-2 py-1 rounded-lg text-[10px] font-semibold', cat.is_active ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground')}>
                         {cat.is_active ? 'Active' : 'Inactive'}
                       </span>
-                      <button onClick={() => handleToggle(cat.category_id)} className="text-[10px] text-primary hover:underline">
+                      <button
+                        onClick={() => handleToggle(cat.category_id)}
+                        disabled={!canEdit}
+                        className="text-[10px] text-primary hover:underline disabled:opacity-50"
+                      >
                         {cat.is_active ? 'Deactivate' : 'Activate'}
                       </button>
                     </div>
@@ -152,7 +208,13 @@ const AdminCategoriesPage = () => {
                 </div>
                 <Input placeholder="Category Name (e.g., Vegetables)" value={form.category_name} onChange={e => setForm(p => ({ ...p, category_name: e.target.value }))} className="h-12 rounded-xl" />
                 <div className="flex gap-3">
-                  <Button onClick={handleAdd} disabled={!form.category_name} className="flex-1 bg-gradient-to-r from-primary to-accent text-white rounded-xl h-11">Add Category</Button>
+                  <Button
+                    onClick={handleAdd}
+                    disabled={!form.category_name || !canCreate}
+                    className="flex-1 bg-gradient-to-r from-primary to-accent text-white rounded-xl h-11 disabled:opacity-50"
+                  >
+                    Add Category
+                  </Button>
                   <Button onClick={() => setShowAdd(false)} variant="outline" className="flex-1 rounded-xl h-11">Cancel</Button>
                 </div>
               </div>

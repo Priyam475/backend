@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Shield, Users, UserCog, Cog, ChevronRight, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BottomNav from '@/components/BottomNav';
+import { usePermissions } from '@/lib/permissions';
+import ForbiddenPage from '@/components/ForbiddenPage';
 
 const settingsCards = [
   {
@@ -39,6 +41,25 @@ const settingsCards = [
 
 const SettingsPage = () => {
   const navigate = useNavigate();
+  const { canAccessModule, can } = usePermissions();
+
+  const canViewSettings = canAccessModule('Settings');
+  const canManageRoles = can('Settings', 'Manage Roles');
+  const canManageUsers = can('Settings', 'Manage Users');
+
+  if (!canViewSettings) {
+    return <ForbiddenPage moduleName="Settings" />;
+  }
+
+  const visibleCards = settingsCards.filter(card => {
+    if (card.path === '/settings/roles' || card.path === '/settings/role-allocation') {
+      return canManageRoles;
+    }
+    if (card.path === '/settings/users') {
+      return canManageUsers;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-[100dvh] bg-background pb-28 lg:pb-6">
@@ -70,7 +91,7 @@ const SettingsPage = () => {
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {settingsCards.map((card, i) => (
+          {visibleCards.map((card, i) => (
             <motion.button
               key={card.title}
               initial={{ opacity: 0, y: 15, scale: 0.95 }}

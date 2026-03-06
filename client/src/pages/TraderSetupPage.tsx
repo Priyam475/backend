@@ -1,19 +1,22 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft, User, Mail, Phone, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
+import { categoryApi } from '@/services/api';
+import type { BusinessCategory } from '@/types/models';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import loginBg from '@/assets/login-bg.jpg';
 
-const BUSINESS_CATEGORIES = ['Retailer', 'Exporter', 'Trader', 'Commission Agent', 'Distributor', 'Wholesaler'];
 const STATES = ['Karnataka'];
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MOBILE_REGEX = /^[6-9]\d{9}$/;
 
 // Deterministic particles (same pattern as login/register)
 const PARTICLES = Array.from({ length: 10 }, (_, i) => ({
@@ -25,23 +28,46 @@ const PARTICLES = Array.from({ length: 10 }, (_, i) => ({
 
 interface FormData {
   businessName: string;
-  businessCategory: string;
-  gstin: string;
+  ownerName: string;
+  email: string;
+  mobile: string;
+  password: string;
+  confirmPassword: string;
+  address: string;
+  city: string;
   address: string;
   shopNo: string;
   state: string;
-  market: string;
+  categoryId: string;
+  categoryName: string;
+  gstNumber: string;
+  rmcApmcCode: string;
   description: string;
 }
 
 const TraderSetupPage = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
-  const { register, isLoading } = useAuth();
+  const { register, isLoading, error, clearError } = useAuth();
+
+  const [categories, setCategories] = useState<BusinessCategory[]>([]);
 
   const [form, setForm] = useState<FormData>({
-    businessName: '', businessCategory: '', gstin: '', address: '',
-    shopNo: '', state: 'Karnataka', market: '', description: '',
+    businessName: '',
+    ownerName: '',
+    email: '',
+    mobile: '',
+    password: '',
+    confirmPassword: '',
+    address: '',
+    city: '',
+    shopNo: '',
+    state: 'Karnataka',
+    categoryId: '',
+    categoryName: '',
+    gstNumber: '',
+    rmcApmcCode: '',
+    description: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -50,11 +76,21 @@ const TraderSetupPage = () => {
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showStateDropdown, setShowStateDropdown] = useState(false);
 
+  useEffect(() => {
+    categoryApi
+      .list()
+      .then(setCategories)
+      .catch(() => {
+        toast.error('Failed to load business categories');
+      });
+  }, []);
+
   const inputClass = "pl-12 h-12 sm:h-14 text-base rounded-xl bg-white/90 border-0 text-blue-900 placeholder:text-blue-400";
   const inputClassPlain = "h-12 sm:h-14 text-base rounded-xl bg-white/90 border-0 text-blue-900 placeholder:text-blue-400";
 
   const updateField = (field: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
+    clearError();
     if (errors[field]) setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
   };
 
@@ -66,20 +102,77 @@ const TraderSetupPage = () => {
   const validateField = (field: string): string => {
     let error = '';
     switch (field) {
-      case 'businessName': if (!form.businessName.trim()) error = 'This field is required'; break;
-      case 'businessCategory': if (!form.businessCategory) error = 'Please select a category'; break;
-      case 'gstin': if (form.gstin && !GSTIN_REGEX.test(form.gstin.toUpperCase())) error = 'Invalid GSTIN format'; break;
-      case 'address': if (!form.address.trim()) error = 'This field is required'; break;
-      case 'shopNo': if (!form.shopNo.trim()) error = 'This field is required'; break;
-      case 'state': if (!form.state) error = 'This field is required'; break;
-      case 'market': if (!form.market.trim()) error = 'This field is required'; break;
+      case 'businessName':
+        if (!form.businessName.trim()) error = 'Business name is required';
+        else if (form.businessName.trim().length < 3) error = 'Min 3 characters';
+        break;
+      case 'ownerName':
+        if (!form.ownerName.trim()) error = 'Owner name is required';
+        else if (form.ownerName.trim().length < 2) error = 'Min 2 characters';
+        break;
+      case 'email':
+        if (!form.email.trim()) error = 'Email is required';
+        else if (!EMAIL_REGEX.test(form.email.trim())) error = 'Enter a valid email';
+        break;
+      case 'mobile':
+        if (!form.mobile.trim()) error = 'Mobile number is required';
+        else if (!MOBILE_REGEX.test(form.mobile.trim())) error = 'Enter valid 10-digit mobile (starts 6-9)';
+        break;
+      case 'password':
+        if (!form.password) error = 'Password is required';
+        else if (form.password.length < 6) error = 'Min 6 characters';
+        else if (form.confirmPassword && form.confirmPassword !== form.password) {
+          // keep confirm password error in sync when user edits password after confirming
+          setErrors(prev => ({
+            ...prev,
+            confirmPassword: 'Passwords do not match',
+          }));
+        }
+        break;
+      case 'confirmPassword':
+        if (!form.confirmPassword) error = 'Please confirm your password';
+        else if (form.confirmPassword !== form.password) error = 'Passwords do not match';
+        break;
+      case 'address':
+        if (!form.address.trim()) error = 'Address is required';
+        break;
+      case 'city':
+        if (!form.city.trim()) error = 'City / Market is required';
+        break;
+      case 'state':
+        if (!form.state.trim()) error = 'State is required (mandatory for GST)';
+        break;
+      case 'categoryName':
+        if (!form.categoryName) error = 'Select a business category';
+        break;
+      case 'gstNumber':
+        if (form.gstNumber && !GSTIN_REGEX.test(form.gstNumber.toUpperCase())) {
+          error = 'Enter valid 15-char GST (e.g., 22AAAAA0000A1Z5)';
+        }
+        break;
+      case 'shopNo':
+        if (!form.shopNo.trim()) error = 'Shop number is required';
+        break;
     }
     setErrors(prev => error ? { ...prev, [field]: error } : (() => { const n = { ...prev }; delete n[field]; return n; })());
     return error;
   };
 
   const validateAll = (): boolean => {
-    const fields = ['businessName', 'businessCategory', 'address', 'shopNo', 'state', 'market', 'gstin'];
+    const fields = [
+      'businessName',
+      'ownerName',
+      'email',
+      'mobile',
+      'password',
+      'confirmPassword',
+      'address',
+      'city',
+      'state',
+      'categoryName',
+      'gstNumber',
+      'shopNo',
+    ];
     let valid = true;
     fields.forEach(f => { if (validateField(f)) valid = false; });
     setTouched(fields.reduce((a, f) => ({ ...a, [f]: true }), {}));
@@ -107,18 +200,33 @@ const TraderSetupPage = () => {
   }, []);
 
   const handleSubmit = async () => {
-    if (!validateAll()) { toast.error('Please fill all required fields'); return; }
+    if (!validateAll()) {
+      toast.error('Please fix the highlighted fields');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await register({
-        businessName: form.businessName.trim(), ownerName: form.businessName.trim(),
-        mobile: '', email: `trader_${Date.now()}@mercotrace.app`, password: 'trader123456',
-        address: form.address.trim(), city: form.market.trim(), state: form.state, pinCode: '', category: form.businessCategory,
+        businessName: form.businessName.trim(),
+        ownerName: form.ownerName.trim(),
+        email: form.email.trim(),
+        mobile: form.mobile.trim(),
+        password: form.password,
+        address: form.address.trim(),
+        city: form.city.trim(),
+        state: form.state.trim(),
+        categoryName: form.categoryName,
+        gstNumber: form.gstNumber.trim() || undefined,
+        rmcApmcCode: form.rmcApmcCode.trim() || undefined,
       });
       toast.success('Trader profile saved successfully!');
       navigate('/home', { replace: true });
-    } catch { toast.error('Failed to save profile. Please try again.'); }
-    finally { setIsSubmitting(false); }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save profile. Please try again.';
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const FieldError = ({ field }: { field: string }) => {
@@ -167,154 +275,427 @@ const TraderSetupPage = () => {
           </motion.div>
 
           <h1 className="text-2xl font-bold text-white mb-1 drop-shadow-lg">Trader Setup</h1>
-          <p className="text-white/70 text-sm mb-5">Set up your business profile to get started</p>
+          <p className="text-white/70 text-sm mb-5">
+            Create your Mercotrace account and set up your business profile
+          </p>
+
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="w-full max-w-4xl mb-4 p-3 rounded-xl bg-red-500/20 border border-red-400/30"
+              role="alert"
+            >
+              <p className="text-sm text-white text-center">{error}</p>
+            </motion.div>
+          )}
 
           {/* Form */}
-          <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="w-full max-w-sm space-y-3 pb-28">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="w-full max-w-4xl pb-28"
+          >
+            <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/20 p-4 sm:p-6 lg:p-8 shadow-2xl">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-8">
+                {/* Left column — Business, owner, credentials */}
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-1 flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5" /> Business &amp; Owner
+                  </p>
 
-            {/* Section: Business Details */}
-            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider pt-1 flex items-center gap-1.5">
-              <Store className="w-3.5 h-3.5" /> Business Details
-            </p>
+                  {/* Business Name */}
+                  <div>
+                    <div className="relative">
+                      <Building className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        placeholder="Business Name *"
+                        value={form.businessName}
+                        onChange={e => updateField('businessName', e.target.value)}
+                        onBlur={() => handleBlur('businessName')}
+                        className={cn(
+                          inputClass,
+                          touched.businessName && errors.businessName && 'ring-2 ring-red-400/50'
+                        )}
+                        maxLength={100}
+                      />
+                    </div>
+                    <FieldError field="businessName" />
+                  </div>
 
-            {/* Business Name */}
-            <div>
-              <div className="relative">
-                <Building className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
-                <Input placeholder="Business Name *" value={form.businessName} onChange={e => updateField('businessName', e.target.value)} onBlur={() => handleBlur('businessName')}
-                  className={cn(inputClass, touched.businessName && errors.businessName && "ring-2 ring-red-400/50")} maxLength={100} />
+                  {/* Owner Name */}
+                  <div>
+                    <div className="relative">
+                      <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        placeholder="Owner Name *"
+                        value={form.ownerName}
+                        onChange={e => updateField('ownerName', e.target.value)}
+                        onBlur={() => handleBlur('ownerName')}
+                        className={cn(
+                          inputClass,
+                          touched.ownerName && errors.ownerName && 'ring-2 ring-red-400/50'
+                        )}
+                        maxLength={100}
+                      />
+                    </div>
+                    <FieldError field="ownerName" />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <div className="relative">
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        type="email"
+                        placeholder="Email Address *"
+                        value={form.email}
+                        onChange={e => updateField('email', e.target.value)}
+                        onBlur={() => handleBlur('email')}
+                        className={cn(
+                          inputClass,
+                          touched.email && errors.email && 'ring-2 ring-red-400/50'
+                        )}
+                      />
+                    </div>
+                    <FieldError field="email" />
+                  </div>
+
+                  {/* Mobile */}
+                  <div>
+                    <div className="relative">
+                      <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        type="tel"
+                        placeholder="Mobile Number *"
+                        value={form.mobile}
+                        onChange={e =>
+                          updateField('mobile', e.target.value.replace(/\D/g, '').slice(0, 10))
+                        }
+                        onBlur={() => handleBlur('mobile')}
+                        className={cn(
+                          inputClass,
+                          touched.mobile && errors.mobile && 'ring-2 ring-red-400/50'
+                        )}
+                        maxLength={10}
+                      />
+                    </div>
+                    <FieldError field="mobile" />
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <div className="relative">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        type="password"
+                        placeholder="Create Password (min 6 chars) *"
+                        value={form.password}
+                        onChange={e => updateField('password', e.target.value)}
+                        onBlur={() => handleBlur('password')}
+                        className={cn(
+                          inputClass,
+                          touched.password && errors.password && 'ring-2 ring-red-400/50'
+                        )}
+                      />
+                    </div>
+                    <FieldError field="password" />
+                  </div>
+
+                    {/* Confirm Password */}
+                    <div>
+                      <div className="relative">
+                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                        <Input
+                          type="password"
+                          placeholder="Confirm Password *"
+                          value={form.confirmPassword}
+                          onChange={e => updateField('confirmPassword', e.target.value)}
+                          onBlur={() => handleBlur('confirmPassword')}
+                          className={cn(
+                            inputClass,
+                            touched.confirmPassword && errors.confirmPassword && 'ring-2 ring-red-400/50'
+                          )}
+                        />
+                      </div>
+                      <FieldError field="confirmPassword" />
+                    </div>
+
+                  {/* Shop No */}
+                  <div>
+                    <div className="relative">
+                      <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        placeholder="Shop No *"
+                        value={form.shopNo}
+                        onChange={e => updateField('shopNo', e.target.value)}
+                        onBlur={() => handleBlur('shopNo')}
+                        className={cn(
+                          inputClass,
+                          touched.shopNo && errors.shopNo && 'ring-2 ring-red-400/50'
+                        )}
+                        maxLength={20}
+                      />
+                    </div>
+                    <FieldError field="shopNo" />
+                  </div>
+                </div>
+
+                {/* Right column — Address, location, category, tax, extras */}
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-1 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" /> Address &amp; Location
+                  </p>
+
+                  {/* Address */}
+                  <div>
+                    <div className="relative">
+                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                      <Input
+                        placeholder="Search or enter address *"
+                        value={form.address}
+                        onChange={e => updateField('address', e.target.value)}
+                        onBlur={() => handleBlur('address')}
+                        className={cn(
+                          inputClass,
+                          touched.address && errors.address && 'ring-2 ring-red-400/50'
+                        )}
+                      />
+                    </div>
+                    <FieldError field="address" />
+                    <button
+                      type="button"
+                      onClick={handleUseCurrentLocation}
+                      disabled={isFetchingLocation}
+                      className="mt-1.5 flex items-center gap-2 text-xs sm:text-sm text-white/80 font-medium hover:text-white transition-colors min-h-[44px] px-1"
+                    >
+                      {isFetchingLocation ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Navigation className="w-4 h-4" />
+                      )}
+                      {isFetchingLocation
+                        ? 'Fetching location...'
+                        : '📍 Use my current location as address'}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* City / Market */}
+                    <div>
+                      <div className="relative">
+                        <Store className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                        <Input
+                          placeholder="City / Market *"
+                          value={form.city}
+                          onChange={e => updateField('city', e.target.value)}
+                          onBlur={() => handleBlur('city')}
+                          className={cn(
+                            inputClass,
+                            touched.city && errors.city && 'ring-2 ring-red-400/50'
+                          )}
+                          maxLength={100}
+                        />
+                      </div>
+                      <FieldError field="city" />
+                    </div>
+
+                    {/* State Dropdown */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowStateDropdown(!showStateDropdown);
+                          setShowCategoryDropdown(false);
+                        }}
+                        onBlur={() =>
+                          setTimeout(() => {
+                            setShowStateDropdown(false);
+                            handleBlur('state');
+                          }, 150)
+                        }
+                        className={cn(
+                          'w-full h-12 sm:h-14 px-4 rounded-xl bg-white/90 text-sm flex items-center justify-between text-blue-900',
+                          touched.state && errors.state && 'ring-2 ring-red-400/50'
+                        )}
+                      >
+                        <span>{form.state || 'Select State *'}</span>
+                        <ChevronDown
+                          className={cn(
+                            'w-4 h-4 text-blue-800/50 transition-transform',
+                            showStateDropdown && 'rotate-180'
+                          )}
+                        />
+                      </button>
+                      {showStateDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="absolute z-50 top-full mt-2 w-full rounded-2xl py-2 bg-white/95 backdrop-blur-xl shadow-xl border border-white/50"
+                        >
+                          {STATES.map(s => (
+                            <button
+                              key={s}
+                              type="button"
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => {
+                                updateField('state', s);
+                                setShowStateDropdown(false);
+                              }}
+                              className={cn(
+                                'w-full text-left px-4 py-2.5 text-sm text-blue-900 hover:bg-blue-50 transition-colors',
+                                form.state === s && 'bg-blue-50 font-medium'
+                              )}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                      <FieldError field="state" />
+                    </div>
+                  </div>
+
+                  {/* Category */}
+                  <div className="grid grid-cols-1 sm:grid-cols-1 gap-3">
+                    {/* Category dropdown */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCategoryDropdown(!showCategoryDropdown);
+                          setShowStateDropdown(false);
+                        }}
+                        onBlur={() =>
+                          setTimeout(() => {
+                            setShowCategoryDropdown(false);
+                            handleBlur('categoryName');
+                          }, 150)
+                        }
+                        className={cn(
+                          'w-full h-12 sm:h-14 px-4 rounded-xl bg-white/90 text-sm flex items-center justify-between',
+                          form.categoryName ? 'text-blue-900' : 'text-blue-400',
+                          touched.categoryName && errors.categoryName && 'ring-2 ring-red-400/50'
+                        )}
+                      >
+                        <span>{form.categoryName || 'Select Business Category *'}</span>
+                        <ChevronDown
+                          className={cn(
+                            'w-4 h-4 text-blue-800/50 transition-transform',
+                            showCategoryDropdown && 'rotate-180'
+                          )}
+                        />
+                      </button>
+                      {showCategoryDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="absolute z-50 top-full mt-2 w-full rounded-2xl py-2 max-h-48 overflow-auto bg-white/95 backdrop-blur-xl shadow-xl border border-white/50"
+                        >
+                          {categories.map(cat => (
+                            <button
+                              key={cat.category_id}
+                              type="button"
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => {
+                                updateField('categoryId', cat.category_id);
+                                updateField('categoryName', cat.category_name);
+                                setShowCategoryDropdown(false);
+                              }}
+                              className={cn(
+                                'w-full text-left px-4 py-2.5 text-sm text-blue-900 hover:bg-blue-50 transition-colors',
+                                form.categoryId === cat.category_id && 'bg-blue-50 font-medium'
+                              )}
+                            >
+                              {cat.category_name}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                      <FieldError field="categoryName" />
+                    </div>
+                  </div>
+
+                  {/* Tax / registration */}
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-3 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5" /> Tax &amp; Registration
+                  </p>
+
+                  {/* GST + RMC */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* GST */}
+                    <div>
+                      <div className="relative">
+                        <FileText className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                        <Input
+                          placeholder="GST Number (optional)"
+                          value={form.gstNumber}
+                          onChange={e =>
+                            updateField('gstNumber', e.target.value.toUpperCase().slice(0, 15))
+                          }
+                          onBlur={() => handleBlur('gstNumber')}
+                          className={cn(
+                            inputClass,
+                            touched.gstNumber && errors.gstNumber && 'ring-2 ring-red-400/50'
+                          )}
+                          maxLength={15}
+                        />
+                      </div>
+                      <FieldError field="gstNumber" />
+                    </div>
+
+                    {/* RMC / APMC */}
+                    <div>
+                      <div className="relative">
+                        <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
+                        <Input
+                          placeholder="RMC / APMC Code (optional)"
+                          value={form.rmcApmcCode}
+                          onChange={e => updateField('rmcApmcCode', e.target.value)}
+                          className={inputClass}
+                          maxLength={50}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-3 flex items-center gap-1.5">
+                    <AlignLeft className="w-3.5 h-3.5" /> Additional Info
+                  </p>
+
+                  <textarea
+                    placeholder="Tell us about your shop... (optional)"
+                    value={form.description}
+                    onChange={e => updateField('description', e.target.value)}
+                    className="w-full min-h-[90px] px-4 py-3 rounded-xl bg-white/90 border-0 text-sm text-blue-900 placeholder:text-blue-400 resize-none focus:outline-none focus:ring-2 focus:ring-white/50"
+                    maxLength={500}
+                  />
+                </div>
               </div>
-              <FieldError field="businessName" />
-            </div>
 
-            {/* Business Category Dropdown */}
-            <div className="relative">
-              <button type="button"
-                onClick={() => { setShowCategoryDropdown(!showCategoryDropdown); setShowStateDropdown(false); }}
-                onBlur={() => setTimeout(() => { setShowCategoryDropdown(false); handleBlur('businessCategory'); }, 150)}
-                className={cn("w-full h-12 sm:h-14 px-4 rounded-xl bg-white/90 text-sm flex items-center justify-between",
-                  form.businessCategory ? 'text-blue-900' : 'text-blue-400',
-                  touched.businessCategory && errors.businessCategory && "ring-2 ring-red-400/50"
-                )}>
-                <span>{form.businessCategory || 'Select Business Category *'}</span>
-                <ChevronDown className={cn('w-4 h-4 text-blue-800/50 transition-transform', showCategoryDropdown && 'rotate-180')} />
-              </button>
-              {showCategoryDropdown && (
-                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                  className="absolute z-50 top-full mt-2 w-full rounded-2xl py-2 max-h-48 overflow-auto bg-white/95 backdrop-blur-xl shadow-xl border border-white/50">
-                  {BUSINESS_CATEGORIES.map(cat => (
-                    <button key={cat} type="button" onMouseDown={e => e.preventDefault()}
-                      onClick={() => { updateField('businessCategory', cat); setShowCategoryDropdown(false); }}
-                      className={cn("w-full text-left px-4 py-2.5 text-sm text-blue-900 hover:bg-blue-50 transition-colors",
-                        form.businessCategory === cat && "bg-blue-50 font-medium"
-                      )}>{cat}</button>
-                  ))}
-                </motion.div>
-              )}
-              <FieldError field="businessCategory" />
-            </div>
-
-            {/* GSTIN */}
-            <div>
-              <div className="relative">
-                <FileText className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
-                <Input placeholder="GSTIN (optional)" value={form.gstin} onChange={e => updateField('gstin', e.target.value.toUpperCase())} onBlur={() => handleBlur('gstin')}
-                  className={cn(inputClass, "uppercase", touched.gstin && errors.gstin && "ring-2 ring-red-400/50")} maxLength={15} />
+              {/* Submit button */}
+              <div className="mt-6">
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || isLoading}
+                  className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70"
+                >
+                  {isSubmitting ? (
+                    <motion.div
+                      className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    />
+                  ) : (
+                    <>
+                      <Save className="w-5 h-5 mr-2" /> Create Account &amp; Continue
+                    </>
+                  )}
+                </Button>
               </div>
-              <FieldError field="gstin" />
             </div>
-
-            {/* Section: Address & Location */}
-            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider pt-3 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5" /> Address & Location
-            </p>
-
-            {/* Address */}
-            <div>
-              <div className="relative">
-                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
-                <Input placeholder="Search or enter address *" value={form.address} onChange={e => updateField('address', e.target.value)} onBlur={() => handleBlur('address')}
-                  className={cn(inputClass, touched.address && errors.address && "ring-2 ring-red-400/50")} />
-              </div>
-              <FieldError field="address" />
-              <button type="button" onClick={handleUseCurrentLocation} disabled={isFetchingLocation}
-                className="mt-1.5 flex items-center gap-2 text-sm text-white/80 font-medium hover:text-white transition-colors min-h-[44px] px-1">
-                {isFetchingLocation ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
-                {isFetchingLocation ? 'Fetching location...' : '📍 Use my current location as address'}
-              </button>
-            </div>
-
-            {/* Shop No */}
-            <div>
-              <div className="relative">
-                <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
-                <Input placeholder="Shop No *" value={form.shopNo} onChange={e => updateField('shopNo', e.target.value)} onBlur={() => handleBlur('shopNo')}
-                  className={cn(inputClass, touched.shopNo && errors.shopNo && "ring-2 ring-red-400/50")} maxLength={20} />
-              </div>
-              <FieldError field="shopNo" />
-            </div>
-
-            {/* Section: Market Location */}
-            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider pt-3 flex items-center gap-1.5">
-              <Map className="w-3.5 h-3.5" /> Your Market Location
-            </p>
-
-            {/* State Dropdown */}
-            <div className="relative">
-              <button type="button"
-                onClick={() => { setShowStateDropdown(!showStateDropdown); setShowCategoryDropdown(false); }}
-                onBlur={() => setTimeout(() => { setShowStateDropdown(false); handleBlur('state'); }, 150)}
-                className={cn("w-full h-12 sm:h-14 px-4 rounded-xl bg-white/90 text-sm flex items-center justify-between text-blue-900")}>
-                <span>{form.state || 'Select State *'}</span>
-                <ChevronDown className={cn('w-4 h-4 text-blue-800/50 transition-transform', showStateDropdown && 'rotate-180')} />
-              </button>
-              {showStateDropdown && (
-                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                  className="absolute z-50 top-full mt-2 w-full rounded-2xl py-2 bg-white/95 backdrop-blur-xl shadow-xl border border-white/50">
-                  {STATES.map(s => (
-                    <button key={s} type="button" onMouseDown={e => e.preventDefault()}
-                      onClick={() => { updateField('state', s); setShowStateDropdown(false); }}
-                      className={cn("w-full text-left px-4 py-2.5 text-sm text-blue-900 hover:bg-blue-50 transition-colors",
-                        form.state === s && "bg-blue-50 font-medium"
-                      )}>{s}</button>
-                  ))}
-                </motion.div>
-              )}
-              <FieldError field="state" />
-            </div>
-
-            {/* Market */}
-            <div>
-              <div className="relative">
-                <Store className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-blue-800/50" />
-                <Input placeholder="Market Name *" value={form.market} onChange={e => updateField('market', e.target.value)} onBlur={() => handleBlur('market')}
-                  className={cn(inputClass, touched.market && errors.market && "ring-2 ring-red-400/50")} maxLength={100} />
-              </div>
-              <FieldError field="market" />
-            </div>
-
-            {/* Section: Description */}
-            <p className="text-xs font-semibold text-white/50 uppercase tracking-wider pt-3 flex items-center gap-1.5">
-              <AlignLeft className="w-3.5 h-3.5" /> Additional Info
-            </p>
-
-            <textarea
-              placeholder="Tell us about your shop... (optional)"
-              value={form.description}
-              onChange={e => updateField('description', e.target.value)}
-              className="w-full min-h-[100px] px-4 py-3 rounded-xl bg-white/90 border-0 text-sm text-blue-900 placeholder:text-blue-400 resize-none focus:outline-none focus:ring-2 focus:ring-white/50"
-              maxLength={500}
-            />
-
-            {/* Submit button */}
-            <Button onClick={handleSubmit} disabled={isSubmitting || isLoading}
-              className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70 mt-2">
-              {isSubmitting ? (
-                <motion.div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} />
-              ) : (
-                <><Save className="w-5 h-5 mr-2" /> Save & Continue</>
-              )}
-            </Button>
           </motion.div>
         </div>
       </div>

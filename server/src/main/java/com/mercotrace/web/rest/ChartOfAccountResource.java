@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.dto.ChartOfAccountCreateRequest;
 import com.mercotrace.service.dto.ChartOfAccountDTO;
@@ -16,6 +17,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -42,6 +44,7 @@ public class ChartOfAccountResource {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")")
     public ResponseEntity<Page<ChartOfAccountDTO>> getAll(
         @org.springdoc.core.annotations.ParameterObject
         @PageableDefault(size = 10, sort = "ledgerName", direction = Sort.Direction.ASC) Pageable pageable,
@@ -56,6 +59,7 @@ public class ChartOfAccountResource {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")")
     public ResponseEntity<ChartOfAccountDTO> getById(@PathVariable Long id) {
         LOG.debug("REST request to get chart of account: {}", id);
         try {
@@ -67,6 +71,7 @@ public class ChartOfAccountResource {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_CREATE + "\")")
     public ResponseEntity<ChartOfAccountDTO> create(@Valid @RequestBody ChartOfAccountCreateRequest request) throws java.net.URISyntaxException {
         LOG.debug("REST request to create chart of account: {}", request.getLedgerName());
         try {
@@ -81,6 +86,7 @@ public class ChartOfAccountResource {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_EDIT + "\")")
     public ResponseEntity<ChartOfAccountDTO> update(@PathVariable Long id, @Valid @RequestBody ChartOfAccountUpdateRequest request) {
         LOG.debug("REST request to update chart of account: {}", id);
         try {
@@ -94,6 +100,7 @@ public class ChartOfAccountResource {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_DELETE + "\")")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         LOG.debug("REST request to delete chart of account: {}", id);
         try {

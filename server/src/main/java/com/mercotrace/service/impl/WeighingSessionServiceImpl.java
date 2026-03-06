@@ -92,7 +92,11 @@ public class WeighingSessionServiceImpl implements WeighingSessionService {
     @Override
     @Transactional(readOnly = true)
     public Optional<WeighingSessionDTO> getById(Long id) {
-        return weighingSessionRepository.findById(id).map(this::toDto);
+        Long traderId = traderContextService.getCurrentTraderId();
+        return weighingSessionRepository
+            .findById(id)
+            .filter(ws -> traderId.equals(ws.getTraderId()))
+            .map(this::toDto);
     }
 
     @Override

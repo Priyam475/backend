@@ -27,4 +27,10 @@ public interface RoleRepository extends RoleRepositoryWithBagRelationships, JpaR
     default Page<Role> findAllWithEagerRelationships(Pageable pageable) {
         return this.fetchBagRelationships(this.findAll(pageable));
     }
+
+    /**
+     * Roles that are scoped to a specific trader.
+     */
+    List<Role> findByTraderId(Long traderId);
 }
+

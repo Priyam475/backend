@@ -13,6 +13,8 @@ import { useDesktopMode } from '@/hooks/use-desktop';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { selfSaleApi, type OpenLotDTO, type ClosureDTO } from '@/services/api';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 /** UI shape for an open lot (derived from OpenLotDTO). */
 interface LotInfo {
@@ -42,6 +44,11 @@ function openLotToLotInfo(d: OpenLotDTO): LotInfo {
 const SelfSalePage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Self-Sale');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Self-Sale" />;
+  }
   const [lots, setLots] = useState<LotInfo[]>([]);
   const [openLotsLoading, setOpenLotsLoading] = useState(true);
   const [openLotsError, setOpenLotsError] = useState<string | null>(null);
@@ -111,6 +118,10 @@ const SelfSalePage = () => {
     if (!selectedLot || !rate) return;
     const r = parseFloat(rate);
     if (r <= 0) return;
+    if (!can('Self-Sale', 'Create')) {
+      toast.error('You do not have permission to close self-sale lots.');
+      return;
+    }
     setSubmitting(true);
     try {
       await selfSaleApi.createClosure({

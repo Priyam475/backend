@@ -1,0 +1,36 @@
+package com.mercotrace.repository;
+
+import com.mercotrace.domain.UserTrader;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface UserTraderRepository extends JpaRepository<UserTrader, Long> {
+
+    Optional<UserTrader> findFirstByUserIdAndPrimaryMappingTrue(Long userId);
+
+    Optional<UserTrader> findFirstByTraderIdAndPrimaryMappingTrue(Long traderId);
+
+    List<UserTrader> findAllByRoleInTraderAndPrimaryMappingTrue(String roleInTrader);
+
+    List<UserTrader> findAllByTraderIdAndPrimaryMappingTrue(Long traderId);
+
+    /**
+     * Fetch primary user-trader mappings for a trader along with the associated {@link com.mercotrace.domain.User}
+     * to avoid LazyInitializationException when accessing the user outside of a transactional context.
+     */
+    @Query(
+        "select ut from UserTrader ut " +
+        "join fetch ut.user u " +
+        "where ut.trader.id = :traderId and ut.primaryMapping = true"
+    )
+    List<UserTrader> findAllWithUserByTraderIdAndPrimaryMappingTrue(@Param("traderId") Long traderId);
+
+    Optional<UserTrader> findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(Long userId, Long traderId);
+}
+
+

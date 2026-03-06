@@ -57,6 +57,12 @@ public class TraderDTO implements Serializable {
     // Comma-separated URLs/paths
     private String shopPhotos;
 
+    @Size(max = 15)
+    private String gstNumber;
+
+    @Size(max = 64)
+    private String rmcApmcCode;
+
     public Long getId() {
         return id;
     }
@@ -183,6 +189,22 @@ public class TraderDTO implements Serializable {
 
     public void setShopPhotos(String shopPhotos) {
         this.shopPhotos = shopPhotos;
+    }
+
+    public String getGstNumber() {
+        return gstNumber;
+    }
+
+    public void setGstNumber(String gstNumber) {
+        this.gstNumber = gstNumber;
+    }
+
+    public String getRmcApmcCode() {
+        return rmcApmcCode;
+    }
+
+    public void setRmcApmcCode(String rmcApmcCode) {
+        this.rmcApmcCode = rmcApmcCode;
     }
 
     @Override

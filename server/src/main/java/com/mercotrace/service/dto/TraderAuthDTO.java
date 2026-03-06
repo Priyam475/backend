@@ -1,9 +1,11 @@
 package com.mercotrace.service.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Set;
 
 /**
- * Module 1 auth response payload, aligned to frontend AuthState expectations.
+ * Auth response payload, aligned to frontend AuthState expectations, for both
+ * trader and admin flows.
  *
  * Shape on the wire:
  * {
@@ -12,15 +14,27 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *   "trader": { ... }
  * }
  */
-public class Module1AuthDTO {
+public class TraderAuthDTO {
 
     private String token;
+
+    /** When true, registration succeeded but auto-login failed; client should prompt sign-in. */
+    @JsonProperty("needs_login")
+    private Boolean needsLogin;
 
     @JsonProperty("user")
     private UserPayload user;
 
     @JsonProperty("trader")
     private TraderPayload trader;
+
+    public Boolean getNeedsLogin() {
+        return needsLogin;
+    }
+
+    public void setNeedsLogin(Boolean needsLogin) {
+        this.needsLogin = needsLogin;
+    }
 
     public String getToken() {
         return token;
@@ -66,6 +80,9 @@ public class Module1AuthDTO {
         // UI helpers
         private String name;
         private String role;
+
+        @JsonProperty("authorities")
+        private Set<String> authorities;
 
         public String getUserId() {
             return userId;
@@ -122,6 +139,14 @@ public class Module1AuthDTO {
         public void setRole(String role) {
             this.role = role;
         }
+
+        public Set<String> getAuthorities() {
+            return authorities;
+        }
+
+        public void setAuthorities(Set<String> authorities) {
+            this.authorities = authorities;
+        }
     }
 
     /** Minimal trader payload mapped to frontend `Trader` model. */
@@ -160,6 +185,12 @@ public class Module1AuthDTO {
 
         @JsonProperty("pin_code")
         private String pinCode;
+
+        @JsonProperty("gst_number")
+        private String gstNumber;
+
+        @JsonProperty("rmc_apmc_code")
+        private String rmcApmcCode;
 
         @JsonProperty("shop_photos")
         private String[] shopPhotos;
@@ -274,6 +305,22 @@ public class Module1AuthDTO {
 
         public void setPinCode(String pinCode) {
             this.pinCode = pinCode;
+        }
+
+        public String getGstNumber() {
+            return gstNumber;
+        }
+
+        public void setGstNumber(String gstNumber) {
+            this.gstNumber = gstNumber;
+        }
+
+        public String getRmcApmcCode() {
+            return rmcApmcCode;
+        }
+
+        public void setRmcApmcCode(String rmcApmcCode) {
+            this.rmcApmcCode = rmcApmcCode;
         }
 
         public String[] getShopPhotos() {

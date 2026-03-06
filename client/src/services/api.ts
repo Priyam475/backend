@@ -7,7 +7,7 @@ export { arrivalsApi } from './api/arrivals';
 export { traderApi } from './api/trader';
 export { vehicleApi } from './api/vehicles';
 export { categoryApi } from './api/categories';
-export { rbacApi } from './api/rbac';
+export { rbacApi, traderRbacApi } from './api/rbac';
 export { auctionApi, fetchAllAuctionResults } from './api/auction';
 export { weighingApi } from './api/weighing';
 export { printLogApi } from './api/printLog';

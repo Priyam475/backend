@@ -9,6 +9,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useFontSize } from '@/context/FontSizeContext';
 import FontSizeControls from '@/components/FontSizeControls';
 import { cn } from '@/lib/utils';
+import { usePermissions, getModuleKeyForRoute } from '@/lib/permissions';
 
 // Illustrated module images
 import imgCommodity from '@/assets/modules/commodity-settings.png';
@@ -98,6 +99,7 @@ const Homepage = () => {
   const isDesktop = useDesktopMode();
   const { isDark, toggleTheme } = useTheme();
   const { level } = useFontSize();
+  const { canAccessModule } = usePermissions();
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -198,9 +200,20 @@ const Homepage = () => {
       {/* Module Cards */}
       <div className={`px-4 md:px-8 lg:px-8 relative z-10 ${isDesktop ? 'pt-2' : '-mt-5'}`}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
-          {modules.map((mod) => (
-            <ModuleCard key={mod.title} mod={mod} onClick={() => navigate(mod.path)} level={level} />
-          ))}
+          {modules.map((mod) => {
+            const moduleKey = getModuleKeyForRoute(mod.path);
+            if (moduleKey && !canAccessModule(moduleKey)) {
+              return null;
+            }
+            return (
+              <ModuleCard
+                key={mod.title}
+                mod={mod}
+                onClick={() => navigate(mod.path)}
+                level={level}
+              />
+            );
+          })}
         </div>
       </div>
 

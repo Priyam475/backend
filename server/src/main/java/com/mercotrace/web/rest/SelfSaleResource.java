@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.SelfSaleService;
 import com.mercotrace.service.dto.SelfSaleDTOs.ClosureDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.CreateClosureRequestDTO;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -48,6 +50,7 @@ public class SelfSaleResource {
      * {@code GET  /self-sale/open-lots} : Get open lots (from arrivals, excluding already closed). Optional search.
      */
     @GetMapping("/open-lots")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SELF_SALE_VIEW + "\")")
     public ResponseEntity<List<OpenLotDTO>> getOpenLots(
         @org.springdoc.core.annotations.ParameterObject @PageableDefault(size = 20) Pageable pageable,
         @RequestParam(required = false) String search
@@ -62,6 +65,7 @@ public class SelfSaleResource {
      * {@code POST  /self-sale/closures} : Create a self-sale closure.
      */
     @PostMapping("/closures")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SELF_SALE_CREATE + "\")")
     public ResponseEntity<ClosureDTO> createClosure(@Valid @RequestBody CreateClosureRequestDTO request) throws URISyntaxException {
         LOG.debug("REST request to create self-sale closure: {}", request);
         try {
@@ -79,6 +83,7 @@ public class SelfSaleResource {
      * {@code GET  /self-sale/closures} : Get paginated closed self-sales (default sort: closedAt,desc).
      */
     @GetMapping("/closures")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SELF_SALE_VIEW + "\")")
     public ResponseEntity<List<ClosureDTO>> getClosures(
         @org.springdoc.core.annotations.ParameterObject @PageableDefault(size = 10, sort = "closedAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {

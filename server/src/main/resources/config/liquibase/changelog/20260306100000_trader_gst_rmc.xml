@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Extend Trader with GST number and RMC/APMC code to match
+        frontend trader registration extras. Columns are optional and
+        safe to add on existing deployments.
+    -->
+    <changeSet id="20260306100000-1" author="cursor-fe2be">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="trader" columnName="gst_number"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="trader">
+            <column name="gst_number" type="varchar(15)"/>
+        </addColumn>
+        <addColumn tableName="trader">
+            <column name="rmc_apmc_code" type="varchar(64)"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>
+

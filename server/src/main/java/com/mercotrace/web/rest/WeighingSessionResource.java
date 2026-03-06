@@ -37,7 +37,7 @@ public class WeighingSessionResource {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WEIGHING_CREATE + "\")")
     @Operation(summary = "Create weighing session", description = "Save completed weighing session from frontend")
     public ResponseEntity<WeighingSessionDTO> create(@Valid @RequestBody WeighingSessionCreateRequest request) {
         LOG.debug("REST request to create WeighingSession for bid {}", request.getBidNumber());
@@ -46,7 +46,7 @@ public class WeighingSessionResource {
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WEIGHING_VIEW + "\")")
     @Operation(summary = "List sessions", description = "Paginated list of weighing sessions for current trader")
     public ResponseEntity<List<WeighingSessionDTO>> list(
         @org.springdoc.core.annotations.ParameterObject Pageable pageable
@@ -58,7 +58,7 @@ public class WeighingSessionResource {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WEIGHING_VIEW + "\")")
     @Operation(summary = "Get session by id")
     public ResponseEntity<WeighingSessionDTO> getById(@PathVariable Long id) {
         return weighingSessionService.getById(id)
@@ -67,7 +67,7 @@ public class WeighingSessionResource {
     }
 
     @GetMapping("/by-bid/{bidNumber}")
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.WEIGHING_VIEW + "\")")
     @Operation(summary = "Get session by bid number")
     public ResponseEntity<WeighingSessionDTO> getByBidNumber(@PathVariable Integer bidNumber) {
         return weighingSessionService.getByBidNumber(bidNumber)

@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { commodityApi } from '@/services/api';
 import type { Commodity } from '@/types/models';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 import onionImg from '@/assets/commodities/onion.jpg';
 import potatoImg from '@/assets/commodities/potato.jpg';
@@ -14,10 +16,19 @@ import tomatoImg from '@/assets/commodities/tomato.jpg';
 const commodityImages: Record<string, string> = { 'Onion': onionImg, 'Potato': potatoImg, 'Dry Chili': dryChiliImg, 'Tomato': tomatoImg };
 
 const AdminCommoditiesPage = () => {
+  const { canAccessModule } = useAdminPermissions();
   const [commodities, setCommodities] = useState<Commodity[]>([]);
   const [search, setSearch] = useState('');
 
-  useEffect(() => { commodityApi.list().then(setCommodities); }, []);
+  useEffect(() => {
+    commodityApi.adminList().then(setCommodities).catch(() => {
+      setCommodities([]);
+    });
+  }, []);
+
+  if (!canAccessModule('Commodities')) {
+    return <AdminForbiddenPage moduleName="Commodities" />;
+  }
 
   const filtered = commodities.filter(c => c.commodity_name.toLowerCase().includes(search.toLowerCase()));
 

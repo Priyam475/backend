@@ -179,8 +179,22 @@ public class HighLevelReportsServiceImpl implements HighLevelReportsService {
         if (to.isBefore(from)) {
             throw new IllegalArgumentException("dateTo must be on or after dateFrom");
         }
-        // For now, reuse trader-scoped billing aggregates; system-wide metrics can be extended later.
-        Long traderId = traderContextService.getCurrentTraderId();
+        AdminDailySummaryDTO dto = new AdminDailySummaryDTO();
+        dto.setTotalArrivals(0L);
+        dto.setTotalLots(0L);
+        dto.setTotalAuctions(0L);
+
+        // When called by an admin without a trader context, return a safe placeholder summary instead of failing.
+        java.util.Optional<Long> traderIdOpt = traderContextService.getCurrentTraderIdOptional();
+        if (traderIdOpt.isEmpty()) {
+            dto.setTotalBills(0L);
+            dto.setTotalRevenue(BigDecimal.ZERO);
+            dto.setTotalCollected(BigDecimal.ZERO);
+            dto.setTotalPending(BigDecimal.ZERO);
+            return dto;
+        }
+
+        Long traderId = traderIdOpt.get();
         Instant fromInstant = from.atStartOfDay().toInstant(ZoneOffset.UTC);
         Instant toInstant = to.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).minusMillis(1);
 
@@ -190,10 +204,6 @@ public class HighLevelReportsServiceImpl implements HighLevelReportsService {
         BigDecimal pending = agg != null && agg.getPendingBalance() != null ? agg.getPendingBalance() : BigDecimal.ZERO;
         BigDecimal collected = gross.subtract(pending != null ? pending : BigDecimal.ZERO);
 
-        AdminDailySummaryDTO dto = new AdminDailySummaryDTO();
-        dto.setTotalArrivals(0L);
-        dto.setTotalLots(0L);
-        dto.setTotalAuctions(0L);
         dto.setTotalBills(totalBills);
         dto.setTotalRevenue(gross);
         dto.setTotalCollected(collected);

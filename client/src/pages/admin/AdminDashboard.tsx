@@ -8,8 +8,11 @@ import {
 import { cn } from '@/lib/utils';
 import { reportsApi, type AdminDailySummaryDTO } from '@/services/api/reports';
 import { toast } from 'sonner';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const AdminDashboard = () => {
+  const { canAccessModule } = useAdminPermissions();
   const [summary, setSummary] = useState<AdminDailySummaryDTO | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,6 +41,10 @@ const AdminDashboard = () => {
       cancelled = true;
     };
   }, []);
+
+  if (!canAccessModule('Dashboard')) {
+    return <AdminForbiddenPage moduleName="Dashboard" />;
+  }
 
   const effectiveSummary = summary ?? {
     totalArrivals: 0,

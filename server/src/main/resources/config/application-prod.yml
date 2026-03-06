@@ -128,3 +128,15 @@ application:
   liquibase:
     # Run Liquibase synchronously so all tables exist before the app accepts requests
     async-start: false
+
+# OTP SMS configuration (Fast2SMS)
+otp:
+ fast2sms:
+   base-url: https://www.fast2sms.com/dev/bulkV2
+   api-key: YOUR_FAST2SMS_API_KEY_HERE
+   sender-id: MERCO
+   route: dlt
+   message-id: 170404
+   flash: "0"
+   # Optional: schedule-time in Fast2SMS-supported format
+   #schedule-time: ""

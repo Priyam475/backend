@@ -106,11 +106,14 @@ public class CommodityResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!commodityRepository.existsById(id)) {
-            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
-        }
-
         Long traderId = resolveTraderId(commodityDTO);
+        commodityService
+            .findOne(id)
+            .ifPresent(existing -> {
+                if (!Objects.equals(existing.getTraderId(), traderId)) {
+                    throw new BadRequestAlertException("You are not allowed to modify this commodity", ENTITY_NAME, "forbidden");
+                }
+            });
         commodityDTO.setTraderId(traderId);
 
         // Enforce case-insensitive unique name per trader, excluding current record
@@ -148,9 +151,14 @@ public class CommodityResource {
             throw new BadRequestAlertException("Invalid ID", ENTITY_NAME, "idinvalid");
         }
 
-        if (!commodityRepository.existsById(id)) {
-            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
-        }
+        Long traderId = resolveTraderId(commodityDTO);
+        commodityService
+            .findOne(id)
+            .ifPresent(existing -> {
+                if (!Objects.equals(existing.getTraderId(), traderId)) {
+                    throw new BadRequestAlertException("You are not allowed to modify this commodity", ENTITY_NAME, "forbidden");
+                }
+            });
 
         Optional<CommodityDTO> result = commodityService.partialUpdate(commodityDTO);
         return ResponseUtil.wrapOrNotFound(
@@ -182,7 +190,10 @@ public class CommodityResource {
     @GetMapping("/{id}")
     public ResponseEntity<CommodityDTO> getCommodity(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Commodity : {}", id);
-        Optional<CommodityDTO> commodityDTO = commodityService.findOne(id);
+        Long traderId = traderContextService.getCurrentTraderId();
+        Optional<CommodityDTO> commodityDTO = commodityService
+            .findOne(id)
+            .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
         return ResponseUtil.wrapOrNotFound(commodityDTO);
     }
 
@@ -235,6 +246,11 @@ public class CommodityResource {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCommodity(@PathVariable("id") Long id) {
         LOG.debug("REST request to delete Commodity : {}", id);
+        Long traderId = traderContextService.getCurrentTraderId();
+        Optional<CommodityDTO> existing = commodityService.findOne(id);
+        if (existing.isEmpty() || !Objects.equals(existing.get().getTraderId(), traderId)) {
+            throw new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound");
+        }
         commodityService.delete(id);
         return ResponseEntity.noContent()
             .headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id.toString()))
@@ -242,9 +258,7 @@ public class CommodityResource {
     }
 
     private Long resolveTraderId(CommodityDTO commodityDTO) {
-        if (commodityDTO.getTraderId() != null) {
-            return commodityDTO.getTraderId();
-        }
+        // Always resolve trader from authenticated context; ignore any client-provided traderId
         return traderContextService.getCurrentTraderId();
     }
 }

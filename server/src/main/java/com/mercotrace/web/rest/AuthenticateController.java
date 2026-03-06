@@ -2,6 +2,8 @@ package com.mercotrace.web.rest;
 
 import static com.mercotrace.security.SecurityUtils.AUTHORITIES_CLAIM;
 import static com.mercotrace.security.SecurityUtils.JWT_ALGORITHM;
+import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_CLAIM;
+import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_TRADER;
 import static com.mercotrace.security.SecurityUtils.USER_ID_CLAIM;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -14,13 +16,14 @@ import java.time.temporal.ChronoUnit;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -47,11 +50,23 @@ public class AuthenticateController {
     @Value("${jhipster.security.authentication.jwt.token-validity-in-seconds-for-remember-me:0}")
     private long tokenValidityInSecondsForRememberMe;
 
-    private final AuthenticationManagerBuilder authenticationManagerBuilder;
+    /**
+     * Controls whether the ACCESS_TOKEN cookie is marked as Secure.
+     * In production this should remain true (HTTPS only), but for local
+     * HTTP development we allow overriding it via configuration so that
+     * the browser will actually store and send the cookie.
+     */
+    @Value("${application.security.cookie.secure:true}")
+    private boolean cookieSecure;
 
-    public AuthenticateController(JwtEncoder jwtEncoder, AuthenticationManagerBuilder authenticationManagerBuilder) {
+    private final AuthenticationManager authenticationManager;
+
+    public AuthenticateController(
+        JwtEncoder jwtEncoder,
+        @Qualifier("traderAuthenticationManager") AuthenticationManager authenticationManager
+    ) {
         this.jwtEncoder = jwtEncoder;
-        this.authenticationManagerBuilder = authenticationManagerBuilder;
+        this.authenticationManager = authenticationManager;
     }
 
     @PostMapping("/authenticate")
@@ -61,7 +76,7 @@ public class AuthenticateController {
             loginVM.getPassword()
         );
 
-        Authentication authentication = authenticationManagerBuilder.getObject().authenticate(authenticationToken);
+        Authentication authentication = authenticationManager.authenticate(authenticationToken);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String jwt = this.createToken(authentication, loginVM.isRememberMe());
 
@@ -74,13 +89,31 @@ public class AuthenticateController {
         ResponseCookie cookie = ResponseCookie
             .from("ACCESS_TOKEN", jwt)
             .httpOnly(true)
-            .secure(true)
+            .secure(cookieSecure)
             .sameSite("Lax")
             .path("/")
             .build();
         httpHeaders.add(HttpHeaders.SET_COOKIE, cookie.toString());
 
         return new ResponseEntity<>(new JWTToken(jwt), httpHeaders, HttpStatus.OK);
+    }
+
+    /**
+     * Build HTTP headers with Bearer token and httpOnly cookie for a JWT.
+     * Used by register (and similar flows) that issue a token without going through login.
+     */
+    public HttpHeaders buildAuthHeaders(String jwt) {
+        HttpHeaders httpHeaders = new HttpHeaders();
+        httpHeaders.setBearerAuth(jwt);
+        ResponseCookie cookie = ResponseCookie
+            .from("ACCESS_TOKEN", jwt)
+            .httpOnly(true)
+            .secure(cookieSecure)
+            .sameSite("Lax")
+            .path("/")
+            .build();
+        httpHeaders.add(HttpHeaders.SET_COOKIE, cookie.toString());
+        return httpHeaders;
     }
 
     /**
@@ -96,6 +129,10 @@ public class AuthenticateController {
     }
 
     public String createToken(Authentication authentication, boolean rememberMe) {
+        return createToken(authentication, rememberMe, TOKEN_TYPE_TRADER);
+    }
+
+    public String createToken(Authentication authentication, boolean rememberMe, String tokenType) {
         String authorities = authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority).collect(Collectors.joining(" "));
 
         Instant now = Instant.now();
@@ -111,7 +148,8 @@ public class AuthenticateController {
             .issuedAt(now)
             .expiresAt(validity)
             .subject(authentication.getName())
-            .claim(AUTHORITIES_CLAIM, authorities);
+            .claim(AUTHORITIES_CLAIM, authorities)
+            .claim(TOKEN_TYPE_CLAIM, tokenType);
         if (authentication.getPrincipal() instanceof UserWithId user) {
             builder.claim(USER_ID_CLAIM, user.getId());
         }

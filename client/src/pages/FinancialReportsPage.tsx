@@ -18,6 +18,8 @@ import { reportsApi } from '@/services/api/reports';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { toast } from 'sonner';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 type ReportTab = 'TRIAL_BALANCE' | 'PL' | 'BALANCE_SHEET' | 'AR_AGING' | 'AP_AGING' | 'COMMODITY' | 'GST' | 'MARKET_FEE' | 'BROKER';
 
@@ -38,6 +40,11 @@ const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#e
 const FinancialReportsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule } = usePermissions();
+  const canView = canAccessModule('Financial Reports');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Financial Reports" />;
+  }
   const [activeTab, setActiveTab] = useState<ReportTab>('TRIAL_BALANCE');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');

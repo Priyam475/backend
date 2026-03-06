@@ -18,10 +18,10 @@ import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 
 /**
- * A user.
+ * Trader-facing user (legacy JHipster user table, renamed to trader_user).
  */
 @Entity
-@Table(name = "jhi_user")
+@Table(name = "trader_user")
 @Cache(usage = CacheConcurrencyStrategy.NONSTRICT_READ_WRITE)
 public class User extends AbstractAuditingEntity<Long> implements Serializable {
 
@@ -85,7 +85,7 @@ public class User extends AbstractAuditingEntity<Long> implements Serializable {
     @JsonIgnore
     @ManyToMany
     @JoinTable(
-        name = "jhi_user_authority",
+        name = "trader_user_authority",
         joinColumns = { @JoinColumn(name = "user_id", referencedColumnName = "id") },
         inverseJoinColumns = { @JoinColumn(name = "authority_name", referencedColumnName = "name") }
     )

@@ -95,6 +95,14 @@ export const contactApi = {
     return data.map(mapDtoToContact);
   },
 
+  async adminList(): Promise<Contact[]> {
+    const res = await apiFetch('/admin/contacts', {
+      method: 'GET',
+    });
+    const data = await handleResponse<ContactDto[]>(res, 'Failed to load contacts');
+    return data.map(mapDtoToContact);
+  },
+
   async create(data: Partial<Contact>): Promise<Contact> {
     const res = await apiFetch('/contacts', {
       method: 'POST',

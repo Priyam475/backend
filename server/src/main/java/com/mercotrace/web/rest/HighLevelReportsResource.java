@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.HighLevelReportsService;
 import com.mercotrace.service.dto.AdminDailySummaryDTO;
 import com.mercotrace.service.dto.DailySalesSummaryDTO;
@@ -12,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,6 +36,7 @@ public class HighLevelReportsResource {
     }
 
     @GetMapping("/api/reports/daily-sales")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.REPORTS_VIEW + "\")")
     @Operation(summary = "Daily sales summary", description = "High-level daily sales metrics for the trader.")
     public ResponseEntity<DailySalesSummaryDTO> getDailySalesSummary(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
@@ -44,6 +47,7 @@ public class HighLevelReportsResource {
     }
 
     @GetMapping("/api/reports/party-exposure")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.REPORTS_VIEW + "\")")
     @Operation(summary = "Party exposure", description = "Outstanding exposure per party (AR-focused).")
     public ResponseEntity<List<PartyExposureRowDTO>> getPartyExposure(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
@@ -54,6 +58,7 @@ public class HighLevelReportsResource {
     }
 
     @GetMapping("/api/admin/reports/daily-summary")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ADMIN + "\")")
     @Operation(summary = "Admin daily summary", description = "Admin-facing daily summary metrics.")
     public ResponseEntity<AdminDailySummaryDTO> getAdminDailySummary(
         @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,

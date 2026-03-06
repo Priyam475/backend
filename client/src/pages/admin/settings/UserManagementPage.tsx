@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Profile, Role, UserRole } from '@/types/rbac';
-import { rbacApi } from '@/services/api';
+import { traderRbacApi } from '@/services/api';
 
 const UserManagementPage = () => {
   const navigate = useNavigate();
@@ -31,9 +31,9 @@ const UserManagementPage = () => {
     try {
       setLoading(true);
       const [profilesData, userRoles, roles] = await Promise.all([
-        rbacApi.listProfiles(),
-        rbacApi.listUserRoles(),
-        rbacApi.listRoles(),
+        traderRbacApi.listProfiles(),
+        traderRbacApi.listUserRoles(),
+        traderRbacApi.listRoles(),
       ]);
 
       const roleMap = new Map(roles.map((r: Role) => [r.id, r.name]));
@@ -56,7 +56,9 @@ const UserManagementPage = () => {
     }
   };
 
-  useEffect(() => { fetchProfiles(); }, []);
+  useEffect(() => {
+    fetchProfiles();
+  }, []);
 
   const openCreate = () => {
     setEditingProfile(null);
@@ -78,7 +80,7 @@ const UserManagementPage = () => {
     setSaving(true);
     try {
       if (editingProfile) {
-        await rbacApi.updateProfile(editingProfile.id, {
+        await traderRbacApi.updateProfile(editingProfile.id, {
           full_name: formName.trim(),
           email: formEmail.trim(),
           mobile: formMobile.trim() || null,
@@ -90,10 +92,11 @@ const UserManagementPage = () => {
           setSaving(false);
           return;
         }
-        await rbacApi.createProfile({
+        await traderRbacApi.createProfile({
           full_name: formName.trim(),
           email: formEmail.trim(),
           mobile: formMobile.trim() || null,
+          password: formPassword,
         });
         toast.success('User created successfully');
       }
@@ -110,7 +113,7 @@ const UserManagementPage = () => {
   const toggleStatus = async (profile: Profile) => {
     const newStatus = profile.status === 'active' ? 'inactive' : 'active';
     try {
-      await rbacApi.setProfileStatus(profile.id, newStatus);
+      await traderRbacApi.setProfileStatus(profile.id, newStatus);
       toast.success(`User ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
       fetchProfiles();
     } catch (error) {

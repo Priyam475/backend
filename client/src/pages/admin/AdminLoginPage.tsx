@@ -5,13 +5,13 @@ import { ShieldCheck, Eye, EyeOff, ArrowRight, Mail, Lock, Sun, Moon } from 'luc
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
-import { useAuth } from '@/context/AuthContext';
+import { useAdminAuth } from '@/context/AdminAuthContext';
 import { useTheme } from '@/context/ThemeContext';
 const loginBg = '/login-bg.webp';
 
 const AdminLoginPage = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login } = useAdminAuth();
   const { isDark, toggleTheme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

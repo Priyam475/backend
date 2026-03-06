@@ -16,6 +16,8 @@ import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, weighingApi, printLogApi, arrivalsApi } from '@/services/api';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { ArrivalDetail } from '@/services/api/arrivals';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 /** REQ-WGH-004: Government deduction from API full-config */
 function getGovtDeductionFromConfigs(weight: number, fullConfigs: FullCommodityConfigDto[]): number {
@@ -62,6 +64,11 @@ interface WeighingSessionData {
 const WeighingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Weighing');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Weighing" />;
+  }
   const [searchParams] = useSearchParams();
   const [bids, setBids] = useState<BidForWeighing[]>([]);
   const [selectedBid, setSelectedBid] = useState<BidForWeighing | null>(null);
@@ -255,6 +262,11 @@ const WeighingPage = () => {
   // Complete session and save (backend only; no localStorage for business data)
   const completeSession = async () => {
     if (!session || !selectedBid) return;
+
+    if (!can('Weighing', 'Create')) {
+      toast.error('You do not have permission to create weighing sessions.');
+      return;
+    }
 
     const payload = {
       session_id: session.sessionId,

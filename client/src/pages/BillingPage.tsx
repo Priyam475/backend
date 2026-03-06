@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi } from '@/services/api';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
@@ -97,6 +99,11 @@ const BillingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const { trader } = useAuth();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Billing');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Billing" />;
+  }
   const [buyers, setBuyers] = useState<BuyerPurchase[]>([]);
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerPurchase | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -386,6 +393,10 @@ const BillingPage = () => {
       globalOtherCharges: bill.globalOtherCharges ?? 0,
       pendingBalance: bill.pendingBalance ?? bill.grandTotal,
     };
+    if (!can('Billing', 'Create')) {
+      toast.error('You do not have permission to save bills.');
+      return;
+    }
     try {
       const isUpdate = bill.billId && isBackendBillId(bill.billId);
       const result = isUpdate

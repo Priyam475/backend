@@ -16,6 +16,8 @@ import { contactApi, arrivalsApi, billingApi, settlementApi } from '@/services/a
 import { reportsApi, type DailySalesSummaryDTO } from '@/services/api/reports';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 import type { SalesBillDTO } from '@/services/api/billing';
 import type { PattiDTO } from '@/services/api/settlement';
 
@@ -54,6 +56,11 @@ const reportTypes = [
 const PrintsReportsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule } = usePermissions();
+  const canView = canAccessModule('Print Templates');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Print Templates" />;
+  }
   const [activeTab, setActiveTab] = useState('prints');
   const [search, setSearch] = useState('');
   const [selectedPrint, setSelectedPrint] = useState<typeof printTemplates[0] | null>(null);

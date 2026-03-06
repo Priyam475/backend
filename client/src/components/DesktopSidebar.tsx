@@ -11,6 +11,7 @@ import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useState } from 'react';
+import { usePermissions, getModuleKeyForRoute } from '@/lib/permissions';
 
 const navSections = [
   {
@@ -65,6 +66,7 @@ const DesktopSidebar = () => {
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
   const { user, trader, logout } = useAuth();
+  const { canAccessModule } = usePermissions();
 
   const handleLogout = () => {
     logout();
@@ -98,47 +100,77 @@ const DesktopSidebar = () => {
 
       {/* Nav */}
       <nav className="relative z-10 flex-1 py-3 px-2 space-y-4 overflow-y-auto no-scrollbar">
-        {navSections.map((section) => (
-          <div key={section.label}>
-            {!collapsed && (
-              <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold px-3 mb-1.5">{section.label}</p>
-            )}
-            <div className="space-y-0.5">
-              {section.items.map((item) => {
-                const isActive = location.pathname === item.path || (item.path !== '/home' && location.pathname.startsWith(item.path + '/'));
-                return (
-                  <button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 group',
-                      isActive
-                        ? 'bg-white/25 text-white shadow-lg border border-white/30 backdrop-blur-md'
-                        : 'text-white/70 hover:text-white hover:bg-white/10'
-                    )}
-                  >
-                    <div className={cn(
-                      'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all',
-                      isActive ? 'bg-white/30 shadow-md' : 'bg-white/10 group-hover:bg-white/15'
-                    )}>
-                      <item.icon className={cn('w-4 h-4', isActive ? 'text-white' : 'text-white/80 group-hover:text-white')} />
-                    </div>
-                    <AnimatePresence>
-                      {!collapsed && (
-                        <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="whitespace-nowrap text-[13px]">
-                          {item.title}
-                        </motion.span>
+        {navSections.map((section) => {
+          const visibleItems = section.items.filter(item => {
+            const moduleKey = getModuleKeyForRoute(item.path);
+            if (!moduleKey) {
+              return true;
+            }
+            return canAccessModule(moduleKey);
+          });
+
+          if (visibleItems.length === 0) {
+            return null;
+          }
+
+          return (
+            <div key={section.label}>
+              {!collapsed && (
+                <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold px-3 mb-1.5">
+                  {section.label}
+                </p>
+              )}
+              <div className="space-y-0.5">
+                {visibleItems.map((item) => {
+                  const isActive =
+                    location.pathname === item.path ||
+                    (item.path !== '/home' && location.pathname.startsWith(item.path + '/'));
+                  return (
+                    <button
+                      key={item.path}
+                      onClick={() => navigate(item.path)}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 group',
+                        isActive
+                          ? 'bg-white/25 text-white shadow-lg border border-white/30 backdrop-blur-md'
+                          : 'text-white/70 hover:text-white hover:bg-white/10'
                       )}
-                    </AnimatePresence>
-                    {isActive && !collapsed && (
-                      <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-sm animate-indicator-glow" />
-                    )}
-                  </button>
-                );
-              })}
+                    >
+                      <div
+                        className={cn(
+                          'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-all',
+                          isActive ? 'bg-white/30 shadow-md' : 'bg-white/10 group-hover:bg-white/15'
+                        )}
+                      >
+                        <item.icon
+                          className={cn(
+                            'w-4 h-4',
+                            isActive ? 'text-white' : 'text-white/80 group-hover:text-white'
+                          )}
+                        />
+                      </div>
+                      <AnimatePresence>
+                        {!collapsed && (
+                          <motion.span
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="whitespace-nowrap text-[13px]"
+                          >
+                            {item.title}
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                      {isActive && !collapsed && (
+                        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-sm animate-indicator-glow" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Collapse toggle */}

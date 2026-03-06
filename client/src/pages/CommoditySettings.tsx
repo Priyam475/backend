@@ -44,6 +44,11 @@ function fullConfigToLocal(commodity: Commodity, full: FullCommodityConfigDto): 
     commission_percent: cfg?.commissionPercent ?? 0,
     user_fee_percent: cfg?.userFeePercent ?? 0,
     hsn_code: cfg?.hsnCode ?? '',
+    weighing_charge: cfg?.weighingCharge,
+    bill_prefix: cfg?.billPrefix,
+    hamali_enabled: cfg?.hamaliEnabled,
+    gst_rate: cfg?.gstRate,
+    weighing_threshold: cfg?.weighingThreshold,
     created_at: new Date().toISOString(),
   };
   const charges = (full.dynamicCharges ?? []).map(ch => ({
@@ -200,6 +205,22 @@ const CommoditySettings = () => {
     if (cfg.commission_percent < 0 || cfg.commission_percent > 100) { toast.error(`${commodityName}: Commission must be between 0% and 100%`); return; }
     if (cfg.user_fee_percent < 0 || cfg.user_fee_percent > 100) { toast.error(`${commodityName}: User fee must be between 0% and 100%`); return; }
     if (item.gstApplicable && !cfg.hsn_code.trim()) { toast.error(`${commodityName}: HSN/SAC Code is required when GST is applicable`); return; }
+    const gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
+    if (item.gstApplicable) {
+      if (gstRateValue == null || Number.isNaN(gstRateValue)) {
+        toast.error(`${commodityName}: GST Rate (%) is required when GST is applicable`); return;
+      }
+      if (gstRateValue <= 0 || gstRateValue > 100) {
+        toast.error(`${commodityName}: GST Rate must be between 0 and 100%`); return;
+      }
+    } else if (gstRateValue != null && gstRateValue <= 0) {
+      toast.error(`${commodityName}: GST Rate must be greater than 0 when provided`); return;
+    }
+
+    const weighingThresholdValue = (cfg.weighing_threshold ?? undefined) as number | undefined;
+    if (weighingThresholdValue != null && weighingThresholdValue <= 0) {
+      toast.error(`${commodityName}: Weighing Threshold must be greater than 0 when set`); return;
+    }
 
     for (let ri = 0; ri < item.deductionRules.length; ri++) {
       const rule = item.deductionRules[ri];
@@ -226,7 +247,7 @@ const CommoditySettings = () => {
     }
 
     for (const charge of item.charges) {
-      if (!charge.charge_name.trim()) { toast.error(`${commodityName}: Charge name is required`); return; }
+      if (!charge.charge_name.trim()) { toast.error(`${commodityName}: Charge name is required for all dynamic charges`); return; }
       if (!charge.value || Number(charge.value) <= 0) { toast.error(`${commodityName}: "${charge.charge_name}" value must be greater than 0`); return; }
       if (charge.charge_type === 'PERCENT' && Number(charge.value) > 100) { toast.error(`${commodityName}: "${charge.charge_name}" percent cannot exceed 100`); return; }
     }
@@ -245,6 +266,9 @@ const CommoditySettings = () => {
         hsnCode: cfg.hsn_code?.trim() || undefined,
         billPrefix: item.billPrefix?.trim() || undefined,
         hamaliEnabled: item.hamaliEnabled,
+        gstRate: gstRateValue,
+        weighingThreshold: weighingThresholdValue,
+        weighingCharge: cfg.weighing_charge,
       },
       deductionRules: item.deductionRules.map(r => ({
         commodityId: cid,
@@ -508,7 +532,9 @@ const CommoditySettings = () => {
                             onClick={() => {
                               const newGst = !item.gstApplicable;
                               updateItem(index, { gstApplicable: newGst });
-                              if (!newGst) updateConfig(index, { hsn_code: '' });
+                              if (!newGst) {
+                                updateConfig(index, { hsn_code: '', gst_rate: undefined as any });
+                              }
                             }}
                             className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner", item.gstApplicable ? 'bg-gradient-to-r from-emerald-500 to-green-600 shadow-emerald-500/30' : 'bg-slate-300 dark:bg-slate-600')}
                           >
@@ -516,9 +542,34 @@ const CommoditySettings = () => {
                           </button>
                         </div>
                         {item.gstApplicable && (
-                          <div>
-                            <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">HSN/SAC Code <span className="text-red-500">*</span></label>
-                            <Input type="text" value={item.config.hsn_code} onChange={e => updateConfig(index, { hsn_code: e.target.value })} placeholder="e.g., 0703" className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base" />
+                          <div className="space-y-3 mt-2">
+                            <div>
+                              <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
+                                HSN/SAC Code <span className="text-red-500">*</span>
+                              </label>
+                              <Input
+                                type="text"
+                                value={item.config.hsn_code}
+                                onChange={e => updateConfig(index, { hsn_code: e.target.value })}
+                                placeholder="e.g., 0703"
+                                className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
+                                GST Rate (%) <span className="text-red-500">*</span>
+                              </label>
+                              <Input
+                                type="number"
+                                value={item.config.gst_rate ?? ''}
+                                onChange={e => updateConfig(index, { gst_rate: e.target.value === '' ? undefined as any : Number(e.target.value) } as any)}
+                                placeholder="e.g., 5, 12, 18"
+                                className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                min={0}
+                                max={100}
+                                step={0.1}
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -646,14 +697,18 @@ const CommoditySettings = () => {
                         </div>
                       )}
 
-                      {/* Coolie / Unloading Charges */}
+                      {/* Coolie / Unloading Charges (Hamali) */}
                       <div className="rounded-xl border border-pink-300/40 bg-gradient-to-r from-pink-50 to-fuchsia-50 dark:from-pink-950/30 dark:to-fuchsia-950/30 p-4">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex-1">
                             <label className="text-xs font-bold text-pink-700 dark:text-pink-400 uppercase tracking-wider flex items-center gap-1.5">
                               <span className="w-2 h-2 rounded-full bg-pink-500" /> Coolie / Unloading (Auto-calculated)
                             </label>
-                            <p className="text-xs text-pink-600/70 dark:text-pink-400/60 mt-0.5">{item.hamaliEnabled ? '✅ Slab-based logic active — Fixed Rate if W ≤ Threshold, proportional beyond' : 'Disabled — set Fixed price instead'}</p>
+                            <p className="text-xs text-pink-600/70 dark:text-pink-400/60 mt-0.5">
+                              {item.hamaliEnabled
+                                ? '✅ Slab-based logic active — Fixed Rate if W ≤ Threshold, proportional beyond'
+                                : 'Disabled — set Fixed price instead'}
+                            </p>
                           </div>
                           <button
                             onClick={() => updateItem(index, { hamaliEnabled: !item.hamaliEnabled })}
@@ -665,9 +720,19 @@ const CommoditySettings = () => {
 
                         {item.hamaliEnabled && (
                           <>
-                            <div className="rounded-lg bg-pink-100/60 dark:bg-pink-900/20 px-3 py-2 mb-3">
-                              <p className="text-xs font-mono text-pink-700 dark:text-pink-400">If W ≤ Threshold → Unloading = Fixed Rate</p>
-                              <p className="text-xs font-mono text-pink-700 dark:text-pink-400">If W &gt; Threshold → Unloading = Fixed + ((W − Threshold) × Per-kg Rate)</p>
+                            <div className="rounded-lg bg-pink-100/60 dark:bg-pink-900/20 px-3 py-2 mb-3 space-y-1">
+                              <p className="text-xs font-mono text-pink-700 dark:text-pink-400">
+                                📐 SRS Formula: Hamali Rate = Rf × max(1, W / T)
+                              </p>
+                              <p className="text-[11px] text-pink-700/90 dark:text-pink-300/90">
+                                where Rf = Fixed Hamali Rate, W = Net Weight (kg), T = Threshold Weight (kg).
+                              </p>
+                              <p className="text-[11px] text-pink-700/90 dark:text-pink-300/90">
+                                If W ≤ T: Hamali = Rf (minimum 1 slab charged).
+                              </p>
+                              <p className="text-[11px] text-pink-700/90 dark:text-pink-300/90">
+                                If W &gt; T: Hamali = Rf × (W / T), rounded as per billing rules.
+                              </p>
                             </div>
                             <p className="text-[10px] text-pink-600/80 dark:text-pink-400/60 mb-2 font-semibold uppercase tracking-wider">Unloading Charge Slabs</p>
                             <div className="flex items-center justify-end mb-2">
@@ -702,15 +767,43 @@ const CommoditySettings = () => {
                         <label className="text-xs font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-indigo-500" /> Weighing Charges
                         </label>
-                        <p className="text-xs text-indigo-600/70 dark:text-indigo-400/60 mb-2">Separate from Coolie/Unloading. Charged per weighment session.</p>
-                        <Input
-                          type="number"
-                          value={(item.config as any).weighing_charge ?? ''}
-                          onChange={e => updateConfig(index, { weighing_charge: Number(e.target.value) } as any)}
-                          placeholder="e.g., 50 (Fixed ₹ per weighment)"
-                          className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-indigo-200 dark:border-indigo-700/50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-base font-medium"
-                          min={0}
-                        />
+                        <p className="text-xs text-indigo-600/70 dark:text-indigo-400/60 mb-3">
+                          Separate from Coolie/Unloading. Charged per weighment session.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80 mb-1 block font-semibold">
+                              Weighing Threshold (kg)
+                            </label>
+                            <Input
+                              type="number"
+                              value={item.config.weighing_threshold ?? ''}
+                              onChange={e =>
+                                updateConfig(
+                                  index,
+                                  { weighing_threshold: e.target.value === '' ? undefined as any : Number(e.target.value) } as any,
+                                )
+                              }
+                              placeholder="Optional, e.g., 100"
+                              className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-indigo-200 dark:border-indigo-700/50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-base font-medium"
+                              min={0}
+                              step={0.1}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80 mb-1 block font-semibold">
+                              Weighing Charge (₹ per session)
+                            </label>
+                            <Input
+                              type="number"
+                              value={item.config.weighing_charge ?? ''}
+                              onChange={e => updateConfig(index, { weighing_charge: e.target.value === '' ? undefined as any : Number(e.target.value) } as any)}
+                              placeholder="e.g., 50 (Fixed ₹ per weighment)"
+                              className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-indigo-200 dark:border-indigo-700/50 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 text-base font-medium"
+                              min={0}
+                            />
+                          </div>
+                        </div>
                       </div>
 
                       {/* Dynamic Charges */}
@@ -727,19 +820,35 @@ const CommoditySettings = () => {
                           </button>
                         </div>
                         {item.charges.map((charge, ci) => (
-                          <motion.div key={ci} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="rounded-xl bg-white/80 dark:bg-white/5 border-2 border-cyan-200/50 dark:border-cyan-700/30 p-3 mb-2">
-                            <div className="flex items-center justify-between mb-2">
-                              <input
-                                type="text"
-                                placeholder="e.g., Association Fee, Weighment Fee…"
-                                value={charge.charge_name}
-                                onChange={e => {
-                                  const nc = [...item.charges]; nc[ci] = { ...nc[ci], charge_name: e.target.value };
-                                  updateItem(index, { charges: nc });
-                                }}
-                                className="bg-transparent text-sm font-medium text-foreground placeholder:text-cyan-400/60 focus:outline-none flex-1"
-                              />
-                              <button onClick={() => removeCharge(index, ci)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                          <motion.div
+                            key={ci}
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            className="rounded-xl bg-white/80 dark:bg-white/5 border-2 border-cyan-200/50 dark:border-cyan-700/30 p-3 mb-2"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="flex-1">
+                                <label className="text-[10px] text-cyan-700/80 dark:text-cyan-300/80 mb-1 block font-semibold">
+                                  Charge Name
+                                </label>
+                                <Input
+                                  type="text"
+                                  placeholder="e.g., Association Fee, Weighment Fee…"
+                                  value={charge.charge_name}
+                                  onChange={e => {
+                                    const nc = [...item.charges]; nc[ci] = { ...nc[ci], charge_name: e.target.value };
+                                    updateItem(index, { charges: nc });
+                                  }}
+                                  className="h-10 rounded-xl bg-white dark:bg-white/10 border-2 border-cyan-200 dark:border-cyan-700/50 text-sm flex-1 focus:border-cyan-500"
+                                />
+                              </div>
+                              <button
+                                onClick={() => removeCharge(index, ci)}
+                                className="mt-5 text-red-500 hover:text-red-600 shrink-0"
+                                title="Remove charge"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                             <div className="flex items-center gap-2 mb-2">
                               <Input

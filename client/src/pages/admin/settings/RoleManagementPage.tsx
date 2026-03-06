@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Role, ModulePermissions } from '@/types/rbac';
 import { AVAILABLE_MODULES } from '@/types/rbac';
-import { rbacApi } from '@/services/api';
+import { traderRbacApi } from '@/services/api';
 
 const emptyPermissions = (): ModulePermissions => {
   const perms: ModulePermissions = {};
@@ -39,11 +39,13 @@ const RoleManagementPage = () => {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  const normalizeText = (value: string | null | undefined) => (value ?? '').toLowerCase();
+
   const fetchRoles = async () => {
     try {
       setLoading(true);
-      const data = await rbacApi.listRoles();
-      setRoles((data || []).map(r => ({ ...r, permissions: (r.permissions as any) || {} })) as Role[]);
+      const data = await traderRbacApi.listRoles();
+      setRoles(data || []);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load roles');
@@ -52,7 +54,9 @@ const RoleManagementPage = () => {
     }
   };
 
-  useEffect(() => { fetchRoles(); }, []);
+  useEffect(() => {
+    fetchRoles();
+  }, []);
 
   const openCreate = () => {
     setEditingRole(null);
@@ -108,8 +112,10 @@ const RoleManagementPage = () => {
   };
 
   const handleSave = async () => {
-    if (!formName.trim()) { toast.error('Role name is required'); return; }
-    if (roles.some(r => r.name.toLowerCase() === formName.trim().toLowerCase() && r.id !== editingRole?.id)) {
+    const trimmedName = formName.trim();
+    if (!trimmedName) { toast.error('Role name is required'); return; }
+    const normalizedNewName = normalizeText(trimmedName);
+    if (roles.some(r => normalizeText(r.name) === normalizedNewName && r.id !== editingRole?.id)) {
       toast.error('A role with this name already exists');
       return;
     }
@@ -117,10 +123,10 @@ const RoleManagementPage = () => {
     const payload = { name: formName.trim(), description: formDesc.trim(), permissions: formPerms as any };
     try {
       if (editingRole) {
-        await rbacApi.updateRole(editingRole.id, payload);
+        await traderRbacApi.updateRole(editingRole.id, payload);
         toast.success('Role updated');
       } else {
-        await rbacApi.createRole(payload);
+        await traderRbacApi.createRole(payload);
         toast.success('Role created');
       }
       setDialogOpen(false);
@@ -135,7 +141,7 @@ const RoleManagementPage = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      await rbacApi.deleteRole(id);
+      await traderRbacApi.deleteRole(id);
       toast.success('Role deleted');
       setDeleteConfirm(null);
       fetchRoles();
@@ -145,7 +151,11 @@ const RoleManagementPage = () => {
     }
   };
 
-  const filtered = roles.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.description.toLowerCase().includes(search.toLowerCase()));
+  const searchTerm = normalizeText(search);
+  const filtered = roles.filter(r =>
+    normalizeText(r.name).includes(searchTerm) ||
+    normalizeText(r.description).includes(searchTerm)
+  );
   const enabledCount = (perms: ModulePermissions) => Object.values(perms).filter(m => m.enabled).length;
   const totalFeatures = (perms: ModulePermissions) => Object.values(perms).reduce((sum, m) => sum + (m.enabled ? Object.values(m.features).filter(Boolean).length : 0), 0);
 

@@ -8,6 +8,8 @@ import type { COALedger, AccountingClass, LedgerClassification } from '@/types/a
 import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccounts';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 const CLASS_CONFIG: Record<AccountingClass, { label: string; icon: typeof Wallet; gradient: string; glow: string; chartColor: string }> = {
   ASSET: { label: 'Assets', icon: Wallet, gradient: 'from-emerald-400 to-teal-500', glow: 'shadow-emerald-500/20', chartColor: '#10b981' },
@@ -35,6 +37,11 @@ const CLASSIFICATION_TO_CLASS: Record<string, AccountingClass> = {
 const AccountingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Chart of Accounts');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Accounting" />;
+  }
   const [ledgers, setLedgers] = useState<COALedger[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -101,6 +108,10 @@ const AccountingPage = () => {
     if (!newName.trim()) return;
     const parentId = newClassification === 'RECEIVABLE' ? arControlLedger?.ledger_id : newClassification === 'PAYABLE' ? apControlLedger?.ledger_id : undefined;
     const parentControlId = parentId != null && parentId !== '' ? Number(parentId) : null;
+    if (!can('Chart of Accounts', 'Create')) {
+      // We intentionally do not block viewing Chart of Accounts here; only creation.
+      return;
+    }
     try {
       const dto = await chartOfAccountsApi.create({
         ledgerName: newName.trim(),

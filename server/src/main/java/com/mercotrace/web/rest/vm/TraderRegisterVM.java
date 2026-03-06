@@ -3,17 +3,18 @@ package com.mercotrace.web.rest.vm;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * ViewModel for Module 1 Trader registration.
+ * ViewModel for trader registration used by /api/auth/register.
  * Aligned with frontend payload used in RegisterScreen/AuthContext:
  * {
  *   business_name, owner_name, mobile, email, password,
  *   address, city, state, pin_code, category
  * }
  */
-public class Module1RegisterVM {
+public class TraderRegisterVM {
 
     @JsonProperty("business_name")
     @NotBlank
@@ -44,11 +45,26 @@ public class Module1RegisterVM {
     private String state;
 
     @JsonProperty("pin_code")
-    @NotBlank
     private String pinCode;
 
     @NotBlank
     private String category;
+
+    @JsonProperty("gst_number")
+    @Size(max = 15)
+    @Pattern(
+        regexp = "^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$",
+        message = "Invalid GST number"
+    )
+    private String gstNumber;
+
+    @JsonProperty("rmc_apmc_code")
+    @Size(max = 64)
+    private String rmcApmcCode;
+
+    @JsonProperty("shop_photos")
+    @Size(max = 4)
+    private String[] shopPhotos;
 
     public String getBusinessName() {
         return businessName;
@@ -128,6 +144,30 @@ public class Module1RegisterVM {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public String getGstNumber() {
+        return gstNumber;
+    }
+
+    public void setGstNumber(String gstNumber) {
+        this.gstNumber = gstNumber;
+    }
+
+    public String getRmcApmcCode() {
+        return rmcApmcCode;
+    }
+
+    public void setRmcApmcCode(String rmcApmcCode) {
+        this.rmcApmcCode = rmcApmcCode;
+    }
+
+    public String[] getShopPhotos() {
+        return shopPhotos;
+    }
+
+    public void setShopPhotos(String[] shopPhotos) {
+        this.shopPhotos = shopPhotos;
     }
 }
 

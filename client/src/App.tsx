@@ -7,7 +7,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { FontSizeProvider } from "@/context/FontSizeContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { AdminAuthProvider } from "@/context/AdminAuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminProtectedRoute from "@/components/AdminProtectedRoute";
+import TraderProtectedRoute from "@/components/TraderProtectedRoute";
 import RootClassManager from "@/components/RootClassManager";
 import ScrollToTop from "@/components/ScrollToTop";
 import PortraitLock from "@/components/PortraitLock";
@@ -56,6 +59,9 @@ const AdminCommoditiesPage = lazy(() => import("./pages/admin/AdminCommoditiesPa
 const AdminContactsPage = lazy(() => import("./pages/admin/AdminContactsPage"));
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage"));
 const AdminSettingsPage = lazy(() => import("./pages/admin/AdminSettingsPage"));
+const AdminRoleManagementPage = lazy(() => import("./pages/admin/settings/AdminRoleManagementPage"));
+const AdminUserManagementPage = lazy(() => import("./pages/admin/settings/AdminUserManagementPage"));
+const AdminRoleAllocationPage = lazy(() => import("./pages/admin/settings/AdminRoleAllocationPage"));
 
 const queryClient = new QueryClient();
 
@@ -69,16 +75,16 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <FontSizeProvider>
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <ScrollToTop />
-            <PortraitLock />
-            <RootClassManager />
-            <Suspense fallback={<LazyFallback />}>
-              <Routes>
+        <AuthProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <ScrollToTop />
+              <PortraitLock />
+              <RootClassManager />
+              <Suspense fallback={<LazyFallback />}>
+                <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<SplashScreen />} />
                 <Route path="/onboarding" element={<OnboardingScreen />} />
@@ -87,7 +93,7 @@ const App = () => (
                 <Route path="/trader-setup" element={<TraderSetupPage />} />
 
                 {/* Trader App — wrapped in TraderLayout (sidebar on desktop) */}
-                <Route element={<ProtectedRoute><TraderLayout /></ProtectedRoute>}>
+                <Route element={<TraderProtectedRoute><TraderLayout /></TraderProtectedRoute>}>
                   <Route path="/home" element={<Homepage />} />
                   <Route path="/commodity-settings" element={<CommoditySettings />} />
                   <Route path="/auctions" element={<AuctionsPage />} />
@@ -117,8 +123,24 @@ const App = () => (
                 </Route>
 
                 {/* Admin Portal */}
-                <Route path="/admin/login" element={<AdminLoginPage />} />
-                <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
+                <Route
+                  path="/admin/login"
+                  element={
+                    <AdminAuthProvider>
+                      <AdminLoginPage />
+                    </AdminAuthProvider>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminAuthProvider>
+                      <AdminProtectedRoute>
+                        <AdminLayout />
+                      </AdminProtectedRoute>
+                    </AdminAuthProvider>
+                  }
+                >
                   <Route index element={<AdminDashboard />} />
                   <Route path="traders" element={<AdminTradersPage />} />
                   <Route path="categories" element={<AdminCategoriesPage />} />
@@ -126,9 +148,9 @@ const App = () => (
                   <Route path="contacts" element={<AdminContactsPage />} />
                   <Route path="reports" element={<AdminReportsPage />} />
                   <Route path="settings" element={<AdminSettingsPage />} />
-                  <Route path="settings/roles" element={<RoleManagementPage />} />
-                  <Route path="settings/users" element={<UserManagementPage />} />
-                  <Route path="settings/role-allocation" element={<RoleAllocationPage />} />
+                  <Route path="settings/roles" element={<AdminRoleManagementPage />} />
+                  <Route path="settings/users" element={<AdminUserManagementPage />} />
+                  <Route path="settings/role-allocation" element={<AdminRoleAllocationPage />} />
                 </Route>
 
                 <Route path="*" element={<NotFound />} />
@@ -136,7 +158,7 @@ const App = () => (
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
-      </AuthProvider>
+        </AuthProvider>
       </FontSizeProvider>
     </ThemeProvider>
   </QueryClientProvider>

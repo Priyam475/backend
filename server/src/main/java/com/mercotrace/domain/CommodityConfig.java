@@ -68,6 +68,12 @@ public class CommodityConfig extends AbstractAuditingEntity<Long> implements Ser
     @Column(name = "hamali_enabled", nullable = false)
     private Boolean hamaliEnabled = false;
 
+    @Column(name = "gst_rate")
+    private Double gstRate;
+
+    @Column(name = "weighing_threshold")
+    private Double weighingThreshold;
+
     public Long getId() {
         return id;
     }
@@ -170,6 +176,22 @@ public class CommodityConfig extends AbstractAuditingEntity<Long> implements Ser
 
     public void setHamaliEnabled(Boolean hamaliEnabled) {
         this.hamaliEnabled = hamaliEnabled;
+    }
+
+    public Double getGstRate() {
+        return gstRate;
+    }
+
+    public void setGstRate(Double gstRate) {
+        this.gstRate = gstRate;
+    }
+
+    public Double getWeighingThreshold() {
+        return weighingThreshold;
+    }
+
+    public void setWeighingThreshold(Double weighingThreshold) {
+        this.weighingThreshold = weighingThreshold;
     }
 
     @Override

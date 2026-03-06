@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260306130000-1" author="mercotrace">
+        <comment>Seed trader-module authorities for writer's pad, weighing, settlements, contacts, and print logs.</comment>
+
+        <!-- Writer's Pad authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WRITERS_PAD_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WRITERS_PAD_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WRITERS_PAD_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WRITERS_PAD_DELETE"/>
+        </insert>
+
+        <!-- Weighing authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WEIGHING_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WEIGHING_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WEIGHING_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_WEIGHING_DELETE"/>
+        </insert>
+
+        <!-- Settlement (Puty) authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SETTLEMENTS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SETTLEMENTS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SETTLEMENTS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SETTLEMENTS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SETTLEMENTS_APPROVE"/>
+        </insert>
+
+        <!-- Contacts authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CONTACTS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CONTACTS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CONTACTS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CONTACTS_DELETE"/>
+        </insert>
+
+        <!-- Print logs / print hub authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_LOGS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_LOGS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_LOGS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_LOGS_DELETE"/>
+        </insert>
+    </changeSet>
+
+    <changeSet id="20260306130000-2" author="mercotrace">
+        <comment>Seed trader-module authorities for remaining trader UI modules.</comment>
+
+        <!-- Commodity Settings authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_COMMODITY_SETTINGS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_COMMODITY_SETTINGS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_COMMODITY_SETTINGS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_COMMODITY_SETTINGS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_COMMODITY_SETTINGS_APPROVE"/>
+        </insert>
+
+        <!-- Arrivals authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_ARRIVALS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_ARRIVALS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_ARRIVALS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_ARRIVALS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_ARRIVALS_APPROVE"/>
+        </insert>
+
+        <!-- Billing authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_BILLING_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_BILLING_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_BILLING_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_BILLING_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_BILLING_APPROVE"/>
+        </insert>
+
+        <!-- Self-Sale authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SELF_SALE_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SELF_SALE_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SELF_SALE_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SELF_SALE_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_SELF_SALE_APPROVE"/>
+        </insert>
+
+        <!-- Stock Purchase authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_STOCK_PURCHASE_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_STOCK_PURCHASE_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_STOCK_PURCHASE_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_STOCK_PURCHASE_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_STOCK_PURCHASE_APPROVE"/>
+        </insert>
+
+        <!-- CDN (Delivery Note) authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CDN_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CDN_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CDN_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CDN_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CDN_APPROVE"/>
+        </insert>
+
+        <!-- Chart of Accounts authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CHART_OF_ACCOUNTS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CHART_OF_ACCOUNTS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CHART_OF_ACCOUNTS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CHART_OF_ACCOUNTS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_CHART_OF_ACCOUNTS_APPROVE"/>
+        </insert>
+
+        <!-- Vouchers & Payments authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_VOUCHERS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_VOUCHERS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_VOUCHERS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_VOUCHERS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_VOUCHERS_APPROVE"/>
+        </insert>
+
+        <!-- Financial Reports authorities (read-only) -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_FINANCIAL_REPORTS_VIEW"/>
+        </insert>
+
+        <!-- Operational Reports authorities (read-only) -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_REPORTS_VIEW"/>
+        </insert>
+
+        <!-- RBAC Settings authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_RBAC_SETTINGS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_RBAC_SETTINGS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_RBAC_SETTINGS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_RBAC_SETTINGS_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_RBAC_SETTINGS_APPROVE"/>
+        </insert>
+
+        <!-- Print Templates authorities -->
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_TEMPLATES_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_TEMPLATES_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_TEMPLATES_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_TEMPLATES_DELETE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRINT_TEMPLATES_APPROVE"/>
+        </insert>
+    </changeSet>
+</databaseChangeLog>
+

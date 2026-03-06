@@ -6,6 +6,7 @@ interface AuthContextType extends AuthState {
   /** True once initial auth check (getProfile) has completed. Used by ProtectedRoute to avoid redirecting before bootstrap. */
   hasBootstrapped: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithOtp: (mobile: string, otp: string) => Promise<void>;
   register: (data: any) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   trader: null,
   hasBootstrapped: false,
   login: async () => {},
+  loginWithOtp: async () => {},
   register: async () => {},
   logout: () => {},
   isLoading: false,
@@ -40,6 +42,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     let cancelled = false;
+
+    // Skip trader bootstrap entirely when user is in the admin portal.
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      setHasBootstrapped(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const bootstrap = async () => {
       try {
         let profile = await authApi.getProfile();
@@ -87,6 +98,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const loginWithOtp = useCallback(async (mobile: string, otp: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await authApi.verifyOtp(mobile, otp);
+      setState({
+        isAuthenticated: true,
+        user: result.user,
+        trader: result.trader,
+      });
+    } catch (e: any) {
+      setError(e.message || 'Login failed');
+      throw e;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   const register = useCallback(async (data: any) => {
     setIsLoading(true);
     setError(null);
@@ -102,6 +131,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         state: data.state || '',
         pin_code: data.pinCode || data.pin_code || '',
         category: data.categoryName || data.category || '',
+        gst_number: data.gstNumber || data.gst_number || undefined,
+        rmc_apmc_code: data.rmcApmcCode || data.rmc_apmc_code || undefined,
+        shop_photos: data.shopPhotos || data.shop_photos || [],
       });
       setState({
         isAuthenticated: true,
@@ -123,7 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearError = useCallback(() => setError(null), []);
 
   return (
-    <AuthContext.Provider value={{ ...state, hasBootstrapped, login, register, logout, isLoading, error, clearError }}>
+    <AuthContext.Provider value={{ ...state, hasBootstrapped, login, loginWithOtp, register, logout, isLoading, error, clearError }}>
       {children}
     </AuthContext.Provider>
   );

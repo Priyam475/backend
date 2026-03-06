@@ -1,5 +1,6 @@
 package com.mercotrace.web.rest;
 
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.SalesBillService;
 import com.mercotrace.service.dto.SalesBillDTOs.SalesBillCreateOrUpdateRequest;
 import com.mercotrace.service.dto.SalesBillDTOs.SalesBillDTO;
@@ -17,6 +18,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import tech.jhipster.web.util.HeaderUtil;
@@ -46,6 +48,7 @@ public class SalesBillResource {
      * {@code GET  /api/sales-bills} : Paginated list. Optional: billNumber, buyerName, dateFrom, dateTo.
      */
     @GetMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.BILLING_VIEW + "\")")
     public ResponseEntity<Page<SalesBillDTO>> getBills(
         @org.springdoc.core.annotations.ParameterObject
         @PageableDefault(size = 10, sort = "billDate", direction = Sort.Direction.DESC) Pageable pageable,
@@ -64,6 +67,7 @@ public class SalesBillResource {
      * {@code GET  /api/sales-bills/:id} : Get one bill by id.
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.BILLING_VIEW + "\")")
     public ResponseEntity<SalesBillDTO> getBill(@PathVariable Long id) {
         LOG.debug("REST request to get sales bill: {}", id);
         try {
@@ -78,6 +82,7 @@ public class SalesBillResource {
      * {@code POST  /api/sales-bills} : Create a new bill. Bill number assigned by server.
      */
     @PostMapping
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.BILLING_CREATE + "\")")
     public ResponseEntity<SalesBillDTO> createBill(@Valid @RequestBody SalesBillCreateOrUpdateRequest request) throws java.net.URISyntaxException {
         LOG.debug("REST request to create sales bill: buyerMark={}", request.getBuyerMark());
         try {
@@ -95,6 +100,7 @@ public class SalesBillResource {
      * {@code PUT  /api/sales-bills/:id} : Update existing bill. Version snapshot appended.
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.BILLING_EDIT + "\")")
     public ResponseEntity<SalesBillDTO> updateBill(@PathVariable Long id, @Valid @RequestBody SalesBillCreateOrUpdateRequest request) {
         LOG.debug("REST request to update sales bill: {}", id);
         try {

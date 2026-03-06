@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { traderApi } from '@/services/api';
 import type { Trader, ApprovalStatus } from '@/types/models';
+import { useAdminPermissions } from '@/admin/lib/adminPermissions';
+import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
 const statusConfig: Record<ApprovalStatus, { color: string; icon: typeof CheckCircle2; label: string }> = {
   PENDING: { color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', icon: Clock, label: 'Pending' },
@@ -20,6 +22,14 @@ const AdminTradersPage = () => {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<ApprovalStatus | 'ALL'>('ALL');
   const [selectedTrader, setSelectedTrader] = useState<Trader | null>(null);
+  const { canAccessModule, can } = useAdminPermissions();
+
+  const canView = canAccessModule('Traders');
+  const canApprove = can('Traders', 'Approve');
+
+  if (!canView) {
+    return <AdminForbiddenPage moduleName="Traders" />;
+  }
 
   useEffect(() => {
     traderApi.listForAdmin({ page: 0, size: 500 }).then(setTraders).catch(() => setTraders([]));
@@ -32,6 +42,9 @@ const AdminTradersPage = () => {
   });
 
   const handleApprove = async (id: string) => {
+    if (!canApprove) {
+      return;
+    }
     try {
       const updated = await traderApi.approve(id);
       setTraders(prev => prev.map(t => t.trader_id === id ? updated : t));
@@ -137,7 +150,7 @@ const AdminTradersPage = () => {
                         <button onClick={() => setSelectedTrader(t)} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all">
                           <Eye className="w-4 h-4" />
                         </button>
-                        {t.approval_status === 'PENDING' && (
+                        {t.approval_status === 'PENDING' && canApprove && (
                           <button onClick={() => handleApprove(t.trader_id)} className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all">
                             <CheckCircle2 className="w-4 h-4" />
                           </button>

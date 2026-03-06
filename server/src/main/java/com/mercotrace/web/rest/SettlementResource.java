@@ -22,7 +22,6 @@ import tech.jhipster.web.util.PaginationUtil;
  */
 @RestController
 @RequestMapping("/api/settlements")
-@PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
 public class SettlementResource {
 
     private static final Logger LOG = LoggerFactory.getLogger(SettlementResource.class);
@@ -39,6 +38,7 @@ public class SettlementResource {
      * Built from completed auctions + weighing, trader-scoped.
      */
     @GetMapping("/sellers")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
     public ResponseEntity<List<SellerSettlementDTO>> listSellers(
         @org.springdoc.core.annotations.ParameterObject Pageable pageable,
         @RequestParam(required = false) String search
@@ -53,6 +53,7 @@ public class SettlementResource {
      * {@code GET  /api/settlements/pattis} : list pattis (paginated).
      */
     @GetMapping("/pattis")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
     public ResponseEntity<List<PattiDTO>> listPattis(
         @org.springdoc.core.annotations.ParameterObject Pageable pageable
     ) {
@@ -67,6 +68,7 @@ public class SettlementResource {
      * Patti ID generated server-side (PT-YYYYMMDD-NNNN).
      */
     @PostMapping("/pattis")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_CREATE + "\")")
     public ResponseEntity<PattiDTO> createPatti(@Valid @RequestBody PattiSaveRequest request) {
         LOG.debug("REST request to create Patti for seller : {}", request.getSellerName());
         PattiDTO created = settlementService.createPatti(request);
@@ -77,6 +79,7 @@ public class SettlementResource {
      * {@code GET  /api/settlements/pattis/:id} : get patti by id.
      */
     @GetMapping("/pattis/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
     public ResponseEntity<PattiDTO> getPattiById(@PathVariable Long id) {
         LOG.debug("REST request to get Patti : {}", id);
         return settlementService.getPattiById(id)
@@ -88,6 +91,7 @@ public class SettlementResource {
      * {@code GET  /api/settlements/pattis/by-patti-id/:pattiId} : get patti by business key.
      */
     @GetMapping("/pattis/by-patti-id/{pattiId}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
     public ResponseEntity<PattiDTO> getPattiByPattiId(@PathVariable String pattiId) {
         LOG.debug("REST request to get Patti by pattiId : {}", pattiId);
         return settlementService.getPattiByPattiId(pattiId)
@@ -99,6 +103,7 @@ public class SettlementResource {
      * {@code PUT  /api/settlements/pattis/:id} : update patti (e.g. deductions).
      */
     @PutMapping("/pattis/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
     public ResponseEntity<PattiDTO> updatePatti(@PathVariable Long id, @Valid @RequestBody PattiSaveRequest request) {
         LOG.debug("REST request to update Patti : {}", id);
         if (id == null) {

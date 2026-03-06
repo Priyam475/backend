@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Profile, Role, UserRole } from '@/types/rbac';
-import { rbacApi } from '@/services/api';
+import { traderRbacApi } from '@/services/api';
 
 const RoleAllocationPage = () => {
   const navigate = useNavigate();
@@ -29,9 +29,9 @@ const RoleAllocationPage = () => {
     try {
       setLoading(true);
       const [profilesData, rolesData, userRolesData] = await Promise.all([
-        rbacApi.listProfiles(),
-        rbacApi.listRoles(),
-        rbacApi.listUserRoles(),
+        traderRbacApi.listProfiles(),
+        traderRbacApi.listRoles(),
+        traderRbacApi.listUserRoles(),
       ]);
       setProfiles(profilesData as Profile[]);
       setRoles(rolesData.map((r: Role) => ({ ...r, permissions: r.permissions || {} })) as Role[]);
@@ -69,7 +69,7 @@ const RoleAllocationPage = () => {
     setSaving(true);
     const newRoleIds = [...selectedRoleIds];
     try {
-      await rbacApi.setUserRoles(selectedProfile.id, newRoleIds);
+      await traderRbacApi.setUserRoles(selectedProfile.id, newRoleIds);
       toast.success('Roles updated successfully');
       setDialogOpen(false);
       fetchAll();

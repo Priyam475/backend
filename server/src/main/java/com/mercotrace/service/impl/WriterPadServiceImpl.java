@@ -97,8 +97,10 @@ public class WriterPadServiceImpl implements WriterPadService {
             throw new IllegalArgumentException("Raw weight must be positive");
         }
 
+        Long traderId = traderContextService.getCurrentTraderId();
         WriterPadSession session = sessionRepository
             .findById(sessionId)
+            .filter(s -> traderId.equals(s.getTraderId()))
             .orElseThrow(() -> new IllegalArgumentException("WriterPadSession not found: " + sessionId));
 
         WriterPadWeightEntry entry = new WriterPadWeightEntry();
@@ -135,6 +137,7 @@ public class WriterPadServiceImpl implements WriterPadService {
 
         WriterPadSession source = sessionRepository
             .findById(entry.getSessionId())
+            .filter(s -> traderId.equals(s.getTraderId()))
             .orElseThrow(() -> new IllegalStateException("Source WriterPadSession not found for entry: " + entryId));
 
         int sourceBags = Math.max(0, (source.getWeighedBags() != null ? source.getWeighedBags() : 0) - 1);
@@ -186,8 +189,10 @@ public class WriterPadServiceImpl implements WriterPadService {
     @Override
     @Transactional(readOnly = true)
     public Optional<WriterPadSessionWithLogDTO> getSessionWithLog(Long sessionId, Pageable pageable) {
+        Long traderId = traderContextService.getCurrentTraderId();
         return sessionRepository
             .findById(sessionId)
+            .filter(session -> traderId.equals(session.getTraderId()))
             .map(session -> {
                 WriterPadSessionDTO sessionDto = sessionMapper.toDto(session);
                 Page<WriterPadWeightEntry> page = weightEntryRepository.findAllBySessionIdAndDeletedFalseOrderByWeighedAtDesc(

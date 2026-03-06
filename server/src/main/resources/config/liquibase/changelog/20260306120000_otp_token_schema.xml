@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260306120000-1" author="cursor-fe2be">
+        <createTable tableName="otp_token">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="mobile" type="varchar(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="code" type="varchar(10)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp">
+                <constraints nullable="false"/>
+            </column>
+            <column name="expires_at" type="timestamp">
+                <constraints nullable="false"/>
+            </column>
+            <column name="attempts" type="integer" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="max_attempts" type="integer" defaultValueNumeric="5">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_request_ip" type="varchar(64)"/>
+            <column name="consumed_at" type="timestamp"/>
+
+            <!-- Auditing columns -->
+            <column name="created_by" type="varchar(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_date" type="timestamp"/>
+            <column name="last_modified_by" type="varchar(50)"/>
+            <column name="last_modified_date" type="timestamp"/>
+        </createTable>
+
+        <createIndex tableName="otp_token" indexName="idx_otp_token_mobile_expires">
+            <column name="mobile"/>
+            <column name="expires_at"/>
+        </createIndex>
+
+        <createIndex tableName="otp_token" indexName="idx_otp_token_mobile_consumed">
+            <column name="mobile"/>
+            <column name="consumed_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
+

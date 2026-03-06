@@ -232,29 +232,42 @@ public class SettlementServiceImpl implements SettlementService {
     @Override
     @Transactional(readOnly = true)
     public Optional<PattiDTO> getPattiById(Long id) {
-        return pattiRepository.findById(id).map(this::toPattiDTO);
+        Long traderId = traderContextService.getCurrentTraderId();
+        return pattiRepository
+            .findById(id)
+            .filter(p -> traderId.equals(p.getTraderId()))
+            .map(this::toPattiDTO);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Optional<PattiDTO> getPattiByPattiId(String pattiId) {
-        return pattiRepository.findByPattiId(pattiId).map(this::toPattiDTO);
+        Long traderId = traderContextService.getCurrentTraderId();
+        return pattiRepository
+            .findByPattiId(pattiId)
+            .filter(p -> traderId.equals(p.getTraderId()))
+            .map(this::toPattiDTO);
     }
 
     @Override
     @Transactional(readOnly = false)
     public Optional<PattiDTO> updatePatti(Long id, PattiSaveRequest request) {
-        return pattiRepository.findById(id).map(patti -> {
-            patti.setSellerName(request.getSellerName());
-            patti.setGrossAmount(request.getGrossAmount());
-            patti.setTotalDeductions(request.getTotalDeductions());
-            patti.setNetPayable(request.getNetPayable());
-            patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
-            patti.getRateClusters().clear();
-            patti.getDeductions().clear();
-            mapRequestDeductionsAndClustersToEntity(request, patti);
-            return pattiRepository.save(patti);
-        }).map(this::toPattiDTO);
+        Long traderId = traderContextService.getCurrentTraderId();
+        return pattiRepository
+            .findById(id)
+            .filter(p -> traderId.equals(p.getTraderId()))
+            .map(patti -> {
+                patti.setSellerName(request.getSellerName());
+                patti.setGrossAmount(request.getGrossAmount());
+                patti.setTotalDeductions(request.getTotalDeductions());
+                patti.setNetPayable(request.getNetPayable());
+                patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
+                patti.getRateClusters().clear();
+                patti.getDeductions().clear();
+                mapRequestDeductionsAndClustersToEntity(request, patti);
+                return pattiRepository.save(patti);
+            })
+            .map(this::toPattiDTO);
     }
 
     @Override

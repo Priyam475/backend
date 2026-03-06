@@ -17,6 +17,8 @@ import { toast } from 'sonner';
 import { billingApi } from '@/services/api';
 import type { SalesBillDTO } from '@/services/api/billing';
 import { reportsApi, type DailySalesSummaryDTO, type PartyExposureRowDTO } from '@/services/api/reports';
+import ForbiddenPage from '@/components/ForbiddenPage';
+import { usePermissions } from '@/lib/permissions';
 
 /* ── Report Types ── */
 const reportTypes = [
@@ -95,6 +97,11 @@ ${content}
 const ReportsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule } = usePermissions();
+  const canView = canAccessModule('Reports');
+  if (!canView) {
+    return <ForbiddenPage moduleName="Reports" />;
+  }
   const [activeTab, setActiveTab] = useState('summary');
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
