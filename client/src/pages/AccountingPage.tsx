@@ -38,7 +38,7 @@ const AccountingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const { canAccessModule, can } = usePermissions();
-  const canView = canAccessModule('Accounting');
+  const canView = canAccessModule('Chart of Accounts');
   if (!canView) {
     return <ForbiddenPage moduleName="Accounting" />;
   }
@@ -108,7 +108,7 @@ const AccountingPage = () => {
     if (!newName.trim()) return;
     const parentId = newClassification === 'RECEIVABLE' ? arControlLedger?.ledger_id : newClassification === 'PAYABLE' ? apControlLedger?.ledger_id : undefined;
     const parentControlId = parentId != null && parentId !== '' ? Number(parentId) : null;
-    if (!can('Accounting', 'Create')) {
+    if (!can('Chart of Accounts', 'Create')) {
       // We intentionally do not block viewing Chart of Accounts here; only creation.
       return;
     }

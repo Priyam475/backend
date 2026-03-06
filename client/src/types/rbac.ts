@@ -34,25 +34,60 @@ export interface UserRole {
 }
 
 export const AVAILABLE_MODULES: Record<string, string[]> = {
-  'Dashboard': ['View Analytics', 'Export Data'],
+  // 1. Home (dashboard surface; UI-only, no dedicated authorities)
+  'Home': ['View'],
+
+  // 2. Contacts
+  'Contacts': ['View', 'Create', 'Edit', 'Delete'],
+
+  // 3. Commodity Settings
   'Commodity Settings': ['View', 'Create', 'Edit', 'Delete'],
-  'Contacts': ['View', 'Create', 'Edit', 'Delete', 'Import', 'Export'],
-  'Arrivals': ['View', 'Create', 'Edit', 'Delete'],
-  'Auctions': ['View', 'Create', 'Edit', 'Delete', 'Approve'],
-  'Weighing': ['View', 'Create', 'Edit'],
+
+  // 4. Arrivals
+  'Arrivals': ['View', 'Create'],
+
+  // 5. Auctions / Sales
+  'Auctions / Sales': ['View', 'Create', 'Edit', 'Delete', 'Approve'],
+
+  // 6. Weighing
+  'Weighing': ['View', 'Create'],
+
+  // 7. Writer's Pad
   "Writer's Pad": ['View', 'Create', 'Edit'],
-  'Logistics': ['View', 'Create', 'Edit', 'Delete'],
-  // Print Hub (Print Logs) is the operational module behind Logistics.
-  'Print Hub': ['View', 'Create', 'Edit', 'Delete'],
-  'Self-Sale': ['View', 'Create', 'Edit'],
-  'Stock Purchase': ['View', 'Create', 'Edit'],
-  'CDN': ['View', 'Create', 'Edit', 'Delete'],
-  'Settlement': ['View', 'Create', 'Edit', 'Approve'],
-  'Billing': ['View', 'Create', 'Edit', 'Delete', 'Print'],
-  'Accounting': ['View', 'Create', 'Edit'],
-  'Vouchers': ['View', 'Create', 'Edit', 'Delete', 'Approve'],
-  'Financial Reports': ['View', 'Export'],
-  'Print Templates': ['View', 'Create', 'Edit'],
-  'Reports': ['View', 'Export'],
+
+  // 8. Print Hub (navigation / print logs)
+  'Print Hub': ['View', 'Create'],
+
+  // 9. Self-Sale
+  'Self-Sale': ['View', 'Create'],
+
+  // 10. Stock Purchase
+  'Stock Purchase': ['View', 'Create'],
+
+  // 11. CDN (Consignment Dispatch Notes)
+  'CDN': ['View', 'Create'],
+
+  // 12. Settlement
+  'Settlement': ['View', 'Create', 'Edit'],
+
+  // 13. Billing
+  'Billing': ['View', 'Create'],
+
+  // 14. Chart of Accounts
+  'Chart of Accounts': ['View', 'Create'],
+
+  // 15. Vouchers & Payments
+  'Vouchers & Payments': ['View', 'Create', 'Approve'],
+
+  // 16. Financial Reports
+  'Financial Reports': ['View'],
+
+  // 17. Print Templates
+  'Print Templates': ['View'],
+
+  // 18. Reports
+  'Reports': ['View'],
+
+  // 19. Settings (trader RBAC surface)
   'Settings': ['View', 'Manage Roles', 'Manage Users'],
 };

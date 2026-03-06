@@ -35,7 +35,7 @@ const VouchersPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const { canAccessModule, can } = usePermissions();
-  const canView = canAccessModule('Vouchers');
+  const canView = canAccessModule('Vouchers & Payments');
   if (!canView) {
     return <ForbiddenPage moduleName="Vouchers" />;
   }
@@ -147,7 +147,7 @@ const VouchersPage = () => {
         credit: round2(parseFloat(l.credit) || 0),
       }));
     if (payloadLines.length === 0) return;
-    if (!can('Vouchers', 'Create')) {
+    if (!can('Vouchers & Payments', 'Create')) {
       toast.error('You do not have permission to create vouchers.');
       return;
     }
@@ -169,7 +169,7 @@ const VouchersPage = () => {
   };
 
   const handlePost = async (v: VoucherHeader) => {
-    if (!can('Vouchers', 'Approve')) {
+    if (!can('Vouchers & Payments', 'Approve')) {
       toast.error('You do not have permission to approve vouchers.');
       return;
     }
@@ -184,7 +184,7 @@ const VouchersPage = () => {
   };
 
   const handleReverse = async (v: VoucherHeader) => {
-    if (!can('Vouchers', 'Approve')) {
+    if (!can('Vouchers & Payments', 'Approve')) {
       toast.error('You do not have permission to reverse vouchers.');
       return;
     }

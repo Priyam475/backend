@@ -18,24 +18,18 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
     create: 'ROLE_COMMODITY_SETTINGS_CREATE',
     edit: 'ROLE_COMMODITY_SETTINGS_EDIT',
     delete: 'ROLE_COMMODITY_SETTINGS_DELETE',
-    approve: 'ROLE_COMMODITY_SETTINGS_APPROVE',
   },
   [normalize('Contacts')]: {
     view: 'ROLE_CONTACTS_VIEW',
-    export: 'ROLE_CONTACTS_VIEW',
     create: 'ROLE_CONTACTS_CREATE',
-    import: 'ROLE_CONTACTS_CREATE',
     edit: 'ROLE_CONTACTS_EDIT',
     delete: 'ROLE_CONTACTS_DELETE',
   },
   [normalize('Arrivals')]: {
     view: 'ROLE_ARRIVALS_VIEW',
     create: 'ROLE_ARRIVALS_CREATE',
-    edit: 'ROLE_ARRIVALS_EDIT',
-    delete: 'ROLE_ARRIVALS_DELETE',
-    approve: 'ROLE_ARRIVALS_APPROVE',
   },
-  [normalize('Auctions')]: {
+  [normalize('Auctions / Sales')]: {
     view: 'ROLE_AUCTIONS_VIEW',
     create: 'ROLE_AUCTIONS_CREATE',
     edit: 'ROLE_AUCTIONS_EDIT',
@@ -45,73 +39,46 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
   [normalize('Weighing')]: {
     view: 'ROLE_WEIGHING_VIEW',
     create: 'ROLE_WEIGHING_CREATE',
-    edit: 'ROLE_WEIGHING_EDIT',
-    delete: 'ROLE_WEIGHING_DELETE',
   },
   [normalize("Writer's Pad")]: {
     view: 'ROLE_WRITERS_PAD_VIEW',
     create: 'ROLE_WRITERS_PAD_CREATE',
     edit: 'ROLE_WRITERS_PAD_EDIT',
-    delete: 'ROLE_WRITERS_PAD_DELETE',
   },
   [normalize('Self-Sale')]: {
     view: 'ROLE_SELF_SALE_VIEW',
     create: 'ROLE_SELF_SALE_CREATE',
-    edit: 'ROLE_SELF_SALE_EDIT',
-    delete: 'ROLE_SELF_SALE_DELETE',
-    approve: 'ROLE_SELF_SALE_APPROVE',
   },
   [normalize('Stock Purchase')]: {
     view: 'ROLE_STOCK_PURCHASE_VIEW',
     create: 'ROLE_STOCK_PURCHASE_CREATE',
-    edit: 'ROLE_STOCK_PURCHASE_EDIT',
-    delete: 'ROLE_STOCK_PURCHASE_DELETE',
-    approve: 'ROLE_STOCK_PURCHASE_APPROVE',
   },
   [normalize('CDN')]: {
     view: 'ROLE_CDN_VIEW',
     create: 'ROLE_CDN_CREATE',
-    edit: 'ROLE_CDN_EDIT',
-    delete: 'ROLE_CDN_DELETE',
-    approve: 'ROLE_CDN_APPROVE',
   },
-  // Accounting UI module → Chart of Accounts authorities.
-  [normalize('Accounting')]: {
+  // Chart of Accounts module.
+  [normalize('Chart of Accounts')]: {
     view: 'ROLE_CHART_OF_ACCOUNTS_VIEW',
     create: 'ROLE_CHART_OF_ACCOUNTS_CREATE',
-    edit: 'ROLE_CHART_OF_ACCOUNTS_EDIT',
-    delete: 'ROLE_CHART_OF_ACCOUNTS_DELETE',
-    approve: 'ROLE_CHART_OF_ACCOUNTS_APPROVE',
   },
-  [normalize('Vouchers')]: {
+  [normalize('Vouchers & Payments')]: {
     view: 'ROLE_VOUCHERS_VIEW',
     create: 'ROLE_VOUCHERS_CREATE',
-    edit: 'ROLE_VOUCHERS_EDIT',
-    delete: 'ROLE_VOUCHERS_DELETE',
     approve: 'ROLE_VOUCHERS_APPROVE',
   },
   [normalize('Billing')]: {
     view: 'ROLE_BILLING_VIEW',
-    print: 'ROLE_BILLING_VIEW',
     create: 'ROLE_BILLING_CREATE',
-    edit: 'ROLE_BILLING_EDIT',
-    delete: 'ROLE_BILLING_DELETE',
-    approve: 'ROLE_BILLING_APPROVE',
   },
   [normalize('Financial Reports')]: {
     view: 'ROLE_FINANCIAL_REPORTS_VIEW',
-    export: 'ROLE_FINANCIAL_REPORTS_VIEW',
   },
   [normalize('Reports')]: {
     view: 'ROLE_REPORTS_VIEW',
-    export: 'ROLE_REPORTS_VIEW',
   },
   [normalize('Print Templates')]: {
     view: 'ROLE_PRINT_TEMPLATES_VIEW',
-    create: 'ROLE_PRINT_TEMPLATES_CREATE',
-    edit: 'ROLE_PRINT_TEMPLATES_EDIT',
-    delete: 'ROLE_PRINT_TEMPLATES_DELETE',
-    approve: 'ROLE_PRINT_TEMPLATES_APPROVE',
   },
   // Settings (RBAC) module.
   [normalize('Settings')]: {
@@ -119,20 +86,16 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
     'manage roles': 'ROLE_RBAC_SETTINGS_EDIT',
     'manage users': 'ROLE_RBAC_SETTINGS_EDIT',
   },
-  // Settlement (Puty) module.
+  // Settlement (Patti) module.
   [normalize('Settlement')]: {
     view: 'ROLE_SETTLEMENTS_VIEW',
     create: 'ROLE_SETTLEMENTS_CREATE',
     edit: 'ROLE_SETTLEMENTS_EDIT',
-    delete: 'ROLE_SETTLEMENTS_DELETE',
-    approve: 'ROLE_SETTLEMENTS_APPROVE',
   },
   // Print Hub / Print Logs module.
   [normalize('Print Hub')]: {
     view: 'ROLE_PRINT_LOGS_VIEW',
     create: 'ROLE_PRINT_LOGS_CREATE',
-    edit: 'ROLE_PRINT_LOGS_EDIT',
-    delete: 'ROLE_PRINT_LOGS_DELETE',
   },
 };
 
@@ -169,25 +132,25 @@ export function canWithAuthorities(
 
 // Route → module name mapping. Centralized so menus and pages stay consistent.
 export function getModuleKeyForRoute(pathname: string): ModuleKey | null {
+  if (pathname.startsWith('/home')) return 'Home';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/contacts')) return 'Contacts';
   if (pathname.startsWith('/commodity-settings')) return 'Commodity Settings';
   if (pathname.startsWith('/arrivals')) return 'Arrivals';
-  if (pathname.startsWith('/auctions')) return 'Auctions';
+  if (pathname.startsWith('/auctions')) return 'Auctions / Sales';
   if (pathname.startsWith('/weighing')) return 'Weighing';
-  if (pathname.startsWith('/writers-pad')) return "Writer's Pad";
+  if (pathname.startsWith('/writers-pad') || pathname.startsWith('/scribble-pad')) return "Writer's Pad";
   if (pathname.startsWith('/logistics')) return 'Print Hub';
   if (pathname.startsWith('/self-sale')) return 'Self-Sale';
   if (pathname.startsWith('/stock-purchase')) return 'Stock Purchase';
   if (pathname.startsWith('/cdn')) return 'CDN';
   if (pathname.startsWith('/settlement')) return 'Settlement';
   if (pathname.startsWith('/billing')) return 'Billing';
-  if (pathname.startsWith('/accounting')) return 'Accounting';
-  if (pathname.startsWith('/vouchers')) return 'Vouchers';
+  if (pathname.startsWith('/accounting')) return 'Chart of Accounts';
+  if (pathname.startsWith('/vouchers')) return 'Vouchers & Payments';
   if (pathname.startsWith('/financial-reports')) return 'Financial Reports';
-  if (pathname.startsWith('/prints')) return 'Print Templates';
+  if (pathname.startsWith('/prints-reports') || pathname.startsWith('/prints')) return 'Print Templates';
   if (pathname.startsWith('/reports')) return 'Reports';
-  if (pathname.startsWith('/home')) return 'Dashboard';
   return null;
 }
 

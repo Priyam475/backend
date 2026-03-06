@@ -151,7 +151,7 @@ const AuctionsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const { canAccessModule, can } = usePermissions();
-  const canView = canAccessModule('Auctions');
+  const canView = canAccessModule('Auctions / Sales');
   if (!canView) {
     return <ForbiddenPage moduleName="Auctions" />;
   }
@@ -361,7 +361,7 @@ const AuctionsPage = () => {
 
   // REQ-AUC-009: Allow quantity increase with confirmation
   const tryAddEntry = (entry: Omit<SaleEntry, 'id' | 'bidNumber'>) => {
-    if (!can('Auctions', 'Create')) {
+    if (!can('Auctions / Sales', 'Create')) {
       toast.error('You do not have permission to add auction bids.');
       return;
     }
@@ -598,7 +598,7 @@ const AuctionsPage = () => {
 
   const removeEntry = useCallback(async (id: string) => {
     if (!selectedLot) return;
-    if (!can('Auctions', 'Delete')) {
+    if (!can('Auctions / Sales', 'Delete')) {
       toast.error('You do not have permission to delete auction bids.');
       return;
     }
@@ -612,7 +612,7 @@ const AuctionsPage = () => {
 
   const setTokenAdvanceAmount = useCallback(async (id: string, amount: number) => {
     if (!selectedLot) return;
-    if (!can('Auctions', 'Edit')) {
+    if (!can('Auctions / Sales', 'Edit')) {
       toast.error('You do not have permission to edit auction bids.');
       return;
     }
@@ -1379,7 +1379,7 @@ const AuctionsPage = () => {
                   onClick={async () => {
                     if (!selectedLot) return;
                     setCompleteLoading(true);
-                    if (!can('Auctions', 'Approve')) {
+                    if (!can('Auctions / Sales', 'Approve')) {
                       toast.error('You do not have permission to complete auctions.');
                       return;
                     }

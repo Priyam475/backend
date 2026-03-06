@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { usePermissions, getModuleKeyForRoute } from '@/lib/permissions';
 const tabs = [
   { icon: Truck, label: 'Arrivals', path: '/arrivals' },
-  { icon: Gavel, label: 'Auctions', path: '/auctions' },
+  { icon: Gavel, label: 'Auctions / Sales', path: '/auctions' },
   { icon: Receipt, label: 'Billings', path: '/billing' },
   { icon: Printer, label: 'PrintHub', path: '/logistics' },
   { icon: User, label: 'Profile', path: '/profile' },

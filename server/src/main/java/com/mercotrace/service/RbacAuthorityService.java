@@ -366,43 +366,39 @@ public class RbacAuthorityService {
         Map<String, Map<String, String>> modules = new HashMap<>();
 
         // Helper to register module mappings
-        register(modules, "commodity settings", mapOf(
-            "view", AuthoritiesConstants.COMMODITY_SETTINGS_VIEW,
-            "create", AuthoritiesConstants.COMMODITY_SETTINGS_CREATE,
-            "edit", AuthoritiesConstants.COMMODITY_SETTINGS_EDIT,
-            "delete", AuthoritiesConstants.COMMODITY_SETTINGS_DELETE,
-            "approve", AuthoritiesConstants.COMMODITY_SETTINGS_APPROVE
-        ));
-
-        register(modules, "contacts", mapOf(
-            "view", AuthoritiesConstants.CONTACTS_VIEW,
-            // Export is effectively a specialized "view" operation.
-            "export", AuthoritiesConstants.CONTACTS_VIEW,
-            "create", AuthoritiesConstants.CONTACTS_CREATE,
-            // Import is effectively a specialized "create" operation.
-            "import", AuthoritiesConstants.CONTACTS_CREATE,
-            "edit", AuthoritiesConstants.CONTACTS_EDIT,
-            "delete", AuthoritiesConstants.CONTACTS_DELETE
-        ));
-
         register(
             modules,
-            "arrivals",
+            "commodity settings",
             mapOf(
                 "view",
-                AuthoritiesConstants.ARRIVALS_VIEW,
+                AuthoritiesConstants.COMMODITY_SETTINGS_VIEW,
                 "create",
-                AuthoritiesConstants.ARRIVALS_CREATE,
+                AuthoritiesConstants.COMMODITY_SETTINGS_CREATE,
                 "edit",
-                AuthoritiesConstants.ARRIVALS_EDIT,
+                AuthoritiesConstants.COMMODITY_SETTINGS_EDIT,
                 "delete",
-                AuthoritiesConstants.ARRIVALS_DELETE,
-                "approve",
-                AuthoritiesConstants.ARRIVALS_APPROVE
+                AuthoritiesConstants.COMMODITY_SETTINGS_DELETE
             )
         );
 
-        // Settlement (Puty) module – "Settlement" in UI.
+        register(
+            modules,
+            "contacts",
+            mapOf(
+                "view",
+                AuthoritiesConstants.CONTACTS_VIEW,
+                "create",
+                AuthoritiesConstants.CONTACTS_CREATE,
+                "edit",
+                AuthoritiesConstants.CONTACTS_EDIT,
+                "delete",
+                AuthoritiesConstants.CONTACTS_DELETE
+            )
+        );
+
+        register(modules, "arrivals", mapOf("view", AuthoritiesConstants.ARRIVALS_VIEW, "create", AuthoritiesConstants.ARRIVALS_CREATE));
+
+        // Settlement (Patti) module – "Settlement" in UI.
         register(
             modules,
             "settlement",
@@ -412,96 +408,92 @@ public class RbacAuthorityService {
                 "create",
                 AuthoritiesConstants.SETTLEMENTS_CREATE,
                 "edit",
-                AuthoritiesConstants.SETTLEMENTS_EDIT,
-                "delete",
-                AuthoritiesConstants.SETTLEMENTS_DELETE,
-                "approve",
-                AuthoritiesConstants.SETTLEMENTS_APPROVE
+                AuthoritiesConstants.SETTLEMENTS_EDIT
             )
         );
 
-        register(modules, "auctions", mapOf(
-            "view", AuthoritiesConstants.AUCTIONS_VIEW,
-            "create", AuthoritiesConstants.AUCTIONS_CREATE,
-            "edit", AuthoritiesConstants.AUCTIONS_EDIT,
-            "delete", AuthoritiesConstants.AUCTIONS_DELETE,
-            "approve", AuthoritiesConstants.AUCTIONS_APPROVE
-        ));
-
-        register(modules, "weighing", mapOf(
-            "view", AuthoritiesConstants.WEIGHING_VIEW,
-            "create", AuthoritiesConstants.WEIGHING_CREATE,
-            "edit", AuthoritiesConstants.WEIGHING_EDIT,
-            "delete", AuthoritiesConstants.WEIGHING_DELETE
-        ));
-
-        register(modules, "writer's pad", mapOf(
-            "view", AuthoritiesConstants.WRITERS_PAD_VIEW,
-            "create", AuthoritiesConstants.WRITERS_PAD_CREATE,
-            "edit", AuthoritiesConstants.WRITERS_PAD_EDIT,
-            "delete", AuthoritiesConstants.WRITERS_PAD_DELETE
-        ));
-
-        register(modules, "self-sale", mapOf(
-            "view", AuthoritiesConstants.SELF_SALE_VIEW,
-            "create", AuthoritiesConstants.SELF_SALE_CREATE,
-            "edit", AuthoritiesConstants.SELF_SALE_EDIT,
-            "delete", AuthoritiesConstants.SELF_SALE_DELETE,
-            "approve", AuthoritiesConstants.SELF_SALE_APPROVE
-        ));
-
-        register(modules, "stock purchase", mapOf(
-            "view", AuthoritiesConstants.STOCK_PURCHASE_VIEW,
-            "create", AuthoritiesConstants.STOCK_PURCHASE_CREATE,
-            "edit", AuthoritiesConstants.STOCK_PURCHASE_EDIT,
-            "delete", AuthoritiesConstants.STOCK_PURCHASE_DELETE,
-            "approve", AuthoritiesConstants.STOCK_PURCHASE_APPROVE
-        ));
-
-        register(modules, "cdn", mapOf(
-            "view", AuthoritiesConstants.CDN_VIEW,
-            "create", AuthoritiesConstants.CDN_CREATE,
-            "edit", AuthoritiesConstants.CDN_EDIT,
-            "delete", AuthoritiesConstants.CDN_DELETE,
-            "approve", AuthoritiesConstants.CDN_APPROVE
-        ));
-
-        // "Accounting" module in UI maps to Chart of Accounts authorities.
-        register(modules, "accounting", mapOf(
-            "view", AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW,
-            "create", AuthoritiesConstants.CHART_OF_ACCOUNTS_CREATE,
-            "edit", AuthoritiesConstants.CHART_OF_ACCOUNTS_EDIT,
-            "delete", AuthoritiesConstants.CHART_OF_ACCOUNTS_DELETE,
-            "approve", AuthoritiesConstants.CHART_OF_ACCOUNTS_APPROVE
-        ));
-
-        register(modules, "vouchers", mapOf(
-            "view", AuthoritiesConstants.VOUCHERS_VIEW,
-            "create", AuthoritiesConstants.VOUCHERS_CREATE,
-            "edit", AuthoritiesConstants.VOUCHERS_EDIT,
-            "delete", AuthoritiesConstants.VOUCHERS_DELETE,
-            "approve", AuthoritiesConstants.VOUCHERS_APPROVE
-        ));
+        // Auctions / Sales module – exposed as "Auctions / Sales" in the trader UI.
+        register(
+            modules,
+            "auctions / sales",
+            mapOf(
+                "view",
+                AuthoritiesConstants.AUCTIONS_VIEW,
+                "create",
+                AuthoritiesConstants.AUCTIONS_CREATE,
+                "edit",
+                AuthoritiesConstants.AUCTIONS_EDIT,
+                "delete",
+                AuthoritiesConstants.AUCTIONS_DELETE,
+                "approve",
+                AuthoritiesConstants.AUCTIONS_APPROVE
+            )
+        );
 
         register(
             modules,
-            "billing",
+            "weighing",
+            mapOf("view", AuthoritiesConstants.WEIGHING_VIEW, "create", AuthoritiesConstants.WEIGHING_CREATE)
+        );
+
+        register(
+            modules,
+            "writer's pad",
             mapOf(
                 "view",
-                AuthoritiesConstants.BILLING_VIEW,
-                // Printing Bills requires read access; map to VIEW.
-                "print",
-                AuthoritiesConstants.BILLING_VIEW,
+                AuthoritiesConstants.WRITERS_PAD_VIEW,
                 "create",
-                AuthoritiesConstants.BILLING_CREATE,
+                AuthoritiesConstants.WRITERS_PAD_CREATE,
                 "edit",
-                AuthoritiesConstants.BILLING_EDIT,
-                "delete",
-                AuthoritiesConstants.BILLING_DELETE,
-                "approve",
-                AuthoritiesConstants.BILLING_APPROVE
+                AuthoritiesConstants.WRITERS_PAD_EDIT
             )
         );
+
+        register(
+            modules,
+            "self-sale",
+            mapOf("view", AuthoritiesConstants.SELF_SALE_VIEW, "create", AuthoritiesConstants.SELF_SALE_CREATE)
+        );
+
+        register(
+            modules,
+            "stock purchase",
+            mapOf("view", AuthoritiesConstants.STOCK_PURCHASE_VIEW, "create", AuthoritiesConstants.STOCK_PURCHASE_CREATE)
+        );
+
+        register(
+            modules,
+            "cdn",
+            mapOf("view", AuthoritiesConstants.CDN_VIEW, "create", AuthoritiesConstants.CDN_CREATE)
+        );
+
+        // Chart of Accounts module (exposed as "Chart of Accounts" in UI).
+        register(
+            modules,
+            "chart of accounts",
+            mapOf(
+                "view",
+                AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW,
+                "create",
+                AuthoritiesConstants.CHART_OF_ACCOUNTS_CREATE
+            )
+        );
+
+        // Vouchers & Payments module.
+        register(
+            modules,
+            "vouchers & payments",
+            mapOf(
+                "view",
+                AuthoritiesConstants.VOUCHERS_VIEW,
+                "create",
+                AuthoritiesConstants.VOUCHERS_CREATE,
+                "approve",
+                AuthoritiesConstants.VOUCHERS_APPROVE
+            )
+        );
+
+        register(modules, "billing", mapOf("view", AuthoritiesConstants.BILLING_VIEW, "create", AuthoritiesConstants.BILLING_CREATE));
 
         // Print Hub / print logs module.
         register(
@@ -511,31 +503,15 @@ public class RbacAuthorityService {
                 "view",
                 AuthoritiesConstants.PRINT_LOGS_VIEW,
                 "create",
-                AuthoritiesConstants.PRINT_LOGS_CREATE,
-                "edit",
-                AuthoritiesConstants.PRINT_LOGS_EDIT,
-                "delete",
-                AuthoritiesConstants.PRINT_LOGS_DELETE
+                AuthoritiesConstants.PRINT_LOGS_CREATE
             )
         );
 
-        register(modules, "financial reports", mapOf(
-            "view", AuthoritiesConstants.FINANCIAL_REPORTS_VIEW,
-            "export", AuthoritiesConstants.FINANCIAL_REPORTS_VIEW
-        ));
+        register(modules, "financial reports", mapOf("view", AuthoritiesConstants.FINANCIAL_REPORTS_VIEW));
 
-        register(modules, "reports", mapOf(
-            "view", AuthoritiesConstants.REPORTS_VIEW,
-            "export", AuthoritiesConstants.REPORTS_VIEW
-        ));
+        register(modules, "reports", mapOf("view", AuthoritiesConstants.REPORTS_VIEW));
 
-        register(modules, "print templates", mapOf(
-            "view", AuthoritiesConstants.PRINT_TEMPLATES_VIEW,
-            "create", AuthoritiesConstants.PRINT_TEMPLATES_CREATE,
-            "edit", AuthoritiesConstants.PRINT_TEMPLATES_EDIT,
-            "delete", AuthoritiesConstants.PRINT_TEMPLATES_DELETE,
-            "approve", AuthoritiesConstants.PRINT_TEMPLATES_APPROVE
-        ));
+        register(modules, "print templates", mapOf("view", AuthoritiesConstants.PRINT_TEMPLATES_VIEW));
 
         // RBAC Settings surface as "Settings" module in the UI.
         register(modules, "settings", mapOf(
@@ -545,8 +521,8 @@ public class RbacAuthorityService {
             "manage users", AuthoritiesConstants.RBAC_SETTINGS_EDIT
         ));
 
-        // Dashboard, Logistics and other purely-UI modules currently do not gate any backend
-        // endpoints via dedicated ROLE_* constants, so we intentionally do not map them here.
+        // Purely-UI modules such as "Home" do not have dedicated backend authorities and are
+        // intentionally not mapped here.
 
         return Collections.unmodifiableMap(modules);
     }
