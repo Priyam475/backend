@@ -39,11 +39,13 @@ const RoleManagementPage = () => {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  const normalizeText = (value: string | null | undefined) => (value ?? '').toLowerCase();
+
   const fetchRoles = async () => {
     try {
       setLoading(true);
       const data = await traderRbacApi.listRoles();
-      setRoles((data || []).map(r => ({ ...r, permissions: (r.permissions as any) || {} })) as Role[]);
+      setRoles(data || []);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load roles');
@@ -110,8 +112,10 @@ const RoleManagementPage = () => {
   };
 
   const handleSave = async () => {
-    if (!formName.trim()) { toast.error('Role name is required'); return; }
-    if (roles.some(r => r.name.toLowerCase() === formName.trim().toLowerCase() && r.id !== editingRole?.id)) {
+    const trimmedName = formName.trim();
+    if (!trimmedName) { toast.error('Role name is required'); return; }
+    const normalizedNewName = normalizeText(trimmedName);
+    if (roles.some(r => normalizeText(r.name) === normalizedNewName && r.id !== editingRole?.id)) {
       toast.error('A role with this name already exists');
       return;
     }
@@ -147,7 +151,11 @@ const RoleManagementPage = () => {
     }
   };
 
-  const filtered = roles.filter(r => r.name.toLowerCase().includes(search.toLowerCase()) || r.description.toLowerCase().includes(search.toLowerCase()));
+  const searchTerm = normalizeText(search);
+  const filtered = roles.filter(r =>
+    normalizeText(r.name).includes(searchTerm) ||
+    normalizeText(r.description).includes(searchTerm)
+  );
   const enabledCount = (perms: ModulePermissions) => Object.values(perms).filter(m => m.enabled).length;
   const totalFeatures = (perms: ModulePermissions) => Object.values(perms).reduce((sum, m) => sum + (m.enabled ? Object.values(m.features).filter(Boolean).length : 0), 0);
 

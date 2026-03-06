@@ -154,7 +154,8 @@ public class TraderRbacResource {
         existing.setModulePermissions(ModulePermissionsJsonMapper.toJson(modulePermissions));
 
         Role saved = roleRepository.save(existing);
-        RoleDTO result = roleMapper.toDto(saved);
+        Role savedWithRelationships = roleRepository.fetchBagRelationships(java.util.Optional.of(saved)).orElse(saved);
+        RoleDTO result = roleMapper.toDto(savedWithRelationships);
 
         // After changing a role's modulePermissions, recompute authorities for all users that have this role.
         List<UserRole> mappings = userRoleRepository.findByRoleId(saved.getId());

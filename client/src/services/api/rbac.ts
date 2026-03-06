@@ -286,10 +286,11 @@ function traderUserToProfile(u: TraderRbacUserVM): RbacProfile {
 export const traderRbacApi = {
   async listRoles(): Promise<RbacRole[]> {
     const res = await apiFetch('/trader/rbac/roles', { method: 'GET' });
-    const data = await handleRes<any[]>(res, 'Failed to load roles');
-    // Trader role DTO → Role mapping is implemented elsewhere; keep behaviour but
-    // avoid relying on an untyped helper here.
-    return Array.isArray(data) ? (data as any) : [];
+    const data = await handleRes<TraderRoleDTO[]>(res, 'Failed to load roles');
+    if (!Array.isArray(data)) {
+      return [];
+    }
+    return data.map(mapRoleDtoToRole);
   },
 
   async listProfiles(): Promise<RbacProfile[]> {
@@ -385,8 +386,8 @@ export const traderRbacApi = {
         modulePermissions: data.permissions,
       }),
     });
-    const dto = await handleRes<any>(res, 'Failed to create role');
-    return dto as RbacRole;
+    const dto = await handleRes<TraderRoleDTO>(res, 'Failed to create role');
+    return mapRoleDtoToRole(dto);
   },
 
   async updateRole(
@@ -402,8 +403,8 @@ export const traderRbacApi = {
         modulePermissions: data.permissions,
       }),
     });
-    const dto = await handleRes<any>(res, 'Failed to update role');
-    return dto as RbacRole;
+    const dto = await handleRes<TraderRoleDTO>(res, 'Failed to update role');
+    return mapRoleDtoToRole(dto);
   },
 
   async deleteRole(roleId: string): Promise<void> {

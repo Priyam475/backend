@@ -1,7 +1,7 @@
 export interface Role {
   id: string;
   name: string;
-  description: string;
+  description?: string | null;
   permissions: ModulePermissions;
   created_at: string;
   updated_at: string;
