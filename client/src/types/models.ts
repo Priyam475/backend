@@ -118,6 +118,12 @@ export interface CommodityConfiguration {
   user_fee_percent: number;
   hsn_code: string;
   created_at: string;
+  // Extended config fields stored in commodity_config (nullable in DB)
+  weighing_charge?: number;
+  bill_prefix?: string;
+  hamali_enabled?: boolean;
+  gst_rate?: number;
+  weighing_threshold?: number;
 }
 
 /** 3.3 Deduction_Rules */

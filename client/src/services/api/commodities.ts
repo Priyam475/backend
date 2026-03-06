@@ -28,6 +28,8 @@ export type FullCommodityConfigDto = {
     weighingCharge?: number;
     billPrefix?: string;
     hamaliEnabled: boolean;
+    gstRate?: number;
+    weighingThreshold?: number;
     createdBy?: string;
     createdDate?: string;
     lastModifiedBy?: string;
@@ -220,6 +222,9 @@ function mapFullConfigFromApi(raw: Record<string, unknown>): FullCommodityConfig
           weighingCharge: config.weighing_charge != null ? Number(config.weighing_charge) : (config.weighingCharge as number | undefined),
           billPrefix: (config.bill_prefix ?? config.billPrefix) as string | undefined,
           hamaliEnabled: Boolean(config.hamali_enabled ?? config.hamaliEnabled),
+          gstRate: config.gst_rate != null ? Number(config.gst_rate) : (config.gstRate as number | undefined),
+          weighingThreshold:
+            config.weighing_threshold != null ? Number(config.weighing_threshold) : (config.weighingThreshold as number | undefined),
           createdBy: (config.created_by ?? config.createdBy) as string | undefined,
           createdDate: (config.created_date ?? config.createdDate) as string | undefined,
           lastModifiedBy: (config.last_modified_by ?? config.lastModifiedBy) as string | undefined,
@@ -285,6 +290,8 @@ function mapFullConfigToApi(payload: FullCommodityConfigDto): Record<string, unk
       weighing_charge: payload.config.weighingCharge,
       bill_prefix: payload.config.billPrefix ?? '',
       hamali_enabled: payload.config.hamaliEnabled,
+      gst_rate: payload.config.gstRate,
+      weighing_threshold: payload.config.weighingThreshold,
     };
   }
   body.deductionRules = (payload.deductionRules ?? []).map((r) => ({

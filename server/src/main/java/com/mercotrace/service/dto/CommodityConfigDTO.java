@@ -57,6 +57,12 @@ public class CommodityConfigDTO implements Serializable {
     @JsonProperty("hamali_enabled")
     private Boolean hamaliEnabled = false;
 
+    @JsonProperty("gst_rate")
+    private Double gstRate;
+
+    @JsonProperty("weighing_threshold")
+    private Double weighingThreshold;
+
     @JsonProperty("created_by")
     private String createdBy;
 
@@ -96,6 +102,10 @@ public class CommodityConfigDTO implements Serializable {
     public void setBillPrefix(String billPrefix) { this.billPrefix = billPrefix; }
     public Boolean getHamaliEnabled() { return hamaliEnabled; }
     public void setHamaliEnabled(Boolean hamaliEnabled) { this.hamaliEnabled = hamaliEnabled; }
+    public Double getGstRate() { return gstRate; }
+    public void setGstRate(Double gstRate) { this.gstRate = gstRate; }
+    public Double getWeighingThreshold() { return weighingThreshold; }
+    public void setWeighingThreshold(Double weighingThreshold) { this.weighingThreshold = weighingThreshold; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedDate() { return createdDate; }

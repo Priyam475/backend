@@ -16,10 +16,14 @@ const sizes = {
 };
 
 export const MercotraceIcon = ({ size = 48, color = 'white', className = '' }: { size?: number; color?: string; className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-    <path d="M2 88L32 20L58 62L32 62L22 44L12 62L32 62L58 62L42 88H2Z" fill={color} />
-    <path d="M50 88L80 20L118 88H50ZM80 42L98 76H68L80 42Z" fill={color} />
-  </svg>
+  <img
+    src="/merco.svg"
+    alt="Mercotrace logo"
+    width={size}
+    height={size}
+    className={className}
+    style={{ color }}
+  />
 );
 
 // Backward compat alias

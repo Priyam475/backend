@@ -139,6 +139,18 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         // Save config (includes bill_prefix and hamali_enabled)
         CommodityConfigDTO configDto = dto.getConfig();
         if (configDto != null) {
+            if (configDto.getGstRate() != null) {
+                double gstRate = configDto.getGstRate();
+                if (gstRate <= 0D || gstRate > 100D) {
+                    throw new BadRequestAlertException("GST rate must be greater than 0 and at most 100", ENTITY_NAME, "invalidgstrate");
+                }
+            }
+            if (configDto.getWeighingThreshold() != null) {
+                double threshold = configDto.getWeighingThreshold();
+                if (threshold <= 0D) {
+                    throw new BadRequestAlertException("Weighing threshold must be greater than 0", ENTITY_NAME, "invalidweighingthreshold");
+                }
+            }
             CommodityConfig config = toConfigEntity(configDto);
             config.setCommodityId(commodityId);
             commodityConfigRepository.save(config);
@@ -189,6 +201,8 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         d.setWeighingCharge(e.getWeighingCharge());
         d.setBillPrefix(e.getBillPrefix());
         d.setHamaliEnabled(e.getHamaliEnabled());
+        d.setGstRate(e.getGstRate());
+        d.setWeighingThreshold(e.getWeighingThreshold());
         d.setCreatedBy(e.getCreatedBy());
         d.setCreatedDate(e.getCreatedDate());
         d.setLastModifiedBy(e.getLastModifiedBy());
@@ -211,6 +225,8 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         e.setWeighingCharge(d.getWeighingCharge());
         e.setBillPrefix(d.getBillPrefix());
         e.setHamaliEnabled(d.getHamaliEnabled() != null ? d.getHamaliEnabled() : false);
+        e.setGstRate(d.getGstRate());
+        e.setWeighingThreshold(d.getWeighingThreshold());
         return e;
     }
 
