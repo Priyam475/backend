@@ -4,6 +4,8 @@ client_bck
 client_bck20260227
 client_backup
 client_origin
-
+backend/
+client/.env.production
+frontend/
 # Liquibase local configuration (do not commit real credentials)
 server/src/main/resources/liquibase.properties
