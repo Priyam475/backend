@@ -94,6 +94,15 @@ jhipster:
       cluster: false
       # server: redis://localhost:6379,redis://localhost:16379,redis://localhost:26379
       # cluster: true
+  # CORS configuration for production
+  cors:
+    allowed-origins: "https://mercotrace.aau.co.in,https://merco.qualityoutsidethebox.org"
+    allowed-origin-patterns: "https://*.githubpreview.dev"
+    allowed-methods: "*"
+    allowed-headers: "*"
+    exposed-headers: "Authorization,Link,X-Total-Count,X-${jhipster.clientApp.name}-alert,X-${jhipster.clientApp.name}-error,X-${jhipster.clientApp.name}-params"
+    allow-credentials: true
+    max-age: 1800
   security:
     authentication:
       jwt:
