@@ -117,3 +117,15 @@ application:
       # cannot be marked Secure or the browser will ignore it. This flag
       # is used by AuthenticateController/AdminAuthResource.
       secure: false
+
+# OTP SMS configuration (Fast2SMS)
+otp:
+ fast2sms:
+   base-url: https://www.fast2sms.com/dev/bulkV2
+   api-key: 
+   sender-id: MERCO
+   route: dlt
+   message-id: 170404
+   flash: "0"
+   # Optional: schedule-time in Fast2SMS-supported format
+   #schedule-time: ""

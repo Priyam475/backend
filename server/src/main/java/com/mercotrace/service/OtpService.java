@@ -86,7 +86,7 @@ public class OtpService {
         Instant now = Instant.now();
 
         return otpTokenRepository
-            .findLatestActiveByMobile(normalizedMobile, now)
+            .findTopByMobileAndExpiresAtGreaterThanAndConsumedAtIsNullOrderByCreatedAtDesc(normalizedMobile, now)
             .map(token -> validateAgainstToken(token, otp, now))
             .orElse(OtpValidationStatus.NOT_FOUND);
     }

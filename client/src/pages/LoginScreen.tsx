@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Eye, EyeOff, Mail, Lock, Sun, Moon, Building2, Phone, KeyRound } from 'lucide-react';
@@ -40,6 +40,8 @@ const LoginScreen = () => {
   const { login, loginWithOtp, isLoading, error, clearError } = useAuth();
 
   const [touched, setTouched] = useState({ email: false, password: false, phone: false });
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
 
   // Email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,13 +56,17 @@ const LoginScreen = () => {
 
   const handleSendOtp = async () => {
     setTouched(p => ({ ...p, phone: true }));
-    if (!isPhoneValid) return;
+    if (!isPhoneValid || isSendingOtp || otpCooldown > 0) return;
+    setIsSendingOtp(true);
     try {
       await authApi.requestOtp(phone);
       setOtpSent(true);
+      setOtpCooldown(30);
       toast.success('OTP sent', { description: 'Please check your phone for the 4-digit OTP.' });
     } catch (e: any) {
       toast.error(e.message || 'Failed to send OTP. Please try again.');
+    } finally {
+      setIsSendingOtp(false);
     }
   };
 
@@ -73,6 +79,24 @@ const LoginScreen = () => {
       toast.error(e.message || 'Invalid or expired OTP.');
     }
   };
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+
+    const intervalId = window.setInterval(() => {
+      setOtpCooldown(prev => {
+        if (prev <= 1) {
+          window.clearInterval(intervalId);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [otpCooldown]);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,19 +218,35 @@ const LoginScreen = () => {
                           className="pl-12 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-white/90 border-0 text-blue-900 placeholder:text-blue-400 tracking-[0.5em] text-center font-bold"
                           maxLength={4} autoFocus />
                       </div>
-                      <button onClick={handleSendOtp} className="text-xs text-white/70 underline mt-2 ml-1 min-h-[44px] flex items-center">
-                        Resend OTP
+                      <button
+                        type="button"
+                        onClick={handleSendOtp}
+                        disabled={isSendingOtp || otpCooldown > 0}
+                        className="text-xs text-white/70 underline mt-2 ml-1 min-h-[44px] flex items-center disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                      >
+                        {otpCooldown > 0 ? `Resend OTP in ${otpCooldown}s` : 'Resend OTP'}
                       </button>
                     </motion.div>
                   )}
 
                   {!otpSent ? (
-                    <Button onClick={handleSendOtp} disabled={!isPhoneValid || isLoading}
-                      className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70">
-                      {isLoading ? (
-                        <motion.div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} />
+                    <Button
+                      onClick={handleSendOtp}
+                      disabled={!isPhoneValid || isSendingOtp || otpCooldown > 0 || isLoading}
+                      className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70"
+                    >
+                      {isSendingOtp ? (
+                        <motion.div
+                          className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        />
+                      ) : otpCooldown > 0 ? (
+                        <>Resend OTP in {otpCooldown}s</>
                       ) : (
-                        <>Send OTP <ArrowRight className="w-5 h-5 ml-2" /></>
+                        <>
+                          Send OTP <ArrowRight className="w-5 h-5 ml-2" />
+                        </>
                       )}
                     </Button>
                   ) : (

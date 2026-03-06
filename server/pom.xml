@@ -82,11 +82,6 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.twilio.sdk</groupId>
-            <artifactId>twilio</artifactId>
-            <version>11.3.4</version>
-        </dependency>
-        <dependency>
             <groupId>tech.jhipster</groupId>
             <artifactId>jhipster-framework</artifactId>
             <version>${jhipster-framework.version}</version>

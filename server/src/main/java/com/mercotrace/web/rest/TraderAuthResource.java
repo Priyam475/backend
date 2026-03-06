@@ -6,22 +6,23 @@ import com.mercotrace.repository.TraderRepository;
 import com.mercotrace.repository.UserRepository;
 import com.mercotrace.repository.UserTraderRepository;
 import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.security.DomainUserDetailsService.UserWithId;
+import com.mercotrace.service.EmailAlreadyUsedException;
 import com.mercotrace.service.MailService;
 import com.mercotrace.service.OtpService;
 import com.mercotrace.service.TraderOwnerAuthorityService;
-import com.mercotrace.service.EmailAlreadyUsedException;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.UserService;
 import com.mercotrace.service.UsernameAlreadyUsedException;
 import com.mercotrace.service.dto.AdminUserDTO;
 import com.mercotrace.service.dto.TraderAuthDTO;
 import com.mercotrace.service.dto.TraderDTO;
+import com.mercotrace.web.rest.errors.TraderEmailAlreadyRegisteredException;
+import com.mercotrace.web.rest.errors.TraderMobileAlreadyRegisteredException;
 import com.mercotrace.web.rest.vm.LoginVM;
 import com.mercotrace.web.rest.vm.ManagedUserVM;
 import com.mercotrace.web.rest.vm.TraderOtpRequestVM;
 import com.mercotrace.web.rest.vm.TraderOtpVerifyVM;
-import com.mercotrace.web.rest.errors.TraderEmailAlreadyRegisteredException;
-import com.mercotrace.web.rest.errors.TraderMobileAlreadyRegisteredException;
 import com.mercotrace.web.rest.vm.TraderRegisterVM;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -32,8 +33,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -336,26 +341,24 @@ public class TraderAuthResource {
             .findOneByMobile(mobile)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile"));
 
-        // Resolve or create user associated with this trader
+        // Resolve or create canonical user associated with this trader for OTP-based login.
         com.mercotrace.domain.User user = resolveOrCreateUserForTrader(traderEntity, mobile);
 
-        String phonePassword = "phone-otp-login";
+        // Load user with authorities to build a consistent security principal.
+        User managedUser = userRepository
+            .findOneWithAuthoritiesById(user.getId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Trader not configured"));
 
-        // Authenticate using the existing JWT controller so that httpOnly cookie is set.
-        LoginVM loginVM = new LoginVM();
-        loginVM.setUsername(user.getLogin());
-        loginVM.setPassword(phonePassword);
-        loginVM.setRememberMe(false);
+        UserWithId userDetails = UserWithId.fromUser(managedUser);
+        Authentication authentication = new UsernamePasswordAuthenticationToken(
+            userDetails,
+            null,
+            userDetails.getAuthorities()
+        );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
 
-        ResponseEntity<com.mercotrace.web.rest.AuthenticateController.JWTToken> jwtResponse;
-        try {
-            jwtResponse = authenticateController.authorize(loginVM);
-        } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication failed");
-        }
-        if (jwtResponse.getBody() == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication failed");
-        }
+        String jwt = authenticateController.createToken(authentication, false);
+        HttpHeaders httpHeaders = authenticateController.buildAuthHeaders(jwt);
 
         AdminUserDTO account = accountResource.getAccount();
 
@@ -365,7 +368,7 @@ public class TraderAuthResource {
 
         TraderAuthDTO dto = buildAuthDto(account, trader);
 
-        return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
+        return ResponseEntity.ok().headers(httpHeaders).body(dto);
     }
 
     private AdminUserDTO upgradeTraderOwnerAuthoritiesIfNeeded(AdminUserDTO account) {
@@ -543,14 +546,18 @@ public class TraderAuthResource {
     }
 
     private com.mercotrace.domain.User resolveOrCreateUserForTrader(com.mercotrace.domain.Trader trader, String mobile) {
-        // First, see if we already have a mapping for this trader.
+        // Prefer the canonical primary user-trader mapping (typically the owner user created at registration).
         return userTraderRepository
-            .findFirstByTraderIdAndPrimaryMappingTrue(trader.getId())
+            .findAllWithUserByTraderIdAndPrimaryMappingTrue(trader.getId())
+            .stream()
+            .findFirst()
             .map(mapping -> {
-                com.mercotrace.domain.User ownerUser = mapping.getUser();
-                traderOwnerAuthorityService.ensureTraderOwnerAuthorities(ownerUser);
-                return ownerUser;
+                com.mercotrace.domain.User primaryUser = mapping.getUser();
+                // Ensure trader owners receive full trader-module authorities.
+                traderOwnerAuthorityService.ensureTraderOwnerAuthorities(primaryUser);
+                return primaryUser;
             })
+            // If no primary mapping exists, fall back to creating a dedicated phone-login user and mapping.
             .orElseGet(() -> createUserForTrader(trader, mobile));
     }
 

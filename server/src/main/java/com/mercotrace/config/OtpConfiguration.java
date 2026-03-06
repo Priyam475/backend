@@ -1,9 +1,7 @@
 package com.mercotrace.config;
 
-import com.mercotrace.service.otp.HttpOtpSender;
-import com.mercotrace.service.otp.MockOtpSender;
+import com.mercotrace.service.otp.Fast2SmsOtpSender;
 import com.mercotrace.service.otp.OtpSender;
-import com.mercotrace.service.otp.TwilioOtpSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,49 +13,36 @@ public class OtpConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(OtpConfiguration.class);
 
-    @Value("${otp.provider:mock}")
-    private String provider;
+    @Value("${otp.fast2sms.base-url:https://www.fast2sms.com/dev/bulkV2}")
+    private String baseUrl;
 
-    @Value("${otp.twilio.account-sid:}")
-    private String twilioAccountSid;
+    @Value("${otp.fast2sms.api-key:}")
+    private String apiKey;
 
-    @Value("${otp.twilio.auth-token:}")
-    private String twilioAuthToken;
+    @Value("${otp.fast2sms.sender-id:MERCO}")
+    private String senderId;
 
-    @Value("${otp.twilio.from-number:}")
-    private String twilioFromNumber;
+    @Value("${otp.fast2sms.route:dlt}")
+    private String route;
 
-    @Value("${otp.http.url:}")
-    private String httpUrl;
+    @Value("${otp.fast2sms.message-id:170404}")
+    private String messageId;
 
-    @Value("${otp.http.token:}")
-    private String httpToken;
+    @Value("${otp.fast2sms.flash:0}")
+    private String flash;
+
+    @Value("${otp.fast2sms.schedule-time:}")
+    private String scheduleTime;
 
     @Bean
     public OtpSender otpSender() {
-        String normalized = provider == null ? "mock" : provider.trim().toLowerCase();
-        switch (normalized) {
-            case "twilio":
-                if (twilioAccountSid == null || twilioAccountSid.isBlank()
-                    || twilioAuthToken == null || twilioAuthToken.isBlank()
-                    || twilioFromNumber == null || twilioFromNumber.isBlank()) {
-                    log.warn("Twilio OTP provider selected but not fully configured. Falling back to mock provider.");
-                    return new MockOtpSender();
-                }
-                return new TwilioOtpSender(twilioAccountSid, twilioAuthToken, twilioFromNumber);
-            case "http":
-                if (httpUrl == null || httpUrl.isBlank()) {
-                    log.warn("HTTP OTP provider selected but url is not configured. Falling back to mock provider.");
-                    return new MockOtpSender();
-                }
-                return new HttpOtpSender(httpUrl, httpToken);
-            case "mock":
-            default:
-                if (!"mock".equals(normalized)) {
-                    log.warn("Unknown OTP provider '{}', falling back to mock provider.", provider);
-                }
-                return new MockOtpSender();
+        if (apiKey == null || apiKey.isBlank()) {
+            log.error(
+                "Fast2SMS API key (otp.fast2sms.api-key) is not configured. OTP SMS sending will not work until it is set."
+            );
         }
+
+        return new Fast2SmsOtpSender(baseUrl, apiKey, senderId, route, messageId, flash, scheduleTime);
     }
 }
 
