@@ -16,13 +16,14 @@ import java.time.temporal.ChronoUnit;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -49,11 +50,23 @@ public class AuthenticateController {
     @Value("${jhipster.security.authentication.jwt.token-validity-in-seconds-for-remember-me:0}")
     private long tokenValidityInSecondsForRememberMe;
 
-    private final AuthenticationManagerBuilder authenticationManagerBuilder;
+    /**
+     * Controls whether the ACCESS_TOKEN cookie is marked as Secure.
+     * In production this should remain true (HTTPS only), but for local
+     * HTTP development we allow overriding it via configuration so that
+     * the browser will actually store and send the cookie.
+     */
+    @Value("${application.security.cookie.secure:true}")
+    private boolean cookieSecure;
 
-    public AuthenticateController(JwtEncoder jwtEncoder, AuthenticationManagerBuilder authenticationManagerBuilder) {
+    private final AuthenticationManager authenticationManager;
+
+    public AuthenticateController(
+        JwtEncoder jwtEncoder,
+        @Qualifier("traderAuthenticationManager") AuthenticationManager authenticationManager
+    ) {
         this.jwtEncoder = jwtEncoder;
-        this.authenticationManagerBuilder = authenticationManagerBuilder;
+        this.authenticationManager = authenticationManager;
     }
 
     @PostMapping("/authenticate")
@@ -63,7 +76,7 @@ public class AuthenticateController {
             loginVM.getPassword()
         );
 
-        Authentication authentication = authenticationManagerBuilder.getObject().authenticate(authenticationToken);
+        Authentication authentication = authenticationManager.authenticate(authenticationToken);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String jwt = this.createToken(authentication, loginVM.isRememberMe());
 
@@ -76,7 +89,7 @@ public class AuthenticateController {
         ResponseCookie cookie = ResponseCookie
             .from("ACCESS_TOKEN", jwt)
             .httpOnly(true)
-            .secure(true)
+            .secure(cookieSecure)
             .sameSite("Lax")
             .path("/")
             .build();
@@ -95,7 +108,7 @@ public class AuthenticateController {
         ResponseCookie cookie = ResponseCookie
             .from("ACCESS_TOKEN", jwt)
             .httpOnly(true)
-            .secure(true)
+            .secure(cookieSecure)
             .sameSite("Lax")
             .path("/")
             .build();

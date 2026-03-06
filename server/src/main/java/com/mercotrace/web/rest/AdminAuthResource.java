@@ -9,6 +9,8 @@ import com.mercotrace.web.rest.vm.LoginVM;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -38,10 +40,19 @@ public class AdminAuthResource {
     private final com.mercotrace.web.rest.AuthenticateController authenticateController;
     private final org.springframework.security.authentication.AuthenticationManager adminAuthenticationManager;
 
+    /**
+     * Controls whether the ACCESS_TOKEN cookie is marked as Secure for admin flows.
+     * In production this should remain true (HTTPS only), but for local HTTP
+     * development we allow overriding it via configuration so that the browser
+     * will actually store and send the cookie.
+     */
+    @Value("${application.security.cookie.secure:true}")
+    private boolean cookieSecure;
+
     public AdminAuthResource(
         AdminUserService adminUserService,
         com.mercotrace.web.rest.AuthenticateController authenticateController,
-        org.springframework.security.authentication.AuthenticationManager adminAuthenticationManager
+        @Qualifier("adminAuthenticationManager") org.springframework.security.authentication.AuthenticationManager adminAuthenticationManager
     ) {
         this.adminUserService = adminUserService;
         this.authenticateController = authenticateController;
@@ -85,7 +96,7 @@ public class AdminAuthResource {
         org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
             .from("ACCESS_TOKEN", jwt)
             .httpOnly(true)
-            .secure(true)
+            .secure(cookieSecure)
             .sameSite("Lax")
             .path("/")
             .build();

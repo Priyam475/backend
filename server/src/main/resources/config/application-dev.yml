@@ -111,3 +111,9 @@ application:
   liquibase:
     # Run Liquibase synchronously so all tables exist before the app accepts requests
     async-start: false
+  security:
+    cookie:
+      # In local dev we do not use HTTPS, so the ACCESS_TOKEN cookie
+      # cannot be marked Secure or the browser will ignore it. This flag
+      # is used by AuthenticateController/AdminAuthResource.
+      secure: false

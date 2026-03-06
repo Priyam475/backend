@@ -75,17 +75,16 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <FontSizeProvider>
-      <AuthProvider>
-      <AdminAuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <ScrollToTop />
-            <PortraitLock />
-            <RootClassManager />
-            <Suspense fallback={<LazyFallback />}>
-              <Routes>
+        <AuthProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <ScrollToTop />
+              <PortraitLock />
+              <RootClassManager />
+              <Suspense fallback={<LazyFallback />}>
+                <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<SplashScreen />} />
                 <Route path="/onboarding" element={<OnboardingScreen />} />
@@ -124,8 +123,24 @@ const App = () => (
                 </Route>
 
                 {/* Admin Portal */}
-                <Route path="/admin/login" element={<AdminLoginPage />} />
-                <Route path="/admin" element={<AdminProtectedRoute><AdminLayout /></AdminProtectedRoute>}>
+                <Route
+                  path="/admin/login"
+                  element={
+                    <AdminAuthProvider>
+                      <AdminLoginPage />
+                    </AdminAuthProvider>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminAuthProvider>
+                      <AdminProtectedRoute>
+                        <AdminLayout />
+                      </AdminProtectedRoute>
+                    </AdminAuthProvider>
+                  }
+                >
                   <Route index element={<AdminDashboard />} />
                   <Route path="traders" element={<AdminTradersPage />} />
                   <Route path="categories" element={<AdminCategoriesPage />} />
@@ -143,8 +158,7 @@ const App = () => (
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
-      </AdminAuthProvider>
-      </AuthProvider>
+        </AuthProvider>
       </FontSizeProvider>
     </ThemeProvider>
   </QueryClientProvider>

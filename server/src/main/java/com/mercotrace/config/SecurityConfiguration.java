@@ -45,10 +45,13 @@ public class SecurityConfiguration {
 
     /**
      * Handles public API paths without JWT so that unauthenticated flows (trader
-     * setup/registration) work. Runs before the trader chain so no Bearer token is
+     * setup/registration/login/OTP) work. Runs before the trader chain so no Bearer token is
      * validated (avoids 401 when an invalid/expired cookie is sent with the request).
-     * - GET /api/business-categories(/**): load categories anonymously
-     * - POST /api/auth/register: trader registration (user not logged in)
+     * - GET  /api/business-categories(/**): load categories anonymously
+     * - POST /api/auth/register          : trader registration (user not logged in)
+     * - POST /api/auth/login             : trader email/password login
+     * - POST /api/auth/otp/request       : request OTP for phone-based login
+     * - POST /api/auth/otp/verify        : verify OTP and perform login
      */
     @Bean
     @Order(0)
@@ -57,7 +60,10 @@ public class SecurityConfiguration {
             .securityMatcher(new OrRequestMatcher(
                 mvc.pattern(HttpMethod.GET, "/api/business-categories"),
                 mvc.pattern(HttpMethod.GET, "/api/business-categories/**"),
-                mvc.pattern(HttpMethod.POST, "/api/auth/register")
+                mvc.pattern(HttpMethod.POST, "/api/auth/register"),
+                mvc.pattern(HttpMethod.POST, "/api/auth/login"),
+                mvc.pattern(HttpMethod.POST, "/api/auth/otp/request"),
+                mvc.pattern(HttpMethod.POST, "/api/auth/otp/verify")
             ))
             .cors(withDefaults())
             .csrf(csrf -> csrf.disable())
