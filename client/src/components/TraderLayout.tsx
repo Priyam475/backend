@@ -1,9 +1,12 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Moon, Sun, Bell, User, Sparkles } from 'lucide-react';
+import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { Moon, Sun, Bell, User, AlertCircle } from 'lucide-react';
 import DesktopSidebar from '@/components/DesktopSidebar';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
+
+/** Paths allowed when trader is not yet approved (pending registration). */
+const ALLOWED_PATHS_WHEN_PENDING = ['/home', '/profile'];
 
 const pageTitles: Record<string, string> = {
   '/home': 'Dashboard',
@@ -56,6 +59,16 @@ const TraderLayout = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
   const { user, trader } = useAuth();
+
+  const isApproved = trader?.approval_status === 'APPROVED';
+  const pathAllowedWhenPending = ALLOWED_PATHS_WHEN_PENDING.some(
+    (p) => location.pathname === p || (p !== '/home' && location.pathname.startsWith(p + '/'))
+  );
+
+  // Unapproved traders may only access dashboard and profile; redirect others to /home
+  if (!isApproved && !pathAllowedWhenPending) {
+    return <Navigate to="/home" replace />;
+  }
 
   if (!isDesktop) {
     return <Outlet />;
@@ -118,6 +131,17 @@ const TraderLayout = () => {
         </header>
 
         <main className="relative z-10">
+          {!isApproved && (
+            <div
+              className="mx-4 mt-4 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-800 dark:text-amber-200"
+              role="alert"
+            >
+              <AlertCircle className="h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="text-sm font-medium">
+                Your account is pending approval. Only Dashboard and Profile are available. Full access to all modules will be enabled after an admin approves your registration.
+              </p>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

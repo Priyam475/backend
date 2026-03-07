@@ -13,11 +13,15 @@ import { useAuth } from '@/context/AuthContext';
 import { useState } from 'react';
 import { usePermissions, getModuleKeyForRoute } from '@/lib/permissions';
 
+/** Paths allowed in sidebar when trader is not yet approved. */
+const ALLOWED_PATHS_WHEN_PENDING = ['/home', '/profile'];
+
 const navSections = [
   {
     label: 'Main',
     items: [
       { icon: Home, title: 'Home', path: '/home' },
+      { icon: User, title: 'Profile', path: '/profile' },
       { icon: Users, title: 'Contacts', path: '/contacts' },
     ],
   },
@@ -68,6 +72,8 @@ const DesktopSidebar = () => {
   const { user, trader, logout } = useAuth();
   const { canAccessModule } = usePermissions();
 
+  const isApproved = trader?.approval_status === 'APPROVED';
+
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -102,6 +108,9 @@ const DesktopSidebar = () => {
       <nav className="relative z-10 flex-1 py-3 px-2 space-y-4 overflow-y-auto no-scrollbar">
         {navSections.map((section) => {
           const visibleItems = section.items.filter(item => {
+            if (!isApproved) {
+              return ALLOWED_PATHS_WHEN_PENDING.includes(item.path);
+            }
             const moduleKey = getModuleKeyForRoute(item.path);
             if (!moduleKey) {
               return true;

@@ -1,6 +1,8 @@
 package com.mercotrace.web.rest;
 
 import com.mercotrace.domain.enumeration.ApprovalStatus;
+import com.mercotrace.repository.UserTraderRepository;
+import com.mercotrace.service.TraderOwnerAuthorityService;
 import com.mercotrace.service.TraderQueryService;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.criteria.TraderCriteria;
@@ -25,10 +27,19 @@ public class AdminTraderSpecResource {
 
     private final TraderService traderService;
     private final TraderQueryService traderQueryService;
+    private final UserTraderRepository userTraderRepository;
+    private final TraderOwnerAuthorityService traderOwnerAuthorityService;
 
-    public AdminTraderSpecResource(TraderService traderService, TraderQueryService traderQueryService) {
+    public AdminTraderSpecResource(
+        TraderService traderService,
+        TraderQueryService traderQueryService,
+        UserTraderRepository userTraderRepository,
+        TraderOwnerAuthorityService traderOwnerAuthorityService
+    ) {
         this.traderService = traderService;
         this.traderQueryService = traderQueryService;
+        this.userTraderRepository = userTraderRepository;
+        this.traderOwnerAuthorityService = traderOwnerAuthorityService;
     }
 
     /** Module 1 spec: GET /admin/traders — List all traders with approval status. */
@@ -51,7 +62,11 @@ public class AdminTraderSpecResource {
             .findOne(id)
             .map(dto -> {
                 dto.setApprovalStatus(ApprovalStatus.APPROVED);
-                return ResponseEntity.ok(traderService.update(dto));
+                TraderDTO updated = traderService.update(dto);
+                userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(id).forEach(ut ->
+                    traderOwnerAuthorityService.ensureTraderOwnerAuthorities(ut.getUser())
+                );
+                return ResponseEntity.ok(updated);
             })
             .orElse(ResponseEntity.notFound().build());
     }

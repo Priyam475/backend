@@ -1,5 +1,5 @@
 import BottomNav from '@/components/BottomNav';
-import { User, Shield, Bell, Settings, HelpCircle, LogOut, ChevronRight, ArrowLeft } from 'lucide-react';
+import { User, Shield, Bell, Settings, HelpCircle, LogOut, ChevronRight, ArrowLeft, CheckCircle2, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -70,11 +70,18 @@ const ProfilePage = () => {
               <h3 className="text-xl font-bold text-foreground">{user?.name || 'User'}</h3>
               <p className="text-sm text-muted-foreground">{user?.username || ''}</p>
               {trader && (
-                <div className="flex items-center gap-1 mt-1">
-                  <Shield className="w-3 h-3 text-success" />
-                  <span className="text-xs text-success font-medium">
-                    {trader.approval_status === 'APPROVED' ? 'Approved' : 'Pending Approval'}
-                  </span>
+                <div className="mt-2">
+                  {trader.approval_status === 'APPROVED' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Approved
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                      <Clock className="w-3.5 h-3.5" />
+                      Pending Approval
+                    </span>
+                  )}
                 </div>
               )}
             </div>

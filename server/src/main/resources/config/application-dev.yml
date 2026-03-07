@@ -72,8 +72,8 @@ jhipster:
       # cluster: true
   # CORS is only enabled by default with the "dev" profile
   cors:
-    # Allow local frontends (Ionic + React dev server)
-    allowed-origins: 'http://localhost:8100,https://localhost:8100,http://localhost:8081'
+    # Allow local frontends (Ionic + React dev server) and deployed sites
+    allowed-origins: 'http://localhost:8100,https://localhost:8100,http://localhost:8081,https://merco.qualityoutsidethebox.org,https://mercotrace.qualityoutsidethebox.org'
     # Enable CORS when running in GitHub Codespaces
     allowed-origin-patterns: 'https://*.githubpreview.dev'
     allowed-methods: '*'

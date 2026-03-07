@@ -10,8 +10,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
 import tech.jhipster.config.JHipsterProperties;
 
 /**
@@ -40,17 +40,25 @@ public class WebConfigurer implements ServletContextInitializer {
         LOG.info("Web application fully configured");
     }
 
+    /**
+     * CORS configuration source used by Spring Security's .cors(withDefaults()).
+     * Exposing this bean ensures CORS runs inside the security filter chain so that
+     * 401/403 responses also get Access-Control-Allow-Origin headers (otherwise the
+     * browser reports "blocked by CORS" when the real issue is auth failure).
+     */
     @Bean
-    public CorsFilter corsFilter() {
+    public CorsConfigurationSource corsConfigurationSource() {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = jHipsterProperties.getCors();
         if (!CollectionUtils.isEmpty(config.getAllowedOrigins()) || !CollectionUtils.isEmpty(config.getAllowedOriginPatterns())) {
-            LOG.debug("Registering CORS filter");
+            LOG.debug("Registering CORS configuration");
             source.registerCorsConfiguration("/api/**", config);
             source.registerCorsConfiguration("/management/**", config);
             source.registerCorsConfiguration("/v3/api-docs", config);
+            source.registerCorsConfiguration("/v3/api-docs/**", config);
             source.registerCorsConfiguration("/swagger-ui/**", config);
+            source.registerCorsConfiguration("/swagger-ui.html", config);
         }
-        return new CorsFilter(source);
+        return source;
     }
 }

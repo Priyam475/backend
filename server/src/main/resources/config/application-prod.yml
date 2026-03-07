@@ -96,7 +96,7 @@ jhipster:
       # cluster: true
   # CORS configuration for production
   cors:
-    allowed-origins: "https://mercotrace.aau.co.in,https://merco.qualityoutsidethebox.org"
+    allowed-origins: "https://mercotrace.aau.co.in,https://merco.qualityoutsidethebox.org,https://mercotrace.qualityoutsidethebox.org"
     allowed-origin-patterns: "https://*.githubpreview.dev"
     allowed-methods: "*"
     allowed-headers: "*"

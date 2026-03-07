@@ -1,9 +1,11 @@
 package com.mercotrace.service;
 
 import com.mercotrace.domain.Authority;
+import com.mercotrace.domain.Trader;
 import com.mercotrace.domain.User;
 import com.mercotrace.repository.AuthorityRepository;
 import com.mercotrace.repository.UserRepository;
+import com.mercotrace.repository.UserTraderRepository;
 import com.mercotrace.security.AuthoritiesConstants;
 import java.util.HashSet;
 import java.util.List;
@@ -19,6 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * This service is intentionally idempotent: calling {@link #ensureTraderOwnerAuthorities(User)}
  * multiple times for the same user will not duplicate authorities.
+ *
+ * <p><strong>Approval enforcement:</strong> Module authorities (Contacts, Auctions, etc.) are only
+ * granted when the user's primary trader has {@link ApprovalStatus#APPROVED}. Pending traders
+ * receive only {@code ROLE_USER}, so backend {@code @PreAuthorize} on module endpoints returns
+ * 403 and prevents bypass via direct API calls or frontend tampering.
  */
 @Service
 @Transactional
@@ -30,15 +37,25 @@ public class TraderOwnerAuthorityService {
 
     private final AuthorityRepository authorityRepository;
     private final UserRepository userRepository;
+    private final UserTraderRepository userTraderRepository;
 
-    public TraderOwnerAuthorityService(AuthorityRepository authorityRepository, UserRepository userRepository) {
+    public TraderOwnerAuthorityService(
+        AuthorityRepository authorityRepository,
+        UserRepository userRepository,
+        UserTraderRepository userTraderRepository
+    ) {
         this.authorityRepository = authorityRepository;
         this.userRepository = userRepository;
+        this.userTraderRepository = userTraderRepository;
     }
 
     /**
      * Ensure that the given user has the full set of trader-module authorities required
      * for an OWNER, plus {@code ROLE_USER}. Does not grant any global admin authority.
+     * <p>
+     * If the user's primary trader is not {@link ApprovalStatus#APPROVED}, only
+     * {@code ROLE_USER} is ensured; no module authorities are added. This enforces
+     * backend rejection of module API calls for unapproved traders.
      * <p>
      * This method is transactional and always works on a managed {@link User} with its
      * {@code authorities} collection initialized to avoid {@link org.hibernate.LazyInitializationException}.
@@ -51,7 +68,6 @@ public class TraderOwnerAuthorityService {
         }
 
         User target = user;
-
         if (user.getId() != null) {
             target = userRepository.findOneWithAuthoritiesById(user.getId()).orElse(user);
         }
@@ -60,6 +76,24 @@ public class TraderOwnerAuthorityService {
         if (currentAuthorities == null) {
             currentAuthorities = new HashSet<>();
             target.setAuthorities(currentAuthorities);
+        }
+
+        Long userId = target.getId();
+        if (userId == null) {
+            return;
+        }
+
+        boolean traderApproved = userTraderRepository
+            .findFirstByUserIdAndPrimaryMappingTrue(userId)
+            .map(ut -> {
+                Trader t = ut.getTrader();
+                return t != null && t.getApprovalStatus() == com.mercotrace.domain.enumeration.ApprovalStatus.APPROVED;
+            })
+            .orElse(false);
+
+        if (!traderApproved) {
+            ensureOnlyRoleUser(target, currentAuthorities);
+            return;
         }
 
         Set<String> existingNames = currentAuthorities.stream().map(Authority::getName).collect(Collectors.toSet());
@@ -86,6 +120,19 @@ public class TraderOwnerAuthorityService {
         userRepository.save(target);
 
         LOG.info("Upgraded user {} with trader-owner authorities: {}", target.getLogin(), missingNames);
+    }
+
+    /**
+     * Ensure the user has only ROLE_USER (no module authorities). Used when trader is not approved.
+     */
+    private void ensureOnlyRoleUser(User target, Set<Authority> currentAuthorities) {
+        Set<String> existingNames = currentAuthorities.stream().map(Authority::getName).collect(Collectors.toSet());
+        if (existingNames.contains(AuthoritiesConstants.USER)) {
+            return;
+        }
+        authorityRepository.findById(AuthoritiesConstants.USER).ifPresent(currentAuthorities::add);
+        userRepository.save(target);
+        LOG.debug("User {} has unapproved trader; ensured ROLE_USER only.", target.getLogin());
     }
 
     private static Set<String> buildTraderOwnerAuthorityNames() {

@@ -90,17 +90,23 @@ const CommoditySettings = () => {
 
   useEffect(() => {
     const load = async () => {
-      const [commodities, fullConfigs] = await Promise.all([
-        commodityApi.list(),
-        commodityApi.getAllFullConfigs(),
-      ]);
-      const result: LocalCommodityConfig[] = commodities.map((c) => {
-        const full = fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id));
-        if (full) return fullConfigToLocal(c, full);
-        return fullConfigToLocal(c, { commodityId: Number(c.commodity_id) || 0 });
-      });
-      setItems(result);
-      setLoading(false);
+      try {
+        const [commodities, fullConfigs] = await Promise.all([
+          commodityApi.list(),
+          commodityApi.getAllFullConfigs(),
+        ]);
+        const result: LocalCommodityConfig[] = commodities.map((c) => {
+          const full = fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id));
+          if (full) return fullConfigToLocal(c, full);
+          return fullConfigToLocal(c, { commodityId: Number(c.commodity_id) || 0 });
+        });
+        setItems(result);
+      } catch (err) {
+        console.error('Load commodities:', err);
+        toast.error('Failed to load commodity settings');
+      } finally {
+        setLoading(false);
+      }
     };
     load();
   }, []);
@@ -294,6 +300,7 @@ const CommoditySettings = () => {
     try {
       await commodityApi.saveFullConfig(item.commodity.commodity_id, payload);
       toast.success(`✅ ${commodityName} settings saved successfully!`);
+      setExpanded(null); // Close the expanded panel so list shows as normal
     } catch (err) {
       console.error('Save commodity config:', err);
       toast.error('Failed to save settings');
