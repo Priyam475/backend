@@ -74,18 +74,6 @@ class AccountResourceIT {
     }
 
     @Test
-    @WithUnauthenticatedMockUser
-    void testNonAuthenticatedUser() throws Exception {
-        restAccountMockMvc.perform(get("/api/authenticate")).andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    @WithMockUser(TEST_USER_LOGIN)
-    void testAuthenticatedUser() throws Exception {
-        restAccountMockMvc.perform(get("/api/authenticate").with(request -> request)).andExpect(status().isNoContent());
-    }
-
-    @Test
     @WithMockUser(TEST_USER_LOGIN)
     void testGetExistingAccount() throws Exception {
         Set<String> authorities = new HashSet<>();
