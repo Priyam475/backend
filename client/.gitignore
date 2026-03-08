@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cypress reports (mochawesome HTML/JSON)
+cypress/reports/
+# Cypress screenshots and videos
+cypress/screenshots/
+cypress/videos/
+# Test coverage and other generated QA artifacts
+coverage/

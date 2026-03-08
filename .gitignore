@@ -9,3 +9,8 @@ client/.env.production
 frontend/
 # Liquibase local configuration (do not commit real credentials)
 server/src/main/resources/liquibase.properties
+node_modules/
+
+# QA / test artifacts (Cypress in client/.gitignore)
+# Newman/Postman report outputs
+docs/test/reports/

@@ -28,7 +28,10 @@
     "cap:build:apk": "bash scripts/build-apk.sh",
     "cap:build:apk:debug": "npm run build && bash scripts/run-android.sh sync android && cd android && ./gradlew assembleDebug && cd ..",
     "cap:build:apk:release": "npm run build && bash scripts/run-android.sh sync android && cd android && ./gradlew assembleRelease && cd ..",
-    "cap:install:debug": "adb install android/app/build/outputs/apk/debug/app-debug.apk"
+    "cap:install:debug": "adb install android/app/build/outputs/apk/debug/app-debug.apk",
+    "cypress:run": "cypress run",
+    "cypress:run:rbac": "mkdir -p cypress/reports && cypress run --spec \"cypress/e2e/api/trader-rbac.cy.ts\"",
+    "cypress:open": "cypress open"
   },
   "dependencies": {
     "@capacitor/android": "^8.1.0",
@@ -102,11 +105,13 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "cypress": "^13.15.0",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
+    "mochawesome": "^7.1.4",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
