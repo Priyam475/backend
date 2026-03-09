@@ -2,6 +2,7 @@ package com.mercotrace.web.rest.vm;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.Set;
 
@@ -14,19 +15,23 @@ public class TraderRbacUserCreateVM {
 
     @NotBlank
     @Email
+    @Size(max = 254)
+    @Pattern(regexp = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "Invalid email format")
     private String email;
 
     @NotBlank
+    @Size(max = 200)
     private String fullName;
 
     @NotBlank
-    @Size(min = 6)
+    @Size(min = 6, max = 100)
     private String password;
 
     /**
      * Human-readable role label inside the trader (e.g. CASHIER, WRITER).
      */
     @NotBlank
+    @Size(max = 50)
     private String roleInTrader;
 
     /**

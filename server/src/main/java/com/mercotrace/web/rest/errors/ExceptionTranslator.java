@@ -218,6 +218,7 @@ public class ExceptionTranslator extends ResponseEntityExceptionHandler {
         if (err instanceof ConcurrencyFailureException) return HttpStatus.CONFLICT;
         if (err instanceof DataIntegrityViolationException) return HttpStatus.CONFLICT;
         if (err instanceof BadCredentialsException) return HttpStatus.UNAUTHORIZED;
+        if (err instanceof HttpMessageConversionException) return HttpStatus.BAD_REQUEST;
         return null;
     }
 

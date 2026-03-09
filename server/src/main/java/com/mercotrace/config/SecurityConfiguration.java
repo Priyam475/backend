@@ -121,15 +121,23 @@ public class SecurityConfiguration {
         return http.build();
     }
 
+    /**
+     * Trader API chain: all /api/** except /api/admin/** (handled by admin chain).
+     * Explicit securityMatcher ensures /api/trader/rbac/* and other trader endpoints
+     * require authentication (401/403 when no valid JWT).
+     */
     @Bean
     @Order(2)
     public SecurityFilterChain traderSecurityFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
         http
+            .securityMatcher("/api/**")
             .cors(withDefaults())
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authz ->
                 // prettier-ignore
                 authz
+                    // Trader-scoped APIs: require auth first (fix: GET /api/trader/rbac/roles without token → 401/403)
+                    .requestMatchers(new AntPathRequestMatcher("/api/trader/**")).authenticated()
                     .requestMatchers(mvc.pattern(HttpMethod.POST, "/api/authenticate")).permitAll()
                     .requestMatchers(mvc.pattern(HttpMethod.GET, "/api/authenticate")).permitAll()
                     .requestMatchers(mvc.pattern("/api/register")).permitAll()
@@ -146,7 +154,6 @@ public class SecurityConfiguration {
                     .requestMatchers(mvc.pattern("/management/info")).permitAll()
                     .requestMatchers(mvc.pattern("/management/prometheus")).permitAll()
                     .requestMatchers(mvc.pattern("/management/**")).hasAuthority(AuthoritiesConstants.ADMIN)
-                    // GET /api/business-categories(*) handled by businessCategoriesPublicFilterChain (Order 0)
                     // everything else under /api/** requires an authenticated trader
                     .requestMatchers(mvc.pattern("/api/**")).authenticated()
             )
