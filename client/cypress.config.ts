@@ -27,6 +27,8 @@ export default defineConfig({
       traderPassword: process.env.CYPRESS_TRADER_PASSWORD || '',
       otherTraderRoleId: process.env.CYPRESS_OTHER_TRADER_ROLE_ID ? Number(process.env.CYPRESS_OTHER_TRADER_ROLE_ID) : undefined,
       otherUserId: process.env.CYPRESS_OTHER_USER_ID ? Number(process.env.CYPRESS_OTHER_USER_ID) : undefined,
+      adminLogin: process.env.CYPRESS_ADMIN_LOGIN || '',
+      adminPassword: process.env.CYPRESS_ADMIN_PASSWORD || '',
     },
   },
   video: false,
