@@ -178,6 +178,8 @@ export interface Contact {
   type?: ContactType;
   opening_balance?: number;
   current_balance?: number;
+  email?: string;
+  can_login?: boolean;
 }
 
 /** 4.2 Ledgers (Chart of Accounts) */

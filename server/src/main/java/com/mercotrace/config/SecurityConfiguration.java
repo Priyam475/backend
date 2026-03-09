@@ -85,7 +85,12 @@ public class SecurityConfiguration {
                 mvc.pattern(HttpMethod.POST, "/api/auth/register"),
                 mvc.pattern(HttpMethod.POST, "/api/auth/login"),
                 mvc.pattern(HttpMethod.POST, "/api/auth/otp/request"),
-                mvc.pattern(HttpMethod.POST, "/api/auth/otp/verify")
+                mvc.pattern(HttpMethod.POST, "/api/auth/otp/verify"),
+                // Contact Portal public auth endpoints
+                mvc.pattern(HttpMethod.POST, "/api/auth/register-contact"),
+                mvc.pattern(HttpMethod.POST, "/api/portal/auth/login"),
+                mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/request"),
+                mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/verify")
             ))
             .cors(withDefaults())
             .csrf(csrf -> csrf.disable())
@@ -128,6 +133,35 @@ public class SecurityConfiguration {
      */
     @Bean
     @Order(2)
+    public SecurityFilterChain contactSecurityFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
+        http
+            .securityMatcher("/api/portal/**")
+            .cors(withDefaults())
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authz ->
+                authz
+                    // Public contact auth endpoints are already handled by businessCategoriesPublicFilterChain
+                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/api/portal/auth/login")).permitAll()
+                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/request")).permitAll()
+                    .requestMatchers(mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/verify")).permitAll()
+                    .requestMatchers(mvc.pattern("/api/portal/**")).authenticated()
+            )
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(exceptions ->
+                exceptions
+                    .authenticationEntryPoint(new BearerTokenAuthenticationEntryPoint())
+                    .accessDeniedHandler(new BearerTokenAccessDeniedHandler())
+            )
+            .oauth2ResourceServer(oauth2 ->
+                oauth2
+                    .bearerTokenResolver(new CookieOrHeaderBearerTokenResolver())
+                    .jwt(jwt -> jwt.jwtAuthenticationConverter(contactJwtAuthenticationConverter()))
+            );
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     public SecurityFilterChain traderSecurityFilterChain(HttpSecurity http, MvcRequestMatcher.Builder mvc) throws Exception {
         http
             .securityMatcher("/api/**")
@@ -201,6 +235,22 @@ public class SecurityConfiguration {
             String tokenType = getTokenType(jwt);
             if (!SecurityUtils.TOKEN_TYPE_TRADER.equals(tokenType)) {
                 throw new JwtException("Invalid token_type for trader resources");
+            }
+            var authorities = delegate.convert(jwt);
+            String principalName = jwt.getSubject();
+            return new JwtAuthenticationToken(jwt, authorities, principalName);
+        };
+    }
+
+    private Converter<Jwt, ? extends AbstractAuthenticationToken> contactJwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter delegate = new JwtGrantedAuthoritiesConverter();
+        delegate.setAuthoritiesClaimName(SecurityUtils.AUTHORITIES_CLAIM);
+        delegate.setAuthorityPrefix("");
+
+        return jwt -> {
+            String tokenType = getTokenType(jwt);
+            if (!SecurityUtils.TOKEN_TYPE_CONTACT.equals(tokenType)) {
+                throw new JwtException("Invalid token_type for contact resources");
             }
             var authorities = delegate.convert(jwt);
             String principalName = jwt.getSubject();

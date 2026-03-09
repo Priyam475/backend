@@ -95,6 +95,7 @@ const AdminContactsPage = () => {
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Mark</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Address</th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Portal</th>
                 <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Balance</th>
               </tr>
             </thead>
@@ -120,6 +121,16 @@ const AdminContactsPage = () => {
                     </td>
                     <td className="py-3.5 px-4 text-foreground font-medium">{c.mark || '—'}</td>
                     <td className="py-3.5 px-4 text-muted-foreground">{c.address || '—'}</td>
+                    <td className="py-3.5 px-4 text-muted-foreground">
+                      {c.can_login ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          Enabled
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">Disabled</span>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 text-right">
                       <span className={cn('font-semibold', (c.current_balance ?? 0) >= 0 ? 'text-success' : 'text-destructive')}>
                         ₹{Math.abs(c.current_balance ?? 0).toLocaleString()}

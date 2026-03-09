@@ -18,6 +18,9 @@ public class ContactDTO implements Serializable {
     // Logical trader owner (mapped from traderId)
     private Long traderId;
 
+    @Size(max = 191)
+    private String email;
+
     @NotNull
     @Size(max = 150)
     private String name;
@@ -38,6 +41,8 @@ public class ContactDTO implements Serializable {
 
     private BigDecimal currentBalance;
 
+    private Boolean canLogin;
+
     /** Contact type: SELLER (vendor), BUYER, BROKER. Returned in API as "type". */
     @Size(max = 20)
     private String type;
@@ -56,6 +61,14 @@ public class ContactDTO implements Serializable {
 
     public void setTraderId(Long traderId) {
         this.traderId = traderId;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public String getName() {
@@ -114,6 +127,14 @@ public class ContactDTO implements Serializable {
         this.currentBalance = currentBalance;
     }
 
+    public Boolean getCanLogin() {
+        return canLogin;
+    }
+
+    public void setCanLogin(Boolean canLogin) {
+        this.canLogin = canLogin;
+    }
+
     public String getType() {
         return type;
     }
@@ -148,6 +169,7 @@ public class ContactDTO implements Serializable {
         return "ContactDTO{" +
             "id=" + getId() +
             ", traderId=" + getTraderId() +
+            ", email='" + getEmail() + "'" +
             ", name='" + getName() + "'" +
             ", phone='" + getPhone() + "'" +
             ", mark='" + getMark() + "'" +
@@ -155,6 +177,7 @@ public class ContactDTO implements Serializable {
             ", createdAt='" + getCreatedAt() + "'" +
             ", openingBalance=" + getOpeningBalance() +
             ", currentBalance=" + getCurrentBalance() +
+            ", canLogin=" + getCanLogin() +
             ", type='" + getType() + "'" +
             "}";
     }

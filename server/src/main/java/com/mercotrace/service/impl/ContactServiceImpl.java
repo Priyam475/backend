@@ -2,6 +2,7 @@ package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.Contact;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.service.mapper.ContactMapper;
@@ -36,14 +37,18 @@ public class ContactServiceImpl implements ContactService {
 
     private final CacheManager cacheManager;
 
+    private final ContactIdentityService contactIdentityService;
+
     public ContactServiceImpl(
         ContactRepository contactRepository,
         ContactMapper contactMapper,
-        CacheManager cacheManager
+        CacheManager cacheManager,
+        ContactIdentityService contactIdentityService
     ) {
         this.contactRepository = contactRepository;
         this.contactMapper = contactMapper;
         this.cacheManager = cacheManager;
+        this.contactIdentityService = contactIdentityService;
     }
 
     @Override

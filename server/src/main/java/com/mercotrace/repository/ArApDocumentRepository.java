@@ -28,4 +28,15 @@ public interface ArApDocumentRepository extends JpaRepository<ArApDocument, Long
         @Param("status") ArApStatus status,
         Pageable pageable
     );
+
+    /**
+     * Portal-scoped query: all AR/AP documents for a given contact across traders.
+     */
+    Page<ArApDocument> findAllByContact_Id(Long contactId, Pageable pageable);
+
+    /**
+     * Portal-scoped query: AP (payables/settlements) documents for a given contact across traders.
+     */
+    Page<ArApDocument> findAllByContact_IdAndType(Long contactId, ArApType type, Pageable pageable);
 }
+

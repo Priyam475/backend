@@ -1,0 +1,148 @@
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { contactPortalAuthApi, type ContactPortalProfile } from '@/services/api/contactPortalAuth';
+
+interface ContactAuthState {
+  isAuthenticated: boolean;
+  contact: ContactPortalProfile | null;
+}
+
+interface ContactAuthContextType extends ContactAuthState {
+  hasBootstrapped: boolean;
+  login: (identifier: string, password: string) => Promise<void>;
+  signup: (data: { phone: string; password: string; email?: string; name?: string }) => Promise<void>;
+  loginWithProfile: (profile: ContactPortalProfile) => void;
+  logout: () => void;
+  isLoading: boolean;
+  error: string | null;
+  clearError: () => void;
+}
+
+const ContactAuthContext = createContext<ContactAuthContextType>({
+  isAuthenticated: false,
+  contact: null,
+  hasBootstrapped: false,
+  login: async () => {},
+  signup: async () => {},
+  loginWithProfile: () => {},
+  logout: () => {},
+  isLoading: false,
+  error: null,
+  clearError: () => {},
+});
+
+export const useContactAuth = () => useContext(ContactAuthContext);
+
+export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [state, setState] = useState<ContactAuthState>({
+    isAuthenticated: false,
+    contact: null,
+  });
+  const [hasBootstrapped, setHasBootstrapped] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Only bootstrap when user is in the contact portal URLs.
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/portal')) {
+      setHasBootstrapped(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const bootstrap = async () => {
+      try {
+        let profile = await contactPortalAuthApi.getProfile();
+        if (!cancelled && profile) {
+          setState({
+            isAuthenticated: true,
+            contact: profile,
+          });
+        }
+      } catch {
+        // treat as logged out
+      } finally {
+        if (!cancelled) {
+          setHasBootstrapped(true);
+        }
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const login = useCallback(async (identifier: string, password: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const profile = await contactPortalAuthApi.login(identifier, password);
+      setState({
+        isAuthenticated: true,
+        contact: profile,
+      });
+    } catch (e: any) {
+      setError(e?.message || 'Login failed. Please try again.');
+      throw e;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const signup = useCallback(
+    async (data: { phone: string; password: string; email?: string; name?: string }) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const profile = await contactPortalAuthApi.signup(data);
+        setState({
+          isAuthenticated: true,
+          contact: profile,
+        });
+      } catch (e: any) {
+        setError(e?.message || 'Signup failed. Please try again.');
+        throw e;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [],
+  );
+
+  const logout = useCallback(() => {
+    setState({ isAuthenticated: false, contact: null });
+  }, []);
+
+  const loginWithProfile = useCallback((profile: ContactPortalProfile) => {
+    setState({
+      isAuthenticated: true,
+      contact: profile,
+    });
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
+
+  return (
+    <ContactAuthContext.Provider
+      value={{
+        ...state,
+        hasBootstrapped,
+        login,
+        signup,
+        loginWithProfile,
+        logout,
+        isLoading,
+        error,
+        clearError,
+      }}
+    >
+      {children}
+    </ContactAuthContext.Provider>
+  );
+};
+

@@ -17,6 +17,9 @@ type ContactDto = {
   currentBalance?: number;
   current_balance?: number;
   type?: ContactType;
+  email?: string;
+  canLogin?: boolean;
+  can_login?: boolean;
 };
 
 function mapDtoToContact(dto: ContactDto): Contact {
@@ -34,6 +37,8 @@ function mapDtoToContact(dto: ContactDto): Contact {
     type: dto.type,
     opening_balance: dto.opening_balance ?? dto.openingBalance ?? 0,
     current_balance: dto.current_balance ?? dto.currentBalance ?? 0,
+    email: dto.email,
+    can_login: dto.can_login ?? dto.canLogin,
   };
 }
 

@@ -54,4 +54,6 @@
     <include file="config/liquibase/changelog/20260307120000_add_admin_user_mobile.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260307130000_commodity_config_gst_rate_and_threshold.xml" relativeToChangelogFile="false"/>
     <!-- jhipster-needle-liquibase-add-incremental-changelog - JHipster will add incremental liquibase changelogs here -->
+    <include file="config/liquibase/changelog/20260309120000_contact_login_identity.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260309121000_contact_otp_token_schema.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

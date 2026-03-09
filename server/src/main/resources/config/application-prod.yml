@@ -94,9 +94,13 @@ jhipster:
       cluster: false
       # server: redis://localhost:6379,redis://localhost:16379,redis://localhost:26379
       # cluster: true
-  # CORS configuration for production
+  # CORS configuration for production (applies to all APIs, including /api/portal/**)
   cors:
-    allowed-origins: "https://mercotrace.aau.co.in,https://merco.qualityoutsidethebox.org,https://mercotrace.qualityoutsidethebox.org,https://uat-merco.qualityoutsidethebox.org"
+    allowed-origins:
+      - https://mercotrace.aau.co.in
+      - https://merco.qualityoutsidethebox.org
+      - https://mercotrace.qualityoutsidethebox.org
+      - https://uat-merco.qualityoutsidethebox.org
     allowed-origin-patterns: "https://*.githubpreview.dev"
     allowed-methods: "*"
     allowed-headers: "*"

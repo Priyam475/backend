@@ -32,7 +32,7 @@ const ContactsPage = () => {
   const [search, setSearch] = useState('');
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', mark: '', address: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', mark: '', address: '', enablePortal: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -57,7 +57,7 @@ const ContactsPage = () => {
       toast.error('You do not have permission to create contacts.');
       return;
     }
-    setFormData({ name: '', phone: '', mark: '', address: '' });
+    setFormData({ name: '', phone: '', mark: '', address: '', enablePortal: false });
     setErrors({});
     setModalMode('add');
   };
@@ -73,7 +73,13 @@ const ContactsPage = () => {
       return;
     }
     setSelectedContact(c);
-    setFormData({ name: c.name, phone: c.phone, mark: c.mark || '', address: c.address || '' });
+    setFormData({
+      name: c.name,
+      phone: c.phone,
+      mark: c.mark || '',
+      address: c.address || '',
+      enablePortal: !!c.can_login,
+    });
     setErrors({});
     setModalMode('edit');
   };
@@ -272,7 +278,17 @@ const ContactsPage = () => {
                     <td className="px-5 py-3.5">
                       {c.mark && <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/10 to-teal-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/15">{c.mark}</span>}
                     </td>
-                    <td className="px-5 py-3.5 text-muted-foreground text-xs max-w-[200px] truncate">{c.address || '—'}</td>
+                    <td className="px-5 py-3.5 text-muted-foreground text-xs max-w-[200px] truncate">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="truncate">{c.address || '—'}</span>
+                        {c.can_login && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Portal enabled
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-5 py-3.5 text-right">
                       <span className={cn('font-bold tabular-nums', (c.current_balance ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
                         ₹{Math.abs(c.current_balance ?? 0).toLocaleString()}
@@ -517,6 +533,20 @@ const ContactsPage = () => {
                     <Input placeholder="e.g., Village Pune, Market Yard" value={formData.address}
                       onChange={e => setFormData(p => ({ ...p, address: e.target.value }))}
                       className="h-12 rounded-xl" />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="enable-portal-login"
+                      type="checkbox"
+                      className="w-4 h-4 rounded border border-emerald-500"
+                      checked={formData.enablePortal}
+                      onChange={e => setFormData(p => ({ ...p, enablePortal: e.target.checked }))}
+                      disabled
+                    />
+                    <label htmlFor="enable-portal-login" className="text-xs text-muted-foreground">
+                      Contact Portal login (managed from self-signup/profile in this version)
+                    </label>
                   </div>
 
                   {modalMode === 'add' && (

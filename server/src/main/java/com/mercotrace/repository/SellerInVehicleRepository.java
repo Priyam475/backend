@@ -11,5 +11,10 @@ public interface SellerInVehicleRepository extends JpaRepository<SellerInVehicle
     List<SellerInVehicle> findAllByVehicleId(Long vehicleId);
 
     List<SellerInVehicle> findAllByVehicleIdIn(Iterable<Long> vehicleIds);
+
+    /**
+     * Portal-scoped query: all seller/broker rows where this contact participates.
+     */
+    List<SellerInVehicle> findAllByContactIdOrBrokerId(Long contactId, Long brokerId);
 }
 

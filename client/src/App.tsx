@@ -7,15 +7,26 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { FontSizeProvider } from "@/context/FontSizeContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { ContactAuthProvider } from "@/context/ContactAuthContext";
 import { AdminAuthProvider } from "@/context/AdminAuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminProtectedRoute from "@/components/AdminProtectedRoute";
 import TraderProtectedRoute from "@/components/TraderProtectedRoute";
+import ContactProtectedRoute from "@/components/ContactProtectedRoute";
+import ContactPortalLayout from "@/components/ContactPortalLayout";
 import RootClassManager from "@/components/RootClassManager";
 import ScrollToTop from "@/components/ScrollToTop";
 import PortraitLock from "@/components/PortraitLock";
 import TraderLayout from "@/components/TraderLayout";
 import LoginScreen from "./pages/LoginScreen";
+import ContactPortalLoginPage from "./pages/ContactPortalLoginPage";
+import ContactPortalSignupPage from "./pages/ContactPortalSignupPage";
+import ContactPortalDashboardPage from "./pages/ContactPortalDashboardPage";
+import ContactPortalArrivalsPage from "./pages/ContactPortalArrivalsPage";
+import ContactPortalPurchasesPage from "./pages/ContactPortalPurchasesPage";
+import ContactPortalStatementsPage from "./pages/ContactPortalStatementsPage";
+import ContactPortalSettlementsPage from "./pages/ContactPortalSettlementsPage";
+import ContactPortalProfilePage from "./pages/ContactPortalProfilePage";
 
 // Eagerly loaded — all trader routes for instant navigation (no white flash)
 import SplashScreen from "./pages/SplashScreen";
@@ -76,19 +87,32 @@ const App = () => (
     <ThemeProvider>
       <FontSizeProvider>
         <AuthProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <ScrollToTop />
-              <PortraitLock />
-              <RootClassManager />
-              <Suspense fallback={<LazyFallback />}>
-                <Routes>
+          <ContactAuthProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
+                <ScrollToTop />
+                <PortraitLock />
+                <RootClassManager />
+                <Suspense fallback={<LazyFallback />}>
+                  <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<SplashScreen />} />
                 <Route path="/onboarding" element={<OnboardingScreen />} />
                 <Route path="/login" element={<LoginScreen />} />
+                <Route
+                  path="/portal/login"
+                  element={
+                    <ContactPortalLoginPage />
+                  }
+                />
+                <Route
+                  path="/portal/signup"
+                  element={
+                    <ContactPortalSignupPage />
+                  }
+                />
                 <Route path="/register" element={<RegisterScreen />} />
                 <Route path="/trader-setup" element={<TraderSetupPage />} />
 
@@ -120,6 +144,23 @@ const App = () => (
                   <Route path="/settings/roles" element={<RoleManagementPage />} />
                   <Route path="/settings/users" element={<UserManagementPage />} />
                   <Route path="/settings/role-allocation" element={<RoleAllocationPage />} />
+                </Route>
+
+                {/* Contact Portal (protected, nested layout) */}
+                <Route
+                  path="/portal"
+                  element={
+                    <ContactProtectedRoute>
+                      <ContactPortalLayout />
+                    </ContactProtectedRoute>
+                  }
+                >
+                  <Route index element={<ContactPortalDashboardPage />} />
+                  <Route path="arrivals" element={<ContactPortalArrivalsPage />} />
+                  <Route path="purchases" element={<ContactPortalPurchasesPage />} />
+                  <Route path="statements" element={<ContactPortalStatementsPage />} />
+                  <Route path="settlements" element={<ContactPortalSettlementsPage />} />
+                  <Route path="profile" element={<ContactPortalProfilePage />} />
                 </Route>
 
                 {/* Admin Portal */}
@@ -158,6 +199,7 @@ const App = () => (
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
+        </ContactAuthProvider>
         </AuthProvider>
       </FontSizeProvider>
     </ThemeProvider>

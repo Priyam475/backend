@@ -24,4 +24,9 @@ public interface StockPurchaseRepository extends JpaRepository<StockPurchase, Lo
         @Param("vendorIds") List<Long> vendorIds,
         Pageable pageable
     );
+
+    /**
+     * Portal-scoped query: all stock purchases where this contact is the vendor.
+     */
+    Page<StockPurchase> findAllByVendorIdAndIsDeletedFalse(Long vendorId, Pageable pageable);
 }

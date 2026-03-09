@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Extend contact table with minimal identity fields for Contact Portal login.
+        This is a non-destructive change that keeps the existing per-trader contact model
+        but adds the ability for a contact to have its own login credentials.
+    -->
+    <changeSet id="20260309120000-1" author="mercotrace">
+        <addColumn tableName="contact">
+            <column name="email" type="varchar(191)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="password_hash" type="varchar(60)">
+                <constraints nullable="true"/>
+            </column>
+            <column name="can_login" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+        <!--
+            Email is optional but must be unique when provided so that the same email
+            cannot own multiple contact identities.
+            PostgreSQL allows multiple NULLs under a unique constraint.
+        -->
+        <addUniqueConstraint
+            tableName="contact"
+            columnNames="email"
+            constraintName="ux_contact_email"/>
+
+        <!--
+            Helpful index for global phone lookups during contact login and trader/admin
+            contact linking flows. Does not change existing trader_id + phone uniqueness.
+        -->
+        <createIndex tableName="contact" indexName="idx_contact_phone_global">
+            <column name="phone"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>
+

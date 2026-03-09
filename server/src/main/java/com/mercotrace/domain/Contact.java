@@ -29,6 +29,10 @@ public class Contact implements Serializable {
     @Column(name = "trader_id")
     private Long traderId;
 
+    @Size(max = 191)
+    @Column(name = "email", length = 191)
+    private String email;
+
     @NotNull
     @Size(max = 150)
     @Column(name = "name", length = 150, nullable = false)
@@ -57,6 +61,14 @@ public class Contact implements Serializable {
     @Column(name = "current_balance", precision = 19, scale = 2, nullable = false)
     private BigDecimal currentBalance;
 
+    @Size(max = 60)
+    @Column(name = "password_hash", length = 60)
+    private String passwordHash;
+
+    @NotNull
+    @Column(name = "can_login", nullable = false)
+    private Boolean canLogin = false;
+
     /** Contact type: SELLER (vendor), BUYER, BROKER. Used so client can filter vendors. */
     @Size(max = 20)
     @Column(name = "contact_type", length = 20)
@@ -83,6 +95,14 @@ public class Contact implements Serializable {
 
     public void setTraderId(Long traderId) {
         this.traderId = traderId;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public String getName() {
@@ -159,6 +179,22 @@ public class Contact implements Serializable {
 
     public void setCurrentBalance(BigDecimal currentBalance) {
         this.currentBalance = currentBalance;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public Boolean getCanLogin() {
+        return canLogin;
+    }
+
+    public void setCanLogin(Boolean canLogin) {
+        this.canLogin = canLogin;
     }
 
     public String getType() {
