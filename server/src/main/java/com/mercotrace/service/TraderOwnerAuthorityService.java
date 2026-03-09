@@ -9,10 +9,12 @@ import com.mercotrace.repository.UserTraderRepository;
 import com.mercotrace.security.AuthoritiesConstants;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,15 +40,18 @@ public class TraderOwnerAuthorityService {
     private final AuthorityRepository authorityRepository;
     private final UserRepository userRepository;
     private final UserTraderRepository userTraderRepository;
+    private final CacheManager cacheManager;
 
     public TraderOwnerAuthorityService(
         AuthorityRepository authorityRepository,
         UserRepository userRepository,
-        UserTraderRepository userTraderRepository
+        UserTraderRepository userTraderRepository,
+        CacheManager cacheManager
     ) {
         this.authorityRepository = authorityRepository;
         this.userRepository = userRepository;
         this.userTraderRepository = userTraderRepository;
+        this.cacheManager = cacheManager;
     }
 
     /**
@@ -118,6 +123,7 @@ public class TraderOwnerAuthorityService {
 
         currentAuthorities.addAll(toAdd);
         userRepository.save(target);
+        clearUserCaches(target);
 
         LOG.info("Upgraded user {} with trader-owner authorities: {}", target.getLogin(), missingNames);
     }
@@ -132,7 +138,24 @@ public class TraderOwnerAuthorityService {
         }
         authorityRepository.findById(AuthoritiesConstants.USER).ifPresent(currentAuthorities::add);
         userRepository.save(target);
+        clearUserCaches(target);
         LOG.debug("User {} has unapproved trader; ensured ROLE_USER only.", target.getLogin());
+    }
+
+    private void clearUserCaches(User user) {
+        if (user == null) {
+            return;
+        }
+        if (cacheManager.getCache(UserRepository.USERS_BY_LOGIN_CACHE) != null) {
+            Objects
+                .requireNonNull(cacheManager.getCache(UserRepository.USERS_BY_LOGIN_CACHE))
+                .evictIfPresent(user.getLogin());
+        }
+        if (user.getEmail() != null && cacheManager.getCache(UserRepository.USERS_BY_EMAIL_CACHE) != null) {
+            Objects
+                .requireNonNull(cacheManager.getCache(UserRepository.USERS_BY_EMAIL_CACHE))
+                .evictIfPresent(user.getEmail());
+        }
     }
 
     private static Set<String> buildTraderOwnerAuthorityNames() {
