@@ -8,7 +8,6 @@ import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_CONTACT;
 
 import com.mercotrace.domain.Contact;
 import com.mercotrace.repository.ContactRepository;
-import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.ContactOtpService;
 import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.dto.ContactDTO;
@@ -19,6 +18,8 @@ import com.mercotrace.web.rest.errors.UnauthorizedAlertException;
 import com.mercotrace.web.rest.vm.ContactRegisterVM;
 import com.mercotrace.web.rest.vm.ContactOtpRequestVM;
 import com.mercotrace.web.rest.vm.ContactOtpVerifyVM;
+import com.mercotrace.web.rest.vm.ContactOtpVerifyResponseVM;
+import com.mercotrace.web.rest.vm.ContactPortalSessionVM;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -39,6 +40,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
@@ -218,12 +220,11 @@ public class ContactAuthResource {
     }
 
     /**
-     * POST /portal/auth/otp/request — request OTP for contact login.
+     * POST /portal/auth/otp/request — request OTP for contact or guest login.
      *
-     * Accepts a phone number as identifier. Only login-enabled contacts
-     * with a registered mobile can request OTP. Returns explicit errors
-     * when the phone is not registered or when the OTP provider is not
-     * configured.
+     * Accepts a phone number as identifier. OTP is generated for any valid
+     * 10-digit mobile number when the provider is configured. Actual contact
+     * lookup and login/guest decision happens during OTP verification.
      */
     @PostMapping("/portal/auth/otp/request")
     public ResponseEntity<Map<String, String>> requestOtp(
@@ -245,20 +246,9 @@ public class ContactAuthResource {
 
         String phone = normalizePhone(identifier);
 
-        Contact contact = contactRepository
-            .findOneByPhone(phone)
-            .filter(c -> Boolean.TRUE.equals(c.getCanLogin()))
-            .orElseThrow(() ->
-                new BadRequestAlertException(
-                    "This mobile number is not registered for a Contact login.",
-                    "contactPortal",
-                    "contactPortal.phone.notRegistered"
-                )
-            );
-
         try {
             String clientIp = request.getRemoteAddr();
-            contactOtpService.generateOtpForMobile(contact.getPhone(), clientIp);
+            contactOtpService.generateOtpForMobile(phone, clientIp);
         } catch (ContactOtpService.ContactOtpRateLimitExceededException ex) {
             throw new ResponseStatusException(
                 HttpStatus.TOO_MANY_REQUESTS,
@@ -270,13 +260,16 @@ public class ContactAuthResource {
     }
 
     /**
-     * POST /portal/auth/otp/verify — verify OTP and issue CONTACT JWT.
+     * POST /portal/auth/otp/verify — verify OTP and issue CONTACT or guest CONTACT JWT.
      *
-     * Uses phone as identifier. Returns explicit errors when the phone is
-     * not registered for login or when the OTP is invalid/expired.
+     * Uses phone as identifier. If a login-enabled contact exists for the
+     * verified mobile, a CONTACT token is issued and the full ContactDTO is
+     * returned. If no such contact exists, a short-lived CONTACT token with
+     * guest authority is issued and the response is marked as guest=true
+     * without creating or persisting any contact record.
      */
     @PostMapping("/portal/auth/otp/verify")
-    public ResponseEntity<ContactDTO> verifyOtp(@Valid @RequestBody ContactOtpVerifyVM vm) {
+    public ResponseEntity<ContactOtpVerifyResponseVM> verifyOtp(@Valid @RequestBody ContactOtpVerifyVM vm) {
         String identifier = vm.getIdentifier();
         String otp = vm.getOtp();
 
@@ -286,18 +279,7 @@ public class ContactAuthResource {
 
         String phone = normalizePhone(identifier);
 
-        Contact contact = contactRepository
-            .findOneByPhone(phone)
-            .filter(c -> Boolean.TRUE.equals(c.getCanLogin()))
-            .orElseThrow(() ->
-                new BadRequestAlertException(
-                    "This mobile number is not registered for a Contact login.",
-                    "contactPortal",
-                    "contactPortal.phone.notRegistered"
-                )
-            );
-
-        ContactOtpService.OtpValidationStatus status = contactOtpService.validateOtp(contact.getPhone(), otp);
+        ContactOtpService.OtpValidationStatus status = contactOtpService.validateOtp(phone, otp);
         if (
             status == ContactOtpService.OtpValidationStatus.EXPIRED ||
             status == ContactOtpService.OtpValidationStatus.NOT_FOUND ||
@@ -316,11 +298,23 @@ public class ContactAuthResource {
             );
         }
 
-        String jwt = createContactToken(contact, false, Set.of(new SimpleGrantedAuthority("ROLE_CONTACT")));
-        HttpHeaders headers = buildAuthHeaders(jwt);
+        Optional<Contact> contactOpt = contactRepository
+            .findOneByPhone(phone)
+            .filter(c -> Boolean.TRUE.equals(c.getCanLogin()));
 
-        ContactDTO dto = contactMapper.toDto(contact);
-        return ResponseEntity.ok().headers(headers).body(dto);
+        if (contactOpt.isPresent()) {
+            Contact contact = contactOpt.get();
+            String jwt = createContactToken(contact, false, Set.of(new SimpleGrantedAuthority("ROLE_CONTACT")));
+            HttpHeaders headers = buildAuthHeaders(jwt);
+            ContactDTO dto = contactMapper.toDto(contact);
+            ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(false, phone, dto);
+            return ResponseEntity.ok().headers(headers).body(body);
+        } else {
+            String jwt = createGuestContactToken(phone);
+            HttpHeaders headers = buildAuthHeaders(jwt);
+            ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(true, phone, null);
+            return ResponseEntity.ok().headers(headers).body(body);
+        }
     }
 
     /**
@@ -350,6 +344,49 @@ public class ContactAuthResource {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contact not found"));
 
         return contactMapper.toDto(contact);
+    }
+
+    /**
+     * GET /portal/session — return the current Contact Portal session.
+     *
+     * For CONTACT tokens (ROLE_CONTACT with contactId claim) this returns the persisted
+     * ContactDTO. For guest CONTACT tokens (ROLE_CONTACT_GUEST without contactId), this
+     * returns guest=true with only the verified phone number from the JWT subject.
+     */
+    @GetMapping("/portal/session")
+    public ContactPortalSessionVM session(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof Jwt jwt)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contact not authenticated");
+        }
+
+        boolean isGuest = authentication
+            .getAuthorities()
+            .stream()
+            .map(GrantedAuthority::getAuthority)
+            .anyMatch(auth -> "ROLE_CONTACT_GUEST".equals(auth));
+
+        if (isGuest) {
+            String subject = jwt.getSubject();
+            String phone = subject != null ? subject : "";
+            return new ContactPortalSessionVM(true, phone, null);
+        }
+
+        Object rawContactId = jwt.getClaim(CONTACT_ID_CLAIM);
+        if (rawContactId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contact not authenticated");
+        }
+        Long contactId;
+        try {
+            contactId = Long.valueOf(rawContactId.toString());
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contact not authenticated");
+        }
+
+        Contact contact = contactRepository
+            .findById(contactId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contact not found"));
+
+        return new ContactPortalSessionVM(false, contact.getPhone(), contactMapper.toDto(contact));
     }
 
     private String normalizePhone(String phone) {
@@ -387,6 +424,25 @@ public class ContactAuthResource {
             .claim(AUTHORITIES_CLAIM, authoritiesClaim)
             .claim(TOKEN_TYPE_CLAIM, TOKEN_TYPE_CONTACT)
             .claim(CONTACT_ID_CLAIM, contact.getId())
+            .build();
+
+        JwsHeader jwsHeader = JwsHeader.with(JWT_ALGORITHM).build();
+        return this.jwtEncoder.encode(JwtEncoderParameters.from(jwsHeader, claims)).getTokenValue();
+    }
+
+    private String createGuestContactToken(String phone) {
+        String authoritiesClaim = "ROLE_CONTACT_GUEST";
+
+        Instant now = Instant.now();
+        Instant validity = now.plus(this.tokenValidityInSeconds, ChronoUnit.SECONDS);
+
+        JwtClaimsSet claims = JwtClaimsSet
+            .builder()
+            .issuedAt(now)
+            .expiresAt(validity)
+            .subject(phone)
+            .claim(AUTHORITIES_CLAIM, authoritiesClaim)
+            .claim(TOKEN_TYPE_CLAIM, TOKEN_TYPE_CONTACT)
             .build();
 
         JwsHeader jwsHeader = JwsHeader.with(JWT_ALGORITHM).build();

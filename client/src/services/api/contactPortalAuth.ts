@@ -12,6 +12,8 @@ export interface ContactPortalProfile {
   phone: string;
   email?: string;
   can_login?: boolean;
+  /** True when this session is a guest (no persisted Contact). */
+  is_guest?: boolean;
 }
 
 type ContactDto = {
@@ -31,7 +33,20 @@ function mapDtoToProfile(dto: ContactDto): ContactPortalProfile {
     phone: dto.phone ?? '',
     email: dto.email,
     can_login: dto.can_login ?? dto.canLogin,
+    is_guest: false,
   };
+}
+
+export interface ContactOtpVerifyResult {
+  guest: boolean;
+  phone: string;
+  profile: ContactPortalProfile | null;
+}
+
+export interface ContactPortalSession {
+  guest: boolean;
+  phone: string;
+  profile: ContactPortalProfile | null;
 }
 
 export const contactPortalAuthApi = {
@@ -166,7 +181,7 @@ export const contactPortalAuthApi = {
     }
   },
 
-  async verifyOtp(identifier: string, otp: string): Promise<ContactPortalProfile> {
+  async verifyOtp(identifier: string, otp: string): Promise<ContactOtpVerifyResult> {
     const res = await apiFetch('/portal/auth/otp/verify', {
       method: 'POST',
       body: JSON.stringify({
@@ -186,8 +201,6 @@ export const contactPortalAuthApi = {
           if (errorKey === 'error.otp.invalid_or_expired') {
             message =
               'The OTP you entered is invalid or has expired. Please request a new one.';
-          } else if (errorKey === 'error.contactPortal.phone.notRegistered') {
-            message = 'This mobile number is not registered for a Contact login.';
           } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
           } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
@@ -205,8 +218,21 @@ export const contactPortalAuthApi = {
       throw new Error(message);
     }
 
-    const dto: ContactDto = await res.json();
-    return mapDtoToProfile(dto);
+    const data: { guest: boolean; phone: string; contact?: ContactDto | null } = await res.json();
+    const profile = data.contact ? mapDtoToProfile(data.contact) : ({
+      contact_id: '',
+      name: data.phone,
+      phone: data.phone,
+      email: undefined,
+      can_login: false,
+      is_guest: true,
+    } satisfies ContactPortalProfile);
+
+    return {
+      guest: data.guest,
+      phone: data.phone,
+      profile: profile ?? null,
+    };
   },
 
   async getProfile(): Promise<ContactPortalProfile | null> {
@@ -224,6 +250,36 @@ export const contactPortalAuthApi = {
 
     const dto: ContactDto = await res.json();
     return mapDtoToProfile(dto);
+  },
+
+  async getSession(): Promise<ContactPortalSession | null> {
+    const res = await apiFetch('/portal/session', {
+      method: 'GET',
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return null;
+    }
+
+    if (!res.ok) {
+      throw new Error('Failed to load contact portal session');
+    }
+
+    const data: { guest: boolean; phone: string; contact?: ContactDto | null } = await res.json();
+    const profile = data.contact ? mapDtoToProfile(data.contact) : ({
+      contact_id: '',
+      name: data.phone,
+      phone: data.phone,
+      email: undefined,
+      can_login: false,
+      is_guest: true,
+    } satisfies ContactPortalProfile);
+
+    return {
+      guest: data.guest,
+      phone: data.phone,
+      profile: profile ?? null,
+    };
   },
 };
 

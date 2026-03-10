@@ -1,9 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { contactPortalAuthApi, type ContactPortalProfile } from '@/services/api/contactPortalAuth';
+import {
+  contactPortalAuthApi,
+  type ContactPortalProfile,
+  type ContactPortalSession,
+} from '@/services/api/contactPortalAuth';
 
 interface ContactAuthState {
   isAuthenticated: boolean;
   contact: ContactPortalProfile | null;
+  isGuest: boolean;
 }
 
 interface ContactAuthContextType extends ContactAuthState {
@@ -11,6 +16,8 @@ interface ContactAuthContextType extends ContactAuthState {
   login: (identifier: string, password: string) => Promise<void>;
   signup: (data: { phone: string; password: string; email?: string; name?: string }) => Promise<void>;
   loginWithProfile: (profile: ContactPortalProfile) => void;
+  /** Mark the current session as guest with a synthetic profile. */
+  loginAsGuest: (phone: string) => void;
   logout: () => void;
   isLoading: boolean;
   error: string | null;
@@ -20,10 +27,12 @@ interface ContactAuthContextType extends ContactAuthState {
 const ContactAuthContext = createContext<ContactAuthContextType>({
   isAuthenticated: false,
   contact: null,
+  isGuest: false,
   hasBootstrapped: false,
   login: async () => {},
   signup: async () => {},
   loginWithProfile: () => {},
+  loginAsGuest: () => {},
   logout: () => {},
   isLoading: false,
   error: null,
@@ -36,6 +45,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [state, setState] = useState<ContactAuthState>({
     isAuthenticated: false,
     contact: null,
+    isGuest: false,
   });
   const [hasBootstrapped, setHasBootstrapped] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,11 +64,12 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const bootstrap = async () => {
       try {
-        let profile = await contactPortalAuthApi.getProfile();
-        if (!cancelled && profile) {
+        const session: ContactPortalSession | null = await contactPortalAuthApi.getSession();
+        if (!cancelled && session && session.profile) {
           setState({
             isAuthenticated: true,
-            contact: profile,
+            contact: session.profile,
+            isGuest: !!session.guest,
           });
         }
       } catch {
@@ -85,6 +96,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setState({
         isAuthenticated: true,
         contact: profile,
+        isGuest: !!profile.is_guest,
       });
     } catch (e: any) {
       setError(e?.message || 'Login failed. Please try again.');
@@ -103,6 +115,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setState({
           isAuthenticated: true,
           contact: profile,
+          isGuest: !!profile.is_guest,
         });
       } catch (e: any) {
         setError(e?.message || 'Signup failed. Please try again.');
@@ -115,13 +128,30 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   );
 
   const logout = useCallback(() => {
-    setState({ isAuthenticated: false, contact: null });
+    setState({ isAuthenticated: false, contact: null, isGuest: false });
   }, []);
 
   const loginWithProfile = useCallback((profile: ContactPortalProfile) => {
     setState({
       isAuthenticated: true,
       contact: profile,
+      isGuest: !!profile.is_guest,
+    });
+  }, []);
+
+  const loginAsGuest = useCallback((phone: string) => {
+    const guestProfile: ContactPortalProfile = {
+      contact_id: '',
+      name: phone,
+      phone,
+      email: undefined,
+      can_login: false,
+      is_guest: true,
+    };
+    setState({
+      isAuthenticated: true,
+      contact: guestProfile,
+      isGuest: true,
     });
   }, []);
 
@@ -135,6 +165,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
         login,
         signup,
         loginWithProfile,
+        loginAsGuest,
         logout,
         isLoading,
         error,

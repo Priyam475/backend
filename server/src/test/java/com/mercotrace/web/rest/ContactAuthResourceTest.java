@@ -352,7 +352,7 @@ class ContactAuthResourceTest {
 
     @Test
     @Transactional
-    void requestOtp_withUnregisteredPhone_returns400() throws Exception {
+    void requestOtp_withUnregisteredPhone_stillPersistsToken_andReturns200() throws Exception {
         ContactOtpRequestVM vm = new ContactOtpRequestVM();
         vm.setIdentifier("9876543210");
 
@@ -362,7 +362,11 @@ class ContactAuthResourceTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsBytes(vm))
             )
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("OK"));
+
+        long tokenCount = contactOtpTokenRepository.count();
+        org.assertj.core.api.Assertions.assertThat(tokenCount).isGreaterThanOrEqualTo(1);
     }
 
     @Test
@@ -403,8 +407,8 @@ class ContactAuthResourceTest {
 
     @Test
     @Transactional
-    void verifyOtp_withValidCode_issuesContactJwt_andMarksTokenConsumed() throws Exception {
-        createLoginCapableContact("9876543210", "otp-verify@example.com", "strongpass");
+    void verifyOtp_withValidCode_forExistingContact_issuesContactJwt_andMarksTokenConsumed() throws Exception {
+        Contact contact = createLoginCapableContact("9876543210", "otp-verify@example.com", "strongpass");
 
         ContactOtpToken token = new ContactOtpToken();
         token.setMobile("9876543210");
@@ -428,7 +432,9 @@ class ContactAuthResourceTest {
                     .content(objectMapper.writeValueAsBytes(vm))
             )
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(false))
             .andExpect(jsonPath("$.phone").value("9876543210"))
+            .andExpect(jsonPath("$.contact.id").value(contact.getId()))
             .andExpect(header().string(AUTHORIZATION, not(nullValue())))
             .andExpect(header().string(AUTHORIZATION, not(emptyString())))
             .andExpect(header().string("Set-Cookie", not(emptyString())));
@@ -518,7 +524,18 @@ class ContactAuthResourceTest {
 
     @Test
     @Transactional
-    void verifyOtp_withUnregisteredPhone_returns400() throws Exception {
+    void verifyOtp_withValidCode_forUnregisteredPhone_issuesGuestJwt_andMarksTokenConsumed() throws Exception {
+        ContactOtpToken token = new ContactOtpToken();
+        token.setMobile("9876543210");
+        token.setCode("1234");
+        token.setCreatedAt(Instant.now().minusSeconds(10));
+        token.setExpiresAt(Instant.now().plusSeconds(300));
+        token.setAttempts(0);
+        token.setMaxAttempts(5);
+        token.setLastRequestIp("127.0.0.1");
+        token.setConsumedAt(null);
+        token = contactOtpTokenRepository.saveAndFlush(token);
+
         ContactOtpVerifyVM vm = new ContactOtpVerifyVM();
         vm.setIdentifier("9876543210");
         vm.setOtp("1234");
@@ -529,7 +546,17 @@ class ContactAuthResourceTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsBytes(vm))
             )
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(true))
+            .andExpect(jsonPath("$.phone").value("9876543210"))
+            .andExpect(jsonPath("$.contact").doesNotExist())
+            .andExpect(header().string(AUTHORIZATION, not(nullValue())))
+            .andExpect(header().string(AUTHORIZATION, not(emptyString())))
+            .andExpect(header().string("Set-Cookie", not(emptyString())));
+
+        ContactOtpToken refreshed = contactOtpTokenRepository.findById(token.getId()).orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(refreshed.getConsumedAt()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(refreshed.getAttempts()).isGreaterThanOrEqualTo(1);
     }
 
     // ----- GET /api/portal/me -----
@@ -560,6 +587,36 @@ class ContactAuthResourceTest {
             .andExpect(jsonPath("$.id").value(contact.getId()))
             .andExpect(jsonPath("$.phone").value("9876543210"))
             .andExpect(jsonPath("$.email").value("me@example.com"));
+    }
+
+    // ----- GET /api/portal/session -----
+
+    @Test
+    @Transactional
+    void session_withContactToken_returnsNonGuestSession() throws Exception {
+        Contact contact = createLoginCapableContact("9876543210", "session@example.com", "strongpass");
+
+        ContactRegisterVM vm = new ContactRegisterVM();
+        vm.setPhone("9876543210");
+        vm.setPassword("strongpass");
+
+        ResultActions loginResult = mockMvc
+            .perform(
+                post("/api/portal/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsBytes(vm))
+            )
+            .andExpect(status().isOk());
+
+        String authHeader = loginResult.andReturn().getResponse().getHeader(AUTHORIZATION);
+        String token = authHeader != null && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+
+        mockMvc
+            .perform(get("/api/portal/session").header(AUTHORIZATION, "Bearer " + token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(false))
+            .andExpect(jsonPath("$.phone").value("9876543210"))
+            .andExpect(jsonPath("$.contact.id").value(contact.getId()));
     }
 
     private Contact createLoginCapableContact(String phone, String email, String rawPassword) {

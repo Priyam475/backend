@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 const ContactPortalProfilePage = () => {
-  const { contact, loginWithProfile, clearError } = useContactAuth();
+  const { contact, isGuest, loginWithProfile, clearError } = useContactAuth();
   const [name, setName] = useState(contact?.name ?? '');
   const [email, setEmail] = useState(contact?.email ?? '');
   const [address, setAddress] = useState('');
@@ -78,78 +78,105 @@ const ContactPortalProfilePage = () => {
       <header>
         <h2 className="text-lg font-semibold text-foreground">Profile</h2>
         <p className="text-xs text-muted-foreground">
-          Update your basic details and optionally change your password.
+          {isGuest
+            ? 'You are currently logged in as a guest. Register to save your details and manage your profile.'
+            : 'Update your basic details and optionally change your password.'}
         </p>
       </header>
 
-      {message && <p className="text-xs text-emerald-700 dark:text-emerald-400">{message}</p>}
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
-
-      <form onSubmit={handleSave} className="space-y-4 text-sm">
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
-          <Input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Your name"
-            className="h-10"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
-          <Input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="h-10"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Address</label>
-          <Input
-            value={address}
-            onChange={e => setAddress(e.target.value)}
-            placeholder="Address (optional)"
-            className="h-10"
-          />
-        </div>
-
-        <fieldset className="space-y-2 border border-emerald-100/70 dark:border-emerald-900/50 rounded-xl p-3">
-          <legend className="px-1 text-xs font-semibold text-muted-foreground">
-            Change Password (optional)
-          </legend>
-          <p className="text-[11px] text-muted-foreground">
-            To change your password, enter your current password and a new password with at least 6 characters.
+      {isGuest ? (
+        <div className="rounded-xl border border-dashed border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/10 p-4 text-xs space-y-2">
+          <p className="text-muted-foreground">
+            Guest sessions do not have a persistent profile. To update your details and create a
+            secure login, please register for a contact account.
           </p>
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Current password</label>
-            <Input
-              type="password"
-              value={currentPassword}
-              onChange={e => setCurrentPassword(e.target.value)}
-              className="h-10"
-              autoComplete="current-password"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">New password</label>
-            <Input
-              type="password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              className="h-10"
-              autoComplete="new-password"
-            />
-          </div>
-        </fieldset>
+          <Button
+            type="button"
+            className="h-9 rounded-lg px-3 text-xs"
+            onClick={() => {
+              window.location.href = '/portal/signup';
+            }}
+          >
+            Go to registration
+          </Button>
+        </div>
+      ) : (
+        <>
+          {message && <p className="text-xs text-emerald-700 dark:text-emerald-400">{message}</p>}
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
-        <Button type="submit" disabled={isSaving} className="h-10 rounded-lg px-4">
-          {isSaving ? 'Saving…' : 'Save changes'}
-        </Button>
-      </form>
+          <form onSubmit={handleSave} className="space-y-4 text-sm">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+              <Input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Your name"
+                className="h-10"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Email</label>
+              <Input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="h-10"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Address</label>
+              <Input
+                value={address}
+                onChange={e => setAddress(e.target.value)}
+                placeholder="Address (optional)"
+                className="h-10"
+              />
+            </div>
+
+            <fieldset className="space-y-2 border border-emerald-100/70 dark:border-emerald-900/50 rounded-xl p-3">
+              <legend className="px-1 text-xs font-semibold text-muted-foreground">
+                Change Password (optional)
+              </legend>
+              <p className="text-[11px] text-muted-foreground">
+                To change your password, enter your current password and a new password with at
+                least 6 characters.
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Current password
+                </label>
+                <Input
+                  type="password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  className="h-10"
+                  autoComplete="current-password"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  New password
+                </label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="h-10"
+                  autoComplete="new-password"
+                />
+              </div>
+            </fieldset>
+
+            <Button type="submit" disabled={isSaving} className="h-10 rounded-lg px-4">
+              {isSaving ? 'Saving…' : 'Save changes'}
+            </Button>
+          </form>
+        </>
+      )}
     </section>
   );
 };

@@ -121,7 +121,7 @@ const PortalModuleCard = memo(
 PortalModuleCard.displayName = 'PortalModuleCard';
 
 const ContactPortalDashboardPage = () => {
-  const { contact } = useContactAuth();
+  const { contact, isGuest } = useContactAuth();
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
   const { isDark, toggleTheme } = useTheme();
@@ -134,6 +134,10 @@ const ContactPortalDashboardPage = () => {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (isGuest) {
+        setIsLoading(false);
+        return;
+      }
       try {
         const [st, pu] = await Promise.all([
           contactPortalApi.getStatements(10),
@@ -157,7 +161,7 @@ const ContactPortalDashboardPage = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isGuest]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -201,7 +205,7 @@ const ContactPortalDashboardPage = () => {
 
               <div className="relative z-10">
                 <p className={cn('text-xs font-semibold uppercase tracking-wider text-white/70')}>
-                  Contact Portal
+                  {isGuest ? 'Guest session' : 'Contact Portal'}
                 </p>
                 <h1
                   className={cn(
@@ -221,7 +225,9 @@ const ContactPortalDashboardPage = () => {
                   )}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  Stay on top of your arrivals, purchases and statements.
+                  {isGuest
+                    ? 'Explore a read-only view. Register to see your real arrivals, purchases and statements.'
+                    : 'Stay on top of your arrivals, purchases and statements.'}
                 </p>
                 <p className="text-[11px] text-white/60 mt-2 flex items-center gap-1.5">
                   <LayoutDashboard className="w-3.5 h-3.5" />
@@ -254,6 +260,7 @@ const ContactPortalDashboardPage = () => {
               </p>
               <h1 className="text-2xl font-bold text-foreground mt-1">
                 Welcome, {contact?.name || contact?.phone}
+                {isGuest && <span className="text-sm text-muted-foreground ml-2">(guest)</span>}
               </h1>
             </div>
           </header>
@@ -261,22 +268,33 @@ const ContactPortalDashboardPage = () => {
 
         <section className="rounded-2xl bg-white/80 dark:bg-slate-900/80 shadow-lg shadow-emerald-500/10 border border-emerald-100/70 dark:border-emerald-900/40 p-5">
           <h2 className="text-sm font-semibold text-muted-foreground mb-2">
-            Your contact details
+            {isGuest ? 'Guest session details' : 'Your contact details'}
           </h2>
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-muted-foreground/80">Phone</dt>
               <dd className="font-medium text-foreground">{contact?.phone}</dd>
             </div>
-            <div>
-              <dt className="text-muted-foreground/80">Email</dt>
-              <dd className="font-medium text-foreground">
-                {contact?.email || (
-                  <span className="text-muted-foreground/60">Not provided</span>
-                )}
-              </dd>
-            </div>
+            {!isGuest && (
+              <div>
+                <dt className="text-muted-foreground/80">Email</dt>
+                <dd className="font-medium text-foreground">
+                  {contact?.email || (
+                    <span className="text-muted-foreground/60">Not provided</span>
+                  )}
+                </dd>
+              </div>
+            )}
           </dl>
+          {isGuest && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              You are browsing as a guest. To save your details and see your historical data,{' '}
+              <Link to="/portal/signup" className="underline font-semibold">
+                register for a contact login
+              </Link>
+              .
+            </p>
+          )}
         </section>
 
         {error && <p className="text-xs text-red-500">{error}</p>}
@@ -294,31 +312,41 @@ const ContactPortalDashboardPage = () => {
                 View all
               </Link>
             </div>
-            {isLoading && <p className="text-xs text-muted-foreground">Loading statements…</p>}
-            {!isLoading && !error && statements.length === 0 && (
-              <p className="text-xs text-muted-foreground">No statements yet.</p>
+            {isGuest ? (
+              <p className="text-xs text-muted-foreground">
+                Sign up or log in with a contact account to see your account statements.
+              </p>
+            ) : (
+              <>
+                {isLoading && (
+                  <p className="text-xs text-muted-foreground">Loading statements…</p>
+                )}
+                {!isLoading && !error && statements.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No statements yet.</p>
+                )}
+                <ul className="space-y-2 text-xs">
+                  {statements.map((s) => (
+                    <li
+                      key={s.document_id}
+                      className="flex items-center justify-between border-b border-border/40 pb-1 last:border-b-0"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground">{s.reference_number}</p>
+                        <p className="text-muted-foreground">
+                          {s.type} · {s.document_date}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                          ₹{Math.abs(s.outstanding_balance ?? 0).toLocaleString()}
+                        </p>
+                        <p className="text-muted-foreground">{s.status}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
-            <ul className="space-y-2 text-xs">
-              {statements.map((s) => (
-                <li
-                  key={s.document_id}
-                  className="flex items-center justify-between border-b border-border/40 pb-1 last:border-b-0"
-                >
-                  <div>
-                    <p className="font-medium text-foreground">{s.reference_number}</p>
-                    <p className="text-muted-foreground">
-                      {s.type} · {s.document_date}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-emerald-700 dark:text-emerald-400">
-                      ₹{Math.abs(s.outstanding_balance ?? 0).toLocaleString()}
-                    </p>
-                    <p className="text-muted-foreground">{s.status}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
 
           <div className="rounded-2xl bg-white/80 dark:bg-slate-900/80 shadow border border-emerald-100/70 dark:border-emerald-900/40 p-4">
@@ -333,28 +361,39 @@ const ContactPortalDashboardPage = () => {
                 View all
               </Link>
             </div>
-            {isLoading && <p className="text-xs text-muted-foreground">Loading purchases…</p>}
-            {!isLoading && purchases.length === 0 && !error && (
-              <p className="text-xs text-muted-foreground">No purchases yet.</p>
+            {isGuest ? (
+              <p className="text-xs text-muted-foreground">
+                Guest sessions don&apos;t show purchase history. Register or log in to view your
+                purchases.
+              </p>
+            ) : (
+              <>
+                {isLoading && (
+                  <p className="text-xs text-muted-foreground">Loading purchases…</p>
+                )}
+                {!isLoading && purchases.length === 0 && !error && (
+                  <p className="text-xs text-muted-foreground">No purchases yet.</p>
+                )}
+                <ul className="space-y-2 text-xs">
+                  {purchases.map((p) => (
+                    <li
+                      key={p.purchase_id}
+                      className="flex items-center justify-between border-b border-border/40 pb-1 last:border-b-0"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground">Purchase #{p.purchase_id}</p>
+                        <p className="text-muted-foreground">{p.purchase_date}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                          ₹{Math.abs(p.total_amount ?? 0).toLocaleString()}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
-            <ul className="space-y-2 text-xs">
-              {purchases.map((p) => (
-                <li
-                  key={p.purchase_id}
-                  className="flex items-center justify-between border-b border-border/40 pb-1 last:border-b-0"
-                >
-                  <div>
-                    <p className="font-medium text-foreground">Purchase #{p.purchase_id}</p>
-                    <p className="text-muted-foreground">{p.purchase_date}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-emerald-700 dark:text-emerald-400">
-                      ₹{Math.abs(p.total_amount ?? 0).toLocaleString()}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
         </section>
       </div>

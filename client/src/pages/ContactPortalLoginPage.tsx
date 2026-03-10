@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Eye, EyeOff, Lock, Mail, Phone, KeyRound } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Lock, Mail, Phone, KeyRound, UserPlus, LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useContactAuth } from '@/context/ContactAuthContext';
-import { contactPortalAuthApi } from '@/services/api/contactPortalAuth';
+import { contactPortalAuthApi, type ContactOtpVerifyResult } from '@/services/api/contactPortalAuth';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const loginBg = '/login-bg.webp';
 
@@ -23,7 +31,7 @@ type LoginMode = 'phone' | 'email';
 
 const ContactPortalLoginPage = () => {
   const navigate = useNavigate();
-  const { login, loginWithProfile, isLoading, error, clearError } = useContactAuth();
+  const { login, loginWithProfile, loginAsGuest, isLoading, error, clearError } = useContactAuth();
 
   const [loginMode, setLoginMode] = useState<LoginMode>('phone');
 
@@ -34,6 +42,10 @@ const ContactPortalLoginPage = () => {
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
+
+  // Guest/registration choice after successful OTP with no existing contact
+  const [guestDialogOpen, setGuestDialogOpen] = useState(false);
+  const [guestResult, setGuestResult] = useState<ContactOtpVerifyResult | null>(null);
 
   // Email + password state (email-only, no OTP)
   const [email, setEmail] = useState('');
@@ -92,9 +104,16 @@ const ContactPortalLoginPage = () => {
     setIsVerifyingOtp(true);
     clearError();
     try {
-      const profile = await contactPortalAuthApi.verifyOtp(phone, otp);
-      loginWithProfile(profile);
-      navigate('/portal', { replace: true });
+      const result = await contactPortalAuthApi.verifyOtp(phone, otp);
+      if (result.guest) {
+        setGuestResult(result);
+        setGuestDialogOpen(true);
+      } else if (result.profile) {
+        loginWithProfile(result.profile);
+        navigate('/portal', { replace: true });
+      } else {
+        toast.error('We could not complete sign-in. Please try again.');
+      }
     } catch (e: any) {
       toast.error(
         e?.message ||
@@ -103,6 +122,19 @@ const ContactPortalLoginPage = () => {
     } finally {
       setIsVerifyingOtp(false);
     }
+  };
+
+  const handleGuestLogin = () => {
+    if (!guestResult) return;
+    loginAsGuest(guestResult.phone);
+    setGuestDialogOpen(false);
+    navigate('/portal', { replace: true });
+  };
+
+  const handleContinueToSignup = () => {
+    if (!guestResult) return;
+    setGuestDialogOpen(false);
+    navigate('/portal/signup', { replace: false });
   };
 
   useEffect(() => {
@@ -532,6 +564,29 @@ const ContactPortalLoginPage = () => {
           </div>
         </main>
       </div>
+      <Dialog open={guestDialogOpen} onOpenChange={open => setGuestDialogOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No contact account found</DialogTitle>
+            <DialogDescription>
+              We verified this mobile number but couldn&apos;t find a contact portal account. You can
+              register now to save your details and see your history, or continue as a guest without
+              creating an account. You can use OTP again later to come back as a guest or register
+              when you&apos;re ready.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleContinueToSignup} className="flex-1 gap-2">
+              <UserPlus className="w-4 h-4" />
+              Continue to register
+            </Button>
+            <Button onClick={handleGuestLogin} className="flex-1 gap-2">
+              <LogIn className="w-4 h-4" />
+              Login as guest
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
