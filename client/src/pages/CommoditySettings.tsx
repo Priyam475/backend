@@ -11,6 +11,8 @@ import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { Commodity, CommodityConfiguration, ChargeType, AppliesTo } from '@/types/models';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { toast } from 'sonner';
+import { usePermissions } from '@/lib/permissions';
+import ForbiddenPage from '@/components/ForbiddenPage';
 
 import onionImg from '@/assets/commodities/onion.jpg';
 import potatoImg from '@/assets/commodities/potato.jpg';
@@ -82,6 +84,11 @@ function fullConfigToLocal(commodity: Commodity, full: FullCommodityConfigDto): 
 const CommoditySettings = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
+  const { canAccessModule, can } = usePermissions();
+  const canView = canAccessModule('Commodity Settings');
+  const canCreate = can('Commodity Settings', 'Create');
+  const canEdit = can('Commodity Settings', 'Edit');
+  const canDelete = can('Commodity Settings', 'Delete');
   const [items, setItems] = useState<LocalCommodityConfig[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +97,10 @@ const CommoditySettings = () => {
 
   useEffect(() => {
     const load = async () => {
+      if (!canView) {
+        setLoading(false);
+        return;
+      }
       try {
         const [commodities, fullConfigs] = await Promise.all([
           commodityApi.list(),
@@ -109,7 +120,7 @@ const CommoditySettings = () => {
       }
     };
     load();
-  }, []);
+  }, [canView]);
 
   const updateConfig = (index: number, updates: Partial<CommodityConfiguration>) => {
     setItems(prev => prev.map((item, i) => {
@@ -162,6 +173,10 @@ const CommoditySettings = () => {
   };
 
   const handleAddCommodity = async () => {
+    if (!canCreate) {
+      toast.error('You do not have permission to add commodities.');
+      return;
+    }
     const name = newCommodityName.trim();
     if (!name) { toast.error('Please enter a commodity name'); return; }
     // Check duplicate
@@ -190,6 +205,10 @@ const CommoditySettings = () => {
   };
 
   const handleDeleteCommodity = async (index: number) => {
+    if (!canDelete) {
+      toast.error('You do not have permission to delete commodities.');
+      return;
+    }
     const item = items[index];
     const name = item.commodity.commodity_name || 'this commodity';
     await commodityApi.remove(item.commodity.commodity_id);
@@ -199,6 +218,10 @@ const CommoditySettings = () => {
   };
 
   const saveSettings = async (index: number) => {
+    if (!canEdit) {
+      toast.error('You do not have permission to edit commodity settings.');
+      return;
+    }
     const item = items[index];
     const cfg = item.config;
     const commodityName = item.commodity.commodity_name || 'Commodity';
@@ -307,6 +330,10 @@ const CommoditySettings = () => {
     }
   };
 
+  if (!canView && !loading) {
+    return <ForbiddenPage moduleName="Commodity Settings" />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-[100dvh] flex items-center justify-center bg-background">
@@ -391,7 +418,11 @@ const CommoditySettings = () => {
                   onKeyDown={e => e.key === 'Enter' && handleAddCommodity()}
                   className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-blue-200 dark:border-blue-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base font-medium flex-1"
                 />
-                <Button onClick={handleAddCommodity} className="h-12 px-5 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg shadow-blue-500/25">
+              <Button
+                onClick={handleAddCommodity}
+                disabled={!canCreate}
+                className="h-12 px-5 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg shadow-blue-500/25 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
                   Add
                 </Button>
                 <Button variant="ghost" onClick={() => { setShowAddForm(false); setNewCommodityName(''); }} className="h-12 px-3 rounded-xl">
@@ -401,7 +432,9 @@ const CommoditySettings = () => {
             </motion.div>
           ) : (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <Button onClick={() => setShowAddForm(true)}
+              <Button
+                onClick={() => canCreate ? setShowAddForm(true) : toast.error('You do not have permission to add commodities.')}
+                disabled={!canCreate}
                 className="w-full h-14 rounded-2xl font-bold text-base bg-gradient-to-r from-blue-500 via-violet-500 to-purple-600 hover:from-blue-600 hover:via-violet-600 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 transition-all hover:shadow-xl hover:scale-[1.01] gap-2">
                 <Plus className="w-5 h-5" /> Add Commodity
               </Button>
@@ -447,8 +480,12 @@ const CommoditySettings = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteCommodity(index); }}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteCommodity(index);
+                    }}
+                    disabled={!canDelete}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Remove commodity"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -928,7 +965,11 @@ const CommoditySettings = () => {
                         {item.charges.length === 0 && <p className="text-xs text-cyan-600/60 text-center py-3 italic">No charges added yet. Tap + to add one.</p>}
                       </div>
 
-                      <Button onClick={() => saveSettings(index)} className="w-full h-13 rounded-xl font-bold text-base bg-gradient-to-r from-blue-500 via-violet-500 to-purple-600 hover:from-blue-600 hover:via-violet-600 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 transition-all hover:shadow-xl hover:scale-[1.01]">
+                      <Button
+                        onClick={() => saveSettings(index)}
+                        disabled={!canEdit}
+                        className="w-full h-13 rounded-xl font-bold text-base bg-gradient-to-r from-blue-500 via-violet-500 to-purple-600 hover:from-blue-600 hover:via-violet-600 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 transition-all hover:shadow-xl hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
                         <Save className="w-5 h-5 mr-2" /> Save {cName} Settings
                       </Button>
                     </div>

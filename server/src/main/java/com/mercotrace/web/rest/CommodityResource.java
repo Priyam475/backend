@@ -1,6 +1,7 @@
 package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.CommodityRepository;
+import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.CommodityConfigService;
 import com.mercotrace.service.CommodityService;
 import com.mercotrace.service.TraderContextService;
@@ -18,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import tech.jhipster.web.util.HeaderUtil;
 import tech.jhipster.web.util.ResponseUtil;
@@ -66,6 +68,7 @@ public class CommodityResource {
      * or with status {@code 400 (Bad Request)} if the commodity has already an ID or duplicate name.
      */
     @PostMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_CREATE + "\")")
     public ResponseEntity<CommodityDTO> createCommodity(@Valid @RequestBody CommodityDTO commodityDTO) throws URISyntaxException {
         LOG.debug("REST request to save Commodity : {}", commodityDTO);
         if (commodityDTO.getId() != null) {
@@ -94,6 +97,7 @@ public class CommodityResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated commodityDTO.
      */
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_EDIT + "\")")
     public ResponseEntity<CommodityDTO> updateCommodity(
         @PathVariable(value = "id", required = false) final Long id,
         @Valid @RequestBody CommodityDTO commodityDTO
@@ -139,6 +143,7 @@ public class CommodityResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the updated commodityDTO.
      */
     @PatchMapping(value = "/{id}", consumes = { "application/json", "application/merge-patch+json" })
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_EDIT + "\")")
     public ResponseEntity<CommodityDTO> partialUpdateCommodity(
         @PathVariable(value = "id", required = false) final Long id,
         @NotNull @RequestBody CommodityDTO commodityDTO
@@ -174,6 +179,7 @@ public class CommodityResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of commodities in body.
      */
     @GetMapping("")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_VIEW + "\")")
     public ResponseEntity<List<CommodityDTO>> getAllCommodities() {
         LOG.debug("REST request to get all Commodities for current trader");
         Long traderId = traderContextService.getCurrentTraderId();
@@ -188,6 +194,7 @@ public class CommodityResource {
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and with body the commodityDTO, or with status {@code 404 (Not Found)}.
      */
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_VIEW + "\")")
     public ResponseEntity<CommodityDTO> getCommodity(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Commodity : {}", id);
         Long traderId = traderContextService.getCurrentTraderId();
@@ -201,6 +208,7 @@ public class CommodityResource {
      * {@code GET  /commodities/full-configs} : get full config for all commodities (for billing/weighing pages).
      */
     @GetMapping("/full-configs")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_VIEW + "\")")
     public ResponseEntity<java.util.List<FullCommodityConfigDTO>> getAllFullConfigs() {
         LOG.debug("REST request to get all full configs");
         return ResponseEntity.ok().body(commodityConfigService.getAllFullConfigs());
@@ -210,6 +218,7 @@ public class CommodityResource {
      * {@code GET  /commodities/:id/full-config} : get full config (config, deduction rules, hamali slabs, dynamic charges) for the commodity.
      */
     @GetMapping("/{id}/full-config")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_VIEW + "\")")
     public ResponseEntity<FullCommodityConfigDTO> getFullConfig(@PathVariable("id") Long id) {
         LOG.debug("REST request to get full config for Commodity : {}", id);
         FullCommodityConfigDTO dto = commodityConfigService.getFullConfig(id);
@@ -220,6 +229,7 @@ public class CommodityResource {
      * {@code PUT  /commodities/:id/full-config} : update full config for the commodity. All config data stored in DB with audit.
      */
     @PutMapping("/{id}/full-config")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_EDIT + "\")")
     public ResponseEntity<FullCommodityConfigDTO> updateFullConfig(
         @PathVariable("id") Long id,
         @Valid @RequestBody FullCommodityConfigDTO fullConfig
@@ -244,6 +254,7 @@ public class CommodityResource {
      * @return the {@link ResponseEntity} with status {@code 204 (NO_CONTENT)}.
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_DELETE + "\")")
     public ResponseEntity<Void> deleteCommodity(@PathVariable("id") Long id) {
         LOG.debug("REST request to delete Commodity : {}", id);
         Long traderId = traderContextService.getCurrentTraderId();
