@@ -143,6 +143,65 @@ describe('Contact Portal Data API', () => {
     });
   });
 
+  // --- RBAC: trader JWT must not access contact portal data (Rule 2) ---
+
+  describe('RBAC (Rule 2) - trader vs contact portal data', function () {
+    const sampleEndpoint = PORTAL_STATEMENTS;
+
+    it('TRADER JWT cannot access contact-only data endpoints (returns 401/403)', function () {
+      const traderLogin = Cypress.env('traderLogin');
+      const traderPassword = Cypress.env('traderPassword');
+      if (!traderLogin || !traderPassword) {
+        this.skip();
+        return;
+      }
+
+      cy.request({
+        method: 'POST',
+        url: `${apiUrl()}/api/auth/login`,
+        body: { username: traderLogin, password: traderPassword },
+        failOnStatusCode: false,
+      }).then((loginRes) => {
+        if (loginRes.status !== 200) {
+          this.skip();
+          return;
+        }
+        const h = loginRes.headers['authorization'] || loginRes.headers['Authorization'];
+        const headerVal = Array.isArray(h) ? h[0] : h;
+        if (!headerVal || typeof headerVal !== 'string') {
+          this.skip();
+          return;
+        }
+        const traderToken = headerVal.replace(/^Bearer\s+/i, '').trim();
+
+        const endpoints = [
+          { method: 'GET', path: PORTAL_STATEMENTS },
+          { method: 'GET', path: PORTAL_PURCHASES },
+          { method: 'GET', path: PORTAL_ARRIVALS },
+          { method: 'GET', path: PORTAL_SETTLEMENTS },
+          { method: 'PUT', path: PORTAL_PROFILE },
+        ] as const;
+
+        endpoints.forEach(({ method, path }) => {
+          cy.request({
+            method,
+            url: `${apiUrl()}${path}`,
+            headers: authHeaders(traderToken),
+            failOnStatusCode: false,
+          }).then((res) => {
+            expect(
+              res.status,
+              res.status === 200
+                ? `Critical RBAC bug: trader token must not access ${method} ${path}`
+                : undefined
+            ).to.be.oneOf([401, 403]);
+            expectErrorSanitized(res.body);
+          });
+        });
+      });
+    });
+  });
+
   // --- PUT /api/portal/profile ---
 
   describe('PUT /api/portal/profile', function () {

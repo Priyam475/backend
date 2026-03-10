@@ -19,6 +19,7 @@ const PORTAL_LOGIN = '/api/portal/auth/login';
 const PORTAL_OTP_REQUEST = '/api/portal/auth/otp/request';
 const PORTAL_OTP_VERIFY = '/api/portal/auth/otp/verify';
 const PORTAL_ME = '/api/portal/me';
+const PORTAL_SESSION = '/api/portal/session';
 
 const SENSITIVE_KEYS = ['password', 'passwordHash', 'token', 'refreshToken', 'secretKey'];
 
@@ -407,6 +408,21 @@ describe('Contact Portal Auth API', () => {
       });
     });
 
+    it('authentication enforcement (Rule 1): with malformed/invalid token returns 401', () => {
+      cy.request({
+        method: 'GET',
+        url: `${apiUrl()}${PORTAL_ME}`,
+        headers: { Authorization: 'Bearer this.is.not.a.valid.jwt' },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(
+          res.status,
+          res.status === 200 ? 'Security bug: /api/portal/me must not accept invalid JWT' : undefined
+        ).to.eq(401);
+        expectErrorSanitized(res.body);
+      });
+    });
+
     it('functional: with valid CONTACT JWT returns 200 and ContactDTO', function () {
       if (!ctx.token) {
         this.skip();
@@ -490,6 +506,105 @@ describe('Contact Portal Auth API', () => {
         )
           .to.be.a('string')
           .and.not.empty;
+      });
+    });
+  });
+
+  // --- 6. GET /api/portal/session ---
+
+  describe('GET /api/portal/session', () => {
+    it('authentication enforcement (Rule 1): without token returns 401', () => {
+      cy.request({
+        method: 'GET',
+        url: `${apiUrl()}${PORTAL_SESSION}`,
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(
+          res.status,
+          res.status === 200 ? 'Security bug: /api/portal/session must not succeed without token' : undefined
+        ).to.eq(401);
+        expectErrorSanitized(res.body);
+      });
+    });
+
+    it('authentication enforcement (Rule 1): with malformed/invalid token returns 401', () => {
+      cy.request({
+        method: 'GET',
+        url: `${apiUrl()}${PORTAL_SESSION}`,
+        headers: { Authorization: 'Bearer not.a.real.jwt' },
+        failOnStatusCode: false,
+      }).then((res) => {
+        expect(
+          res.status,
+          res.status === 200 ? 'Security bug: /api/portal/session must not accept invalid JWT' : undefined
+        ).to.eq(401);
+        expectErrorSanitized(res.body);
+      });
+    });
+
+    it('functional: CONTACT token returns non-guest session with embedded ContactDTO', function () {
+      if (!ctx.token) {
+        this.skip();
+        return;
+      }
+
+      cy.request({
+        method: 'GET',
+        url: `${apiUrl()}${PORTAL_SESSION}`,
+        headers: authHeaders(ctx.token),
+      }).then((res) => {
+        expect(res.status).to.eq(200);
+        expect(res.body).to.have.property('guest', false);
+        expect(res.body).to.have.property('phone').and.to.be.a('string');
+        expect(res.body).to.have.property('contact');
+        const contact = res.body.contact as Record<string, unknown>;
+        expect(contact).to.have.property('id').and.to.be.a('number');
+        expect(contact).to.have.property('phone').and.to.be.a('string');
+        expectNoSensitiveData(res.body);
+        expectNoSensitiveData(contact);
+      });
+    });
+
+    it('RBAC (Rule 2): TRADER JWT cannot access /api/portal/session (must return 401/403)', function () {
+      const traderLogin = Cypress.env('traderLogin');
+      const traderPassword = Cypress.env('traderPassword');
+      if (!traderLogin || !traderPassword) {
+        this.skip();
+        return;
+      }
+
+      cy.request({
+        method: 'POST',
+        url: `${apiUrl()}/api/auth/login`,
+        body: { username: traderLogin, password: traderPassword },
+        failOnStatusCode: false,
+      }).then((loginRes) => {
+        if (loginRes.status !== 200) {
+          this.skip();
+          return;
+        }
+        const h = loginRes.headers['authorization'] || loginRes.headers['Authorization'];
+        const headerVal = Array.isArray(h) ? h[0] : h;
+        if (!headerVal || typeof headerVal !== 'string') {
+          this.skip();
+          return;
+        }
+        const traderToken = headerVal.replace(/^Bearer\s+/i, '').trim();
+
+        cy.request({
+          method: 'GET',
+          url: `${apiUrl()}${PORTAL_SESSION}`,
+          headers: authHeaders(traderToken),
+          failOnStatusCode: false,
+        }).then((res) => {
+          expect(
+            res.status,
+            res.status === 200
+              ? 'Critical RBAC bug: trader token must not access /api/portal/session'
+              : undefined
+          ).to.be.oneOf([401, 403]);
+          expectErrorSanitized(res.body);
+        });
       });
     });
   });

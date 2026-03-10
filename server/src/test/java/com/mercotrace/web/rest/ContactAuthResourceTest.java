@@ -10,12 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mercotrace.IntegrationTest;
 import com.mercotrace.domain.Contact;
 import com.mercotrace.domain.ContactOtpToken;
 import com.mercotrace.repository.ContactOtpTokenRepository;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.security.SecurityUtils;
 import com.mercotrace.web.rest.vm.ContactOtpRequestVM;
 import com.mercotrace.web.rest.vm.ContactOtpVerifyVM;
 import com.mercotrace.web.rest.vm.ContactRegisterVM;
@@ -26,6 +28,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -65,6 +69,9 @@ class ContactAuthResourceTest {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private JwtDecoder jwtDecoder;
 
     // ----- POST /api/auth/register-contact (self-onboarding) -----
 
@@ -540,7 +547,7 @@ class ContactAuthResourceTest {
         vm.setIdentifier("9876543210");
         vm.setOtp("1234");
 
-        mockMvc
+        ResultActions verifyResult = mockMvc
             .perform(
                 post("/api/portal/auth/otp/verify")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -557,6 +564,16 @@ class ContactAuthResourceTest {
         ContactOtpToken refreshed = contactOtpTokenRepository.findById(token.getId()).orElseThrow();
         org.assertj.core.api.Assertions.assertThat(refreshed.getConsumedAt()).isNotNull();
         org.assertj.core.api.Assertions.assertThat(refreshed.getAttempts()).isGreaterThanOrEqualTo(1);
+
+        String authHeader = verifyResult.andReturn().getResponse().getHeader(AUTHORIZATION);
+        String jwtToken = authHeader != null && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+        Jwt jwt = jwtDecoder.decode(jwtToken);
+        String authorities = jwt.getClaimAsString(SecurityUtils.AUTHORITIES_CLAIM);
+        Object contactIdClaim = jwt.getClaim(SecurityUtils.CONTACT_ID_CLAIM);
+
+        org.assertj.core.api.Assertions.assertThat(authorities).isEqualTo("ROLE_CONTACT_GUEST");
+        org.assertj.core.api.Assertions.assertThat(contactIdClaim).isNull();
+        org.assertj.core.api.Assertions.assertThat(contactRepository.findOneByPhone("9876543210")).isEmpty();
     }
 
     // ----- GET /api/portal/me -----
@@ -617,6 +634,83 @@ class ContactAuthResourceTest {
             .andExpect(jsonPath("$.guest").value(false))
             .andExpect(jsonPath("$.phone").value("9876543210"))
             .andExpect(jsonPath("$.contact.id").value(contact.getId()));
+    }
+
+    @Test
+    @Transactional
+    void session_withGuestToken_returnsGuestSessionWithoutContact() throws Exception {
+        ContactOtpToken token = new ContactOtpToken();
+        token.setMobile("9876543210");
+        token.setCode("1234");
+        token.setCreatedAt(Instant.now().minusSeconds(10));
+        token.setExpiresAt(Instant.now().plusSeconds(300));
+        token.setAttempts(0);
+        token.setMaxAttempts(5);
+        token.setLastRequestIp("127.0.0.1");
+        token.setConsumedAt(null);
+        contactOtpTokenRepository.saveAndFlush(token);
+
+        ContactOtpVerifyVM vm = new ContactOtpVerifyVM();
+        vm.setIdentifier("9876543210");
+        vm.setOtp("1234");
+
+        ResultActions verifyResult = mockMvc
+            .perform(
+                post("/api/portal/auth/otp/verify")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsBytes(vm))
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(true))
+            .andExpect(jsonPath("$.phone").value("9876543210"));
+
+        String authHeader = verifyResult.andReturn().getResponse().getHeader(AUTHORIZATION);
+        String jwtToken = authHeader != null && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+
+        ResultActions sessionResult = mockMvc
+            .perform(get("/api/portal/session").header(AUTHORIZATION, "Bearer " + jwtToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(true))
+            .andExpect(jsonPath("$.phone").value("9876543210"));
+
+        String sessionBody = sessionResult.andReturn().getResponse().getContentAsString();
+        JsonNode sessionJson = objectMapper.readTree(sessionBody);
+        org.assertj.core.api.Assertions.assertThat(sessionJson.get("contact").isNull()).isTrue();
+    }
+
+    @Test
+    @Transactional
+    void portalData_withGuestToken_cannotAccessContactOnlyEndpoints() throws Exception {
+        ContactOtpToken token = new ContactOtpToken();
+        token.setMobile("9876543210");
+        token.setCode("1234");
+        token.setCreatedAt(Instant.now().minusSeconds(10));
+        token.setExpiresAt(Instant.now().plusSeconds(300));
+        token.setAttempts(0);
+        token.setMaxAttempts(5);
+        token.setLastRequestIp("127.0.0.1");
+        token.setConsumedAt(null);
+        contactOtpTokenRepository.saveAndFlush(token);
+
+        ContactOtpVerifyVM vm = new ContactOtpVerifyVM();
+        vm.setIdentifier("9876543210");
+        vm.setOtp("1234");
+
+        ResultActions verifyResult = mockMvc
+            .perform(
+                post("/api/portal/auth/otp/verify")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsBytes(vm))
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.guest").value(true));
+
+        String authHeader = verifyResult.andReturn().getResponse().getHeader(AUTHORIZATION);
+        String jwtToken = authHeader != null && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : authHeader;
+
+        mockMvc
+            .perform(get("/api/portal/arrivals").header(AUTHORIZATION, "Bearer " + jwtToken))
+            .andExpect(status().isForbidden());
     }
 
     private Contact createLoginCapableContact(String phone, String email, String rawPassword) {
