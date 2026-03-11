@@ -1,4 +1,4 @@
-import { apiFetch } from './http';
+import { apiFetch, captureAuthTokenFromResponse } from './http';
 
 type ProblemDetails = {
   title?: string;
@@ -95,6 +95,9 @@ export const contactPortalAuthApi = {
     }
 
     const dto: ContactDto = await res.json();
+
+    // Best-effort: capture contact JWT when backend issues one.
+    captureAuthTokenFromResponse(res, 'contact');
     return mapDtoToProfile(dto);
   },
 
@@ -137,6 +140,9 @@ export const contactPortalAuthApi = {
     }
 
     const dto: ContactDto = await res.json();
+
+    // Capture contact portal JWT for native shells and web.
+    captureAuthTokenFromResponse(res, 'contact');
     return mapDtoToProfile(dto);
   },
 
@@ -219,6 +225,9 @@ export const contactPortalAuthApi = {
     }
 
     const data: { guest: boolean; phone: string; contact?: ContactDto | null } = await res.json();
+
+    // OTP login can also carry JWT headers; capture when present.
+    captureAuthTokenFromResponse(res, 'contact');
     const profile = data.contact ? mapDtoToProfile(data.contact) : ({
       contact_id: '',
       name: data.phone,

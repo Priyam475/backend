@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { AuthState, Trader, User } from '@/types/models';
 import { authApi } from '@/services/api';
+import { setTraderToken } from '@/services/api/tokenStore';
 
 interface AuthContextType extends AuthState {
   /** True once initial auth check (getProfile) has completed. Used by ProtectedRoute to avoid redirecting before bootstrap. */
@@ -153,6 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(() => {
     setState({ isAuthenticated: false, user: null, trader: null });
+    setTraderToken(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { User } from '@/types/models';
 import { adminAuthApi } from '@/services/api/adminAuth';
+import { setAdminToken } from '@/services/api/tokenStore';
 
 interface AdminAuthState {
   isAuthenticated: boolean;
@@ -82,6 +83,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const logout = useCallback(() => {
     setState({ isAuthenticated: false, user: null });
+    setAdminToken(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);

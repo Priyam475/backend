@@ -1,5 +1,6 @@
 import type { User } from '@/types/models';
-import { apiFetch } from './http';
+import { apiFetch, captureAuthTokenFromResponse } from './http';
+import { setAdminToken } from './tokenStore';
 
 export const adminAuthApi = {
   async login(email: string, password: string): Promise<{ user: User }> {
@@ -36,6 +37,13 @@ export const adminAuthApi = {
     }
 
     const data = await res.json();
+
+    // Admin login returns a JWT token; prefer explicit token field, fall back to Authorization header.
+    if (data && typeof (data as any).token === 'string') {
+      setAdminToken((data as any).token as string);
+    } else {
+      captureAuthTokenFromResponse(res, 'admin');
+    }
 
     const user: User = {
       user_id: data.user.user_id,

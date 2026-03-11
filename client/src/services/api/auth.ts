@@ -1,5 +1,5 @@
 import type { Trader, User } from '@/types/models';
-import { apiFetch } from './http';
+import { apiFetch, captureAuthTokenFromResponse } from './http';
 
 /** Default message when we cannot show a specific validation message. */
 const REGISTRATION_FAILED = 'Registration failed. Please try again.';
@@ -91,6 +91,9 @@ export const authApi = {
 
     const dataRes = await res.json();
 
+    // Best-effort: capture JWT from headers for native shells where cookies are unreliable.
+    captureAuthTokenFromResponse(res, 'trader');
+
     const user: User = {
       user_id: dataRes.user.user_id,
       trader_id: dataRes.user.trader_id,
@@ -159,6 +162,9 @@ export const authApi = {
     }
 
     const data = await res.json();
+
+    // Capture trader JWT for use in Authorization header (web + Capacitor).
+    captureAuthTokenFromResponse(res, 'trader');
 
     const user: User = {
       user_id: data.user.user_id,
@@ -303,6 +309,9 @@ export const authApi = {
     }
 
     const data = await res.json();
+
+    // OTP login issues a JWT via same auth pipeline; capture it for native shells.
+    captureAuthTokenFromResponse(res, 'trader');
 
     const user: User = {
       user_id: data.user.user_id,

@@ -4,6 +4,7 @@ import {
   type ContactPortalProfile,
   type ContactPortalSession,
 } from '@/services/api/contactPortalAuth';
+import { setContactToken } from '@/services/api/tokenStore';
 
 interface ContactAuthState {
   isAuthenticated: boolean;
@@ -129,6 +130,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const logout = useCallback(() => {
     setState({ isAuthenticated: false, contact: null, isGuest: false });
+    setContactToken(null);
   }, []);
 
   const loginWithProfile = useCallback((profile: ContactPortalProfile) => {
