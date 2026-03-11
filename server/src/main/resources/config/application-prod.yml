@@ -97,6 +97,9 @@ jhipster:
   # CORS configuration for production (applies to all APIs, including /api/portal/**)
   cors:
     allowed-origins:
+      - http://localhost:8100
+      - https://localhost:8100
+      - http://localhost:8081
       - https://mercotrace.aau.co.in
       - https://merco.qualityoutsidethebox.org
       - https://mercotrace.qualityoutsidethebox.org
