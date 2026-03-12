@@ -82,15 +82,21 @@ public class SecurityConfiguration {
             .securityMatcher(new OrRequestMatcher(
                 mvc.pattern(HttpMethod.GET, "/api/business-categories"),
                 mvc.pattern(HttpMethod.GET, "/api/business-categories/**"),
+                // Trader public auth endpoints
                 mvc.pattern(HttpMethod.POST, "/api/auth/register"),
                 mvc.pattern(HttpMethod.POST, "/api/auth/login"),
                 mvc.pattern(HttpMethod.POST, "/api/auth/otp/request"),
                 mvc.pattern(HttpMethod.POST, "/api/auth/otp/verify"),
+                mvc.pattern(HttpMethod.POST, "/api/auth/logout"),
                 // Contact Portal public auth endpoints
                 mvc.pattern(HttpMethod.POST, "/api/auth/register-contact"),
                 mvc.pattern(HttpMethod.POST, "/api/portal/auth/login"),
                 mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/request"),
-                mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/verify")
+                mvc.pattern(HttpMethod.POST, "/api/portal/auth/otp/verify"),
+                mvc.pattern(HttpMethod.POST, "/api/portal/auth/logout"),
+                // Admin public auth endpoints
+                mvc.pattern(HttpMethod.POST, "/api/admin/auth/login"),
+                mvc.pattern(HttpMethod.POST, "/api/admin/auth/logout")
             ))
             .cors(withDefaults())
             .csrf(csrf -> csrf.disable())
