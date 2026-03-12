@@ -101,17 +101,9 @@ const App = () => (
                 <Route path="/" element={<SplashScreen />} />
                 <Route path="/onboarding" element={<OnboardingScreen />} />
                 <Route path="/login" element={<LoginScreen />} />
-                <Route
-                  path="/portal/login"
-                  element={
-                    <ContactPortalLoginPage />
-                  }
-                />
-                {/* Legacy /portal/signup path retained as redirect to canonical /contact-registartion */}
-                <Route
-                  path="/portal/signup"
-                  element={<LoginScreen />}
-                />
+                {/* Legacy /portal/login & /portal/signup paths — redirect to unified /login */}
+                <Route path="/portal/login" element={<Navigate to="/login" replace />} />
+                <Route path="/portal/signup" element={<Navigate to="/login" replace />} />
                 <Route
                   path="/contact-registartion"
                   element={

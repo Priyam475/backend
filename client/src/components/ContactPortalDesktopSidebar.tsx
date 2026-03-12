@@ -37,7 +37,7 @@ const ContactPortalDesktopSidebar = () => {
 
   const handleLogout = async () => {
     await Promise.resolve(logout());
-    navigate('/portal/login');
+    navigate('/login');
   };
 
   return (
