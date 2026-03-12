@@ -8,7 +8,7 @@ public class TraderMobileAlreadyRegisteredException extends ConflictAlertExcepti
     public TraderMobileAlreadyRegisteredException() {
         super(
             ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
-            "A trader is already registered with this mobile number.",
+            "This mobile number is already in use.",
             "traderRegistration",
             "traderMobileExists"
         );

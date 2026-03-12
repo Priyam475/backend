@@ -29,5 +29,7 @@ public interface AdminUserRepository extends JpaRepository<AdminUser, Long> {
     Optional<AdminUser> findOneByLogin(String login);
 
     Optional<AdminUser> findOneByEmailIgnoreCase(String email);
+
+    Optional<AdminUser> findOneByMobile(String mobile);
 }
 

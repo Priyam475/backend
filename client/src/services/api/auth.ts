@@ -16,7 +16,7 @@ async function parseRegistrationError(res: Response): Promise<string> {
   const status = res.status;
   try {
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const problem = await res.json();
       const detail =
         typeof problem.detail === 'string' ? problem.detail.trim() : '';
@@ -138,7 +138,7 @@ export const authApi = {
       let message = 'Login failed. Please try again.';
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
           const problem = await res.json();
           if (typeof problem.detail === 'string' && problem.detail.includes('Invalid email or password')) {
             message = 'Invalid email or password';
@@ -259,7 +259,7 @@ export const authApi = {
       let message = 'Failed to send OTP. Please try again.';
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
           const problem = await res.json();
           if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
@@ -289,7 +289,7 @@ export const authApi = {
       let message = 'OTP verification failed. Please try again.';
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
           const problem = await res.json();
           if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;

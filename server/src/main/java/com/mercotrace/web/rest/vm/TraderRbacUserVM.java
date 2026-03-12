@@ -10,6 +10,7 @@ public class TraderRbacUserVM {
     private Long id;
     private String login;
     private String email;
+    private String mobile;
     private String fullName;
     private Boolean activated;
     private String roleInTrader;
@@ -37,6 +38,14 @@ public class TraderRbacUserVM {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getMobile() {
+        return mobile;
+    }
+
+    public void setMobile(String mobile) {
+        this.mobile = mobile;
     }
 
     public String getFullName() {

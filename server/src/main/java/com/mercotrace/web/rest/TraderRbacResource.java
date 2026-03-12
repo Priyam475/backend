@@ -60,6 +60,9 @@ public class TraderRbacResource {
     private final UserTraderRepository userTraderRepository;
     private final UserRoleRepository userRoleRepository;
     private final RbacAuthorityService rbacAuthorityService;
+    private final com.mercotrace.repository.TraderRepository traderRepository;
+    private final com.mercotrace.repository.ContactRepository contactRepository;
+    private final com.mercotrace.admin.identity.AdminUserRepository adminUserRepository;
 
     public TraderRbacResource(
         TraderContextService traderContextService,
@@ -69,7 +72,10 @@ public class TraderRbacResource {
         UserRepository userRepository,
         UserTraderRepository userTraderRepository,
         UserRoleRepository userRoleRepository,
-        RbacAuthorityService rbacAuthorityService
+        RbacAuthorityService rbacAuthorityService,
+        com.mercotrace.repository.TraderRepository traderRepository,
+        com.mercotrace.repository.ContactRepository contactRepository,
+        com.mercotrace.admin.identity.AdminUserRepository adminUserRepository
     ) {
         this.traderContextService = traderContextService;
         this.roleRepository = roleRepository;
@@ -79,6 +85,9 @@ public class TraderRbacResource {
         this.userTraderRepository = userTraderRepository;
         this.userRoleRepository = userRoleRepository;
         this.rbacAuthorityService = rbacAuthorityService;
+        this.traderRepository = traderRepository;
+        this.contactRepository = contactRepository;
+        this.adminUserRepository = adminUserRepository;
     }
 
     // -------------------------------------------------------------------------
@@ -270,6 +279,7 @@ public class TraderRbacResource {
             vm.setId(user.getId());
             vm.setLogin(user.getLogin());
             vm.setEmail(user.getEmail());
+            vm.setMobile(user.getMobile());
             vm.setActivated(user.isActivated());
             vm.setFullName(buildFullName(user.getFirstName(), user.getLastName()));
             vm.setRoleInTrader(mapping.getRoleInTrader());
@@ -309,6 +319,11 @@ public class TraderRbacResource {
             login = email;
         }
 
+        String mobile = vm.getMobile() != null ? vm.getMobile().trim() : null;
+        if (mobile != null && !mobile.isEmpty()) {
+            assertMobileAvailableForTraderStaff(mobile, null);
+        }
+
         // Delegate uniqueness checks and password handling to UserService.registerUser.
         AdminUserDTO userDTO = new AdminUserDTO();
         userDTO.setLogin(login);
@@ -326,6 +341,9 @@ public class TraderRbacResource {
         boolean activated = vm.getActivated() != null ? vm.getActivated() : true;
         user.setActivated(activated);
         user.setActivationKey(null);
+        if (mobile != null && !mobile.isEmpty()) {
+            user.setMobile(mobile);
+        }
         user = userRepository.save(user);
 
         // Create UserTrader mapping for this trader.
@@ -364,6 +382,7 @@ public class TraderRbacResource {
         result.setId(user.getId());
         result.setLogin(user.getLogin());
         result.setEmail(user.getEmail());
+        result.setMobile(user.getMobile());
         result.setActivated(user.isActivated());
         result.setFullName(buildFullName(user.getFirstName(), user.getLastName()));
         result.setRoleInTrader(mapping.getRoleInTrader());
@@ -419,6 +438,15 @@ public class TraderRbacResource {
 
         if (vm.getActivated() != null) {
             user.setActivated(vm.getActivated());
+        }
+
+        if (vm.getMobile() != null) {
+            String trimmed = vm.getMobile().trim();
+            String normalizedMobile = trimmed.isBlank() ? null : trimmed;
+            if (normalizedMobile != null) {
+                assertMobileAvailableForTraderStaff(normalizedMobile, userId);
+            }
+            user.setMobile(normalizedMobile);
         }
 
         userRepository.save(user);
@@ -525,6 +553,38 @@ public class TraderRbacResource {
         rbacAuthorityService.applyTraderAuthoritiesToUser(userId, traderId);
 
         return ResponseEntity.noContent().build();
+    }
+
+    private void assertMobileAvailableForTraderStaff(String mobile, Long currentTraderUserId) {
+        if (mobile == null || mobile.isBlank()) {
+            return;
+        }
+
+        userRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                if (currentTraderUserId == null || !existing.getId().equals(currentTraderUserId)) {
+                    throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+                }
+            });
+
+        traderRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+            });
+
+        contactRepository
+            .findOneByPhone(mobile)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+            });
+
+        adminUserRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+            });
     }
 
     private String buildFullName(String firstName, String lastName) {

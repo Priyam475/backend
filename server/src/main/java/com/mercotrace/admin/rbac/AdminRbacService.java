@@ -70,17 +70,26 @@ public class AdminRbacService {
     private final AdminUserRepository adminUserRepository;
     private final AdminAuthorityRepository adminAuthorityRepository;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private final com.mercotrace.repository.UserRepository userRepository;
+    private final com.mercotrace.repository.TraderRepository traderRepository;
+    private final com.mercotrace.repository.ContactRepository contactRepository;
 
     public AdminRbacService(
         AdminRoleRepository adminRoleRepository,
         AdminUserRepository adminUserRepository,
         AdminAuthorityRepository adminAuthorityRepository,
-        org.springframework.security.crypto.password.PasswordEncoder passwordEncoder
+        org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
+        com.mercotrace.repository.UserRepository userRepository,
+        com.mercotrace.repository.TraderRepository traderRepository,
+        com.mercotrace.repository.ContactRepository contactRepository
     ) {
         this.adminRoleRepository = adminRoleRepository;
         this.adminUserRepository = adminUserRepository;
         this.adminAuthorityRepository = adminAuthorityRepository;
         this.passwordEncoder = passwordEncoder;
+        this.userRepository = userRepository;
+        this.traderRepository = traderRepository;
+        this.contactRepository = contactRepository;
     }
 
     // -------------------------------------------------------------------------
@@ -229,6 +238,7 @@ public class AdminRbacService {
 
         String normalizedEmail = email.toLowerCase(Locale.ROOT);
         String normalizedLogin = (login != null && !login.isBlank() ? login : normalizedEmail.split("@")[0]).toLowerCase(Locale.ROOT);
+        String normalizedMobile = mobile != null && !mobile.isBlank() ? mobile.trim() : null;
 
         adminUserRepository
             .findOneByLogin(normalizedLogin)
@@ -242,12 +252,16 @@ public class AdminRbacService {
                 throw new IllegalArgumentException("Email is already in use");
             });
 
+        if (normalizedMobile != null) {
+            assertMobileAvailableForAdmin(normalizedMobile, null);
+        }
+
         AdminUser user = new AdminUser();
         user.setLogin(normalizedLogin);
         user.setEmail(normalizedEmail);
         user.setFirstName(firstName);
         user.setLastName(lastName);
-        user.setMobile(mobile != null && !mobile.isBlank() ? mobile.trim() : null);
+        user.setMobile(normalizedMobile);
         user.setActivated(activated != null ? activated : true);
         user.setPassword(passwordEncoder.encode(rawPassword));
 
@@ -279,7 +293,12 @@ public class AdminRbacService {
             user.setLastName(lastName);
         }
         if (mobile != null) {
-            user.setMobile(mobile.isBlank() ? null : mobile.trim());
+            String trimmed = mobile.trim();
+            String normalizedMobile = trimmed.isBlank() ? null : trimmed;
+            if (normalizedMobile != null) {
+                assertMobileAvailableForAdmin(normalizedMobile, id);
+            }
+            user.setMobile(normalizedMobile);
         }
         if (activated != null) {
             user.setActivated(activated);
@@ -409,6 +428,37 @@ public class AdminRbacService {
             user.getId(),
             authorities.stream().map(AdminAuthority::getName).collect(Collectors.toSet())
         );
+    }
+
+    private void assertMobileAvailableForAdmin(String mobile, Long currentAdminUserId) {
+        if (mobile == null || mobile.isBlank()) {
+            return;
+        }
+
+        adminUserRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                if (currentAdminUserId == null || !existing.getId().equals(currentAdminUserId)) {
+                    throw new IllegalArgumentException("This mobile number is already in use.");
+                }
+            });
+
+        // Prevent conflicts with trader users, traders, and contacts.
+        userRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                throw new IllegalArgumentException("This mobile number is already in use.");
+            });
+        traderRepository
+            .findOneByMobile(mobile)
+            .ifPresent(existing -> {
+                throw new IllegalArgumentException("This mobile number is already in use.");
+            });
+        contactRepository
+            .findOneByPhone(mobile)
+            .ifPresent(existing -> {
+                throw new IllegalArgumentException("This mobile number is already in use.");
+            });
     }
 
     private Set<AdminAuthority> resolveAuthorities(Set<String> names) {

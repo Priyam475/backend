@@ -24,8 +24,10 @@ const UserManagementPage = () => {
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formMobile, setFormMobile] = useState('');
+  const [formMobileError, setFormMobileError] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const MOBILE_REGEX = /^\d{10}$/;
 
   const fetchProfiles = async () => {
     try {
@@ -62,7 +64,7 @@ const UserManagementPage = () => {
 
   const openCreate = () => {
     setEditingProfile(null);
-    setFormName(''); setFormEmail(''); setFormMobile(''); setFormPassword('');
+    setFormName(''); setFormEmail(''); setFormMobile(''); setFormPassword(''); setFormMobileError('');
     setDialogOpen(true);
   };
 
@@ -71,19 +73,28 @@ const UserManagementPage = () => {
     setFormName(profile.full_name);
     setFormEmail(profile.email);
     setFormMobile(profile.mobile || '');
+    setFormMobileError('');
     setFormPassword('');
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!formName.trim() || !formEmail.trim()) { toast.error('Name and email are required'); return; }
+
+    const mobileTrimmed = formMobile.trim();
+    if (mobileTrimmed && !MOBILE_REGEX.test(mobileTrimmed)) {
+      setFormMobileError('Mobile must be exactly 10 digits (digits only)');
+      toast.error('Enter a valid 10-digit mobile number');
+      return;
+    }
+    setFormMobileError('');
     setSaving(true);
     try {
       if (editingProfile) {
         await traderRbacApi.updateProfile(editingProfile.id, {
           full_name: formName.trim(),
           email: formEmail.trim(),
-          mobile: formMobile.trim() || null,
+          mobile: mobileTrimmed || null,
         });
         toast.success('User updated');
       } else {
@@ -95,7 +106,7 @@ const UserManagementPage = () => {
         await traderRbacApi.createProfile({
           full_name: formName.trim(),
           email: formEmail.trim(),
-          mobile: formMobile.trim() || null,
+          mobile: mobileTrimmed || null,
           password: formPassword,
         });
         toast.success('User created successfully');
@@ -329,6 +340,7 @@ const UserManagementPage = () => {
               <div>
                 <Label className="text-xs font-semibold uppercase text-muted-foreground">Mobile</Label>
                 <Input value={formMobile} onChange={e => setFormMobile(e.target.value)} placeholder="9876543210" className="mt-1.5 glass border-border/30" />
+                {formMobileError && <p className="text-xs text-destructive mt-1">{formMobileError}</p>}
               </div>
               {!editingProfile && (
                 <div>

@@ -71,6 +71,8 @@ public class TraderAuthResource {
     private final UserTraderRepository userTraderRepository;
     private final OtpService otpService;
     private final TraderOwnerAuthorityService traderOwnerAuthorityService;
+    private final com.mercotrace.repository.ContactRepository contactRepository;
+    private final com.mercotrace.admin.identity.AdminUserRepository adminUserRepository;
 
     public TraderAuthResource(
         UserService userService,
@@ -82,7 +84,9 @@ public class TraderAuthResource {
         TraderRepository traderRepository,
         UserTraderRepository userTraderRepository,
         OtpService otpService,
-        TraderOwnerAuthorityService traderOwnerAuthorityService
+        TraderOwnerAuthorityService traderOwnerAuthorityService,
+        com.mercotrace.repository.ContactRepository contactRepository,
+        com.mercotrace.admin.identity.AdminUserRepository adminUserRepository
     ) {
         this.userService = userService;
         this.mailService = mailService;
@@ -94,6 +98,8 @@ public class TraderAuthResource {
         this.userTraderRepository = userTraderRepository;
         this.otpService = otpService;
         this.traderOwnerAuthorityService = traderOwnerAuthorityService;
+        this.contactRepository = contactRepository;
+        this.adminUserRepository = adminUserRepository;
     }
 
     /** POST /auth/register — Register Trader (Directory Listing only) + auto-login for trader UI. */
@@ -121,8 +127,28 @@ public class TraderAuthResource {
             throw new TraderEmailAlreadyRegisteredException();
         }
         String mobile = vm.getMobile() != null ? vm.getMobile().trim() : null;
-        if (mobile != null && !mobile.isEmpty() && traderRepository.findOneByMobile(mobile).isPresent()) {
-            throw new TraderMobileAlreadyRegisteredException();
+        if (mobile != null && !mobile.isEmpty()) {
+            // Ensure the mobile is not already used anywhere (trader, trader user, admin user, or contact).
+            traderRepository
+                .findOneByMobile(mobile)
+                .ifPresent(existing -> {
+                    throw new TraderMobileAlreadyRegisteredException();
+                });
+            userRepository
+                .findOneByMobile(mobile)
+                .ifPresent(existing -> {
+                    throw new TraderMobileAlreadyRegisteredException();
+                });
+            adminUserRepository
+                .findOneByMobile(mobile)
+                .ifPresent(existing -> {
+                    throw new TraderMobileAlreadyRegisteredException();
+                });
+            contactRepository
+                .findOneByPhone(mobile)
+                .ifPresent(existing -> {
+                    throw new TraderMobileAlreadyRegisteredException();
+                });
         }
 
         // 1) Create Trader (directory listing, pending approval)
@@ -174,6 +200,9 @@ public class TraderAuthResource {
         // Auto-activate user for trader flows (no email activation flow in UI)
         user.setActivated(true);
         user.setActivationKey(null);
+        if (mobile != null && !mobile.isEmpty()) {
+            user.setMobile(mobile);
+        }
         userRepository.save(user);
 
         // Ensure trader owners receive full trader-module authorities (no global admin).
@@ -225,11 +254,15 @@ public class TraderAuthResource {
         if (loginVM.getPassword() == null || loginVM.getPassword().length() < 6) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
         }
-        // Allow email-based login by resolving email -> internal login username
+        // Allow email- or mobile-based login by resolving to internal login username
         String username = loginVM.getUsername();
         if (username != null && username.contains("@")) {
             userRepository
                 .findOneByEmailIgnoreCase(username.toLowerCase())
+                .ifPresent(user -> loginVM.setUsername(user.getLogin()));
+        } else if (username != null && username.matches("^[0-9]{10}$")) {
+            userRepository
+                .findOneByMobile(username)
                 .ifPresent(user -> loginVM.setUsername(user.getLogin()));
         }
 
@@ -304,10 +337,15 @@ public class TraderAuthResource {
     ) {
         String mobile = vm.getMobile();
 
-        // OTP login is only allowed for existing traders with this mobile
-        traderRepository
+        // OTP login is only allowed when this mobile belongs to a trader or trader user.
+        boolean hasTraderByMobile = traderRepository.findOneByMobile(mobile).isPresent();
+        boolean hasTraderUserByMobile = userRepository
             .findOneByMobile(mobile)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile"));
+            .flatMap(user -> userTraderRepository.findFirstByUserIdAndPrimaryMappingTrue(user.getId()))
+            .isPresent();
+        if (!hasTraderByMobile && !hasTraderUserByMobile) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile");
+        }
 
         try {
             String clientIp = request.getRemoteAddr();
@@ -336,13 +374,29 @@ public class TraderAuthResource {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid OTP");
         }
 
-        // At this point, OTP is valid. Resolve trader by mobile.
-        com.mercotrace.domain.Trader traderEntity = traderRepository
-            .findOneByMobile(mobile)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile"));
+        // At this point, OTP is valid. Resolve trader and user by mobile.
+        com.mercotrace.domain.User user = null;
+        com.mercotrace.domain.Trader traderEntity = null;
 
-        // Resolve or create canonical user associated with this trader for OTP-based login.
-        com.mercotrace.domain.User user = resolveOrCreateUserForTrader(traderEntity, mobile);
+        // Prefer a trader user whose mobile matches and has a primary trader mapping.
+        java.util.Optional<com.mercotrace.domain.User> userOpt = userRepository.findOneByMobile(mobile);
+        if (userOpt.isPresent()) {
+            com.mercotrace.domain.User candidate = userOpt.get();
+            traderEntity =
+                userTraderRepository
+                    .findFirstByUserIdAndPrimaryMappingTrue(candidate.getId())
+                    .map(com.mercotrace.domain.UserTrader::getTrader)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured"));
+            user = candidate;
+        } else {
+            // Fallback: treat the mobile as the trader's own registration number.
+            traderEntity =
+                traderRepository
+                    .findOneByMobile(mobile)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile"));
+            // Resolve or create canonical user associated with this trader for OTP-based login.
+            user = resolveOrCreateUserForTrader(traderEntity, mobile);
+        }
 
         // Load user with authorities to build a consistent security principal.
         User managedUser = userRepository

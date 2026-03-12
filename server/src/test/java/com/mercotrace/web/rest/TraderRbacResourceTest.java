@@ -39,6 +39,9 @@ import com.mercotrace.repository.RoleRepository;
 import com.mercotrace.repository.UserRepository;
 import com.mercotrace.repository.UserRoleRepository;
 import com.mercotrace.repository.UserTraderRepository;
+import com.mercotrace.repository.TraderRepository;
+import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.admin.identity.AdminUserRepository;
 
 /**
  * Unit tests for the {@link TraderRbacResource} REST controller.
@@ -82,6 +85,15 @@ class TraderRbacResourceTest {
     @Mock
     private RbacAuthorityService rbacAuthorityService;
 
+    @Mock
+    private TraderRepository traderRepository;
+
+    @Mock
+    private ContactRepository contactRepository;
+
+    @Mock
+    private AdminUserRepository adminUserRepository;
+
     @BeforeEach
     void setUp() {
         lenient().when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
@@ -93,7 +105,10 @@ class TraderRbacResourceTest {
             userRepository,
             userTraderRepository,
             userRoleRepository,
-            rbacAuthorityService
+            rbacAuthorityService,
+            traderRepository,
+            contactRepository,
+            adminUserRepository
         );
         mockMvc = MockMvcBuilders.standaloneSetup(resource).build();
     }

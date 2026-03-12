@@ -84,7 +84,7 @@ async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<
   let message = defaultMessage;
   try {
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const body = await res.json();
       if (body?.message) message = body.message;
       else if (body?.detail) message = body.detail;

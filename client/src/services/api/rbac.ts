@@ -99,7 +99,7 @@ async function handleRes<T>(res: Response, msg: string): Promise<T> {
   }
   try {
     const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
+    if (ct.includes('application/json') || ct.includes('application/problem+json')) {
       const j = await res.json() as { detail?: string; message?: string };
       if (typeof j.detail === 'string') detail = j.detail;
       else if (typeof j.message === 'string') detail = j.message;
@@ -172,6 +172,7 @@ export const rbacApi = {
         firstName: first ?? '',
         lastName: rest.join(' ') ?? '',
         email: data.email,
+        mobile: data.mobile != null ? (data.mobile.trim() || null) : undefined,
         password: data.password,
         activated: true,
       }),
@@ -257,6 +258,7 @@ type TraderRbacUserVM = {
   id?: number;
   login?: string;
   email?: string;
+  mobile?: string | null;
   fullName?: string;
   activated?: boolean;
   roleInTrader?: string;
@@ -269,7 +271,7 @@ function traderUserToProfile(u: TraderRbacUserVM): RbacProfile {
     user_id: String(u.id ?? ''),
     full_name: u.fullName ?? u.login ?? '',
     email: u.email ?? '',
-    mobile: null,
+    mobile: u.mobile ?? null,
     status: u.activated ? 'active' : 'inactive',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -341,6 +343,7 @@ export const traderRbacApi = {
       body: JSON.stringify({
         fullName: data.full_name,
         email: data.email,
+        mobile: data.mobile != null ? (data.mobile.trim() || null) : undefined,
         password: data.password,
         roleInTrader: data.roleInTrader ?? 'STAFF',
         activated: true,
@@ -359,6 +362,7 @@ export const traderRbacApi = {
       body: JSON.stringify({
         fullName: data.full_name,
         email: data.email,
+        mobile: data.mobile != null ? (data.mobile.trim() || null) : undefined,
       }),
     });
     const u = await handleRes<TraderRbacUserVM>(res, 'Failed to update user');

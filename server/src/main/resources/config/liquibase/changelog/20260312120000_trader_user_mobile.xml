@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260312120000-1-trader-user-mobile-column" author="cursor">
+        <addColumn tableName="trader_user">
+            <column name="mobile" type="varchar(20)"/>
+        </addColumn>
+        <addUniqueConstraint tableName="trader_user"
+                             columnNames="mobile"
+                             constraintName="ux_trader_user_mobile"/>
+    </changeSet>
+
+</databaseChangeLog>
+

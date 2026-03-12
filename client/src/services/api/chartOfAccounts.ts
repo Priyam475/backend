@@ -75,7 +75,7 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
   let message = defaultMessage;
   try {
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const problem = (await res.json()) as {
         detail?: string;
         title?: string;

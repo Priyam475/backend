@@ -23,6 +23,13 @@ public class TraderRbacUserCreateVM {
     @Size(max = 200)
     private String fullName;
 
+    /**
+     * Optional mobile number. If present, must be exactly 10 digits (digits only).
+     */
+    @Pattern(regexp = "^(|\\d{10})$", message = "Mobile must be exactly 10 digits when provided")
+    @Size(max = 15)
+    private String mobile;
+
     @NotBlank
     @Size(min = 6, max = 100)
     private String password;
@@ -66,6 +73,14 @@ public class TraderRbacUserCreateVM {
 
     public void setFullName(String fullName) {
         this.fullName = fullName;
+    }
+
+    public String getMobile() {
+        return mobile;
+    }
+
+    public void setMobile(String mobile) {
+        this.mobile = mobile;
     }
 
     public String getPassword() {

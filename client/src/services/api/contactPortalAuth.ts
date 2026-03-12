@@ -70,7 +70,7 @@ export const contactPortalAuthApi = {
       let message = 'Signup failed. Please try again.';
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
           const problem: ProblemDetails = await res.json();
           const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
 
@@ -114,7 +114,7 @@ export const contactPortalAuthApi = {
       let message = 'Login failed. Please try again.';
       try {
         const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
           const problem: ProblemDetails = await res.json();
           const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
 

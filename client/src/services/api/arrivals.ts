@@ -74,7 +74,7 @@ async function handleArrivalResponse<T>(res: Response, defaultMessage: string): 
   let message = defaultMessage;
   try {
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const problem = await res.json();
       if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
         message = problem.detail;

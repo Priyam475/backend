@@ -13,6 +13,13 @@ public class TraderRbacUserUpdateVM {
 
     private String fullName;
 
+    /**
+     * Optional mobile number. If present, must be exactly 10 digits (digits only).
+     */
+    @jakarta.validation.constraints.Pattern(regexp = "^(|\\d{10})$", message = "Mobile must be exactly 10 digits when provided")
+    @jakarta.validation.constraints.Size(max = 15)
+    private String mobile;
+
     private Boolean activated;
 
     private String roleInTrader;
@@ -33,6 +40,14 @@ public class TraderRbacUserUpdateVM {
 
     public void setFullName(String fullName) {
         this.fullName = fullName;
+    }
+
+    public String getMobile() {
+        return mobile;
+    }
+
+    public void setMobile(String mobile) {
+        this.mobile = mobile;
     }
 
     public Boolean getActivated() {

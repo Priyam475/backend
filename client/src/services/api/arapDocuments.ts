@@ -51,8 +51,8 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
   }
   let message = defaultMessage;
   try {
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
       const problem = (await res.json()) as { detail?: string; message?: string; title?: string };
       if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) message = problem.detail;
       else if (typeof problem.message === 'string' && problem.message.trim().length > 0) message = problem.message;
