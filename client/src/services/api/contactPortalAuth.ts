@@ -81,8 +81,8 @@ export const contactPortalAuthApi = {
           const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
 
           if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
-            message =
-              'This mobile number is already registered for a Trader account and cannot be used for a Contact login.';
+            // Do not reveal whether this mobile belongs to a trader, staff user, or admin.
+            message = 'This mobile number is already in use.';
           } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
           } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
