@@ -74,8 +74,8 @@ const DesktopSidebar = () => {
 
   const isApproved = trader?.approval_status === 'APPROVED';
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await Promise.resolve(logout());
     navigate('/login');
   };
 

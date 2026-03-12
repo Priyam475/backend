@@ -35,8 +35,8 @@ const ContactPortalDesktopSidebar = () => {
   const { isDark, toggleTheme } = useTheme();
   const { contact, logout } = useContactAuth();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await Promise.resolve(logout());
     navigate('/portal/login');
   };
 

@@ -53,8 +53,8 @@ const AdminLayout = () => {
     item.moduleKey ? canAccessModule(item.moduleKey) : false
   );
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await Promise.resolve(logout());
     navigate('/admin/login');
   };
 

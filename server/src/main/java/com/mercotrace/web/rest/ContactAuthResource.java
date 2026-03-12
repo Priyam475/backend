@@ -389,6 +389,28 @@ public class ContactAuthResource {
         return new ContactPortalSessionVM(false, contact.getPhone(), contactMapper.toDto(contact));
     }
 
+    /**
+     * POST /portal/auth/logout — clear ACCESS_TOKEN cookie for contact portal sessions.
+     *
+     * Like other logout endpoints, this is purely client-facing and instructs the
+     * browser to delete the httpOnly ACCESS_TOKEN cookie. JWTs remain stateless
+     * and will naturally expire according to their validity window.
+     */
+    @PostMapping("/portal/auth/logout")
+    public ResponseEntity<Void> contactLogout() {
+        ResponseCookie deleteCookie = ResponseCookie
+            .from("ACCESS_TOKEN", "")
+            .httpOnly(true)
+            .secure(cookieSecure)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(0)
+            .build();
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE, deleteCookie.toString());
+        return ResponseEntity.noContent().headers(headers).build();
+    }
+
     private String normalizePhone(String phone) {
         if (phone == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Phone number is required");

@@ -308,14 +308,38 @@ const LoginScreen = () => {
             </AnimatePresence>
           </div>
 
-          <div className="px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-center shrink-0 space-y-2">
-            <Button onClick={() => navigate('/trader-setup')} variant="outline"
-              className="w-full max-w-sm mx-auto h-12 rounded-xl text-sm font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white backdrop-blur-sm">
-              <Building2 className="w-4 h-4 mr-2" /> Register as Trader
-            </Button>
+          <div className="px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-center shrink-0 space-y-3">
+            <div className="w-full max-w-sm mx-auto space-y-2">
+              <Button
+                onClick={() => navigate('/trader-setup')}
+                variant="outline"
+                className="w-full h-12 rounded-xl text-sm font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white backdrop-blur-sm"
+              >
+                <Building2 className="w-4 h-4 mr-2" /> Register as Trader
+              </Button>
+              <Button
+                onClick={() => navigate('/portal/login')}
+                variant="outline"
+                className="w-full h-12 rounded-xl text-sm font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white backdrop-blur-sm"
+              >
+                Login as Contact (Seller/Buyer/Broker/Agent)
+              </Button>
+            </div>
             <p className="text-sm text-white/70">
-              Don't have an account?{' '}
-              <button onClick={() => navigate('/trader-setup')} className="text-white font-semibold underline min-h-[44px]">Sign Up</button>
+              New here?{' '}
+              <button
+                onClick={() => navigate('/trader-setup')}
+                className="text-white font-semibold underline min-h-[44px]"
+              >
+                Sign up as Trader
+              </button>{' '}
+              or{' '}
+              <button
+                onClick={() => navigate('/portal/signup')}
+                className="text-white font-semibold underline min-h-[44px]"
+              >
+                Sign up as Contact
+              </button>
             </p>
           </div>
         </main>

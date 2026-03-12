@@ -28,8 +28,8 @@ const ProfilePage = () => {
   const { user, trader, logout } = useAuth();
   const isDesktop = useDesktopMode();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await Promise.resolve(logout());
     navigate('/login', { replace: true });
   };
 

@@ -117,6 +117,28 @@ public class AuthenticateController {
     }
 
     /**
+     * POST /auth/logout — clear ACCESS_TOKEN cookie for trader/admin flows.
+     *
+     * This does not invalidate the JWT server-side (tokens remain stateless),
+     * but instructs the browser to delete the httpOnly cookie so subsequent
+     * requests from this device are treated as logged out until a new login.
+     */
+    @PostMapping("/auth/logout")
+    public ResponseEntity<Void> logout() {
+        ResponseCookie deleteCookie = ResponseCookie
+            .from("ACCESS_TOKEN", "")
+            .httpOnly(true)
+            .secure(cookieSecure)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(0)
+            .build();
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE, deleteCookie.toString());
+        return ResponseEntity.noContent().headers(headers).build();
+    }
+
+    /**
      * {@code GET /authenticate} : check if the user is authenticated.
      *
      * @return the {@link ResponseEntity} with status {@code 204 (No Content)},

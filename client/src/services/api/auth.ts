@@ -346,4 +346,14 @@ export const authApi = {
 
     return { trader, user };
   },
+
+  async logout(): Promise<void> {
+    // Best-effort: ask backend to clear ACCESS_TOKEN cookie for trader/admin flows.
+    // Ignore network errors so UI logout still succeeds locally.
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch {
+      // no-op
+    }
+  },
 };

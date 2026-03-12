@@ -110,7 +110,7 @@ const ContactPortalSignupPage = () => {
             className="text-center mb-6"
           >
             <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 drop-shadow-lg">
-              Sign up as Contact
+              Contact (Seller / Buyer / Broker / Agent)
             </h1>
             <p className="text-white/70 text-sm sm:text-base">
               Minimal details now. Add full profile later.

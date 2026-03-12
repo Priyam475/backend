@@ -290,5 +290,17 @@ export const contactPortalAuthApi = {
       profile: profile ?? null,
     };
   },
+
+  async logout(): Promise<void> {
+    // Best-effort: ask backend to clear ACCESS_TOKEN cookie for contact portal flows.
+    // Ignore network errors so that client-side logout still completes.
+    try {
+      await apiFetch('/portal/auth/logout', {
+        method: 'POST',
+      });
+    } catch {
+      // no-op
+    }
+  },
 };
 

@@ -124,6 +124,27 @@ public class AdminAuthResource {
         return buildAdminAuthDto(account);
     }
 
+    /**
+     * POST /api/admin/auth/logout — clear ACCESS_TOKEN cookie for admin sessions.
+     *
+     * This complements the trader/contact logout endpoints and ensures multi-role
+     * testing in the same browser does not leave stale ACCESS_TOKEN cookies behind.
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout() {
+        org.springframework.http.ResponseCookie deleteCookie = org.springframework.http.ResponseCookie
+            .from("ACCESS_TOKEN", "")
+            .httpOnly(true)
+            .secure(cookieSecure)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(0)
+            .build();
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.add(org.springframework.http.HttpHeaders.SET_COOKIE, deleteCookie.toString());
+        return ResponseEntity.noContent().headers(headers).build();
+    }
+
     private boolean isAdminAccount(AdminUserDTO account) {
         if (account == null || account.getAuthorities() == null) {
             return false;

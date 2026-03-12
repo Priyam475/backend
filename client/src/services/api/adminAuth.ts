@@ -87,5 +87,16 @@ export const adminAuthApi = {
 
     return { user };
   },
+
+  async logout(): Promise<void> {
+    // Best-effort: clear ACCESS_TOKEN cookie for admin flows on the backend.
+    try {
+      await apiFetch('/admin/auth/logout', {
+        method: 'POST',
+      });
+    } catch {
+      // ignore network errors
+    }
+  },
 };
 
