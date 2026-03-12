@@ -170,6 +170,9 @@ export const contactPortalAuthApi = {
 
           if (errorKey === 'error.contactPortal.phone.notRegistered') {
             message = 'This mobile number is not registered for a Contact login.';
+          } else if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
+            // Do not reveal which account type owns this mobile; just block OTP flow.
+            message = 'This mobile number is already in use.';
           } else if (errorKey === 'error.otp.provider.not_configured') {
             message =
               'We are unable to send OTPs right now. Please try again later or contact support.';
@@ -213,6 +216,9 @@ export const contactPortalAuthApi = {
           if (errorKey === 'error.otp.invalid_or_expired') {
             message =
               'The OTP you entered is invalid or has expired. Please request a new one.';
+          } else if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
+            // Do not reveal which account type owns this mobile; just block guest login.
+            message = 'This mobile number is already in use.';
           } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
           } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {

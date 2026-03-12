@@ -66,6 +66,9 @@ public class ContactServiceImpl implements ContactService {
         if (contactDTO.getCurrentBalance() == null) {
             contactDTO.setCurrentBalance(BigDecimal.ZERO);
         }
+        if (contactDTO.getCanLogin() == null) {
+            contactDTO.setCanLogin(Boolean.FALSE);
+        }
 
         Contact contact = contactMapper.toEntity(contactDTO);
         contact = contactRepository.save(contact);
@@ -81,6 +84,9 @@ public class ContactServiceImpl implements ContactService {
         }
         if (contactDTO.getCurrentBalance() == null) {
             contactDTO.setCurrentBalance(BigDecimal.ZERO);
+        }
+        if (contactDTO.getCanLogin() == null) {
+            contactDTO.setCanLogin(Boolean.FALSE);
         }
         Contact contact = contactMapper.toEntity(contactDTO);
         contact = contactRepository.save(contact);

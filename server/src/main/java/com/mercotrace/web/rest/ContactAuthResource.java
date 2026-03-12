@@ -278,6 +278,22 @@ public class ContactAuthResource {
 
         String phone = normalizePhone(identifier);
 
+        // If this mobile already belongs to any trader, trader staff user, admin user, or contact
+        // (including login-capable contacts), do not allow OTP-based guest login.
+        boolean hasTraderByMobile = traderRepository.findOneByMobile(phone).isPresent();
+        boolean hasUserByMobile = userRepository.findOneByMobile(phone).isPresent();
+        boolean hasAdminByMobile = adminUserRepository.findOneByMobile(phone).isPresent();
+        boolean hasAnyContact = contactRepository.findOneByPhone(phone).isPresent();
+
+        if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile || hasAnyContact) {
+            throw new ConflictAlertException(
+                ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                "This mobile number is already in use.",
+                "contactPortal",
+                "contactPortal.phone.alreadyUsedByTrader"
+            );
+        }
+
         try {
             String clientIp = request.getRemoteAddr();
             contactOtpService.generateOtpForMobile(phone, clientIp);
@@ -342,6 +358,22 @@ public class ContactAuthResource {
             ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(false, phone, dto);
             return ResponseEntity.ok().headers(headers).body(body);
         } else {
+            // If this mobile already belongs to any trader, trader staff user, admin user, or contact,
+            // do not allow guest login for security reasons.
+            boolean hasTraderByMobile = traderRepository.findOneByMobile(phone).isPresent();
+            boolean hasUserByMobile = userRepository.findOneByMobile(phone).isPresent();
+            boolean hasAdminByMobile = adminUserRepository.findOneByMobile(phone).isPresent();
+            boolean hasAnyContact = contactRepository.findOneByPhone(phone).isPresent();
+
+            if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile || hasAnyContact) {
+                throw new ConflictAlertException(
+                    ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                    "This mobile number is already in use.",
+                    "contactPortal",
+                    "contactPortal.phone.alreadyUsedByTrader"
+                );
+            }
+
             String jwt = createGuestContactToken(phone);
             HttpHeaders headers = buildAuthHeaders(jwt);
             ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(true, phone, null);
