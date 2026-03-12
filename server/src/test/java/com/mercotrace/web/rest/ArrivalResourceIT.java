@@ -2,6 +2,7 @@ package com.mercotrace.web.rest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -18,6 +19,8 @@ import com.mercotrace.domain.enumeration.FreightMethod;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.repository.VehicleRepository;
+import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalLotDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalRequestDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSellerDTO;
@@ -30,6 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
@@ -37,7 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @IntegrationTest
 @AutoConfigureMockMvc
-@WithMockUser
+@WithMockUser(authorities = { AuthoritiesConstants.ARRIVALS_VIEW, AuthoritiesConstants.ARRIVALS_CREATE })
 class ArrivalResourceIT {
 
     private static final String ENTITY_API_URL = "/api/arrivals";
@@ -57,6 +61,9 @@ class ArrivalResourceIT {
     @Autowired
     private VehicleRepository vehicleRepository;
 
+    @MockBean
+    private TraderContextService traderContextService;
+
     private Commodity commodity;
 
     private Contact contact;
@@ -65,6 +72,8 @@ class ArrivalResourceIT {
 
     @BeforeEach
     void initTest() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(1L);
+
         commodity = new Commodity();
         commodity.setTraderId(1L);
         commodity.setCommodityName("POTATO");
