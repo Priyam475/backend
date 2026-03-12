@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useContactAuth } from '@/context/ContactAuthContext';
 
@@ -17,7 +18,8 @@ const ContactPortalSignupPage = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [touched, setTouched] = useState({ phone: false, password: false, email: false });
+  const [type, setType] = useState('');
+  const [touched, setTouched] = useState({ phone: false, password: false, email: false, type: false });
 
   const phoneRegex = /^[6-9]\d{9}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -39,14 +41,18 @@ const ContactPortalSignupPage = () => {
   const emailError =
     touched.email && email && !emailRegex.test(email) ? 'Enter a valid email address' : '';
 
+  const typeError =
+    touched.type && !type ? 'Contact type is required' : '';
+
   const isFormValid =
     phoneRegex.test(phone) &&
     password.length >= 6 &&
-    (!email || emailRegex.test(email));
+    (!email || emailRegex.test(email)) &&
+    !!type;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ phone: true, password: true, email: true });
+    setTouched({ phone: true, password: true, email: true, type: true });
     if (!isFormValid) return;
     try {
       await signup({
@@ -54,6 +60,7 @@ const ContactPortalSignupPage = () => {
         password,
         email: email || undefined,
         name: name || undefined,
+        type,
       });
       navigate('/contact', { replace: true });
     } catch {
@@ -236,6 +243,34 @@ const ContactPortalSignupPage = () => {
                   className="pl-12 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-white/90 border-0 text-emerald-900 placeholder:text-emerald-400"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-1 block">
+                Contact Type *
+              </label>
+              <Select
+                value={type}
+                onValueChange={value => {
+                  setType(value);
+                  clearError();
+                }}
+              >
+                <SelectTrigger className="h-12 sm:h-14 rounded-xl bg-white/90 border-0 text-emerald-900">
+                  <SelectValue placeholder="Select contact type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BUYER">Buyer</SelectItem>
+                  <SelectItem value="BROKER">Broker</SelectItem>
+                  <SelectItem value="AGENT">Agent</SelectItem>
+                  <SelectItem value="SELLER">Seller</SelectItem>
+                </SelectContent>
+              </Select>
+              {typeError && (
+                <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
+                  {typeError}
+                </p>
+              )}
             </div>
 
             <Button

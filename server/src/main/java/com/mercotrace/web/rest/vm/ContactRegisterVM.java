@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Size;
  * - password (required)
  * - email (optional)
  * - name (optional)
+ * - type (required; one of BUYER, BROKER, AGENT, SELLER)
  *
  * For login:
  * - phone can contain either phone or email (identifier)
@@ -27,6 +28,12 @@ public class ContactRegisterVM {
     private String email;
 
     private String name;
+
+    /**
+     * Contact type for self-onboarded contacts.
+     * Accepted values (case-insensitive): BUYER, BROKER, AGENT, SELLER.
+     */
+    private String type;
 
     public String getPhone() {
         return phone;
@@ -58,6 +65,14 @@ public class ContactRegisterVM {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
     }
 }
 

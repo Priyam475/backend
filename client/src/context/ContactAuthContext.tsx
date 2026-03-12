@@ -15,7 +15,13 @@ interface ContactAuthState {
 interface ContactAuthContextType extends ContactAuthState {
   hasBootstrapped: boolean;
   login: (identifier: string, password: string) => Promise<void>;
-  signup: (data: { phone: string; password: string; email?: string; name?: string }) => Promise<void>;
+  signup: (data: {
+    phone: string;
+    password: string;
+    email?: string;
+    name?: string;
+    type: string;
+  }) => Promise<void>;
   loginWithProfile: (profile: ContactPortalProfile) => void;
   /** Mark the current session as guest with a synthetic profile. */
   loginAsGuest: (phone: string) => void;
@@ -108,7 +114,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const signup = useCallback(
-    async (data: { phone: string; password: string; email?: string; name?: string }) => {
+    async (data: { phone: string; password: string; email?: string; name?: string; type: string }) => {
       setIsLoading(true);
       setError(null);
       try {

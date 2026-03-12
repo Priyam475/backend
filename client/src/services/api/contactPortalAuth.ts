@@ -11,6 +11,8 @@ export interface ContactPortalProfile {
   name: string;
   phone: string;
   email?: string;
+  /** Contact type: BUYER, BROKER, AGENT, SELLER. */
+  type?: string;
   can_login?: boolean;
   /** True when this session is a guest (no persisted Contact). */
   is_guest?: boolean;
@@ -21,6 +23,7 @@ type ContactDto = {
   name?: string;
   phone?: string;
   email?: string;
+  type?: string;
   canLogin?: boolean;
   can_login?: boolean;
 };
@@ -32,6 +35,7 @@ function mapDtoToProfile(dto: ContactDto): ContactPortalProfile {
     name: dto.name ?? '',
     phone: dto.phone ?? '',
     email: dto.email,
+    type: dto.type,
     can_login: dto.can_login ?? dto.canLogin,
     is_guest: false,
   };
@@ -55,6 +59,7 @@ export const contactPortalAuthApi = {
     password: string;
     email?: string;
     name?: string;
+    type: string;
   }): Promise<ContactPortalProfile> {
     const res = await apiFetch('/auth/register-contact', {
       method: 'POST',
@@ -63,6 +68,7 @@ export const contactPortalAuthApi = {
         password: data.password,
         email: data.email,
         name: data.name,
+        type: data.type,
       }),
     });
 

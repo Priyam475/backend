@@ -68,6 +68,8 @@ public class ContactAuthResource {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContactAuthResource.class);
 
+    private static final Set<String> ALLOWED_CONTACT_TYPES = Set.of("BUYER", "BROKER", "AGENT", "SELLER");
+
     private final ContactRepository contactRepository;
 
     private final ContactMapper contactMapper;
@@ -117,6 +119,7 @@ public class ContactAuthResource {
      * Optional:
      * - email
      * - name
+     * - type (required in UI; one of BUYER, BROKER, AGENT, SELLER)
      *
      * On success, returns ContactDTO and issues a CONTACT JWT via httpOnly cookie.
      */
@@ -127,6 +130,15 @@ public class ContactAuthResource {
 
         if (vm.getPassword() == null || vm.getPassword().length() < 6) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
+        }
+
+        String rawType = vm.getType();
+        if (rawType == null || rawType.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contact type is required");
+        }
+        String normalizedType = rawType.trim().toUpperCase();
+        if (!ALLOWED_CONTACT_TYPES.contains(normalizedType)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid contact type");
         }
 
         // Enforce uniqueness among login-capable contacts.
@@ -145,6 +157,7 @@ public class ContactAuthResource {
         }
         contact.setPasswordHash(passwordEncoder.encode(vm.getPassword()));
         contact.setCanLogin(true);
+        contact.setType(normalizedType);
         if (contact.getCreatedAt() == null) {
             contact.setCreatedAt(Instant.now());
         }

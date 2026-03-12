@@ -130,7 +130,11 @@ const ContactPortalLayout = () => {
                 <p className="text-xs font-semibold text-foreground">
                   {contact?.name || contact?.phone || 'Contact'}
                 </p>
-                <p className="text-[10px] text-muted-foreground">Contact Portal</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {contact?.type
+                    ? `${contact.type.charAt(0)}${contact.type.slice(1).toLowerCase()}`
+                    : 'Contact Portal'}
+                </p>
               </div>
             </div>
           </div>
