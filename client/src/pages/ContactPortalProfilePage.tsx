@@ -94,7 +94,7 @@ const ContactPortalProfilePage = () => {
             type="button"
             className="h-9 rounded-lg px-3 text-xs"
             onClick={() => {
-              window.location.href = '/portal/signup';
+              window.location.href = '/contact-registartion';
             }}
           >
             Go to registration

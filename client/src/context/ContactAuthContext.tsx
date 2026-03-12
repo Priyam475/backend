@@ -56,7 +56,7 @@ export const ContactAuthProvider: React.FC<{ children: React.ReactNode }> = ({ c
     let cancelled = false;
 
     // Only bootstrap when user is in the contact portal URLs.
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/portal')) {
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/contact')) {
       setHasBootstrapped(true);
       return () => {
         cancelled = true;

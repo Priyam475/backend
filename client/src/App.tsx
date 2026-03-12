@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { FontSizeProvider } from "@/context/FontSizeContext";
 import { AuthProvider } from "@/context/AuthContext";
@@ -107,8 +107,13 @@ const App = () => (
                     <ContactPortalLoginPage />
                   }
                 />
+                {/* Legacy /portal/signup path retained as redirect to canonical /contact-registartion */}
                 <Route
                   path="/portal/signup"
+                  element={<LoginScreen />}
+                />
+                <Route
+                  path="/contact-registartion"
                   element={
                     <ContactPortalSignupPage />
                   }
@@ -148,7 +153,7 @@ const App = () => (
 
                 {/* Contact Portal (protected, nested layout) */}
                 <Route
-                  path="/portal"
+                  path="/contact"
                   element={
                     <ContactProtectedRoute>
                       <ContactPortalLayout />
@@ -156,12 +161,22 @@ const App = () => (
                   }
                 >
                   <Route index element={<ContactPortalDashboardPage />} />
+                  <Route path="dashboard" element={<ContactPortalDashboardPage />} />
                   <Route path="arrivals" element={<ContactPortalArrivalsPage />} />
                   <Route path="purchases" element={<ContactPortalPurchasesPage />} />
                   <Route path="statements" element={<ContactPortalStatementsPage />} />
                   <Route path="settlements" element={<ContactPortalSettlementsPage />} />
                   <Route path="profile" element={<ContactPortalProfilePage />} />
                 </Route>
+
+                {/* Legacy /portal/* front-end routes: redirect to /contact equivalents */}
+                <Route path="/portal" element={<Navigate to="/contact" replace />} />
+                <Route path="/portal/dashboard" element={<Navigate to="/contact/dashboard" replace />} />
+                <Route path="/portal/arrivals" element={<Navigate to="/contact/arrivals" replace />} />
+                <Route path="/portal/purchases" element={<Navigate to="/contact/purchases" replace />} />
+                <Route path="/portal/statements" element={<Navigate to="/contact/statements" replace />} />
+                <Route path="/portal/settlements" element={<Navigate to="/contact/settlements" replace />} />
+                <Route path="/portal/profile" element={<Navigate to="/contact/profile" replace />} />
 
                 {/* Admin Portal */}
                 <Route

@@ -3,12 +3,12 @@ import { Home, Truck, ShoppingBag, FileText, Scale, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const portalTabs = [
-  { icon: Home, label: 'Home', path: '/portal' },
-  { icon: Truck, label: 'Arrivals', path: '/portal/arrivals' },
-  { icon: ShoppingBag, label: 'Purchases', path: '/portal/purchases' },
-  { icon: FileText, label: 'Statements', path: '/portal/statements' },
-  { icon: Scale, label: 'Settlements', path: '/portal/settlements' },
-  { icon: User, label: 'Profile', path: '/portal/profile' },
+  { icon: Home, label: 'Home', path: '/contact' },
+  { icon: Truck, label: 'Arrivals', path: '/contact/arrivals' },
+  { icon: ShoppingBag, label: 'Purchases', path: '/contact/purchases' },
+  { icon: FileText, label: 'Statements', path: '/contact/statements' },
+  { icon: Scale, label: 'Settlements', path: '/contact/settlements' },
+  { icon: User, label: 'Profile', path: '/contact/profile' },
 ] as const;
 
 const ContactPortalBottomNav = () => {
@@ -19,9 +19,9 @@ const ContactPortalBottomNav = () => {
     <nav className="bottom-nav z-50 w-full max-w-[56rem] left-1/2 -translate-x-1/2 lg:hidden">
       <div className="flex items-center justify-around h-14 px-2 md:px-6">
         {portalTabs.map((tab) => {
-          const isHome = tab.path === '/portal';
+          const isHome = tab.path === '/contact';
           const isActive = isHome
-            ? location.pathname === '/portal'
+            ? location.pathname === '/contact'
             : location.pathname.startsWith(tab.path);
 
           return (

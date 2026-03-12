@@ -7,30 +7,30 @@ import ContactPortalDesktopSidebar from '@/components/ContactPortalDesktopSideba
 import ContactPortalBottomNav from '@/components/ContactPortalBottomNav';
 
 const navItems = [
-  { to: '/portal', label: 'Dashboard' },
-  { to: '/portal/arrivals', label: 'Arrivals' },
-  { to: '/portal/purchases', label: 'Purchases' },
-  { to: '/portal/statements', label: 'Statements' },
-  { to: '/portal/settlements', label: 'Settlements' },
-  { to: '/portal/profile', label: 'Profile' },
+  { to: '/contact', label: 'Dashboard' },
+  { to: '/contact/arrivals', label: 'Arrivals' },
+  { to: '/contact/purchases', label: 'Purchases' },
+  { to: '/contact/statements', label: 'Statements' },
+  { to: '/contact/settlements', label: 'Settlements' },
+  { to: '/contact/profile', label: 'Profile' },
 ];
 
 const pageTitles: Record<string, string> = {
-  '/portal': 'Dashboard',
-  '/portal/arrivals': 'Arrivals',
-  '/portal/purchases': 'Purchases',
-  '/portal/statements': 'Statements',
-  '/portal/settlements': 'Settlements',
-  '/portal/profile': 'Profile',
+  '/contact': 'Dashboard',
+  '/contact/arrivals': 'Arrivals',
+  '/contact/purchases': 'Purchases',
+  '/contact/statements': 'Statements',
+  '/contact/settlements': 'Settlements',
+  '/contact/profile': 'Profile',
 };
 
 const pageGradients: Record<string, string> = {
-  '/portal': 'from-primary/8 to-violet-500/5',
-  '/portal/arrivals': 'from-blue-500/8 to-cyan-500/5',
-  '/portal/purchases': 'from-emerald-500/8 to-teal-500/5',
-  '/portal/statements': 'from-red-500/8 to-rose-500/5',
-  '/portal/settlements': 'from-rose-500/8 to-pink-500/5',
-  '/portal/profile': 'from-emerald-500/8 to-teal-500/5',
+  '/contact': 'from-primary/8 to-violet-500/5',
+  '/contact/arrivals': 'from-blue-500/8 to-cyan-500/5',
+  '/contact/purchases': 'from-emerald-500/8 to-teal-500/5',
+  '/contact/statements': 'from-red-500/8 to-rose-500/5',
+  '/contact/settlements': 'from-rose-500/8 to-pink-500/5',
+  '/contact/profile': 'from-emerald-500/8 to-teal-500/5',
 };
 
 const ContactPortalLayout = () => {
@@ -121,7 +121,7 @@ const ContactPortalLayout = () => {
             </button>
             <div
               className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl glass cursor-pointer hover:bg-muted/50 transition-all border border-border/30"
-              onClick={() => navigate('/portal/profile')}
+              onClick={() => navigate('/contact/profile')}
             >
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-violet-500 flex items-center justify-center shadow-md shadow-primary/20">
                 <User className="w-3.5 h-3.5 text-white" />

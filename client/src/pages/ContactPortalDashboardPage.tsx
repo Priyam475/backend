@@ -21,7 +21,7 @@ const portalModules = [
     image: imgArrivals,
     title: 'Arrivals',
     desc: 'View your vehicle arrivals',
-    path: '/portal/arrivals',
+    path: '/contact/arrivals',
     accent: 'from-emerald-400 to-teal-500',
     icon: Truck,
   },
@@ -29,7 +29,7 @@ const portalModules = [
     image: imgBilling,
     title: 'Purchases',
     desc: 'Track your purchase history',
-    path: '/portal/purchases',
+    path: '/contact/purchases',
     accent: 'from-blue-400 to-indigo-500',
     icon: ShoppingBag,
   },
@@ -37,7 +37,7 @@ const portalModules = [
     image: imgFinancialReports,
     title: 'Statements',
     desc: 'Check account statements',
-    path: '/portal/statements',
+    path: '/contact/statements',
     accent: 'from-indigo-400 to-blue-600',
     icon: FileText,
   },
@@ -45,7 +45,7 @@ const portalModules = [
     image: imgBilling,
     title: 'Settlements',
     desc: 'View your settlements',
-    path: '/portal/settlements',
+    path: '/contact/settlements',
     accent: 'from-rose-400 to-pink-500',
     icon: Scale,
   },
@@ -53,7 +53,7 @@ const portalModules = [
     image: imgContacts,
     title: 'Profile',
     desc: 'Update your basic details',
-    path: '/portal/profile',
+    path: '/contact/profile',
     accent: 'from-cyan-400 to-blue-500',
     icon: User,
   },
@@ -289,7 +289,7 @@ const ContactPortalDashboardPage = () => {
           {isGuest && (
             <p className="mt-3 text-xs text-muted-foreground">
               You are browsing as a guest. To save your details and see your historical data,{' '}
-              <Link to="/portal/signup" className="underline font-semibold">
+              <Link to="/contact-registartion" className="underline font-semibold">
                 register for a contact login
               </Link>
               .
@@ -306,7 +306,7 @@ const ContactPortalDashboardPage = () => {
                 Recent Statements
               </h2>
               <Link
-                to="/portal/statements"
+                to="/contact/statements"
                 className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300 underline"
               >
                 View all
@@ -355,7 +355,7 @@ const ContactPortalDashboardPage = () => {
                 Recent Purchases
               </h2>
               <Link
-                to="/portal/purchases"
+                to="/contact/purchases"
                 className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300 underline"
               >
                 View all

@@ -110,7 +110,7 @@ const ContactPortalLoginPage = () => {
         setGuestDialogOpen(true);
       } else if (result.profile) {
         loginWithProfile(result.profile);
-        navigate('/portal', { replace: true });
+        navigate('/contact', { replace: true });
       } else {
         toast.error('We could not complete sign-in. Please try again.');
       }
@@ -128,13 +128,13 @@ const ContactPortalLoginPage = () => {
     if (!guestResult) return;
     loginAsGuest(guestResult.phone);
     setGuestDialogOpen(false);
-    navigate('/portal', { replace: true });
+    navigate('/contact', { replace: true });
   };
 
   const handleContinueToSignup = () => {
     if (!guestResult) return;
     setGuestDialogOpen(false);
-    navigate('/portal/signup', { replace: false });
+    navigate('/contact-registartion', { replace: false });
   };
 
   useEffect(() => {
@@ -162,7 +162,7 @@ const ContactPortalLoginPage = () => {
       if (!isEmailValid) return;
       try {
         await login(email, password);
-        navigate('/portal', { replace: true });
+        navigate('/contact', { replace: true });
       } catch {
         // error state already handled by context
       }
@@ -545,7 +545,7 @@ const ContactPortalLoginPage = () => {
 
           <div className="px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-center shrink-0 space-y-2">
             <Button
-              onClick={() => navigate('/portal/signup')}
+              onClick={() => navigate('/contact-registartion')}
               variant="outline"
               className="w-full max-w-sm mx-auto h-12 rounded-xl text-sm font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white backdrop-blur-sm"
             >
@@ -555,7 +555,7 @@ const ContactPortalLoginPage = () => {
               New to Mercotrace?{' '}
               <button
                 type="button"
-                onClick={() => navigate('/portal/signup')}
+                onClick={() => navigate('/contact-registartion')}
                 className="text-white font-semibold underline min-h-[44px]"
               >
                 Create your contact login

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
@@ -55,7 +55,7 @@ const ContactPortalSignupPage = () => {
         email: email || undefined,
         name: name || undefined,
       });
-      navigate('/portal', { replace: true });
+      navigate('/contact', { replace: true });
     } catch {
       // error handled in context
     }
@@ -76,13 +76,16 @@ const ContactPortalSignupPage = () => {
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/80 via-emerald-800/70 to-slate-900/80 z-[1]" />
 
       <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-y-auto">
-        <div className="flex justify-end px-5 pt-[max(1rem,env(safe-area-inset-top))]">
-          <Link
-            to="/portal/login"
-            className="text-sm font-semibold text-white/80 underline min-h-[44px] flex items-center"
+        <div className="flex items-center justify-between px-5 pt-[max(1rem,env(safe-area-inset-top))]">
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="inline-flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white px-3 h-9 min-w-[44px] min-h-[44px] border border-white/30 shadow-sm transition-colors"
+            aria-label="Back to login"
           >
-            Already have an account?
-          </Link>
+            <ArrowLeft className="w-4 h-4 mr-1.5" />
+            <span className="text-xs font-semibold hidden sm:inline">Back to login</span>
+          </button>
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
