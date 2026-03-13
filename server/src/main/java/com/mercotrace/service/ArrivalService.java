@@ -253,8 +253,8 @@ public class ArrivalService {
         List<Long> contactIds = sellers.stream().map(SellerInVehicle::getContactId).distinct().toList();
         List<Contact> contacts = contactIds.isEmpty() ? List.of() : contactRepository.findAllById(contactIds);
 
-        java.util.Map<Long, String> contactNameById = contacts.stream()
-            .collect(Collectors.toMap(Contact::getId, c -> c.getName() != null ? c.getName() : ""));
+        java.util.Map<Long, Contact> contactById = contacts.stream()
+            .collect(Collectors.toMap(Contact::getId, c -> c));
 
         List<ArrivalDetailDTO> content = vehicles.stream().map(v -> {
             ArrivalDetailDTO dto = new ArrivalDetailDTO();
@@ -266,7 +266,10 @@ public class ArrivalService {
             List<ArrivalSellerDetailDTO> sellerDetailList = new ArrayList<>();
             for (SellerInVehicle siv : vehicleSellers) {
                 ArrivalSellerDetailDTO sellerDetail = new ArrivalSellerDetailDTO();
-                sellerDetail.setSellerName(contactNameById.getOrDefault(siv.getContactId(), ""));
+                Contact contact = contactById.get(siv.getContactId());
+                sellerDetail.setSellerName(contact != null && contact.getName() != null ? contact.getName() : "");
+                sellerDetail.setContactId(siv.getContactId());
+                sellerDetail.setOrigin(contact != null && contact.getAddress() != null ? contact.getAddress() : "");
                 List<Lot> sellerLots = lots.stream().filter(l -> l.getSellerVehicleId().equals(siv.getId())).toList();
                 List<ArrivalLotDetailDTO> lotDetails = sellerLots.stream().map(lot -> {
                     ArrivalLotDetailDTO ld = new ArrivalLotDetailDTO();

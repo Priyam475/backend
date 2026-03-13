@@ -2,18 +2,20 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
-  ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, Trash2,
-  AlertTriangle, Search, Package, Users, Banknote, FileText
+  ArrowLeft, Plus, Truck, Scale, Trash2,
+  Search, Package, Users, Banknote, FileText, MapPin, Share2
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
-import type { ArrivalSummary, ArrivalCreatePayload } from '@/services/api/arrivals';
+import { contactApi, arrivalsApi, commodityApi, weighingApi } from '@/services/api';
+import type { ArrivalSummary, ArrivalCreatePayload, ArrivalDetail } from '@/services/api/arrivals';
+import type { WeighingSessionDTO } from '@/services/api/weighing';
 import type { Vehicle, Contact, FreightMethod } from '@/types/models';
 import { toast } from 'sonner';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import { useAuctionResults } from '@/hooks/useAuctionResults';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 
@@ -98,11 +100,19 @@ const ArrivalsPage = () => {
   const [commodityConfigs, setCommodityConfigs] = useState<any[]>([]);
   const [expandedArrival, setExpandedArrival] = useState<number | null>(null);
   const [desktopTab, setDesktopTab] = useState<'summary' | 'new-arrival'>('summary');
+  const [summarySearch, setSummarySearch] = useState('');
+  const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Bids Created' | 'Pending' | 'Weighed'>('All');
+
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
+  const [weighingSessions, setWeighingSessions] = useState<WeighingSessionDTO[]>([]);
+  const { auctionResults } = useAuctionResults();
 
   // Form state for new arrival — in-memory only (no localStorage). Drafts are session-only; backend draft API not implemented.
   const [showAdd, setShowAdd] = useState(false);
   const [step, setStep] = useState<number>(1);
   const [isMultiSeller, setIsMultiSeller] = useState<boolean>(true);
+  const [deleteArrivalId, setDeleteArrivalId] = useState<string | null>(null);
 
   // Step 1: Vehicle & Tonnage
   const [vehicleNumber, setVehicleNumber] = useState('');
@@ -149,6 +159,8 @@ const ArrivalsPage = () => {
     contactApi.list().then(setContacts);
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setCommodityConfigs);
+    arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
+    weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
   }, []);
 
   // REQ-ARR-001: Tonnage Calculation
@@ -178,6 +190,130 @@ const ArrivalsPage = () => {
       default: return 0;
     }
   }, [freightMethod, freightRate, noRental, finalBillableWeight, sellers]);
+
+  // ── Per-arrival meta map (real data from arrivals detail, auctions, and weighing) ──
+  interface ArrivalMeta {
+    primarySellerName: string;
+    sellerCount: number;
+    primaryOrigin: string;
+    lotCount: number;
+    lotIds: number[];
+    bidsCount: number;
+    weighedCount: number;
+    status: 'Pending' | 'Bids Created' | 'Weighed';
+  }
+
+  const arrivalMetaByVehicleId = useMemo(() => {
+    const map = new Map<string | number, ArrivalMeta>();
+
+    const auctionByLotId = new Map<number, boolean>();
+    (auctionResults ?? []).forEach(r => {
+      if (r.lotId != null) auctionByLotId.set(Number(r.lotId), true);
+    });
+
+    const weighedLotIds = new Set<number>();
+    (weighingSessions ?? []).forEach(ws => {
+      if (ws.lot_id != null) weighedLotIds.add(ws.lot_id);
+    });
+
+    for (const a of apiArrivals) {
+      const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+
+      let primarySellerName = '-';
+      let sellerCount = a.sellerCount || 0;
+      let primaryOrigin = '-';
+      const lotIds: number[] = [];
+
+      if (detail && detail.sellers && detail.sellers.length > 0) {
+        primarySellerName = detail.sellers[0].sellerName || '-';
+        sellerCount = detail.sellers.length;
+        primaryOrigin = detail.sellers[0].origin || '-';
+        for (const seller of detail.sellers) {
+          for (const lot of seller.lots ?? []) {
+            if (lot.id != null) lotIds.push(lot.id);
+          }
+        }
+      }
+
+      const lotCount = lotIds.length > 0 ? lotIds.length : (a.lotCount || 0);
+      const bidsCount = lotIds.filter(id => auctionByLotId.has(id)).length;
+      const weighedCount = lotIds.filter(id => weighedLotIds.has(id)).length;
+
+      let status: ArrivalMeta['status'] = 'Pending';
+      if (bidsCount > 0 && weighedCount >= lotCount && lotCount > 0) {
+        status = 'Weighed';
+      } else if (bidsCount > 0) {
+        status = 'Bids Created';
+      }
+
+      map.set(a.vehicleId, {
+        primarySellerName,
+        sellerCount,
+        primaryOrigin,
+        lotCount,
+        lotIds,
+        bidsCount,
+        weighedCount,
+        status,
+      });
+    }
+
+    return map;
+  }, [apiArrivals, arrivalDetails, auctionResults, weighingSessions]);
+
+  // High-level aggregates for summary stat cards (desktop)
+  const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
+  const totalSellers = useMemo(
+    () => apiArrivals.reduce((acc, a) => acc + (a.sellerCount || 0), 0),
+    [apiArrivals],
+  );
+  const totalLots = useMemo(
+    () => apiArrivals.reduce((acc, a) => acc + (a.lotCount || 0), 0),
+    [apiArrivals],
+  );
+  const totalNetWeightKg = useMemo(
+    () => apiArrivals.reduce((acc, a) => acc + (a.netWeight || 0), 0),
+    [apiArrivals],
+  );
+  const totalNetWeightTons = useMemo(
+    () => (totalNetWeightKg > 0 ? totalNetWeightKg / 1000 : 0),
+    [totalNetWeightKg],
+  );
+
+  // Status counts for filter chips
+  const statusCounts = useMemo(() => {
+    const counts = { All: apiArrivals.length, 'Bids Created': 0, Pending: 0, Weighed: 0 };
+    for (const a of apiArrivals) {
+      const meta = arrivalMetaByVehicleId.get(a.vehicleId);
+      const s = meta?.status ?? 'Pending';
+      counts[s]++;
+    }
+    return counts;
+  }, [apiArrivals, arrivalMetaByVehicleId]);
+
+  const filteredArrivals = useMemo(() => {
+    let result = apiArrivals;
+    const q = summarySearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter(a => {
+        const meta = arrivalMetaByVehicleId.get(a.vehicleId);
+        return (
+          a.vehicleNumber.toLowerCase().includes(q) ||
+          (meta?.primarySellerName ?? '').toLowerCase().includes(q) ||
+          (meta?.primaryOrigin ?? '').toLowerCase().includes(q)
+        );
+      });
+    }
+
+    if (statusFilter !== 'All') {
+      result = result.filter(a => {
+        const meta = arrivalMetaByVehicleId.get(a.vehicleId);
+        return (meta?.status ?? 'Pending') === statusFilter;
+      });
+    }
+
+    return result;
+  }, [summarySearch, apiArrivals, statusFilter, arrivalMetaByVehicleId]);
 
   // REQ-CON-004 / REQ-ARR-007: Unified contact search via mark or phone
   const filteredContacts = useMemo(() => {
@@ -266,26 +402,109 @@ const ArrivalsPage = () => {
 
   const handleSubmitArrival = async () => {
     // Validation
-    if (isMultiSeller && !vehicleNumber.trim()) {
+    const vNum = vehicleNumber.trim();
+    if (isMultiSeller && !vNum) {
       toast.error('Vehicle number is required for multi-seller arrivals');
       return;
     }
+    if (vNum && (vNum.length < 2 || vNum.length > 12)) {
+      toast.error('Vehicle number must be between 2 and 12 characters');
+      return;
+    }
+
+    const gdwn = godown.trim();
+    if (gdwn && !/^[a-zA-Z\s]+$/.test(gdwn)) {
+      toast.error('Godown name must contain only alphabets and spaces');
+      return;
+    }
+    if (gdwn && (gdwn.length < 2 || gdwn.length > 50)) {
+      toast.error('Godown name must be between 2 and 50 characters');
+      return;
+    }
+
+    const gpNum = gatepassNumber.trim();
+    if (gpNum && !/^[a-zA-Z0-9]+$/.test(gpNum)) {
+      toast.error('Gatepass number must be alphanumeric');
+      return;
+    }
+    if (gpNum && (gpNum.length < 1 || gpNum.length > 30)) {
+      toast.error('Gatepass number must be between 1 and 30 characters');
+      return;
+    }
+
+    const brkName = brokerName.trim();
+    if (brkName && !/^[a-zA-Z\s]+$/.test(brkName)) {
+      toast.error('Broker name must contain only alphabets and spaces');
+      return;
+    }
+    if (brkName && (brkName.length < 2 || brkName.length > 100)) {
+      toast.error('Broker name must be between 2 and 100 characters');
+      return;
+    }
+
+    const lw = parseFloat(loadedWeight) || 0;
+    if (loadedWeight && (lw < 0 || lw > 100000)) {
+      toast.error('Loaded weight must be between 0 and 100,000 kg');
+      return;
+    }
+    const ew = parseFloat(emptyWeight) || 0;
+    if (emptyWeight && (ew < 0 || ew > 100000)) {
+      toast.error('Empty weight must be between 0 and 100,000 kg');
+      return;
+    }
+    if (loadedWeight && emptyWeight && ew > lw) {
+      toast.error('Empty weight cannot exceed loaded weight');
+      return;
+    }
+    const dw = parseFloat(deductedWeight) || 0;
+    if (deductedWeight && (dw < 0 || dw > 10000)) {
+      toast.error('Deducted weight must be between 0 and 10,000 kg');
+      return;
+    }
+
+    if (!noRental) {
+      const fr = parseFloat(freightRate) || 0;
+      if (freightRate && (fr < 0 || fr > 100000)) {
+        toast.error('Freight rate must be between 0 and 100,000');
+        return;
+      }
+      const ap = parseFloat(advancePaid) || 0;
+      if (advancePaid && (ap < 0 || ap > 1000000)) {
+        toast.error('Advance paid must be between 0 and 1,000,000');
+        return;
+      }
+    }
+
     if (sellers.length === 0) {
       toast.error('At least one seller is required');
       return;
     }
+    
+    const allLotNames = new Set<string>();
+
     for (const seller of sellers) {
       if (seller.lots.length === 0) {
         toast.error(`${seller.seller_name}: At least one lot is required`);
         return;
       }
       for (const lot of seller.lots) {
-        if (!lot.lot_name.trim()) {
+        const ln = lot.lot_name.trim();
+        if (!ln) {
           toast.error(`${seller.seller_name}: Lot name is required`);
           return;
         }
-        if (lot.quantity <= 0) {
-          toast.error(`${seller.seller_name} → ${lot.lot_name}: Quantity must be > 0`);
+        if (ln.length < 2 || ln.length > 50) {
+          toast.error(`${seller.seller_name} \u2192 ${ln}: Lot name must be between 2 and 50 characters`);
+          return;
+        }
+        if (allLotNames.has(ln.toLowerCase())) {
+          toast.error(`Lot name '${ln}' is already used in this arrival details`);
+          return;
+        }
+        allLotNames.add(ln.toLowerCase());
+
+        if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
+          toast.error(`${seller.seller_name} \u2192 ${ln}: Quantity must be a positive integer between 1 and 100,000`);
           return;
         }
       }
@@ -335,6 +554,7 @@ const ArrivalsPage = () => {
       };
       const created = await arrivalsApi.create(payload);
       await loadArrivalsFromApi();
+      arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
       resetForm();
       setShowAdd(false);
       setDesktopTab('summary');
@@ -407,36 +627,32 @@ const ArrivalsPage = () => {
             <button
               onClick={() => setDesktopTab('summary')}
               className={cn(
-                "px-5 py-3 text-sm font-semibold transition-all relative",
+                "px-4 py-2.5 text-[13px] font-semibold transition-all relative flex items-center gap-2",
                 desktopTab === 'summary'
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4" />
-                Summary
-                <span className="ml-1 px-2 py-0.5 rounded-full bg-muted text-[10px] font-bold">{apiArrivalsLoading ? '…' : apiArrivals.length}</span>
-              </div>
+              <Truck className="w-4 h-4" />
+              Summary
+              <span className="px-1.5 py-0.5 rounded-md bg-muted text-[10px] font-bold">{apiArrivalsLoading ? '…' : apiArrivals.length}</span>
               {desktopTab === 'summary' && (
-                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-violet-500 rounded-full" />
+                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#5b6cf9] rounded-full" />
               )}
             </button>
             <button
               onClick={() => { setDesktopTab('new-arrival'); resetForm(); }}
               className={cn(
-                "px-5 py-3 text-sm font-semibold transition-all relative",
+                "px-4 py-2.5 text-[13px] font-semibold transition-all relative flex items-center gap-2",
                 desktopTab === 'new-arrival'
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              <div className="flex items-center gap-2">
-                <Plus className="w-4 h-4" />
-                New Arrival
-              </div>
+              <Plus className="w-4 h-4" />
+              New Arrival
               {desktopTab === 'new-arrival' && (
-                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-violet-500 rounded-full" />
+                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#5b6cf9] rounded-full" />
               )}
             </button>
           </div>
@@ -464,38 +680,348 @@ const ArrivalsPage = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="glass-card rounded-2xl overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border/40 bg-muted/30">
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Sellers</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Lots</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Net Wt</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Freight</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {apiArrivals.map((a, i) => (
-                          <motion.tr key={a.vehicleId + '-' + i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                            className="border-b border-border/20 hover:bg-muted/20 transition-colors">
-                            <td className="px-4 py-3 font-semibold text-foreground">
-                              <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.sellerCount}</td>
-                            <td className="px-4 py-3 text-right font-medium text-foreground">{a.lotCount}</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.netWeight}kg</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.freightTotal > 0 ? `₹${a.freightTotal.toLocaleString()}` : '—'}</td>
-                            <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(a.arrivalDatetime).toLocaleDateString()}</td>
-                          </motion.tr>
+                  <div className="space-y-6">
+                    {/* Stat cards row */}
+                    <div className="grid grid-cols-4 gap-4">
+                      {/* Total Vehicles Card */}
+                      <div className="bg-white border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Truck className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalVehicles}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Vehicles</p>
+                        </div>
+                      </div>
+                      {/* Total Sellers Card */}
+                      <div className="bg-white border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Users className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalSellers}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Sellers</p>
+                        </div>
+                      </div>
+                      {/* Total Lots Card */}
+                      <div className="bg-white border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Package className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalLots}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Lots</p>
+                        </div>
+                      </div>
+                      {/* Total Weight Card */}
+                      <div className="bg-white border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Scale className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">
+                            {totalNetWeightTons.toFixed(1)}t
+                          </p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Weight</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Search + Primary Tabs */}
+                    <div className="flex items-center gap-4">
+                      <div className="relative w-[300px]">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                          value={summarySearch}
+                          onChange={e => setSummarySearch(e.target.value)}
+                          placeholder="Search seller, vehicle, origin..."
+                          className="pl-9 h-9 rounded-xl bg-white border-0 shadow-sm text-xs focus-visible:ring-1 focus-visible:ring-[#6075FF]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setSummaryMode('arrivals')}
+                          className={cn(
+                            'px-4 py-1.5 rounded-full font-medium transition-colors',
+                            summaryMode === 'arrivals'
+                              ? 'bg-[#6075FF] text-white shadow-sm'
+                              : 'bg-transparent text-muted-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          Arrivals ({totalVehicles})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSummaryMode('sellers')}
+                          className={cn(
+                            'px-4 py-1.5 rounded-full font-medium transition-colors',
+                            summaryMode === 'sellers'
+                              ? 'bg-[#6075FF] text-white shadow-sm'
+                              : 'bg-transparent text-muted-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          Sellers ({totalSellers})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSummaryMode('lots')}
+                          className={cn(
+                            'px-4 py-1.5 rounded-full font-medium transition-colors',
+                            summaryMode === 'lots'
+                              ? 'bg-[#6075FF] text-white shadow-sm'
+                              : 'bg-transparent text-muted-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          Lots ({totalLots})
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Secondary Filter Chips */}
+                    {summaryMode === 'arrivals' && (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        {(['All', 'Bids Created', 'Pending', 'Weighed'] as const).map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatusFilter(s)}
+                            className={cn("px-4 py-1 rounded-full font-medium transition-colors", statusFilter === s ? "bg-[#6075FF] text-white shadow-sm" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200")}
+                          >
+                            {s} ({statusCounts[s]})
+                          </button>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </div>
+                    )}
+
+                    {/* Content Views based on Mode */}
+                    {filteredArrivals.length === 0 ? (
+                      <div className="bg-white rounded-2xl shadow-sm border border-border/40 py-24 flex flex-col items-center justify-center text-center">
+                        {summaryMode === 'arrivals' && (
+                          <>
+                            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#8a9cf9] to-[#6075FF] flex items-center justify-center shadow-md mb-4 shadow-[#6075FF]/20">
+                              <Truck className="w-6 h-6 text-white" />
+                            </div>
+                            <h3 className="text-[17px] font-bold text-foreground mb-1">No arrivals found</h3>
+                          </>
+                        )}
+                        {summaryMode === 'sellers' && (
+                          <>
+                            <Users className="w-10 h-10 text-muted-foreground/30 mb-2" />
+                            <p className="text-[13px] text-muted-foreground font-medium">No sellers found</p>
+                          </>
+                        )}
+                        {summaryMode === 'lots' && (
+                          <>
+                            <Package className="w-10 h-10 text-muted-foreground/30 mb-2" />
+                            <p className="text-[13px] text-muted-foreground font-medium">No lots found</p>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        {summaryMode === 'arrivals' && (
+                          <div className="bg-white rounded-2xl shadow-sm border border-border/40 overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-border/40 bg-zinc-50/50">
+                              <th className="text-left px-5 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Vehicle</th>
+                              <th className="text-left px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Seller</th>
+                              <th className="text-left px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">From</th>
+                              <th className="text-center px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Lots</th>
+                              <th className="text-center px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Bids</th>
+                              <th className="text-center px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Weighed</th>
+                              <th className="text-center px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Status</th>
+                              <th className="text-left px-3 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Date</th>
+                              <th className="text-center px-5 py-3 font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredArrivals.map((a, mapIndex) => {
+                              const meta = arrivalMetaByVehicleId.get(a.vehicleId);
+                              const sellerLabel = meta
+                                ? (meta.sellerCount > 1 ? `${meta.primarySellerName} +${meta.sellerCount - 1} more` : meta.primarySellerName)
+                                : '-';
+                              const originLabel = meta?.primaryOrigin || '-';
+                              const lotsLabel = meta?.lotCount ?? a.lotCount;
+                              const bidsLabel = meta?.bidsCount ?? 0;
+                              const weighedLabel = meta?.weighedCount ?? 0;
+                              const statusLabel = meta?.status ?? 'Pending';
+
+                              return (
+                                <motion.tr
+                                  key={a.vehicleId + '-' + mapIndex}
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  transition={{ delay: mapIndex * 0.03 }}
+                                  className="border-b border-border/20 hover:bg-muted/10 transition-colors"
+                                >
+                                  <td className="px-5 py-3 whitespace-nowrap">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[#eef0ff] text-[#6075FF] text-[11px] font-semibold">
+                                      {a.vehicleNumber}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 text-foreground/80">{sellerLabel}</td>
+                                  <td className="px-3 py-3 text-foreground/80 whitespace-nowrap">{originLabel}</td>
+                                  <td className="px-3 py-3 text-center font-medium text-foreground">{lotsLabel}</td>
+                                  <td className="px-3 py-3 text-center text-foreground/80">{bidsLabel}</td>
+                                  <td className="px-3 py-3 text-center text-foreground/80">{weighedLabel}</td>
+                                  <td className="px-3 py-3 text-center whitespace-nowrap">
+                                    <span className={cn(
+                                      "inline-flex items-center px-2 py-0.5 rounded-[12px] text-[10px] font-bold tracking-wide",
+                                      statusLabel === 'Bids Created'
+                                        ? "bg-[#eef0ff] text-[#6075FF]"
+                                        : statusLabel === 'Weighed'
+                                          ? "bg-emerald-50 text-emerald-600"
+                                          : "bg-zinc-100 text-zinc-500"
+                                    )}>
+                                      {statusLabel}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 text-foreground/80 whitespace-nowrap">
+                                    {new Date(a.arrivalDatetime).toLocaleDateString('en-US', { day: 'numeric', month: 'numeric', year: 'numeric' })}
+                                  </td>
+                                  <td className="px-5 py-3 text-center">
+                                    <button onClick={() => setDeleteArrivalId(String(a.vehicleId))} className="text-red-400 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </motion.tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {summaryMode === 'sellers' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {filteredArrivals.flatMap((a) => {
+                          const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                          if (!detail || !detail.sellers || detail.sellers.length === 0) {
+                            const meta = arrivalMetaByVehicleId.get(a.vehicleId);
+                            return [{ sellerName: meta?.primarySellerName || '-', origin: meta?.primaryOrigin || '-', lotCount: a.lotCount, lots: [] as { id: number; lotName: string }[], vehicleNumber: a.vehicleNumber, key: `seller-${a.vehicleId}-0` }];
+                          }
+                          return detail.sellers.map((s, si) => ({
+                            sellerName: s.sellerName || '-',
+                            origin: s.origin || '-',
+                            lotCount: s.lots?.length ?? 0,
+                            lots: s.lots ?? [],
+                            vehicleNumber: a.vehicleNumber,
+                            key: `seller-${a.vehicleId}-${si}`,
+                          }));
+                        }).map((item, mapIndex) => {
+                          const bgColors = ['bg-[#6075FF]', 'bg-[#00c98b]', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500'];
+                          const bgClass = bgColors[mapIndex % bgColors.length];
+
+                          return (
+                            <motion.div
+                              key={item.key}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: mapIndex * 0.03 }}
+                              className="bg-white rounded-[24px] shadow-sm border border-border/40 p-4"
+                            >
+                              <div className="flex items-start gap-3.5">
+                                <div className={cn("w-[42px] h-[42px] rounded-xl flex items-center justify-center text-white font-bold text-[17px] shrink-0", bgClass)}>
+                                  {item.sellerName.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex-1 min-w-0 pt-0.5">
+                                  <h4 className="text-[14px] font-semibold text-foreground mb-1 leading-none">{item.sellerName}</h4>
+                                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-muted-foreground mb-3 font-medium">
+                                    <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" /> {item.origin}</span>
+                                    <span className="text-muted-foreground/40">{item.lotCount} lot(s)</span>
+                                    <span className="w-0.5 h-0.5 rounded-full bg-muted-foreground/30" />
+                                    <span className="text-muted-foreground/60">{item.vehicleNumber}</span>
+                                  </div>
+
+                                  {item.lots.length > 0 && (
+                                    <div className="bg-zinc-50/80 rounded-[10px] px-2.5 py-1.5 flex items-center gap-2 text-[10px]">
+                                      <Package className="w-3 h-3 text-muted-foreground/70" />
+                                      <span className="font-semibold text-foreground">{item.lots[0].lotName || 'Unnamed'}</span>
+                                      {item.lots.length > 1 && <span className="text-muted-foreground/40 font-medium">+{item.lots.length - 1} more</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {summaryMode === 'lots' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {filteredArrivals.flatMap((a) => {
+                          const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                          if (!detail || !detail.sellers) return [];
+                          return detail.sellers.flatMap(seller =>
+                            (seller.lots ?? []).map(lot => ({
+                              lotId: lot.id,
+                              lotName: lot.lotName || 'Unnamed',
+                              sellerName: seller.sellerName || '-',
+                              origin: seller.origin || '-',
+                              vehicleNumber: a.vehicleNumber,
+                              key: `lot-${a.vehicleId}-${lot.id}`,
+                            }))
+                          );
+                        }).map((item, mapIndex) => (
+                          <motion.div
+                            key={item.key}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: mapIndex * 0.03 }}
+                            className="bg-white rounded-[24px] shadow-sm border border-border/40 p-4 transition-all hover:shadow-md"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start gap-3">
+                                <div className="w-[42px] h-[42px] rounded-xl bg-[#6075FF] flex items-center justify-center shrink-0">
+                                  <Package className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="text-[14px] font-semibold text-foreground leading-none">{item.lotName}</h4>
+                                    <span className="text-[10px] text-muted-foreground/60 font-medium">#{item.lotId}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                                    <span>{item.sellerName}</span>
+                                    <span className="w-0.5 h-0.5 rounded-full bg-muted-foreground/30" />
+                                    <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" /> {item.origin}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <button
+                                  onClick={() => {
+                                    const text = `Lot: ${item.lotName}\nSeller: ${item.sellerName}\nVehicle: ${item.vehicleNumber}`;
+                                    if (navigator.share) {
+                                      navigator.share({ title: 'Lot Details', text }).catch(() => toast.success('Lot details shared'));
+                                    } else {
+                                      navigator.clipboard.writeText(text);
+                                      toast.success('Lot details copied to clipboard');
+                                    }
+                                  }}
+                                  className="p-1 hover:text-foreground transition-colors"
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="mt-4">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[#eef0ff] text-[#6075FF] text-[10px] font-bold">
+                                {item.vehicleNumber}
+                              </span>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
-              </motion.div>
+              </div>
             )}
+          </motion.div>
+        )}
 
             {desktopTab === 'new-arrival' && (
               <motion.div key="new-arrival" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
@@ -549,6 +1075,7 @@ const ArrivalsPage = () => {
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
+                          minLength={2} maxLength={12}
                           className="h-11 rounded-xl text-sm font-medium" />
                       </div>
                     )}
@@ -561,20 +1088,20 @@ const ArrivalsPage = () => {
                         <div>
                           <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-11 rounded-xl text-sm font-medium" min={0} />
+                            className="h-11 rounded-xl text-sm font-medium" min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
                             Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
-                            className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} />
+                            className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
                         <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-11 rounded-xl text-sm font-medium" min={0} />
+                          className="h-11 rounded-xl text-sm font-medium" min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
@@ -592,18 +1119,18 @@ const ArrivalsPage = () => {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className="h-11 rounded-xl text-sm" />
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} minLength={2} maxLength={50} className="h-11 rounded-xl text-sm" />
                         </div>
                         <div>
                           <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} className="h-11 rounded-xl text-sm" />
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} minLength={1} maxLength={30} className="h-11 rounded-xl text-sm" />
                         </div>
                       </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
                       <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} className="h-11 rounded-xl text-sm" />
+                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} minLength={2} maxLength={100} className="h-11 rounded-xl text-sm" />
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -633,7 +1160,7 @@ const ArrivalsPage = () => {
                             <div>
                               <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                                className="h-11 rounded-xl text-sm font-medium" min={0} />
+                                className="h-11 rounded-xl text-sm font-medium" min={0} max={100000} step="0.01" />
                             </div>
                             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
                               <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
@@ -643,7 +1170,7 @@ const ArrivalsPage = () => {
                           <div className="mb-3">
                             <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-11 rounded-xl text-sm font-medium" min={0} />
+                              className="h-11 rounded-xl text-sm font-medium" min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
@@ -754,13 +1281,14 @@ const ArrivalsPage = () => {
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name *</label>
                                   <Input placeholder="e.g., A1" value={lot.lot_name}
                                     onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                    minLength={2} maxLength={50}
                                     className="h-9 rounded-lg text-sm" />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
                                   <Input type="number" placeholder="0" value={lot.quantity || ''}
                                     onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className="h-9 rounded-lg text-sm" min={1} />
+                                    className="h-9 rounded-lg text-sm" min={1} max={100000} />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
@@ -928,6 +1456,7 @@ const ArrivalsPage = () => {
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
+                          minLength={2} maxLength={12}
                           className="h-12 rounded-xl text-base font-medium" />
                       </div>
                     )}
@@ -940,20 +1469,20 @@ const ArrivalsPage = () => {
                         <div>
                           <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-12 rounded-xl text-base font-medium" min={0} />
+                            className="h-12 rounded-xl text-base font-medium" min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
                             Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
-                            className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} />
+                            className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
                         <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-12 rounded-xl text-base font-medium" min={0} />
+                          className="h-12 rounded-xl text-base font-medium" min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
@@ -971,18 +1500,18 @@ const ArrivalsPage = () => {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className="h-12 rounded-xl" />
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} minLength={2} maxLength={50} className="h-12 rounded-xl" />
                         </div>
                         <div>
                           <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} className="h-12 rounded-xl" />
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} minLength={1} maxLength={30} className="h-12 rounded-xl" />
                         </div>
                       </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
                       <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} className="h-12 rounded-xl" />
+                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} minLength={2} maxLength={100} className="h-12 rounded-xl" />
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -1011,7 +1540,7 @@ const ArrivalsPage = () => {
                           <div className="mb-3">
                             <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
                             <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} />
+                              className="h-12 rounded-xl text-base font-medium" min={0} max={100000} step="0.01" />
                           </div>
                           <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 mb-3">
                             <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
@@ -1020,7 +1549,7 @@ const ArrivalsPage = () => {
                           <div className="mb-3">
                             <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} />
+                              className="h-12 rounded-xl text-base font-medium" min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
@@ -1126,13 +1655,14 @@ const ArrivalsPage = () => {
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name *</label>
                                   <Input placeholder="e.g., A1, Ka" value={lot.lot_name}
                                     onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                    minLength={2} maxLength={50}
                                     className="h-10 rounded-lg text-sm" />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
                                   <Input type="number" placeholder="0" value={lot.quantity || ''}
                                     onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className="h-10 rounded-lg text-sm" min={1} />
+                                    className="h-10 rounded-lg text-sm" min={1} max={100000} />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
@@ -1179,6 +1709,55 @@ const ArrivalsPage = () => {
           </AnimatePresence>
         </>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteArrivalId && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-[2px]"
+              onClick={() => setDeleteArrivalId(null)}
+            />
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 pointer-events-none">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="bg-white rounded-[24px] p-6 w-[400px] shadow-2xl pointer-events-auto flex flex-col items-center text-center border border-border/40"
+              >
+                <div className="w-[56px] h-[56px] rounded-[18px] bg-[#fff1f2] flex items-center justify-center mb-4">
+                  <Trash2 className="w-7 h-7 text-[#FA4A5C]" strokeWidth={1.5} />
+                </div>
+                <h3 className="text-[19px] font-bold text-foreground mb-2.5">Delete Arrival?</h3>
+                <p className="text-[14px] text-muted-foreground mb-6 leading-relaxed px-2">
+                  This will permanently remove this arrival record and<br />all associated lots.
+                </p>
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => setDeleteArrivalId(null)}
+                    className="flex-1 py-3 rounded-2xl border border-zinc-200 text-[14px] font-semibold text-foreground hover:bg-zinc-50 transition-colors shadow-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setApiArrivals(prev => prev.filter(a => String(a.vehicleId) !== deleteArrivalId));
+                      setDeleteArrivalId(null);
+                      toast.success('Arrival deleted successfully');
+                    }}
+                    className="flex-1 py-3 rounded-2xl bg-[#FA4A5C] text-white text-[14px] font-semibold hover:bg-[#E53D4E] transition-colors shadow-sm shadow-red-500/20"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
 
       {!isDesktop && <BottomNav />}
     </div>
