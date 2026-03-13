@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
@@ -122,6 +123,15 @@ const ArrivalsPage = () => {
   const [sellers, setSellers] = useState<SellerEntry[]>([]);
   const [sellerSearch, setSellerSearch] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
+  const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+
+  const refreshDropdownPos = useCallback(() => {
+    if (sellerSearchWrapRef.current) {
+      const rect = sellerSearchWrapRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+  }, []);
 
   // ── Weight validation: empty > loaded ──────────────────
   const isEmptyWeightInvalid = useMemo(() => {
@@ -150,6 +160,18 @@ const ArrivalsPage = () => {
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setCommodityConfigs);
   }, []);
+
+  // Close seller dropdown on scroll or resize (portal is fixed-position so it won't follow)
+  useEffect(() => {
+    if (!sellerDropdown) return;
+    const close = () => setSellerDropdown(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [sellerDropdown]);
 
   // REQ-ARR-001: Tonnage Calculation
   const netWeight = useMemo(() => {
@@ -553,7 +575,7 @@ const ArrivalsPage = () => {
                       </div>
                     )}
 
-                    <div className="glass-card rounded-2xl p-4">
+                    <div className="glass-card rounded-2xl p-4 relative z-20 overflow-visible">
                       <label className="text-xs font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider mb-3 block flex items-center gap-1.5">
                         <Scale className="w-3.5 h-3.5" /> Weigh Bridge
                       </label>
@@ -678,35 +700,16 @@ const ArrivalsPage = () => {
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Search className="w-3.5 h-3.5" /> Add Seller
                       </label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <div ref={sellerSearchWrapRef} className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <Input
                           placeholder="Search by name, phone, or mark…"
                           value={sellerSearch}
-                          onChange={e => { setSellerSearch(e.target.value); setSellerDropdown(true); }}
-                          onFocus={() => sellerSearch && setSellerDropdown(true)}
+                          onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                          onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                          onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
                           className="h-11 rounded-xl pl-10 text-sm"
                         />
-                        <AnimatePresence>
-                          {sellerDropdown && filteredContacts.length > 0 && (
-                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
-                              className="absolute top-14 left-0 right-0 z-20 bg-card border border-border/50 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                              {filteredContacts.map(c => (
-                                <button key={c.contact_id} onClick={() => addSeller(c)}
-                                  className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0">
-                                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
-                                    <span className="text-white text-[10px] font-bold">{c.mark || c.name.charAt(0)}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-foreground font-medium">{c.name}</span>
-                                    {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
-                                  </div>
-                                  <span className="ml-auto text-xs text-muted-foreground">{c.phone}</span>
-                                </button>
-                              ))}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
                     </div>
 
@@ -902,7 +905,7 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className="glass-card rounded-2xl p-4">
+                    <div className="glass-card rounded-2xl p-4 relative z-20 overflow-visible">
                       <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Arrival Type</label>
                       <div className="flex gap-2">
                         <button onClick={() => setIsMultiSeller(true)}
@@ -1053,32 +1056,13 @@ const ArrivalsPage = () => {
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5" /> Add Seller
                       </label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <div ref={sellerSearchWrapRef} className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
-                          onChange={e => { setSellerSearch(e.target.value); setSellerDropdown(true); }}
-                          onFocus={() => sellerSearch && setSellerDropdown(true)}
+                          onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                          onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                          onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
                           className="h-12 rounded-xl pl-10" />
-                        <AnimatePresence>
-                          {sellerDropdown && filteredContacts.length > 0 && (
-                            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
-                              className="absolute top-14 left-0 right-0 z-20 bg-card border border-border/50 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                              {filteredContacts.map(c => (
-                                <button key={c.contact_id} onClick={() => addSeller(c)}
-                                  className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0">
-                                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
-                                    <span className="text-white text-[10px] font-bold">{c.mark || c.name.charAt(0)}</span>
-                                  </div>
-                                  <div>
-                                    <span className="text-foreground font-medium">{c.name}</span>
-                                    {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
-                                  </div>
-                                  <span className="ml-auto text-xs text-muted-foreground">{c.phone}</span>
-                                </button>
-                              ))}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
                     </div>
 
@@ -1181,6 +1165,45 @@ const ArrivalsPage = () => {
       )}
 
       {!isDesktop && <BottomNav />}
+
+      {/* ── Seller search dropdown rendered via portal so it escapes all overflow:hidden parents ── */}
+      {sellerDropdown && filteredContacts.length > 0 && createPortal(
+        <AnimatePresence>
+          <motion.div
+            key="seller-dropdown-portal"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              position: 'fixed',
+              top: dropdownPos.top,
+              left: dropdownPos.left,
+              width: dropdownPos.width,
+              zIndex: 9999,
+            }}
+            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto"
+          >
+            {filteredContacts.map(c => (
+              <button
+                key={c.contact_id}
+                onMouseDown={e => { e.preventDefault(); addSeller(c); }}
+                className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0"
+              >
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-[10px] font-bold">{c.mark || c.name.charAt(0)}</span>
+                </div>
+                <div className="min-w-0">
+                  <span className="text-foreground font-medium">{c.name}</span>
+                  {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
+                </div>
+                <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{c.phone}</span>
+              </button>
+            ))}
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };
