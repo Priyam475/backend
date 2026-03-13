@@ -278,14 +278,12 @@ public class ContactAuthResource {
 
         String phone = normalizePhone(identifier);
 
-        // If this mobile already belongs to any trader, trader staff user, admin user, or contact
-        // (including login-capable contacts), do not allow OTP-based guest login.
+        // If this mobile already belongs to any trader, trader staff user, or admin user,
+        // do not allow OTP-based guest login or OTP login via the contact portal.
         boolean hasTraderByMobile = traderRepository.findOneByMobile(phone).isPresent();
         boolean hasUserByMobile = userRepository.findOneByMobile(phone).isPresent();
         boolean hasAdminByMobile = adminUserRepository.findOneByMobile(phone).isPresent();
-        boolean hasAnyContact = contactRepository.findOneByPhone(phone).isPresent();
-
-        if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile || hasAnyContact) {
+        if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile) {
             throw new ConflictAlertException(
                 ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
                 "This mobile number is already in use.",
