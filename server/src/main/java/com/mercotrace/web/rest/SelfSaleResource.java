@@ -3,6 +3,7 @@ package com.mercotrace.web.rest;
 import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.SelfSaleService;
 import com.mercotrace.service.dto.SelfSaleDTOs.ClosureDTO;
+import com.mercotrace.service.dto.SelfSaleDTOs.ClosuresSummaryDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.CreateClosureRequestDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.OpenLotDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
@@ -77,6 +78,17 @@ public class SelfSaleResource {
         } catch (IllegalArgumentException ex) {
             throw new BadRequestAlertException(ex.getMessage(), ENTITY_NAME, "validation");
         }
+    }
+
+    /**
+     * {@code GET  /self-sale/closures/summary} : Get total amount and count of closed self-sales for the current trader (for "Total Sold" header, aligns with client_origin).
+     */
+    @GetMapping("/closures/summary")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SELF_SALE_VIEW + "\")")
+    public ResponseEntity<ClosuresSummaryDTO> getClosuresSummary() {
+        LOG.debug("REST request to get self-sale closures summary");
+        ClosuresSummaryDTO summary = selfSaleService.getClosuresSummary();
+        return ResponseEntity.ok(summary);
     }
 
     /**

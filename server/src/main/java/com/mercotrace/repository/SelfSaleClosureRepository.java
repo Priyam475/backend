@@ -1,6 +1,7 @@
 package com.mercotrace.repository;
 
 import com.mercotrace.domain.SelfSaleClosure;
+import java.math.BigDecimal;
 import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,6 +17,14 @@ public interface SelfSaleClosureRepository extends JpaRepository<SelfSaleClosure
      * Paginated list of closures for a trader (excluding soft-deleted), sorted by closedAt desc by default.
      */
     Page<SelfSaleClosure> findByTraderIdAndIsDeletedFalse(Long traderId, Pageable pageable);
+
+    /**
+     * Sum of (appliedRate * lot.bagCount) for all non-deleted closures of the trader. For "Total Sold" in client (align with client_origin).
+     */
+    @Query("SELECT COALESCE(SUM(s.appliedRate * l.bagCount), 0) FROM SelfSaleClosure s, Lot l WHERE l.id = s.lotId AND s.traderId = :traderId AND s.isDeleted = false")
+    BigDecimal sumAmountByTraderId(@Param("traderId") Long traderId);
+
+    long countByTraderIdAndIsDeletedFalse(Long traderId);
 
     /**
      * Lot IDs that are already closed as self-sale for this trader (to exclude from open lots).

@@ -63,6 +63,8 @@ const SelfSalePage = () => {
   const [closuresTotal, setClosuresTotal] = useState(0);
   const [closuresLoading, setClosuresLoading] = useState(true);
   const [closuresError, setClosuresError] = useState<string | null>(null);
+  const [summaryTotalAmount, setSummaryTotalAmount] = useState(0);
+  const [summaryLoading, setSummaryLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const loadOpenLots = useCallback(async () => {
@@ -98,9 +100,25 @@ const SelfSalePage = () => {
     }
   }, [closuresPage]);
 
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const summary = await selfSaleApi.getClosuresSummary();
+      setSummaryTotalAmount(Number(summary.totalAmount));
+    } catch {
+      setSummaryTotalAmount(0);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadOpenLots();
   }, [loadOpenLots]);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
 
   useEffect(() => {
     loadClosures();
@@ -135,6 +153,7 @@ const SelfSalePage = () => {
       setRate('');
       loadOpenLots();
       loadClosures();
+      loadSummary();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create self-sale closure';
       toast.error(msg);
@@ -143,7 +162,8 @@ const SelfSalePage = () => {
     }
   };
 
-  const totalAmount = useMemo(() => records.reduce((s, r) => s + r.amount, 0), [records]);
+  // Total Sold from backend summary (all closures), aligns with client_origin; not sum of current page only
+  const totalAmount = summaryTotalAmount;
 
   return (
     <div className="min-h-[100dvh] bg-background pb-28 lg:pb-6">
@@ -175,7 +195,7 @@ const SelfSalePage = () => {
               </div>
               <div className="bg-white/20 backdrop-blur-md rounded-xl px-3 py-2">
                 <p className="text-white/70 text-[10px] font-semibold uppercase tracking-wider">Total Sold</p>
-                <p className="text-white text-lg font-bold">₹{totalAmount.toLocaleString()}</p>
+                <p className="text-white text-lg font-bold">{summaryLoading ? '…' : `₹${totalAmount.toLocaleString()}`}</p>
               </div>
             </div>
 
@@ -202,7 +222,7 @@ const SelfSalePage = () => {
             </div>
             <div className="glass-card rounded-xl px-4 py-2 flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-500" />
-              <span className="text-sm font-semibold">₹{totalAmount.toLocaleString()}</span>
+              <span className="text-sm font-semibold">{summaryLoading ? '…' : `₹${totalAmount.toLocaleString()}`}</span>
             </div>
           </div>
         </div>
@@ -299,7 +319,7 @@ const SelfSalePage = () => {
                   <tbody>
                     {records.map(r => (
                       <tr key={r.id} className="border-b border-border/30 last:border-0 hover:bg-amber-50/30 dark:hover:bg-amber-900/5 transition-colors">
-                        <td className="p-3 font-semibold">{r.lotName}</td>
+                        <td className="p-3 font-semibold">{r.lotName} {' {₹'}{r.rate}{'}'}</td>
                         <td className="p-3 text-muted-foreground">{r.commodityName}</td>
                         <td className="p-3 text-muted-foreground">{r.sellerName}</td>
                         <td className="p-3 text-right font-bold text-amber-700 dark:text-amber-400">₹{r.rate}</td>
@@ -321,7 +341,7 @@ const SelfSalePage = () => {
                   <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                     className="glass-card rounded-xl p-3 border-l-4 border-l-emerald-400">
                     <div className="flex items-center justify-between">
-                      <p className="font-bold text-sm">{r.lotName}</p>
+                      <p className="font-bold text-sm">{r.lotName} {' {₹'}{r.rate}{'}'}</p>
                       <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold",
                         r.mode === 'COMMISSION' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                       )}>{r.mode}</span>

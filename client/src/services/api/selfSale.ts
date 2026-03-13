@@ -33,6 +33,12 @@ export interface ClosureDTO {
   closedAt: string;
 }
 
+/** Summary of all closures (total amount and count). For "Total Sold" header, aligns with client_origin. */
+export interface ClosuresSummaryDTO {
+  totalAmount: number;
+  totalCount: number;
+}
+
 export interface SelfSaleClosuresPage {
   content: ClosureDTO[];
   totalElements: number;
@@ -105,6 +111,15 @@ export const selfSaleApi = {
       body: JSON.stringify(payload),
     });
     return handleResponse<ClosureDTO>(res, 'Failed to create self-sale closure');
+  },
+
+  /**
+   * Get summary of all closed self-sales (total amount and count). For "Total Sold" header; aligns with client_origin.
+   */
+  async getClosuresSummary(): Promise<ClosuresSummaryDTO> {
+    const res = await apiFetch('/self-sale/closures/summary', { method: 'GET' });
+    const data = await handleResponse<{ totalAmount: number; totalCount: number }>(res, 'Failed to load closures summary');
+    return { totalAmount: Number(data.totalAmount), totalCount: Number(data.totalCount) };
   },
 
   /**

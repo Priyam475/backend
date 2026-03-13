@@ -129,6 +129,29 @@ public final class SelfSaleDTOs {
         }
     }
 
+    /** Summary of closed self-sales for the current trader (total amount and count). Aligns with client_origin "Total Sold" header. */
+    public static class ClosuresSummaryDTO implements Serializable {
+
+        private java.math.BigDecimal totalAmount;
+        private long totalCount;
+
+        public java.math.BigDecimal getTotalAmount() {
+            return totalAmount;
+        }
+
+        public void setTotalAmount(java.math.BigDecimal totalAmount) {
+            this.totalAmount = totalAmount;
+        }
+
+        public long getTotalCount() {
+            return totalCount;
+        }
+
+        public void setTotalCount(long totalCount) {
+            this.totalCount = totalCount;
+        }
+    }
+
     /** Single closure record (create response and list item). */
     public static class ClosureDTO implements Serializable {
 

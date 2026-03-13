@@ -98,7 +98,8 @@ function clearDraft() {
 function getLotStatus(lotId: string, bagCount: number, apiStatus?: string): LotStatus {
   const draft = loadDraft();
   if (draft?.selectedLotId === lotId && draft.entries.length > 0) return 'pending';
-  if (apiStatus === 'sold' || apiStatus === 'partial' || apiStatus === 'available') return apiStatus as LotStatus;
+  if (apiStatus === 'sold' || apiStatus === 'partial' || apiStatus === 'available' || apiStatus === 'pending')
+    return apiStatus as LotStatus;
   return 'available';
 }
 
@@ -122,7 +123,7 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     seller_vehicle_id: String(dto.seller_vehicle_id ?? ''),
     vehicle_number: dto.vehicle_number ?? '',
     was_modified: dto.was_modified ?? false,
-    status: (dto.status as LotStatus) ?? 'available',
+    status: (dto.status?.toLowerCase() as LotStatus) ?? 'available',
   };
 }
 
@@ -420,6 +421,32 @@ const AuctionsPage = () => {
     try {
       const session = await auctionApi.addBid(selectedLot.lot_id, body);
       setEntries(session.entries.map(sessionEntryToSaleEntry));
+      // Align with client_origin: update selectedLot/availableLots from session.lot so remaining bags and progress bar stay correct (e.g. after quantity increase).
+      if (session.lot) {
+        const lotId = selectedLot.lot_id;
+        setSelectedLot(prev =>
+          prev && prev.lot_id === lotId
+            ? {
+                ...prev,
+                bag_count: session.lot!.bag_count ?? prev.bag_count,
+                original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
+                was_modified: session.lot!.was_modified ?? prev.was_modified,
+              }
+            : prev
+        );
+        setAvailableLots(prev =>
+          prev.map(l =>
+            l.lot_id === lotId && session.lot
+              ? {
+                  ...l,
+                  bag_count: session.lot!.bag_count ?? l.bag_count,
+                  original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
+                  was_modified: session.lot!.was_modified ?? l.was_modified,
+                }
+              : l
+          )
+        );
+      }
       setRate('');
       setQty('');
       setExtraRate('');
@@ -465,6 +492,21 @@ const AuctionsPage = () => {
           token_advance: existingEntry.tokenAdvance ?? 0,
         });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
+        if (session.lot) {
+          const lotId = selectedLot.lot_id;
+          setSelectedLot(prev =>
+            prev && prev.lot_id === lotId
+              ? { ...prev, bag_count: session.lot!.bag_count ?? prev.bag_count, original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count, was_modified: session.lot!.was_modified ?? prev.was_modified }
+              : prev
+          );
+          setAvailableLots(prev =>
+            prev.map(l =>
+              l.lot_id === lotId && session.lot
+                ? { ...l, bag_count: session.lot!.bag_count ?? l.bag_count, original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count, was_modified: session.lot!.was_modified ?? l.was_modified }
+                : l
+            )
+          );
+        }
         toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
@@ -640,7 +682,14 @@ const AuctionsPage = () => {
       .getOrStartSession(lot.lot_id)
       .then((session: AuctionSessionDTO) => {
         const info = lotSummaryToLotInfo(session.lot);
-        setSelectedLot(info);
+        // Keep seller/vehicle/commodity from list lot if session.lot has empty (backend may omit in some paths)
+        setSelectedLot({
+          ...info,
+          seller_name: info.seller_name || lot.seller_name || '',
+          seller_mark: info.seller_mark || lot.seller_mark || '',
+          vehicle_number: info.vehicle_number || lot.vehicle_number || '',
+          commodity_name: info.commodity_name || lot.commodity_name || '',
+        });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
       })
       .catch(() => toast.error('Failed to load session'))
@@ -650,6 +699,8 @@ const AuctionsPage = () => {
   const goBackToSelector = () => {
     // Don't clear entries — they're auto-saved
     setShowLotSelector(true);
+    // Refetch lots so status (Available / Pending / Partial / Sold) is up to date
+    loadLots();
   };
 
   // ═══ LOT SELECTOR SCREEN ═══
@@ -1370,7 +1421,37 @@ const AuctionsPage = () => {
                 className={cn('h-full rounded-full', totalSold >= selectedLot.bag_count ? 'bg-success' : 'bg-gradient-to-r from-primary to-accent')}
               />
             </div>
-            {remaining > 0 && <p className="text-[10px] text-muted-foreground mt-1">{remaining} bags remaining</p>}
+            {remaining > 0 && (
+              <>
+                <p className="text-[10px] text-muted-foreground mt-1">{remaining} bags remaining</p>
+                <Button
+                  disabled={completeLoading}
+                  onClick={async () => {
+                    if (!selectedLot) return;
+                    setCompleteLoading(true);
+                    if (!can('Auctions / Sales', 'Approve')) {
+                      toast.error('You do not have permission to complete auctions.');
+                      return;
+                    }
+                    try {
+                      await auctionApi.completeAuction(selectedLot.lot_id);
+                      clearDraft();
+                      setShowLotSelector(true);
+                      setSelectedLot(null);
+                      setEntries([]);
+                      loadLots();
+                      toast.success('Auction saved (partial). Navigate to Logistics or Weighing.');
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Failed to complete auction');
+                    } finally {
+                      setCompleteLoading(false);
+                    }
+                  }}
+                  className="mt-2 w-full h-10 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-sm shadow-md">
+                  {completeLoading ? 'Completing…' : `✓ Save & Complete (${remaining} unsold)`}
+                </Button>
+              </>
+            )}
             {remaining <= 0 && (
               <>
                 <p className="text-[10px] text-success font-semibold mt-1">✓ All bags sold!</p>
@@ -1389,6 +1470,7 @@ const AuctionsPage = () => {
                       setShowLotSelector(true);
                       setSelectedLot(null);
                       setEntries([]);
+                      loadLots();
                       toast.success('Auction saved! Navigate to Logistics or Weighing.');
                     } catch (e) {
                       toast.error(e instanceof Error ? e.message : 'Failed to complete auction');
