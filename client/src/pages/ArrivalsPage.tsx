@@ -133,12 +133,28 @@ const ArrivalsPage = () => {
   const [sellerSearch, setSellerSearch] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
 
-  // ── Weight validation: empty > loaded ──────────────────
+  // ── Weight validation: loaded required & 0–100,000; empty required, 0–100,000, ≤ loaded ──────────────────
+  const isLoadedWeightInvalid = useMemo(() => {
+    if (!loadedWeight || !loadedWeight.trim()) return true; // required
+    const lw = parseFloat(loadedWeight);
+    if (Number.isNaN(lw)) return true;
+    return lw < 0 || lw > 100000;
+  }, [loadedWeight]);
+
   const isEmptyWeightInvalid = useMemo(() => {
     const lw = parseFloat(loadedWeight) || 0;
     const ew = parseFloat(emptyWeight) || 0;
-    return ew > 0 && lw > 0 && ew > lw;
+    if (!emptyWeight || !emptyWeight.trim()) return true; // required
+    if (Number.isNaN(parseFloat(emptyWeight))) return true;
+    if (ew < 0 || ew > 100000) return true;
+    return ew > lw;
   }, [loadedWeight, emptyWeight]);
+
+  const isDeductedWeightInvalid = useMemo(() => {
+    if (!deductedWeight || !deductedWeight.trim()) return false;
+    const dw = parseFloat(deductedWeight) || 0;
+    return dw < 0 || dw > 10000;
+  }, [deductedWeight]);
 
   const loadArrivalsFromApi = async () => {
     setApiArrivalsLoading(true);
@@ -400,7 +416,18 @@ const ArrivalsPage = () => {
     return warnings;
   };
 
+  const toDecimal2 = (v: string): number => Math.round((parseFloat(v) || 0) * 100) / 100;
+
   const handleSubmitArrival = async () => {
+    /*
+     * ── Pending spec validations (fields not yet in form / API) ──
+     * - Freight Origin (required, 3–100, alphabets+spaces): no form field; ArrivalCreatePayload has no origin.
+     * - Package (required, dropdown, master data): no Package field in form or lot payload.
+     * - Freight Calculation Per (required, integer 1–1,000): no such field in form or payload.
+     * - Lot Number (optional, integer 1–9,999): no Lot Number field; broker_tag is a different concept.
+     * - Variant (optional, dropdown): no variant dropdown on lots.
+     */
+
     // Validation
     const vNum = vehicleNumber.trim();
     if (isMultiSeller && !vNum) {
@@ -442,33 +469,45 @@ const ArrivalsPage = () => {
       return;
     }
 
-    const lw = parseFloat(loadedWeight) || 0;
-    if (loadedWeight && (lw < 0 || lw > 100000)) {
+    if (!loadedWeight || !loadedWeight.trim() || isNaN(parseFloat(loadedWeight))) {
+      toast.error('Loaded weight is required');
+      return;
+    }
+    const lw = toDecimal2(loadedWeight);
+    if (lw < 0 || lw > 100000) {
       toast.error('Loaded weight must be between 0 and 100,000 kg');
       return;
     }
-    const ew = parseFloat(emptyWeight) || 0;
-    if (emptyWeight && (ew < 0 || ew > 100000)) {
+    if (!emptyWeight || !emptyWeight.trim() || isNaN(parseFloat(emptyWeight))) {
+      toast.error('Empty weight is required');
+      return;
+    }
+    const ew = toDecimal2(emptyWeight);
+    if (ew < 0 || ew > 100000) {
       toast.error('Empty weight must be between 0 and 100,000 kg');
       return;
     }
-    if (loadedWeight && emptyWeight && ew > lw) {
+    if (ew > lw) {
       toast.error('Empty weight cannot exceed loaded weight');
       return;
     }
-    const dw = parseFloat(deductedWeight) || 0;
+    const dw = toDecimal2(deductedWeight);
     if (deductedWeight && (dw < 0 || dw > 10000)) {
       toast.error('Deducted weight must be between 0 and 10,000 kg');
       return;
     }
 
     if (!noRental) {
-      const fr = parseFloat(freightRate) || 0;
-      if (freightRate && (fr < 0 || fr > 100000)) {
+      if (!freightRate || !freightRate.trim() || isNaN(parseFloat(freightRate))) {
+        toast.error('Freight rate is required when rental is applicable');
+        return;
+      }
+      const fr = toDecimal2(freightRate);
+      if (fr < 0 || fr > 100000) {
         toast.error('Freight rate must be between 0 and 100,000');
         return;
       }
-      const ap = parseFloat(advancePaid) || 0;
+      const ap = toDecimal2(advancePaid);
       if (advancePaid && (ap < 0 || ap > 1000000)) {
         toast.error('Advance paid must be between 0 and 1,000,000');
         return;
@@ -483,18 +522,30 @@ const ArrivalsPage = () => {
     const allLotNames = new Set<string>();
 
     for (const seller of sellers) {
+      const sName = seller.seller_name.trim();
+      if (sName.length < 2 || sName.length > 100) {
+        toast.error(`Seller name "${sName || '(empty)'}" must be between 2 and 100 characters`);
+        return;
+      }
+
+      const sMark = (seller.seller_mark || '').trim();
+      if (sMark && (sMark.length < 2 || sMark.length > 50)) {
+        toast.error(`${sName}: Alias / mark must be between 2 and 50 characters`);
+        return;
+      }
+
       if (seller.lots.length === 0) {
-        toast.error(`${seller.seller_name}: At least one lot is required`);
+        toast.error(`${sName}: At least one lot is required`);
         return;
       }
       for (const lot of seller.lots) {
         const ln = lot.lot_name.trim();
         if (!ln) {
-          toast.error(`${seller.seller_name}: Lot name is required`);
+          toast.error(`${sName}: Lot name is required`);
           return;
         }
         if (ln.length < 2 || ln.length > 50) {
-          toast.error(`${seller.seller_name} \u2192 ${ln}: Lot name must be between 2 and 50 characters`);
+          toast.error(`${sName} \u2192 ${ln}: Lot name must be between 2 and 50 characters`);
           return;
         }
         if (allLotNames.has(ln.toLowerCase())) {
@@ -504,7 +555,12 @@ const ArrivalsPage = () => {
         allLotNames.add(ln.toLowerCase());
 
         if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
-          toast.error(`${seller.seller_name} \u2192 ${ln}: Quantity must be a positive integer between 1 and 100,000`);
+          toast.error(`${sName} \u2192 ${ln}: Quantity must be a positive integer between 1 and 100,000`);
+          return;
+        }
+
+        if (!lot.commodity_name || !lot.commodity_name.trim()) {
+          toast.error(`${sName} \u2192 ${ln}: Commodity is required`);
           return;
         }
       }
@@ -530,13 +586,13 @@ const ArrivalsPage = () => {
       const payload: ArrivalCreatePayload = {
         vehicle_number: isMultiSeller ? vehicleNumber.trim().toUpperCase() || undefined : undefined,
         is_multi_seller: isMultiSeller,
-        loaded_weight: parseFloat(loadedWeight) || 0,
-        empty_weight: parseFloat(emptyWeight) || 0,
-        deducted_weight: parseFloat(deductedWeight) || 0,
+        loaded_weight: toDecimal2(loadedWeight),
+        empty_weight: toDecimal2(emptyWeight),
+        deducted_weight: toDecimal2(deductedWeight),
         freight_method: freightMethod,
-        freight_rate: parseFloat(freightRate) || 0,
+        freight_rate: toDecimal2(freightRate),
         no_rental: noRental,
-        advance_paid: parseFloat(advancePaid) || 0,
+        advance_paid: toDecimal2(advancePaid),
         broker_name: brokerName || undefined,
         narration: narration || undefined,
         sellers: sellers.map(s => ({
@@ -1086,22 +1142,26 @@ const ArrivalsPage = () => {
                       </label>
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
+                          <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                            Loaded Weight (kg) {isLoadedWeightInvalid && (loadedWeight?.trim() ? "⚠ Must be 0–100,000" : "⚠ Required")}
+                          </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-11 rounded-xl text-sm font-medium" min={0} max={100000} step="0.01" />
+                            className={cn("h-11 rounded-xl text-sm font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
+                            Empty Weight (kg) {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? "⚠ Must be ≤ Loaded Weight" : "⚠ Must be 0–100,000") : "⚠ Required")}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
                             className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
+                        <label className={cn("text-[10px] mb-1 block", isDeductedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Deducted Weight (Fuel/Dust) (kg) — optional {isDeductedWeightInvalid && "⚠ Must be 0–10,000"}
+                        </label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-11 rounded-xl text-sm font-medium" min={0} max={10000} step="0.01" />
+                          className={cn("h-11 rounded-xl text-sm font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
@@ -1467,22 +1527,26 @@ const ArrivalsPage = () => {
                       </label>
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
+                          <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                            Loaded Weight (kg) {isLoadedWeightInvalid && (loadedWeight?.trim() ? "⚠ Must be 0–100,000" : "⚠ Required")}
+                          </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-12 rounded-xl text-base font-medium" min={0} max={100000} step="0.01" />
+                            className={cn("h-12 rounded-xl text-base font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
+                            Empty Weight (kg) {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? "⚠ Must be ≤ Loaded Weight" : "⚠ Must be 0–100,000") : "⚠ Required")}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
                             className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
+                        <label className={cn("text-[10px] mb-1 block", isDeductedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Deducted Weight (Fuel/Dust) (kg) — optional {isDeductedWeightInvalid && "⚠ Must be 0–10,000"}
+                        </label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-12 rounded-xl text-base font-medium" min={0} max={10000} step="0.01" />
+                          className={cn("h-12 rounded-xl text-base font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
