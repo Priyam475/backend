@@ -77,6 +77,15 @@ const ScribblePad = ({ open, onClose, onConfirm }: ScribblePadProps) => {
   const strokesRef = useRef<Stroke[]>([]);
   const currentStroke = useRef<Stroke>({ xs: [], ys: [], ts: [] });
   const strokeStartTime = useRef(0);
+  const [canvasHeight, setCanvasHeight] = useState(320);
+
+  // Canvas height: mobile/tablet 320px, desktop 280px; update on resize
+  useEffect(() => {
+    const update = () => setCanvasHeight(window.innerWidth >= 1024 ? 280 : 320);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
 
   // Resize canvas to match container
   useEffect(() => {
@@ -88,12 +97,12 @@ const ScribblePad = ({ open, onClose, onConfirm }: ScribblePadProps) => {
       if (!parent) return;
       const rect = parent.getBoundingClientRect();
       canvas.width = rect.width;
-      canvas.height = 240;
+      canvas.height = canvasHeight;
     };
     const t = setTimeout(resize, 50);
     window.addEventListener('resize', resize);
     return () => { clearTimeout(t); window.removeEventListener('resize', resize); };
-  }, [open]);
+  }, [open, canvasHeight]);
 
   const doRecognition = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -298,7 +307,8 @@ const ScribblePad = ({ open, onClose, onConfirm }: ScribblePadProps) => {
               <div className="relative mb-3 rounded-2xl overflow-hidden border-2 border-dashed border-violet-400/30 bg-white dark:bg-slate-50">
                 <canvas
                   ref={canvasRef}
-                  className="w-full h-[240px] touch-none cursor-crosshair"
+                  className="w-full touch-none cursor-crosshair"
+                  style={{ height: canvasHeight }}
                   onMouseDown={startDraw}
                   onMouseMove={draw}
                   onMouseUp={endDraw}
