@@ -156,6 +156,47 @@ const ArrivalsPage = () => {
     return dw < 0 || dw > 10000;
   }, [deductedWeight]);
 
+  const isVehicleNumberInvalid = useMemo(() => {
+    if (!isMultiSeller) return false;
+    const v = vehicleNumber.trim();
+    return v.length === 0 || v.length < 2 || v.length > 12;
+  }, [isMultiSeller, vehicleNumber]);
+
+  const isGodownInvalid = useMemo(() => {
+    const g = godown.trim();
+    if (!g) return false;
+    if (g.length < 2 || g.length > 50) return true;
+    return !/^[a-zA-Z\s]+$/.test(g);
+  }, [godown]);
+
+  const isGatepassNumberInvalid = useMemo(() => {
+    const g = gatepassNumber.trim();
+    if (!g) return false;
+    if (g.length < 1 || g.length > 30) return true;
+    return !/^[a-zA-Z0-9]+$/.test(g);
+  }, [gatepassNumber]);
+
+  const isBrokerNameInvalid = useMemo(() => {
+    const b = brokerName.trim();
+    if (!b) return false;
+    if (b.length < 2 || b.length > 100) return true;
+    return !/^[a-zA-Z\s]+$/.test(b);
+  }, [brokerName]);
+
+  const isFreightRateInvalid = useMemo(() => {
+    if (noRental) return false;
+    if (!freightRate || !freightRate.trim()) return true;
+    const fr = parseFloat(freightRate);
+    if (Number.isNaN(fr)) return true;
+    return fr < 0 || fr > 100000;
+  }, [noRental, freightRate]);
+
+  const isAdvancePaidInvalid = useMemo(() => {
+    if (!advancePaid || !advancePaid.trim()) return false;
+    const ap = parseFloat(advancePaid) || 0;
+    return ap < 0 || ap > 1000000;
+  }, [advancePaid]);
+
   const loadArrivalsFromApi = async () => {
     setApiArrivalsLoading(true);
     try {
@@ -1126,13 +1167,13 @@ const ArrivalsPage = () => {
 
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number *
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? "⚠ 2–12 characters" : "⚠ Required")}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          minLength={2} maxLength={12}
-                          className="h-11 rounded-xl text-sm font-medium" />
+                          maxLength={12}
+                          className={cn("h-11 rounded-xl text-sm font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                       </div>
                     )}
 
@@ -1178,19 +1219,28 @@ const ArrivalsPage = () => {
                     <div className="glass-card rounded-2xl p-4">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} minLength={2} maxLength={50} className="h-11 rounded-xl text-sm" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Godown (optional) {isGodownInvalid && "⚠ 2–50, alphabets + spaces"}
+                          </label>
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} maxLength={50}
+                            className={cn("h-11 rounded-xl text-sm", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                         </div>
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} minLength={1} maxLength={30} className="h-11 rounded-xl text-sm" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Gatepass Number (optional) {isGatepassNumberInvalid && "⚠ 1–30, alphanumeric"}
+                          </label>
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} maxLength={30}
+                            className={cn("h-11 rounded-xl text-sm", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                         </div>
                       </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} minLength={2} maxLength={100} className="h-11 rounded-xl text-sm" />
+                      <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isBrokerNameInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        Broker (optional) {isBrokerNameInvalid && "⚠ 2–100, alphabets + spaces"}
+                      </label>
+                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} maxLength={100}
+                        className={cn("h-11 rounded-xl text-sm", isBrokerNameInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -1218,9 +1268,11 @@ const ArrivalsPage = () => {
                         <>
                           <div className="grid grid-cols-2 gap-3 mb-3">
                             <div>
-                              <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
+                              <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                Rate {isFreightRateInvalid && (freightRate?.trim() ? "⚠ 0–100,000" : "⚠ Required")}
+                              </label>
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                                className="h-11 rounded-xl text-sm font-medium" min={0} max={100000} step="0.01" />
+                                className={cn("h-11 rounded-xl text-sm font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                             </div>
                             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
                               <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
@@ -1228,9 +1280,11 @@ const ArrivalsPage = () => {
                             </div>
                           </div>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
+                            <label className={cn("text-[10px] mb-1 block", isAdvancePaidInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Advance Paid (to driver) — optional {isAdvancePaidInvalid && "⚠ 0–1,000,000"}
+                            </label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-11 rounded-xl text-sm font-medium" min={0} max={1000000} step="0.01" />
+                              className={cn("h-11 rounded-xl text-sm font-medium", isAdvancePaidInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
@@ -1511,13 +1565,13 @@ const ArrivalsPage = () => {
 
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number *
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? "⚠ 2–12 characters" : "⚠ Required")}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          minLength={2} maxLength={12}
-                          className="h-12 rounded-xl text-base font-medium" />
+                          maxLength={12}
+                          className={cn("h-12 rounded-xl text-base font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                       </div>
                     )}
 
@@ -1563,19 +1617,28 @@ const ArrivalsPage = () => {
                     <div className="glass-card rounded-2xl p-4">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} minLength={2} maxLength={50} className="h-12 rounded-xl" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Godown (optional) {isGodownInvalid && "⚠ 2–50, alphabets + spaces"}
+                          </label>
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} maxLength={50}
+                            className={cn("h-12 rounded-xl", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                         </div>
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} minLength={1} maxLength={30} className="h-12 rounded-xl" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Gatepass Number (optional) {isGatepassNumberInvalid && "⚠ 1–30, alphanumeric"}
+                          </label>
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} maxLength={30}
+                            className={cn("h-12 rounded-xl", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                         </div>
                       </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} minLength={2} maxLength={100} className="h-12 rounded-xl" />
+                      <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isBrokerNameInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        Broker (optional) {isBrokerNameInvalid && "⚠ 2–100, alphabets + spaces"}
+                      </label>
+                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} maxLength={100}
+                        className={cn("h-12 rounded-xl", isBrokerNameInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -1602,18 +1665,22 @@ const ArrivalsPage = () => {
                       {!noRental && (
                         <>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
+                            <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Rate {isFreightRateInvalid && (freightRate?.trim() ? "⚠ 0–100,000" : "⚠ Required")}
+                            </label>
                             <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} max={100000} step="0.01" />
+                              className={cn("h-12 rounded-xl text-base font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                           </div>
                           <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 mb-3">
                             <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
                             <p className="text-xl font-bold text-foreground">₹{freightTotal.toLocaleString()}</p>
                           </div>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
+                            <label className={cn("text-[10px] mb-1 block", isAdvancePaidInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Advance Paid (to driver) — optional {isAdvancePaidInvalid && "⚠ 0–1,000,000"}
+                            </label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} max={1000000} step="0.01" />
+                              className={cn("h-12 rounded-xl text-base font-medium", isAdvancePaidInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
