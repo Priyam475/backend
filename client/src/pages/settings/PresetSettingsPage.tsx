@@ -28,7 +28,7 @@ import ForbiddenPage from '@/components/ForbiddenPage';
 
 const PREDEFINED_MARK_MIN = 1;
 const PREDEFINED_MARK_MAX = 20;
-const EXTRA_AMOUNT_MIN = 0;
+const EXTRA_AMOUNT_MIN = -100000;
 const EXTRA_AMOUNT_MAX = 100000;
 const ALPHANUMERIC_REGEX = /^[a-zA-Z0-9]*$/;
 
@@ -282,7 +282,7 @@ const PresetSettingsPage = () => {
                 className={formErrors.amount ? 'border-destructive' : ''}
               />
               {formErrors.amount && <p className="text-sm text-destructive">{formErrors.amount}</p>}
-              <p className="text-xs text-muted-foreground">₹0 – ₹1,00,000</p>
+              <p className="text-xs text-muted-foreground">₹−1,00,000 – ₹1,00,000 (negative = loss)</p>
             </div>
           </div>
           <DialogFooter>

@@ -35,7 +35,7 @@ public class PresetMarkSetting implements Serializable {
     private String predefinedMark;
 
     @NotNull
-    @DecimalMin(value = "0", inclusive = true)
+    @DecimalMin(value = "-100000", inclusive = true)
     @DecimalMax(value = "100000", inclusive = true)
     @Column(name = "extra_amount", precision = 19, scale = 2, nullable = false)
     private BigDecimal extraAmount;

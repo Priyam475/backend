@@ -18,7 +18,7 @@ public class PresetMarkSettingDTO {
     private String predefinedMark;
 
     @NotNull
-    @DecimalMin(value = "0", inclusive = true)
+    @DecimalMin(value = "-100000", inclusive = true)
     @DecimalMax(value = "100000", inclusive = true)
     @JsonProperty("extra_amount")
     private BigDecimal extraAmount;

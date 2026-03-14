@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Gavel, Eye, EyeOff, Plus, Trash2,
   ShoppingCart, User, Package, Truck, CircleDollarSign, Banknote, ChevronDown,
-  Search, AlertTriangle, Merge, TrendingUp, TrendingDown, Hash,
+  Search, AlertTriangle, Merge, Hash,
   ChevronLeft, ChevronRight, List, Filter
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -174,10 +174,11 @@ const AuctionsPage = () => {
   const [presetType, setPresetType] = useState<PresetType>('PROFIT');
   const [showTokenInput, setShowTokenInput] = useState<string | null>(null);
   const [scribblePadResetTrigger, setScribblePadResetTrigger] = useState(0);
-  const [activeNumpadField, setActiveNumpadField] = useState<'rate' | 'qty'>('rate');
+  const [activeNumpadField, setActiveNumpadField] = useState<'rate' | 'qty' | 'extraRate'>('rate');
   const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
+  const extraRateInputRef = useRef<HTMLInputElement>(null);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -757,36 +758,43 @@ const AuctionsPage = () => {
 
   const updateActiveNumpadField = (next: string) => {
     if (activeNumpadField === 'rate') setRate(next);
-    else setQty(next);
+    else if (activeNumpadField === 'qty') setQty(next);
+    else setExtraRate(next);
+  };
+
+  const getCurrentNumpadValue = () => {
+    if (activeNumpadField === 'rate') return rate;
+    if (activeNumpadField === 'qty') return qty;
+    return extraRate;
   };
 
   const handleNumpadKey = (key: string) => {
-    const current = activeNumpadField === 'rate' ? rate : qty;
+    const current = getCurrentNumpadValue();
     if (key >= '0' && key <= '9') {
       updateActiveNumpadField(`${current}${key}`.slice(0, 8));
       return;
     }
     if (key === '.') {
-      if (activeNumpadField === 'rate') {
+      if (activeNumpadField === 'rate' || activeNumpadField === 'extraRate') {
         // Fast entry helper: dot key appends double-zero for rates.
         updateActiveNumpadField(`${current}00`.slice(0, 8));
       }
       return;
     }
     if (key === '+') {
-      const n = parseInt(current || '0', 10) || 0;
+      const n = parseInt(String(current || '0'), 10) || 0;
       updateActiveNumpadField(String(n + 1));
       return;
     }
     if (key === '*') {
-      const n = parseInt(current || '0', 10) || 0;
+      const n = parseInt(String(current || '0'), 10) || 0;
       updateActiveNumpadField(String(n * 10));
     }
   };
 
   const handleNumpadBackspace = () => {
-    const current = activeNumpadField === 'rate' ? rate : qty;
-    updateActiveNumpadField(current.slice(0, -1));
+    const current = getCurrentNumpadValue();
+    updateActiveNumpadField(String(current).slice(0, -1));
   };
 
   const handleNumpadClear = () => {
@@ -796,7 +804,8 @@ const AuctionsPage = () => {
   const handleOpenSystemKeyboard = () => {
     setMobileKeyboardEnabled(true);
     if (activeNumpadField === 'rate') rateInputRef.current?.focus();
-    else qtyInputRef.current?.focus();
+    else if (activeNumpadField === 'qty') qtyInputRef.current?.focus();
+    else extraRateInputRef.current?.focus();
   };
 
   const handleSelfSale = () => {
@@ -873,7 +882,11 @@ const AuctionsPage = () => {
     }
   }, [selectedLot]);
 
-  const applyPreset = (value: number) => setPreset((prev) => (prev === value ? 0 : value));
+  const applyPreset = (value: number) => {
+    const next = preset === value ? 0 : value;
+    setPreset(next);
+    if (next !== 0) setPresetType(value >= 0 ? 'PROFIT' : 'LOSS');
+  };
 
   const selectLot = useCallback((lot: LotInfo) => {
     setSelectedLot(lot);
@@ -1110,7 +1123,10 @@ const AuctionsPage = () => {
 
   // ═══ SALES PAD (AUCTION) SCREEN ═══
   return (
-    <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6", isDesktop ? "pb-28" : "pb-[34rem]")}>
+    <div className={cn(
+      "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
+      isDesktop ? "pb-28" : showExtraRate ? "pb-[38rem]" : "pb-[34rem]"
+    )}>
       {/* Mobile Header */}
       {!isDesktop && (
       <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
@@ -1282,67 +1298,56 @@ const AuctionsPage = () => {
       </AnimatePresence>
 
       <div className="px-4 mt-4 flex flex-col gap-3">
-        {/* REQ-AUC-003: Preset & Toggle Bar with Profit/Loss (desktop position) */}
+        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
         {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
             <button
+              type="button"
               onClick={() => setShowExtraRate(!showExtraRate)}
               className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
                 showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
               )}
+              aria-pressed={showExtraRate}
             >
               {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
               Extra Rate
             </button>
           </div>
 
-          {/* Preset Type Toggle (Profit / Loss) */}
-          <div className="flex gap-2 mb-3">
-            <button onClick={() => setPresetType('PROFIT')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                presetType === 'PROFIT'
-                  ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
-                  : 'bg-muted/40 text-muted-foreground')}>
-              <TrendingUp className="w-3.5 h-3.5" /> Profit
-            </button>
-            <button onClick={() => setPresetType('LOSS')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                presetType === 'LOSS'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/20'
-                  : 'bg-muted/40 text-muted-foreground')}>
-              <TrendingDown className="w-3.5 h-3.5" /> Loss
-            </button>
-          </div>
-
           <div className="flex items-center gap-2">
             {presetOptions.map((opt) => (
               <button
-                key={opt.label + opt.value}
+                key={opt.label + String(opt.value)}
+                type="button"
                 onClick={() => applyPreset(opt.value)}
                 className={cn(
                   'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
                   preset === opt.value
-                    ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md shadow-primary/20'
-                    : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'
+                    ? opt.value >= 0
+                      ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
+                      : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                  preset !== opt.value && opt.value >= 0 && 'text-success',
+                  preset !== opt.value && opt.value < 0 && 'text-destructive'
                 )}
               >
-                {presetType === 'PROFIT' ? '−' : '+'}{opt.label}
+                {opt.label}
               </button>
             ))}
             <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
               <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
-              <span className="text-sm font-bold text-foreground">{preset}</span>
+              <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
             </div>
           </div>
-          {preset > 0 && highestBid > 0 && (
+          {preset !== 0 && highestBid > 0 && (
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
               Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
-              <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-amber-500')}>
+              <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                 ₹{calcSellerRate(highestBid, preset, presetType)}
               </span>
-              <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${preset}`})</span>
+              <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
             </motion.p>
           )}
         </motion.div>
@@ -1643,8 +1648,8 @@ const AuctionsPage = () => {
                         <span>₹{entry.rate}/bag</span>
                         <span>{entry.quantity} bags</span>
                         {entry.extraRate > 0 && showExtraRate && <span className="text-amber-500">+₹{entry.extraRate}</span>}
-                        {entry.presetApplied > 0 && !entry.isSelfSale && (
-                          <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-amber-500')}>
+                        {entry.presetApplied !== 0 && !entry.isSelfSale && (
+                          <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                             SR: ₹{entry.sellerRate}
                           </span>
                         )}
@@ -1735,66 +1740,56 @@ const AuctionsPage = () => {
           </motion.div>
         )}
 
-        {/* REQ-AUC-003: Preset & Toggle Bar with Profit/Loss (mobile/tablet after grid) */}
+        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
         {!isDesktop && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3 order-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
               <button
+                type="button"
                 onClick={() => setShowExtraRate(!showExtraRate)}
                 className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
                   showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
                 )}
+                aria-pressed={showExtraRate}
               >
                 {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                 Extra Rate
               </button>
             </div>
 
-            <div className="flex gap-2 mb-3">
-              <button onClick={() => setPresetType('PROFIT')}
-                className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                  presetType === 'PROFIT'
-                    ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
-                    : 'bg-muted/40 text-muted-foreground')}>
-                <TrendingUp className="w-3.5 h-3.5" /> Profit
-              </button>
-              <button onClick={() => setPresetType('LOSS')}
-                className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                  presetType === 'LOSS'
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/20'
-                    : 'bg-muted/40 text-muted-foreground')}>
-                <TrendingDown className="w-3.5 h-3.5" /> Loss
-              </button>
-            </div>
-
             <div className="flex items-center gap-2">
               {presetOptions.map((opt) => (
                 <button
-                  key={opt.label + opt.value}
+                  key={opt.label + String(opt.value)}
+                  type="button"
                   onClick={() => applyPreset(opt.value)}
                   className={cn(
                     'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
                     preset === opt.value
-                      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md shadow-primary/20'
-                      : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'
+                      ? opt.value >= 0
+                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
+                      : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                    preset !== opt.value && opt.value >= 0 && 'text-success',
+                    preset !== opt.value && opt.value < 0 && 'text-destructive'
                   )}
                 >
-                  {presetType === 'PROFIT' ? '−' : '+'}{opt.label}
+                  {opt.label}
                 </button>
               ))}
               <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
                 <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
-                <span className="text-sm font-bold text-foreground">{preset}</span>
+                <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
               </div>
             </div>
-            {preset > 0 && highestBid > 0 && (
+            {preset !== 0 && highestBid > 0 && (
               <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
                 Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
-                <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-amber-500')}>
+                <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                   ₹{calcSellerRate(highestBid, preset, presetType)}
                 </span>
-                <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${preset}`})</span>
+                <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
               </motion.p>
             )}
           </motion.div>
@@ -1940,6 +1935,39 @@ const AuctionsPage = () => {
               )}
             />
           </div>
+          <AnimatePresence>
+            {showExtraRate && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mb-2"
+              >
+                <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
+                <Input
+                  ref={extraRateInputRef}
+                  type="number"
+                  value={extraRate}
+                  onChange={(e) => setExtraRate(e.target.value)}
+                  onFocus={(e) => {
+                    setActiveNumpadField('extraRate');
+                    if (!mobileKeyboardEnabled) {
+                      e.currentTarget.blur();
+                      hideNativeKeyboard();
+                    }
+                  }}
+                  onBlur={() => setMobileKeyboardEnabled(false)}
+                  placeholder="0"
+                  readOnly={!mobileKeyboardEnabled}
+                  inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+                  className={cn(
+                    "h-10 rounded-xl text-center font-bold text-base bg-amber-500/10 border-amber-400/30",
+                    activeNumpadField === 'extraRate' && "ring-1 ring-amber-400"
+                  )}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
           <div className="grid grid-cols-[1.4fr_1fr] gap-2 items-stretch">
             <div className="rounded-2xl border border-violet-400/20 bg-card/80 p-1 h-full min-h-[19rem]">
               <InlineScribblePad
