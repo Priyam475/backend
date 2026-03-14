@@ -12,12 +12,20 @@ const STATUS_CONFIG: Record<ArrivalStatus, { label: string; bg: string; text: st
 export const ALL_STATUSES: ArrivalStatus[] = ['PENDING', 'WEIGHED', 'AUCTIONED', 'SETTLED'];
 
 /**
- * Derive status from backend arrival data (no localStorage).
- * WEIGHED when net weight present; PENDING otherwise. AUCTIONED/SETTLED can be extended when APIs are wired.
+ * Derive status from backend arrival data (bidsCount, weighedCount, lotCount).
+ * SETTLED when all lots weighed and settled; WEIGHED when all lots have weighing; AUCTIONED when any bid; else PENDING.
  */
-export function getArrivalStatus(arrival: { netWeight?: number; emptyWeight?: number }): ArrivalStatus {
-  const hasWeighing = (arrival.netWeight ?? 0) > 0;
-  if (hasWeighing) return 'WEIGHED';
+export function getArrivalStatus(arrival: {
+  netWeight?: number;
+  lotCount?: number;
+  bidsCount?: number;
+  weighedCount?: number;
+}): ArrivalStatus {
+  const lotCount = arrival.lotCount ?? 0;
+  const bidsCount = arrival.bidsCount ?? 0;
+  const weighedCount = arrival.weighedCount ?? 0;
+  if (lotCount > 0 && weighedCount >= lotCount) return 'WEIGHED';
+  if (bidsCount > 0) return 'AUCTIONED';
   return 'PENDING';
 }
 

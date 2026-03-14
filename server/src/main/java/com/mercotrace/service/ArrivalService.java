@@ -21,7 +21,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +55,7 @@ public class ArrivalService {
     private final TraderContextService traderContextService;
     private final AuctionRepository auctionRepository;
     private final AuctionEntryRepository auctionEntryRepository;
+    private final WeighingSessionRepository weighingSessionRepository;
 
     public ArrivalService(
         VehicleRepository vehicleRepository,
@@ -67,7 +70,8 @@ public class ArrivalService {
         ContactRepository contactRepository,
         TraderContextService traderContextService,
         AuctionRepository auctionRepository,
-        AuctionEntryRepository auctionEntryRepository
+        AuctionEntryRepository auctionEntryRepository,
+        WeighingSessionRepository weighingSessionRepository
     ) {
         this.vehicleRepository = vehicleRepository;
         this.vehicleWeightRepository = vehicleWeightRepository;
@@ -82,6 +86,7 @@ public class ArrivalService {
         this.traderContextService = traderContextService;
         this.auctionRepository = auctionRepository;
         this.auctionEntryRepository = auctionEntryRepository;
+        this.weighingSessionRepository = weighingSessionRepository;
     }
 
     /**
@@ -211,8 +216,22 @@ public class ArrivalService {
         return summary;
     }
 
+    private static String arrivalStatusFromDto(ArrivalSummaryDTO dto) {
+        int lotCount = dto.getLotCount();
+        int weighedCount = dto.getWeighedCount();
+        int bidsCount = dto.getBidsCount();
+        if (lotCount > 0 && weighedCount >= lotCount) return "WEIGHED";
+        if (bidsCount > 0) return "AUCTIONED";
+        return "PENDING";
+    }
+
     @Transactional(readOnly = true)
     public Page<ArrivalSummaryDTO> listArrivals(Pageable pageable) {
+        return listArrivals(pageable, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ArrivalSummaryDTO> listArrivals(Pageable pageable, String statusFilter) {
         Long traderId = resolveTraderId();
 
         Page<Vehicle> vehiclePage = vehicleRepository.findAllByTraderIdOrderByArrivalDatetimeDesc(traderId, pageable);
@@ -230,6 +249,21 @@ public class ArrivalService {
         List<Long> sellerVehicleIds = sellers.stream().map(SellerInVehicle::getId).toList();
         List<Lot> lots = sellerVehicleIds.isEmpty() ? List.of() : lotRepository.findAllBySellerVehicleIdIn(sellerVehicleIds);
 
+        List<Long> contactIds = sellers.stream().map(SellerInVehicle::getContactId).filter(java.util.Objects::nonNull).distinct().toList();
+        Map<Long, String> contactNameById = contactIds.isEmpty() ? Map.of() : contactRepository.findAllById(contactIds).stream()
+            .collect(Collectors.toMap(Contact::getId, c -> c.getName() != null ? c.getName() : ""));
+
+        List<Long> allLotIds = lots.stream().map(Lot::getId).toList();
+        List<Auction> auctionsForLots = allLotIds.isEmpty() ? List.of() : auctionRepository.findAllByLotIdIn(allLotIds);
+        List<Long> auctionIds = auctionsForLots.stream().map(Auction::getId).toList();
+        List<AuctionEntry> entries = auctionIds.isEmpty() ? List.of() : auctionEntryRepository.findAllByAuctionIdIn(auctionIds);
+        Set<Long> lotIdsWithBids = entries.stream().map(AuctionEntry::getAuctionId).distinct()
+            .map(aid -> auctionsForLots.stream().filter(a -> a.getId().equals(aid)).findFirst().map(Auction::getLotId).orElse(null))
+            .filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+
+        List<WeighingSession> weighingSessions = allLotIds.isEmpty() ? List.of() : weighingSessionRepository.findByLotIdIn(allLotIds);
+        Set<Long> weighedLotIds = weighingSessions.stream().map(WeighingSession::getLotId).collect(Collectors.toSet());
+
         List<ArrivalSummaryDTO> content = vehicles.stream().map(v -> {
             Optional<VehicleWeight> weightOpt = weights.stream().filter(w -> w.getVehicleId().equals(v.getId())).findFirst();
             Optional<FreightCalculation> freightOpt = freights.stream().filter(f -> f.getVehicleId().equals(v.getId())).findFirst();
@@ -240,10 +274,26 @@ public class ArrivalService {
             double freightTotal = freightOpt.map(FreightCalculation::getTotalAmount).orElse(0d);
             FreightMethod method = freightOpt.map(FreightCalculation::getMethod).orElse(null);
 
-            int sellerCount = (int) sellers.stream().filter(sv -> sv.getVehicleId().equals(v.getId())).count();
-            int lotCount = (int) lots.stream().filter(l -> {
-                return sellers.stream().anyMatch(sv -> sv.getId().equals(l.getSellerVehicleId()) && sv.getVehicleId().equals(v.getId()));
-            }).count();
+            List<SellerInVehicle> vehicleSellers = sellers.stream().filter(sv -> sv.getVehicleId().equals(v.getId())).toList();
+            int sellerCount = vehicleSellers.size();
+            List<Lot> vehicleLots = lots.stream().filter(l -> vehicleSellers.stream().anyMatch(sv -> sv.getId().equals(l.getSellerVehicleId()))).toList();
+            int lotCount = vehicleLots.size();
+
+            String primarySellerName = null;
+            if (!vehicleSellers.isEmpty()) {
+                SellerInVehicle first = vehicleSellers.get(0);
+                if (first.getContactId() != null) {
+                    primarySellerName = contactNameById.getOrDefault(first.getContactId(), "");
+                }
+                if (primarySellerName == null || primarySellerName.isEmpty()) {
+                    primarySellerName = first.getSellerName() != null ? first.getSellerName() : "-";
+                }
+            }
+            if (primarySellerName == null) primarySellerName = "-";
+
+            int totalBags = vehicleLots.stream().mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0).sum();
+            int bidsCount = (int) vehicleLots.stream().map(Lot::getId).filter(lotIdsWithBids::contains).count();
+            int weighedCount = (int) vehicleLots.stream().map(Lot::getId).filter(weighedLotIds::contains).count();
 
             ArrivalSummaryDTO dto = new ArrivalSummaryDTO();
             dto.setVehicleId(v.getId());
@@ -258,9 +308,20 @@ public class ArrivalService {
             dto.setGodown(v.getGodown());
             dto.setGatepassNumber(v.getGatepassNumber());
             dto.setOrigin(v.getOrigin());
+            dto.setPrimarySellerName(primarySellerName);
+            dto.setTotalBags(totalBags);
+            dto.setBidsCount(bidsCount);
+            dto.setWeighedCount(weighedCount);
             return dto;
         }).toList();
 
+        if (statusFilter != null && !statusFilter.isBlank()) {
+            String want = statusFilter.trim().toUpperCase();
+            List<ArrivalSummaryDTO> filtered = content.stream()
+                .filter(dto -> want.equals(arrivalStatusFromDto(dto)))
+                .toList();
+            return new PageImpl<>(filtered, pageable, filtered.size());
+        }
         return new PageImpl<>(content, pageable, vehiclePage.getTotalElements());
     }
 

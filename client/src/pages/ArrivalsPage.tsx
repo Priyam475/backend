@@ -4,14 +4,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
   ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, Trash2,
-  AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter
+  AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter, Share2, MapPin
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
-import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail } from '@/services/api/arrivals';
+import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail, ArrivalDetail } from '@/services/api/arrivals';
 import ArrivalStatusBadge, { getArrivalStatus, ALL_STATUSES, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import FreightDetailsCard from '@/components/arrivals/FreightDetailsCard';
 import SellerInfoCard from '@/components/arrivals/SellerInfoCard';
@@ -172,7 +172,9 @@ const ArrivalsPage = () => {
   const [expandedDetail, setExpandedDetail] = useState<ArrivalFullDetail | null>(null);
   const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
   const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'ALL'>('ALL');
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
 
@@ -202,17 +204,145 @@ const ArrivalsPage = () => {
     }
   }, []);
 
-  // ── Weight validation: empty > loaded ──────────────────
+  // ── Validation (raghav branch: field-level checks; no UI wiring — validation only) ──────────────────
+  const isLoadedWeightInvalid = useMemo(() => {
+    if (!loadedWeight || !loadedWeight.trim()) return true;
+    const lw = parseFloat(loadedWeight);
+    if (Number.isNaN(lw)) return true;
+    return lw < 0 || lw > 100000;
+  }, [loadedWeight]);
+
   const isEmptyWeightInvalid = useMemo(() => {
     const lw = parseFloat(loadedWeight) || 0;
     const ew = parseFloat(emptyWeight) || 0;
-    return ew > 0 && lw > 0 && ew > lw;
+    if (!emptyWeight || !emptyWeight.trim()) return true;
+    if (Number.isNaN(parseFloat(emptyWeight))) return true;
+    if (ew < 0 || ew > 100000) return true;
+    return ew > lw;
   }, [loadedWeight, emptyWeight]);
+
+  const isDeductedWeightInvalid = useMemo(() => {
+    if (!deductedWeight || !deductedWeight.trim()) return false;
+    const dw = parseFloat(deductedWeight) || 0;
+    return dw < 0 || dw > 10000;
+  }, [deductedWeight]);
+
+  const isVehicleNumberInvalid = useMemo(() => {
+    if (!isMultiSeller) return false;
+    const v = vehicleNumber.trim();
+    return v.length === 0 || v.length < 2 || v.length > 12;
+  }, [isMultiSeller, vehicleNumber]);
+
+  const isGodownInvalid = useMemo(() => {
+    const g = godown.trim();
+    if (!g) return false;
+    if (g.length < 2 || g.length > 50) return true;
+    return !/^[a-zA-Z\s]+$/.test(g);
+  }, [godown]);
+
+  const isGatepassNumberInvalid = useMemo(() => {
+    const g = gatepassNumber.trim();
+    if (!g) return false;
+    if (g.length < 1 || g.length > 30) return true;
+    return !/^[a-zA-Z0-9]+$/.test(g);
+  }, [gatepassNumber]);
+
+  const isBrokerNameInvalid = useMemo(() => {
+    const b = brokerName.trim();
+    if (!b) return false;
+    if (b.length < 2 || b.length > 100) return true;
+    return !/^[a-zA-Z\s]+$/.test(b);
+  }, [brokerName]);
+
+  const isFreightRateInvalid = useMemo(() => {
+    if (noRental) return false;
+    if (!freightRate || !freightRate.trim()) return true;
+    const fr = parseFloat(freightRate);
+    if (Number.isNaN(fr)) return true;
+    return fr < 0 || fr > 100000;
+  }, [noRental, freightRate]);
+
+  const isAdvancePaidInvalid = useMemo(() => {
+    if (!advancePaid || !advancePaid.trim()) return false;
+    const ap = parseFloat(advancePaid) || 0;
+    return ap < 0 || ap > 1000000;
+  }, [advancePaid]);
+
+  // Per-seller / per-lot real-time validation (same rules as submit; used for inline UI only)
+  const isSellerNameInvalid = (s: SellerEntry) => {
+    if (s.contact_id !== '' && !Number.isNaN(Number(s.contact_id))) return false;
+    const n = (s.seller_name ?? '').trim();
+    if (!n) return false; // required is enforced on submit
+    return n.length < 2 || n.length > 100;
+  };
+  const isSellerMarkInvalid = (s: SellerEntry) => {
+    const m = (s.seller_mark ?? '').trim();
+    if (!m) return false;
+    return m.length < 2 || m.length > 50;
+  };
+  const isLotNameInvalid = (l: LotEntry) => {
+    const ln = (l.lot_name ?? '').trim();
+    if (!ln) return false;
+    if (ln.length < 2 || ln.length > 50) return true;
+    return !/^[0-9]+$/.test(ln);
+  };
+  const isLotQuantityInvalid = (l: LotEntry) => {
+    const q = l.quantity ?? 0;
+    return q <= 0 || q > 100000 || !Number.isInteger(q);
+  };
+
+  const isFormInvalid = useMemo(() => {
+    if (isVehicleNumberInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
+        isGodownInvalid || isGatepassNumberInvalid || isBrokerNameInvalid || isFreightRateInvalid || isAdvancePaidInvalid) return true;
+    for (const s of sellers) {
+      if (isSellerNameInvalid(s) || isSellerMarkInvalid(s)) return true;
+      for (const l of s.lots) {
+        if (isLotNameInvalid(l) || isLotQuantityInvalid(l)) return true;
+      }
+    }
+    return false;
+  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers]);
+
+  // Summary stats for four cards (mobile-first, same as raghav-style UI)
+  const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
+  const totalSellers = useMemo(() => apiArrivals.reduce((acc, a) => acc + (a.sellerCount ?? 0), 0), [apiArrivals]);
+  const totalLots = useMemo(() => apiArrivals.reduce((acc, a) => acc + (a.lotCount ?? 0), 0), [apiArrivals]);
+  const totalNetWeightKg = useMemo(() => apiArrivals.reduce((acc, a) => acc + (a.netWeight ?? 0), 0), [apiArrivals]);
+  const totalNetWeightTons = useMemo(() => (totalNetWeightKg > 0 ? totalNetWeightKg / 1000 : 0), [totalNetWeightKg]);
+
+  const filteredArrivals = useMemo(() => {
+    let result = apiArrivals;
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      result = result.filter(a => {
+        if (String(a.vehicleNumber).toLowerCase().includes(q)) return true;
+        const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+        if (detail?.sellers?.some(s => (s.sellerName ?? '').toLowerCase().includes(q))) return true;
+        return false;
+      });
+    }
+    if (statusFilter !== 'ALL') {
+      result = result.filter(a => getArrivalStatus(a) === statusFilter);
+    }
+    return result;
+  }, [apiArrivals, searchQuery, statusFilter, arrivalDetails]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<ArrivalStatus | 'ALL', number> = { ALL: apiArrivals.length, PENDING: 0, WEIGHED: 0, AUCTIONED: 0, SETTLED: 0 };
+    apiArrivals.forEach(a => {
+      const s = getArrivalStatus(a);
+      counts[s]++;
+    });
+    return counts;
+  }, [apiArrivals]);
+
+  const statusLabel = (s: ArrivalStatus) => s.charAt(0) + s.slice(1).toLowerCase();
 
   const loadArrivalsFromApi = async () => {
     setApiArrivalsLoading(true);
     try {
-      const list = await arrivalsApi.list(0, 100);
+      const statusParam = statusFilter !== 'ALL' ? statusFilter : undefined;
+      const list = await arrivalsApi.list(0, 100, statusParam);
       setApiArrivals(list);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load arrivals';
@@ -221,14 +351,18 @@ const ArrivalsPage = () => {
     } finally {
       setApiArrivalsLoading(false);
     }
+    arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
   };
 
   useEffect(() => {
-    loadArrivalsFromApi();
     contactApi.list().then(setContacts);
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setCommodityConfigs);
   }, []);
+
+  useEffect(() => {
+    loadArrivalsFromApi();
+  }, [statusFilter]);
 
   // Close seller dropdown on scroll or resize (portal is fixed-position; use document so any scrollable container closes it)
   useEffect(() => {
@@ -363,6 +497,7 @@ const ArrivalsPage = () => {
           quantity: 0,
           commodity_name: commodities[0]?.commodity_name || '',
           broker_tag: '',
+          variant: '',
         }],
       };
     }));
@@ -404,11 +539,59 @@ const ArrivalsPage = () => {
   };
 
   const handleSubmitArrival = async () => {
-    // Validation
-    if (isMultiSeller && !vehicleNumber.trim()) {
-      toast.error('Vehicle number is required for multi-seller arrivals');
+    // ── Validation (raghav branch: same checks at submit; no UI change) ──────────────────
+    const vNum = vehicleNumber.trim();
+    if (isMultiSeller && (vNum.length === 0 || vNum.length < 2 || vNum.length > 12)) {
+      toast.error(vNum.length === 0 ? 'Vehicle number is required for multi-seller arrivals' : 'Vehicle number must be between 2 and 12 characters');
       return;
     }
+    const gdwn = godown.trim();
+    if (gdwn && (gdwn.length < 2 || gdwn.length > 50)) {
+      toast.error('Godown name must be between 2 and 50 characters');
+      return;
+    }
+    const gpNum = gatepassNumber.trim();
+    if (gpNum && (gpNum.length < 1 || gpNum.length > 30 || !/^[a-zA-Z0-9]+$/.test(gpNum))) {
+      toast.error('Gatepass number must be between 1 and 30 characters (alphanumeric)');
+      return;
+    }
+    const brkName = brokerName.trim();
+    if (brkName && (brkName.length < 2 || brkName.length > 100 || !/^[a-zA-Z\s]+$/.test(brkName))) {
+      toast.error('Broker name must be between 2 and 100 characters (alphabets and spaces)');
+      return;
+    }
+    const lw = parseFloat(loadedWeight);
+    if (Number.isNaN(lw) || lw < 0 || lw > 100000) {
+      toast.error('Loaded weight is required and must be between 0 and 100,000 kg');
+      return;
+    }
+    const ew = parseFloat(emptyWeight);
+    if (Number.isNaN(ew) || ew < 0 || ew > 100000) {
+      toast.error('Empty weight is required and must be between 0 and 100,000 kg');
+      return;
+    }
+    if (ew > lw) {
+      toast.error('Empty weight must be less than or equal to loaded weight');
+      return;
+    }
+    const dw = parseFloat(deductedWeight) || 0;
+    if (deductedWeight?.trim() && (dw < 0 || dw > 10000)) {
+      toast.error('Deducted weight must be between 0 and 10,000 kg');
+      return;
+    }
+    if (!noRental) {
+      const fr = parseFloat(freightRate);
+      if (Number.isNaN(fr) || fr < 0 || fr > 100000) {
+        toast.error('Freight rate is required (when not "No rental") and must be between 0 and 100,000');
+        return;
+      }
+    }
+    const ap = parseFloat(advancePaid) || 0;
+    if (advancePaid?.trim() && (ap < 0 || ap > 1000000)) {
+      toast.error('Advance paid must be between 0 and 1,000,000');
+      return;
+    }
+
     if (sellers.length === 0) {
       toast.error('At least one seller is required');
       return;
@@ -419,8 +602,18 @@ const ArrivalsPage = () => {
     }
     for (const seller of sellers) {
       const hasContactId = seller.contact_id !== '' && !Number.isNaN(Number(seller.contact_id));
-      if (!hasContactId && !seller.seller_name?.trim()) {
+      const sName = (seller.seller_name ?? '').trim();
+      if (!hasContactId && !sName) {
         toast.error('Each seller must either be selected from Contacts or have a name entered');
+        return;
+      }
+      if (!hasContactId && (sName.length < 2 || sName.length > 100)) {
+        toast.error(`Seller name must be between 2 and 100 characters${sName ? `: "${sName.slice(0, 20)}…"` : ''}`);
+        return;
+      }
+      const sMark = (seller.seller_mark ?? '').trim();
+      if (sMark && (sMark.length < 2 || sMark.length > 50)) {
+        toast.error(`${sName || 'Seller'}: Alias / mark must be between 2 and 50 characters`);
         return;
       }
       if (seller.lots.length === 0) {
@@ -428,16 +621,21 @@ const ArrivalsPage = () => {
         return;
       }
       for (const lot of seller.lots) {
-        if (!lot.lot_name.trim()) {
+        const ln = lot.lot_name?.trim() ?? '';
+        if (!ln) {
           toast.error(`${seller.seller_name}: Lot name is required`);
           return;
         }
-        if (!/^[0-9]+$/.test(lot.lot_name.trim())) {
+        if (ln.length < 2 || ln.length > 50) {
+          toast.error(`${seller.seller_name} → ${ln}: Lot name must be between 2 and 50 characters`);
+          return;
+        }
+        if (!/^[0-9]+$/.test(ln)) {
           toast.error(`Lot name must contain only numbers (digits), not letters: ${lot.lot_name}`);
           return;
         }
-        if (lot.quantity <= 0) {
-          toast.error(`${seller.seller_name} → ${lot.lot_name}: Quantity must be > 0`);
+        if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
+          toast.error(`${seller.seller_name} → ${ln}: Quantity must be a positive integer between 1 and 100,000`);
           return;
         }
       }
@@ -713,7 +911,7 @@ const ArrivalsPage = () => {
                 <span className="ml-1 px-2 py-0.5 rounded-full bg-muted text-[10px] font-bold">{apiArrivalsLoading ? '…' : apiArrivals.length}</span>
               </div>
               {desktopTab === 'summary' && (
-                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-violet-500 rounded-full" />
+                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" />
               )}
             </button>
             <button
@@ -730,7 +928,7 @@ const ArrivalsPage = () => {
                 New Arrival
               </div>
               {desktopTab === 'new-arrival' && (
-                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-violet-500 rounded-full" />
+                <motion.div layoutId="desktop-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" />
               )}
             </button>
           </div>
@@ -744,6 +942,16 @@ const ArrivalsPage = () => {
                     <p className="text-muted-foreground">Loading arrivals…</p>
                   </div>
                 ) : apiArrivals.length === 0 ? (
+                  statusFilter !== 'ALL' ? (
+                    <div className="glass-card p-12 rounded-2xl text-center">
+                      <Filter className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
+                      <h3 className="text-lg font-bold text-foreground mb-1">No {statusLabel(statusFilter)} arrivals</h3>
+                      <p className="text-sm text-muted-foreground mb-4">No arrivals match the &quot;{statusLabel(statusFilter)}&quot; filter. Show all to see the full list.</p>
+                      <Button onClick={() => setStatusFilter('ALL')} variant="outline" className="rounded-xl">
+                        Show all arrivals
+                      </Button>
+                    </div>
+                  ) : (
                   <div className="glass-card p-12 rounded-2xl text-center">
                     <div className="relative mb-4 mx-auto w-16 h-16">
                       <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl" />
@@ -757,41 +965,85 @@ const ArrivalsPage = () => {
                       <Plus className="w-4 h-4 mr-2" /> New Arrival
                     </Button>
                   </div>
+                  )
                 ) : (
                   <>
-                    <div className="flex gap-2 mb-4">
-                      <div className="relative flex-1 max-w-xs">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input
-                          type="search"
-                          placeholder="Search by vehicle…"
-                          value={searchQuery}
-                          onChange={e => setSearchQuery(e.target.value)}
-                          className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-muted/30 border border-border/30 focus:outline-none focus:border-primary/50"
-                        />
+                    {/* Four summary cards — raghav: all blue icon #6075FF */}
+                    <div className="grid grid-cols-4 gap-4 mb-6">
+                      <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Truck className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalVehicles}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Vehicles</p>
+                        </div>
                       </div>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setStatusFilter('ALL')}
-                          className={cn('px-3 py-1.5 rounded-full text-xs font-semibold', statusFilter === 'ALL' ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}
-                        >All</button>
-                        {ALL_STATUSES.map(s => (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => setStatusFilter(s)}
-                            className={cn('px-3 py-1.5 rounded-full text-xs font-semibold', statusFilter === s ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}
-                          >{s.charAt(0) + s.slice(1).toLowerCase()}</button>
-                        ))}
+                      <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Users className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalSellers}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Sellers</p>
+                        </div>
+                      </div>
+                      <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Package className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalLots}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Lots</p>
+                        </div>
+                      </div>
+                      <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
+                          <Scale className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-bold text-foreground leading-tight">{totalNetWeightTons.toFixed(1)}t</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">Total Weight</p>
+                        </div>
                       </div>
                     </div>
+                    {/* Search + sub-categories (Arrivals / Sellers / Lots) — blue active raghav */}
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="relative w-[300px]">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="search"
+                          placeholder="Search seller, vehicle, origin..."
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          className="w-full h-9 pl-9 pr-4 rounded-xl text-xs bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
+                        <button type="button" onClick={() => setSummaryMode('sellers')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'sellers' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Sellers ({totalSellers})</button>
+                        <button type="button" onClick={() => setSummaryMode('lots')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
+                      </div>
+                    </div>
+                    {/* Status filter — only when Arrivals, blue active (raghav) */}
+                    {summaryMode === 'arrivals' && (
+                      <div className="flex items-center gap-2 mb-4 text-[11px]">
+                        <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                        {ALL_STATUSES.map(s => (
+                          <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
+                        ))}
+                      </div>
+                    )}
+                    {summaryMode === 'arrivals' && (
                     <div className="glass-card rounded-2xl overflow-hidden">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border/40 bg-muted/30">
-                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle | Seller (qty)</th>
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Status</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">From</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Bids</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Weighed</th>
                             <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Sellers</th>
                             <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Lots</th>
                             <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Net Wt</th>
@@ -801,16 +1053,7 @@ const ArrivalsPage = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {apiArrivals
-                            .filter(a => {
-                              if (statusFilter !== 'ALL' && getArrivalStatus(a) !== statusFilter) return false;
-                              if (searchQuery.trim()) {
-                                const q = searchQuery.toLowerCase();
-                                if (!String(a.vehicleNumber).toLowerCase().includes(q)) return false;
-                              }
-                              return true;
-                            })
-                            .map((a, i) => {
+                          {filteredArrivals.map((a, i) => {
                               const status = getArrivalStatus(a);
                               const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
                               return (
@@ -824,8 +1067,14 @@ const ArrivalsPage = () => {
                                   >
                                     <td className="px-4 py-3 font-semibold text-foreground">
                                       <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
+                                      <span className="text-muted-foreground mx-1">|</span>
+                                      <span className="text-foreground text-xs">{a.primarySellerName ?? '-'}</span>
+                                      <span className="text-muted-foreground text-xs"> ({(a.totalBags ?? 0)})</span>
                                     </td>
                                     <td className="px-4 py-3"><ArrivalStatusBadge status={status} /></td>
+                                    <td className="px-4 py-3 text-muted-foreground text-xs">{a.godown ?? '—'}</td>
+                                    <td className="px-4 py-3 text-right text-muted-foreground">{a.bidsCount ?? 0}</td>
+                                    <td className="px-4 py-3 text-right text-muted-foreground">{a.weighedCount ?? 0}</td>
                                     <td className="px-4 py-3 text-right text-muted-foreground">{a.sellerCount}</td>
                                     <td className="px-4 py-3 text-right font-medium text-foreground">{a.lotCount}</td>
                                     <td className="px-4 py-3 text-right text-muted-foreground">{a.netWeight}kg</td>
@@ -844,7 +1093,7 @@ const ArrivalsPage = () => {
                                   </motion.tr>
                                   {isExpanded && (
                                     <tr key={a.vehicleId + '-exp'} className="border-b border-border/20 bg-muted/10">
-                                      <td colSpan={8} className="px-4 py-4">
+                                      <td colSpan={11} className="px-4 py-4">
                                         {expandedDetailLoading ? (
                                           <p className="text-sm text-muted-foreground">Loading…</p>
                                         ) : expandedDetail ? (
@@ -907,6 +1156,93 @@ const ArrivalsPage = () => {
                         </tbody>
                       </table>
                     </div>
+                    )}
+                    {summaryMode === 'sellers' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {filteredArrivals.flatMap(a => {
+                          const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                          if (!detail?.sellers?.length) {
+                            return [{ sellerName: '-', origin: '-', lotCount: a.lotCount ?? 0, lots: [] as { id: number; lotName: string }[], vehicleNumber: a.vehicleNumber, key: `seller-${a.vehicleId}-0` }];
+                          }
+                          return detail.sellers.map((s, si) => ({
+                            sellerName: s.sellerName || '-',
+                            origin: '-',
+                            lotCount: s.lots?.length ?? 0,
+                            lots: s.lots ?? [],
+                            vehicleNumber: a.vehicleNumber,
+                            key: `seller-${a.vehicleId}-${si}`,
+                          }));
+                        }).map((item, mapIndex) => {
+                          const bgColors = ['bg-[#6075FF]', 'bg-[#00c98b]', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500'];
+                          const bgClass = bgColors[mapIndex % bgColors.length];
+                          return (
+                            <motion.div key={item.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: mapIndex * 0.03 }} className="bg-white dark:bg-card rounded-[24px] shadow-sm border border-border/40 p-4">
+                              <div className="flex items-start gap-3.5">
+                                <div className={cn('w-[42px] h-[42px] rounded-xl flex items-center justify-center text-white font-bold text-[17px] shrink-0', bgClass)}>{item.sellerName.charAt(0).toUpperCase()}</div>
+                                <div className="flex-1 min-w-0 pt-0.5">
+                                  <h4 className="text-[14px] font-semibold text-foreground mb-1 leading-none">{item.sellerName}</h4>
+                                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-muted-foreground mb-3 font-medium">
+                                    <span className="flex items-center gap-0.5"><MapPin className="w-2.5 h-2.5" /> {item.origin}</span>
+                                    <span className="text-muted-foreground/40">{item.lotCount} lot(s)</span>
+                                    <span className="w-0.5 h-0.5 rounded-full bg-muted-foreground/30" />
+                                    <span className="text-muted-foreground/60">{item.vehicleNumber}</span>
+                                  </div>
+                                  {item.lots.length > 0 && (
+                                    <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-[10px] px-2.5 py-1.5 flex items-center gap-2 text-[10px]">
+                                      <Package className="w-3 h-3 text-muted-foreground/70" />
+                                      <span className="font-semibold text-foreground">{item.lots[0].lotName || 'Unnamed'}</span>
+                                      {item.lots.length > 1 && <span className="text-muted-foreground/40 font-medium">+{item.lots.length - 1} more</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {summaryMode === 'lots' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {filteredArrivals.flatMap(a => {
+                          const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                          if (!detail?.sellers) return [];
+                          return detail.sellers.flatMap(seller =>
+                            (seller.lots ?? []).map(lot => ({
+                              lotId: lot.id,
+                              lotName: lot.lotName || 'Unnamed',
+                              sellerName: seller.sellerName || '-',
+                              vehicleNumber: a.vehicleNumber,
+                              key: `lot-${a.vehicleId}-${lot.id}`,
+                            }))
+                          );
+                        }).map(item => (
+                          <motion.div key={item.key} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.03 }} className="bg-white dark:bg-card rounded-[24px] shadow-sm border border-border/40 p-4 hover:shadow-md transition-all">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start gap-3">
+                                <div className="w-[42px] h-[42px] rounded-xl bg-[#6075FF] flex items-center justify-center shrink-0">
+                                  <Package className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h4 className="text-[14px] font-semibold text-foreground leading-none">{item.lotName}</h4>
+                                    <span className="text-[10px] text-muted-foreground/60 font-medium">#{item.lotId}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                                    <span>{item.sellerName}</span>
+                                    <span className="w-0.5 h-0.5 rounded-full bg-muted-foreground/30" />
+                                    <span>{item.vehicleNumber}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <button type="button" onClick={() => { const text = `Lot: ${item.lotName}\nSeller: ${item.sellerName}\nVehicle: ${item.vehicleNumber}`; navigator.clipboard?.writeText(text).then(() => toast.success('Copied to clipboard')); }} className="p-1 hover:text-foreground text-muted-foreground transition-colors"><Share2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                            <div className="mt-4">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-[#eef0ff] dark:bg-[#6075FF]/20 text-[#6075FF] text-[10px] font-bold">{item.vehicleNumber}</span>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </motion.div>
@@ -965,12 +1301,12 @@ const ArrivalsPage = () => {
 
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number *
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? <span className="font-normal text-red-500">2–12 characters</span> : <span className="font-normal text-red-500">Required</span>)}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          className="h-11 rounded-xl text-sm font-medium" />
+                          className={cn("h-11 rounded-xl text-sm font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
                       </div>
                     )}
 
@@ -980,22 +1316,26 @@ const ArrivalsPage = () => {
                       </label>
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
+                          <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                            Loaded Weight (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100,000' : '⚠ Required')}
+                          </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-11 rounded-xl text-sm font-medium" min={0} />
+                            className={cn("h-11 rounded-xl text-sm font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
+                            Empty Weight (kg) * {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100,000') : '⚠ Required')}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
-                            className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} />
+                            className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
+                        <label className={cn("text-[10px] mb-1 block", isDeductedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Deducted Weight (Fuel/Dust) (kg) — optional {isDeductedWeightInvalid && '⚠ 0–10,000'}
+                        </label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-11 rounded-xl text-sm font-medium" min={0} />
+                          className={cn("h-11 rounded-xl text-sm font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
@@ -1012,12 +1352,16 @@ const ArrivalsPage = () => {
                     <div className="glass-card rounded-2xl p-4">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className="h-11 rounded-xl text-sm" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Godown (optional) {isGodownInvalid && '⚠ 2–50, letters only'}
+                          </label>
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-11 rounded-xl text-sm", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                         </div>
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} className="h-11 rounded-xl text-sm" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Gatepass (optional) {isGatepassNumberInvalid && '⚠ 1–30, alphanumeric'}
+                          </label>
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-11 rounded-xl text-sm", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
                         </div>
                       </div>
                     </div>
@@ -1028,7 +1372,9 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker (search contact or type any name)</label>
+                      <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isBrokerNameInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        Broker (optional) {isBrokerNameInvalid && '⚠ 2–100, letters + spaces'}
+                      </label>
                       <div ref={brokerSearchWrapRef} className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <Input
@@ -1037,7 +1383,7 @@ const ArrivalsPage = () => {
                           onChange={e => { setBrokerName(e.target.value); setBrokerContactId(null); refreshBrokerDropdownPos(); setBrokerDropdown(true); }}
                           onFocus={() => { if (brokerName.trim()) { refreshBrokerDropdownPos(); setBrokerDropdown(true); } }}
                           onBlur={() => setTimeout(() => setBrokerDropdown(false), 180)}
-                          className="h-11 rounded-xl pl-10 text-sm"
+                          className={cn("h-11 rounded-xl pl-10 text-sm", isBrokerNameInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                         />
                       </div>
                     </div>
@@ -1067,9 +1413,11 @@ const ArrivalsPage = () => {
                         <>
                           <div className="grid grid-cols-2 gap-3 mb-3">
                             <div>
-                              <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
+                              <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                Rate * {isFreightRateInvalid && (freightRate?.trim() ? '⚠ 0–100,000' : '⚠ Required')}
+                              </label>
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                                className="h-11 rounded-xl text-sm font-medium" min={0} />
+                                className={cn("h-11 rounded-xl text-sm font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                             </div>
                             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
                               <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
@@ -1077,9 +1425,11 @@ const ArrivalsPage = () => {
                             </div>
                           </div>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
+                            <label className={cn("text-[10px] mb-1 block", isAdvancePaidInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Advance Paid (to driver) — optional {isAdvancePaidInvalid && '⚠ 0–1,000,000'}
+                            </label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-11 rounded-xl text-sm font-medium" min={0} />
+                              className={cn("h-11 rounded-xl text-sm font-medium", isAdvancePaidInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
@@ -1155,8 +1505,14 @@ const ArrivalsPage = () => {
                               </div>
                             ) : (
                               <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
-                                <Input placeholder="Seller name *" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className="h-9 rounded-lg text-sm" />
-                                <Input placeholder="Mark (optional)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className="h-9 rounded-lg text-sm" />
+                                <div>
+                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
+                                  {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                                </div>
+                                <div>
+                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerMarkInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                                  {isSellerMarkInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–50 if set</p>}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1183,16 +1539,20 @@ const ArrivalsPage = () => {
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name * (numbers only)</label>
+                                  <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                    Lot Name * (2–50, digits) {isLotNameInvalid(lot) && '⚠'}
+                                  </label>
                                   <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
                                     onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
-                                    className="h-9 rounded-lg text-sm" inputMode="numeric" />
+                                    className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="numeric" maxLength={50} />
                                 </div>
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
+                                  <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                    Bags * (1–100,000) {isLotQuantityInvalid(lot) && '⚠'}
+                                  </label>
                                   <Input type="number" placeholder="0" value={lot.quantity || ''}
                                     onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className="h-9 rounded-lg text-sm" min={1} />
+                                    className={cn("h-9 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
@@ -1228,8 +1588,8 @@ const ArrivalsPage = () => {
 
                     {/* Submit */}
                     <Button onClick={handleSubmitArrival}
-                      disabled={!editingVehicleId && sellers.length === 0}
-                      className="w-full h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
+                      disabled={(!editingVehicleId && sellers.length === 0) || isFormInvalid}
+                      className="w-full h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
                       <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
                     </Button>
                   </div>
@@ -1241,26 +1601,78 @@ const ArrivalsPage = () => {
         </div>
       )}
 
-      {/* ═══ MOBILE: List + Modal ═══ */}
+      {/* ═══ MOBILE: Four cards + Search + Status filter + List (mobile-first) ═══ */}
       {!isDesktop && (
         <>
+          {/* Four summary cards — raghav style: blue icon on all, white card */}
+          {!apiArrivalsLoading && apiArrivals.length > 0 && (
+            <div className="px-4 mb-4">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
+                    <Truck className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-foreground leading-tight">{totalVehicles}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Total Vehicles</p>
+                  </div>
+                </div>
+                <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
+                    <Users className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-foreground leading-tight">{totalSellers}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Total Sellers</p>
+                  </div>
+                </div>
+                <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
+                    <Package className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-foreground leading-tight">{totalLots}</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Total Lots</p>
+                  </div>
+                </div>
+                <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-3 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
+                    <Scale className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-foreground leading-tight">{totalNetWeightTons.toFixed(1)}t</p>
+                    <p className="text-[11px] font-medium text-muted-foreground">Total Weight</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="px-4 mb-3 space-y-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="search"
-                placeholder="Search by vehicle…"
+                placeholder="Search seller, vehicle, origin..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-muted/30 border border-border/30 focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
+                className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF] text-foreground placeholder:text-muted-foreground"
               />
             </div>
-            <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
-              <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-semibold', statusFilter === 'ALL' ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}>All</button>
-              {ALL_STATUSES.map(s => (
-                <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-semibold', statusFilter === s ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}>{s.charAt(0) + s.slice(1).toLowerCase()}</button>
-              ))}
+            {/* Sub-categories: Arrivals / Sellers / Lots — blue active (raghav) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 text-xs">
+              <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
+              <button type="button" onClick={() => setSummaryMode('sellers')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'sellers' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Sellers ({totalSellers})</button>
+              <button type="button" onClick={() => setSummaryMode('lots')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
             </div>
+            {/* Status filter — only when Arrivals, blue active (raghav) */}
+            {summaryMode === 'arrivals' && (
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
+                <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                {ALL_STATUSES.map(s => (
+                  <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="px-4 space-y-2.5">
             {apiArrivalsLoading ? (
@@ -1268,26 +1680,73 @@ const ArrivalsPage = () => {
                 <p className="text-muted-foreground">Loading arrivals…</p>
               </div>
             ) : apiArrivals.length === 0 ? (
+              statusFilter !== 'ALL' ? (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 rounded-2xl text-center">
+                  <Filter className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
+                  <h3 className="text-lg font-bold text-foreground mb-1">No {statusLabel(statusFilter)} arrivals</h3>
+                  <p className="text-sm text-muted-foreground mb-4">No arrivals match this filter. Tap below to show all.</p>
+                  <Button onClick={() => setStatusFilter('ALL')} variant="outline" className="rounded-xl">
+                    Show all arrivals
+                  </Button>
+                </motion.div>
+              ) : (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 rounded-2xl text-center">
                 <div className="relative mb-4 mx-auto w-16 h-16">
                   <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl" />
-                  <div className="relative w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center shadow-lg">
+                  <div className="relative w-16 h-16 rounded-full bg-[#6075FF] flex items-center justify-center shadow-lg shadow-[#6075FF]/20">
                     <Truck className="w-7 h-7 text-white" />
                   </div>
                 </div>
                 <h3 className="text-lg font-bold text-foreground mb-1">No Arrivals Yet</h3>
                 <p className="text-sm text-muted-foreground mb-4">Record your first vehicle arrival to start operations</p>
-                <Button onClick={() => { resetForm(); setShowAdd(true); }} className="bg-gradient-to-r from-blue-500 to-violet-500 text-white rounded-xl shadow-lg">
+                <Button onClick={() => { resetForm(); setShowAdd(true); }} className="bg-[#6075FF] text-white rounded-xl shadow-lg hover:bg-[#5060e8]">
                   <Plus className="w-4 h-4 mr-2" /> New Arrival
                 </Button>
               </motion.div>
+              )
+            ) : summaryMode === 'sellers' ? (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredArrivals.flatMap(a => {
+                  const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                  if (!detail?.sellers?.length) return [{ sellerName: '-', lotCount: a.lotCount ?? 0, lots: [] as { id: number; lotName: string }[], vehicleNumber: a.vehicleNumber, key: `ms-${a.vehicleId}-0` }];
+                  return detail.sellers.map((s, si) => ({ sellerName: s.sellerName || '-', lotCount: s.lots?.length ?? 0, lots: s.lots ?? [], vehicleNumber: a.vehicleNumber, key: `ms-${a.vehicleId}-${si}` }));
+                }).map((item, i) => (
+                  <motion.div key={item.key} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }} className="bg-white dark:bg-card rounded-2xl border border-border/40 shadow-sm p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center text-white font-bold shrink-0">{item.sellerName.charAt(0).toUpperCase()}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-foreground">{item.sellerName}</p>
+                        <p className="text-xs text-muted-foreground">{item.lotCount} lot(s) · {item.vehicleNumber}</p>
+                        {item.lots[0] && <p className="text-[10px] text-muted-foreground/80 mt-0.5">{item.lots[0].lotName}{item.lots.length > 1 ? ` +${item.lots.length - 1} more` : ''}</p>}
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : summaryMode === 'lots' ? (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredArrivals.flatMap(a => {
+                  const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
+                  if (!detail?.sellers) return [];
+                  return detail.sellers.flatMap(s => (s.lots ?? []).map(lot => ({ lotId: lot.id, lotName: lot.lotName || 'Unnamed', sellerName: s.sellerName || '-', vehicleNumber: a.vehicleNumber, key: `ml-${a.vehicleId}-${lot.id}` })));
+                }).map((item, i) => (
+                  <motion.div key={item.key} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.03 }} className="bg-white dark:bg-card rounded-2xl border border-border/40 shadow-sm p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shrink-0"><Package className="w-5 h-5 text-white" /></div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">{item.lotName}</p>
+                          <p className="text-xs text-muted-foreground">{item.sellerName} · {item.vehicleNumber}</p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => { navigator.clipboard?.writeText(`Lot: ${item.lotName}\nSeller: ${item.sellerName}\nVehicle: ${item.vehicleNumber}`).then(() => toast.success('Copied')); }} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground"><Share2 className="w-4 h-4" /></button>
+                    </div>
+                    <span className="inline-flex mt-2 px-2 py-0.5 rounded-full bg-[#eef0ff] dark:bg-[#6075FF]/20 text-[#6075FF] text-[10px] font-bold">{item.vehicleNumber}</span>
+                  </motion.div>
+                ))}
+              </div>
             ) : (() => {
-              const filtered = apiArrivals.filter(a => {
-                if (statusFilter !== 'ALL' && getArrivalStatus(a) !== statusFilter) return false;
-                if (searchQuery.trim() && !String(a.vehicleNumber).toLowerCase().includes(searchQuery.toLowerCase())) return false;
-                return true;
-              });
-              if (filtered.length === 0) {
+              if (filteredArrivals.length === 0) {
                 return (
                   <div className="glass-card p-6 rounded-2xl text-center">
                     <Filter className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
@@ -1295,28 +1754,33 @@ const ArrivalsPage = () => {
                   </div>
                 );
               }
-              return filtered.map((a, i) => {
+              return filteredArrivals.map((a, i) => {
                 const status = getArrivalStatus(a);
                 const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
                 return (
                   <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
                     <div className="glass-card rounded-2xl overflow-hidden">
-                      <button type="button" onClick={() => loadExpandedDetail(a.vehicleId)} className="w-full p-3.5 flex items-center justify-between text-left">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md">
+                      <div className="w-full p-3.5 flex items-center justify-between gap-2">
+                        <button type="button" onClick={() => loadExpandedDetail(a.vehicleId)} className="flex-1 flex items-center justify-between text-left min-w-0">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
                             <Truck className="w-4 h-4 text-white" />
                           </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
-                              <ArrivalStatusBadge status={status} />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
+                                <span className="text-muted-foreground text-xs">|</span>
+                                <span className="text-foreground text-xs">{a.primarySellerName ?? '-'}</span>
+                                <span className="text-muted-foreground text-xs"> ({(a.totalBags ?? 0)})</span>
+                                <ArrivalStatusBadge status={status} />
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg · Bids: {a.bidsCount ?? 0} · Weighed: {a.weighedCount ?? 0}</p>
                             </div>
-                            <p className="text-xs text-muted-foreground mt-0.5">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg</p>
                           </div>
-                        </div>
-                        <span className="text-xs text-muted-foreground flex-shrink-0">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
-                        {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
-                      </button>
+                          <span className="text-xs text-muted-foreground flex-shrink-0">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
+                          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                        </button>
+                      </div>
                       <AnimatePresence>
                         {isExpanded && (
                           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-border/30">
@@ -1446,12 +1910,12 @@ const ArrivalsPage = () => {
 
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number *
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? <span className="font-normal text-red-500">2–12</span> : <span className="font-normal text-red-500">Required</span>)}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          className="h-12 rounded-xl text-base font-medium" />
+                          className={cn("h-12 rounded-xl text-base font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
                       </div>
                     )}
 
@@ -1461,22 +1925,26 @@ const ArrivalsPage = () => {
                       </label>
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
-                          <label className="text-[10px] text-muted-foreground mb-1 block">Loaded Weight (kg)</label>
+                          <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                            Loaded (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100k' : '⚠ Required')}
+                          </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
-                            className="h-12 rounded-xl text-base font-medium" min={0} />
+                            className={cn("h-12 rounded-xl text-base font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty Weight (kg) {isEmptyWeightInvalid && '⚠ Must be ≤ Loaded Weight'}
+                            Empty (kg) * {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100k') : '⚠ Required')}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
-                            className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} />
+                            className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                       </div>
                       <div className="mb-3">
-                        <label className="text-[10px] text-muted-foreground mb-1 block">Deducted Weight (Fuel/Dust) (kg)</label>
+                        <label className={cn("text-[10px] mb-1 block", isDeductedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Deducted (kg) optional {isDeductedWeightInvalid && '⚠ 0–10,000'}
+                        </label>
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
-                          className="h-12 rounded-xl text-base font-medium" min={0} />
+                          className={cn("h-12 rounded-xl text-base font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
@@ -1493,12 +1961,16 @@ const ArrivalsPage = () => {
                     <div className="glass-card rounded-2xl p-4">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Godown</label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className="h-12 rounded-xl" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Godown (optional) {isGodownInvalid && '⚠ 2–50'}
+                          </label>
+                          <Input placeholder="Godown (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-12 rounded-xl", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                         </div>
                         <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Gatepass Number</label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value)} className="h-12 rounded-xl" />
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                            Gatepass (optional) {isGatepassNumberInvalid && '⚠ 1–30'}
+                          </label>
+                          <Input placeholder="Gatepass (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-12 rounded-xl", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
                         </div>
                       </div>
                     </div>
@@ -1509,7 +1981,9 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker (search contact or type any name)</label>
+                      <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isBrokerNameInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        Broker (optional) {isBrokerNameInvalid && '⚠ 2–100'}
+                      </label>
                       <div ref={brokerSearchWrapRef} className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <Input
@@ -1518,7 +1992,7 @@ const ArrivalsPage = () => {
                           onChange={e => { setBrokerName(e.target.value); setBrokerContactId(null); refreshBrokerDropdownPos(); setBrokerDropdown(true); }}
                           onFocus={() => { if (brokerName.trim()) { refreshBrokerDropdownPos(); setBrokerDropdown(true); } }}
                           onBlur={() => setTimeout(() => setBrokerDropdown(false), 180)}
-                          className="h-12 rounded-xl pl-10"
+                          className={cn("h-12 rounded-xl pl-10", isBrokerNameInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                         />
                       </div>
                     </div>
@@ -1547,18 +2021,22 @@ const ArrivalsPage = () => {
                       {!noRental && (
                         <>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Rate</label>
+                            <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Rate * {isFreightRateInvalid && (freightRate?.trim() ? '⚠ 0–100k' : '⚠ Required')}
+                            </label>
                             <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} />
+                              className={cn("h-12 rounded-xl text-base font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                           </div>
                           <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 mb-3">
                             <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
                             <p className="text-xl font-bold text-foreground">₹{freightTotal.toLocaleString()}</p>
                           </div>
                           <div className="mb-3">
-                            <label className="text-[10px] text-muted-foreground mb-1 block">Advance Paid (to driver)</label>
+                            <label className={cn("text-[10px] mb-1 block", isAdvancePaidInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                              Advance (optional) {isAdvancePaidInvalid && '⚠ 0–1M'}
+                            </label>
                             <Input type="number" placeholder="0" value={advancePaid} onChange={e => setAdvancePaid(e.target.value)}
-                              className="h-12 rounded-xl text-base font-medium" min={0} />
+                              className={cn("h-12 rounded-xl text-base font-medium", isAdvancePaidInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={1000000} step="0.01" />
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground mb-1 block">Narration</label>
@@ -1629,8 +2107,14 @@ const ArrivalsPage = () => {
                               </div>
                             ) : (
                               <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
-                                <Input placeholder="Seller name *" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className="h-10 rounded-lg text-sm" />
-                                <Input placeholder="Mark (optional)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className="h-10 rounded-lg text-sm" />
+                                <div>
+                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
+                                  {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                                </div>
+                                <div>
+                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                                  {isSellerMarkInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–50 if set</p>}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1657,16 +2141,20 @@ const ArrivalsPage = () => {
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name * (numbers only)</label>
+                                  <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                    Lot Name * (2–50, digits) {isLotNameInvalid(lot) && '⚠'}
+                                  </label>
                                   <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
                                     onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
-                                    className="h-10 rounded-lg text-sm" inputMode="numeric" />
+                                    className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="numeric" maxLength={50} />
                                 </div>
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
+                                  <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                    Bags * (1–100k) {isLotQuantityInvalid(lot) && '⚠'}
+                                  </label>
                                   <Input type="number" placeholder="0" value={lot.quantity || ''}
                                     onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className="h-10 rounded-lg text-sm" min={1} />
+                                    className={cn("h-10 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
@@ -1709,8 +2197,8 @@ const ArrivalsPage = () => {
                   <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-4 py-3 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
                       <Button onClick={handleSubmitArrival}
-                        disabled={!editingVehicleId && sellers.length === 0}
-                        className="w-full h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
+                        disabled={(!editingVehicleId && sellers.length === 0) || isFormInvalid}
+                        className="w-full h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
                         <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})`}
                       </Button>
                     </div>

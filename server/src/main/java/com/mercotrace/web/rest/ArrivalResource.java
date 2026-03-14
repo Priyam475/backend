@@ -77,14 +77,16 @@ public class ArrivalResource {
 
     /**
      * {@code GET  /arrivals} : get paginated arrivals summaries.
+     * @param status optional filter: PENDING, WEIGHED, AUCTIONED, SETTLED (filter applied in memory on current page).
      */
     @GetMapping("")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ARRIVALS_VIEW + "\")")
     public ResponseEntity<List<ArrivalSummaryDTO>> getAllArrivals(
-        @org.springdoc.core.annotations.ParameterObject Pageable pageable
+        @org.springdoc.core.annotations.ParameterObject Pageable pageable,
+        @RequestParam(required = false) String status
     ) {
-        LOG.debug("REST request to get Arrivals page: {}", pageable);
-        Page<ArrivalSummaryDTO> page = arrivalService.listArrivals(pageable);
+        LOG.debug("REST request to get Arrivals page: {} status: {}", pageable, status);
+        Page<ArrivalSummaryDTO> page = arrivalService.listArrivals(pageable, status);
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
         return ResponseEntity.ok().headers(headers).body(page.getContent());
     }

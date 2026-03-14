@@ -312,6 +312,14 @@ public final class ArrivalDTOs {
         private String godown;
         private String gatepassNumber;
         private String origin;
+        /** First seller name for table display (vehicle | seller name). */
+        private String primarySellerName;
+        /** Total bags across all lots of this arrival. */
+        private int totalBags;
+        /** Number of lots that have at least one bid (auction entry). */
+        private int bidsCount;
+        /** Number of lots that have a weighing session. */
+        private int weighedCount;
 
         public Long getVehicleId() {
             return vehicleId;
@@ -407,6 +415,38 @@ public final class ArrivalDTOs {
 
         public void setOrigin(String origin) {
             this.origin = origin;
+        }
+
+        public String getPrimarySellerName() {
+            return primarySellerName;
+        }
+
+        public void setPrimarySellerName(String primarySellerName) {
+            this.primarySellerName = primarySellerName;
+        }
+
+        public int getTotalBags() {
+            return totalBags;
+        }
+
+        public void setTotalBags(int totalBags) {
+            this.totalBags = totalBags;
+        }
+
+        public int getBidsCount() {
+            return bidsCount;
+        }
+
+        public void setBidsCount(int bidsCount) {
+            this.bidsCount = bidsCount;
+        }
+
+        public int getWeighedCount() {
+            return weighedCount;
+        }
+
+        public void setWeighedCount(int weighedCount) {
+            this.weighedCount = weighedCount;
         }
     }
 

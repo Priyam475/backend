@@ -53,6 +53,14 @@ export interface ArrivalSummary {
   godown?: string;
   gatepassNumber?: string;
   origin?: string;
+  /** First seller name for table: vehicle | seller name */
+  primarySellerName?: string;
+  /** Total bags across all lots of this arrival */
+  totalBags?: number;
+  /** Number of lots with at least one bid */
+  bidsCount?: number;
+  /** Number of lots with a weighing session */
+  weighedCount?: number;
 }
 
 /** Lot in arrival detail (id for lot lookup, e.g. WeighingPage bid enrichment). */
@@ -163,10 +171,11 @@ async function handleArrivalResponse<T>(res: Response, defaultMessage: string): 
 }
 
 export const arrivalsApi = {
-  async list(page = 0, size = 10): Promise<ArrivalSummary[]> {
+  async list(page = 0, size = 10, status?: string): Promise<ArrivalSummary[]> {
     const searchParams = new URLSearchParams();
     searchParams.set('page', String(page));
     searchParams.set('size', String(size));
+    if (status && status !== 'ALL') searchParams.set('status', status);
 
     const res = await apiFetch(`/arrivals?${searchParams.toString()}`, { method: 'GET' });
     const data = await handleArrivalResponse<ArrivalSummary[]>(res, 'Failed to load arrivals');

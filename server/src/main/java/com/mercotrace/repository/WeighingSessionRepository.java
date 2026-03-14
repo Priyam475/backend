@@ -1,6 +1,7 @@
 package com.mercotrace.repository;
 
 import com.mercotrace.domain.WeighingSession;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -19,6 +20,8 @@ public interface WeighingSessionRepository extends JpaRepository<WeighingSession
     Page<WeighingSession> findAllByTraderIdOrderByCreatedDateDesc(Long traderId, Pageable pageable);
 
     List<WeighingSession> findAllByBidNumber(Integer bidNumber);
+
+    List<WeighingSession> findByLotIdIn(Collection<Long> lotIds);
 
     boolean existsByBidNumber(Integer bidNumber);
 }
