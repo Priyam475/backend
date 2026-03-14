@@ -28,6 +28,8 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
   [normalize('Arrivals')]: {
     view: 'ROLE_ARRIVALS_VIEW',
     create: 'ROLE_ARRIVALS_CREATE',
+    edit: 'ROLE_ARRIVALS_EDIT',
+    delete: 'ROLE_ARRIVALS_DELETE',
   },
   [normalize('Auctions / Sales')]: {
     view: 'ROLE_AUCTIONS_VIEW',

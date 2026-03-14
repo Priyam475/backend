@@ -38,6 +38,21 @@ public class Vehicle extends AbstractAuditingEntity<Long> implements Serializabl
     @Column(name = "created_at")
     private Instant createdAt;
 
+    @Column(name = "godown", length = 255)
+    private String godown;
+
+    @Column(name = "gatepass_number", length = 100)
+    private String gatepassNumber;
+
+    @Column(name = "origin", length = 500)
+    private String origin;
+
+    @Column(name = "broker_name", length = 255)
+    private String brokerName;
+
+    @Column(name = "narration", length = 500)
+    private String narration;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     @Override
@@ -87,6 +102,46 @@ public class Vehicle extends AbstractAuditingEntity<Long> implements Serializabl
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getGodown() {
+        return godown;
+    }
+
+    public void setGodown(String godown) {
+        this.godown = godown;
+    }
+
+    public String getGatepassNumber() {
+        return gatepassNumber;
+    }
+
+    public void setGatepassNumber(String gatepassNumber) {
+        this.gatepassNumber = gatepassNumber;
+    }
+
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
+    }
+
+    public String getBrokerName() {
+        return brokerName;
+    }
+
+    public void setBrokerName(String brokerName) {
+        this.brokerName = brokerName;
+    }
+
+    public String getNarration() {
+        return narration;
+    }
+
+    public void setNarration(String narration) {
+        this.narration = narration;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

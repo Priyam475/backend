@@ -5,6 +5,8 @@ import com.mercotrace.service.ArrivalService;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalRequestDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSummaryDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalDetailDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalFullDetailDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalUpdateDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -64,6 +66,16 @@ public class ArrivalResource {
     }
 
     /**
+     * {@code GET  /arrivals/:id} : get full arrival detail by vehicle id (for expand panel).
+     */
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ARRIVALS_VIEW + "\")")
+    public ResponseEntity<ArrivalFullDetailDTO> getArrivalById(@PathVariable Long id) {
+        ArrivalFullDetailDTO dto = arrivalService.getArrivalById(id);
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
      * {@code GET  /arrivals} : get paginated arrivals summaries.
      */
     @GetMapping("")
@@ -89,6 +101,26 @@ public class ArrivalResource {
         var page = arrivalService.listArrivalsDetail(pageable);
         HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
         return ResponseEntity.ok().headers(headers).body(page.getContent());
+    }
+
+    /**
+     * {@code PATCH  /arrivals/:id} : partial update (vehicleNumber, godown, gatepassNumber, origin).
+     */
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ARRIVALS_EDIT + "\")")
+    public ResponseEntity<ArrivalSummaryDTO> updateArrival(@PathVariable Long id, @RequestBody ArrivalUpdateDTO update) {
+        ArrivalSummaryDTO result = arrivalService.updateArrival(id, update);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * {@code DELETE  /arrivals/:id} : delete the arrival (vehicle and related records).
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.ARRIVALS_DELETE + "\")")
+    public ResponseEntity<Void> deleteArrival(@PathVariable Long id) {
+        arrivalService.deleteArrival(id);
+        return ResponseEntity.noContent().build();
     }
 }
 

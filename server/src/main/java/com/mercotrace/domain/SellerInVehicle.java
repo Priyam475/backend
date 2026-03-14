@@ -25,11 +25,20 @@ public class SellerInVehicle extends AbstractAuditingEntity<Long> implements Ser
     @Column(name = "vehicle_id", nullable = false)
     private Long vehicleId;
 
-    @Column(name = "contact_id", nullable = false)
+    @Column(name = "contact_id")
     private Long contactId;
 
     @Column(name = "broker_id")
     private Long brokerId;
+
+    @Column(name = "seller_name", length = 150)
+    private String sellerName;
+
+    @Column(name = "seller_phone", length = 20)
+    private String sellerPhone;
+
+    @Column(name = "seller_mark", length = 50)
+    private String sellerMark;
 
     @Override
     public Long getId() {
@@ -62,6 +71,30 @@ public class SellerInVehicle extends AbstractAuditingEntity<Long> implements Ser
 
     public void setBrokerId(Long brokerId) {
         this.brokerId = brokerId;
+    }
+
+    public String getSellerName() {
+        return sellerName;
+    }
+
+    public void setSellerName(String sellerName) {
+        this.sellerName = sellerName;
+    }
+
+    public String getSellerPhone() {
+        return sellerPhone;
+    }
+
+    public void setSellerPhone(String sellerPhone) {
+        this.sellerPhone = sellerPhone;
+    }
+
+    public String getSellerMark() {
+        return sellerMark;
+    }
+
+    public void setSellerMark(String sellerMark) {
+        this.sellerMark = sellerMark;
     }
 
     @Override

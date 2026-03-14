@@ -9,5 +9,7 @@ import org.springframework.stereotype.Repository;
 public interface VoucherRepository extends JpaRepository<Voucher, Long> {
 
     List<Voucher> findAllByTraderId(Long traderId);
+
+    void deleteByReferenceTypeAndReferenceId(String referenceType, Long referenceId);
 }
 

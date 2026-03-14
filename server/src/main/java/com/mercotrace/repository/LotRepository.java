@@ -15,6 +15,8 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
 
     List<Lot> findAllBySellerVehicleIdIn(Iterable<Long> sellerVehicleIds);
 
+    void deleteBySellerVehicleIdIn(Collection<Long> sellerVehicleIds);
+
     Page<Lot> findAllByLotNameContainingIgnoreCase(String lotName, Pageable pageable);
 
     /**

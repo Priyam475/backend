@@ -11,6 +11,10 @@ import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSummaryDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalDetailDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSellerDetailDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalLotDetailDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalFullDetailDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSellerFullDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalLotFullDTO;
+import com.mercotrace.service.dto.ArrivalDTOs.ArrivalUpdateDTO;
 import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -47,6 +51,8 @@ public class ArrivalService {
     private final CommodityRepository commodityRepository;
     private final ContactRepository contactRepository;
     private final TraderContextService traderContextService;
+    private final AuctionRepository auctionRepository;
+    private final AuctionEntryRepository auctionEntryRepository;
 
     public ArrivalService(
         VehicleRepository vehicleRepository,
@@ -59,7 +65,9 @@ public class ArrivalService {
         DailySerialRepository dailySerialRepository,
         CommodityRepository commodityRepository,
         ContactRepository contactRepository,
-        TraderContextService traderContextService
+        TraderContextService traderContextService,
+        AuctionRepository auctionRepository,
+        AuctionEntryRepository auctionEntryRepository
     ) {
         this.vehicleRepository = vehicleRepository;
         this.vehicleWeightRepository = vehicleWeightRepository;
@@ -72,6 +80,8 @@ public class ArrivalService {
         this.commodityRepository = commodityRepository;
         this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
+        this.auctionRepository = auctionRepository;
+        this.auctionEntryRepository = auctionEntryRepository;
     }
 
     /**
@@ -92,6 +102,11 @@ public class ArrivalService {
         vehicle.setVehicleNumber(vehicleNumber);
         vehicle.setArrivalDatetime(now);
         vehicle.setCreatedAt(now);
+        if (request.getGodown() != null) vehicle.setGodown(request.getGodown());
+        if (request.getGatepassNumber() != null) vehicle.setGatepassNumber(request.getGatepassNumber());
+        if (request.getOrigin() != null) vehicle.setOrigin(request.getOrigin());
+        if (request.getBrokerName() != null) vehicle.setBrokerName(request.getBrokerName().trim());
+        if (request.getNarration() != null) vehicle.setNarration(request.getNarration().trim());
         vehicle = vehicleRepository.save(vehicle);
 
         VehicleWeight weight = new VehicleWeight();
@@ -109,16 +124,28 @@ public class ArrivalService {
         List<SellerInVehicle> sellerLinks = new ArrayList<>();
         List<Lot> lots = new ArrayList<>();
 
+        Long brokerContactId = request.getBrokerContactId();
         for (ArrivalSellerDTO sellerDTO : request.getSellers()) {
-            // Ensure contact exists
-            Long contactId = sellerDTO.getContactId();
-            contactRepository.findById(contactId).orElseThrow(() ->
-                new IllegalArgumentException("Seller contact not found: " + contactId)
-            );
-
             SellerInVehicle sellerInVehicle = new SellerInVehicle();
             sellerInVehicle.setVehicleId(vehicle.getId());
-            sellerInVehicle.setContactId(contactId);
+            Long contactId = sellerDTO.getContactId();
+            if (contactId != null) {
+                contactRepository.findById(contactId).orElseThrow(() ->
+                    new IllegalArgumentException("Seller contact not found: " + contactId)
+                );
+                sellerInVehicle.setContactId(contactId);
+            } else {
+                if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
+                    throw new IllegalArgumentException("Free-text seller must have a name");
+                }
+                sellerInVehicle.setContactId(null);
+                sellerInVehicle.setSellerName(sellerDTO.getSellerName().trim());
+                sellerInVehicle.setSellerPhone(sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null);
+                sellerInVehicle.setSellerMark(sellerDTO.getSellerMark() != null ? sellerDTO.getSellerMark().trim() : null);
+            }
+            if (brokerContactId != null) {
+                sellerInVehicle.setBrokerId(brokerContactId);
+            }
             sellerInVehicle = sellerInVehicleRepository.save(sellerInVehicle);
             sellerLinks.add(sellerInVehicle);
 
@@ -129,6 +156,8 @@ public class ArrivalService {
                 lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
                 lot.setLotName(lotDTO.getLotName());
                 lot.setBagCount(lotDTO.getBagCount());
+                if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
+                if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                 lot.setSellerSerialNo(sellerSerial);
                 lot.setCreatedAt(now);
                 lots.add(lot);
@@ -226,10 +255,326 @@ public class ArrivalService {
             dto.setFreightTotal(freightTotal);
             dto.setFreightMethod(method);
             dto.setArrivalDatetime(v.getArrivalDatetime());
+            dto.setGodown(v.getGodown());
+            dto.setGatepassNumber(v.getGatepassNumber());
+            dto.setOrigin(v.getOrigin());
             return dto;
         }).toList();
 
         return new PageImpl<>(content, pageable, vehiclePage.getTotalElements());
+    }
+
+    /**
+     * Get full arrival detail by vehicle id (for expand panel). Trader-scoped.
+     */
+    @Transactional(readOnly = true)
+    public ArrivalFullDetailDTO getArrivalById(Long vehicleId) {
+        Long traderId = resolveTraderId();
+        Vehicle vehicle = vehicleRepository.findById(vehicleId)
+            .orElseThrow(() -> new IllegalArgumentException("Arrival not found: " + vehicleId));
+        if (!vehicle.getTraderId().equals(traderId)) {
+            throw new IllegalArgumentException("Arrival not found: " + vehicleId);
+        }
+
+        Optional<VehicleWeight> weightOpt = vehicleWeightRepository.findOneByVehicleId(vehicleId);
+        Optional<FreightCalculation> freightOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        List<SellerInVehicle> sellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
+        List<Long> sellerVehicleIds = sellers.stream().map(SellerInVehicle::getId).toList();
+        List<Lot> lots = sellerVehicleIds.isEmpty() ? List.of() : lotRepository.findAllBySellerVehicleIdIn(sellerVehicleIds);
+        List<Long> contactIds = sellers.stream().map(SellerInVehicle::getContactId).filter(java.util.Objects::nonNull).distinct().toList();
+        List<Contact> contacts = contactIds.isEmpty() ? List.of() : contactRepository.findAllById(contactIds);
+        List<Long> commodityIds = lots.stream().map(Lot::getCommodityId).filter(java.util.Objects::nonNull).distinct().toList();
+        List<Commodity> commodities = commodityIds.isEmpty() ? List.of() : commodityRepository.findAllById(commodityIds);
+
+        java.util.Map<Long, String> contactNameById = contacts.stream()
+            .collect(Collectors.toMap(Contact::getId, c -> c.getName() != null ? c.getName() : ""));
+        java.util.Map<Long, String> contactPhoneById = contacts.stream()
+            .collect(Collectors.toMap(Contact::getId, c -> c.getPhone() != null ? c.getPhone() : ""));
+        java.util.Map<Long, String> contactMarkById = contacts.stream()
+            .collect(Collectors.toMap(Contact::getId, c -> c.getMark() != null ? c.getMark() : ""));
+        java.util.Map<Long, String> commodityNameById = commodities.stream()
+            .collect(Collectors.toMap(Commodity::getId, c -> c.getCommodityName() != null ? c.getCommodityName() : ""));
+
+        ArrivalFullDetailDTO dto = new ArrivalFullDetailDTO();
+        dto.setVehicleId(vehicle.getId());
+        dto.setVehicleNumber(vehicle.getVehicleNumber());
+        dto.setArrivalDatetime(vehicle.getArrivalDatetime());
+        dto.setGodown(vehicle.getGodown());
+        dto.setGatepassNumber(vehicle.getGatepassNumber());
+        dto.setOrigin(vehicle.getOrigin());
+        dto.setBrokerName(vehicle.getBrokerName());
+        dto.setBrokerContactId(sellers.isEmpty() ? null : sellers.get(0).getBrokerId());
+        dto.setNarration(vehicle.getNarration());
+
+        double netWeight = weightOpt.map(VehicleWeight::getNetWeight).orElse(0d);
+        dto.setLoadedWeight(weightOpt.map(VehicleWeight::getLoadedWeight).orElse(null));
+        dto.setEmptyWeight(weightOpt.map(VehicleWeight::getEmptyWeight).orElse(null));
+        dto.setDeductedWeight(weightOpt.map(VehicleWeight::getDeductedWeight).orElse(null));
+        dto.setNetWeight(netWeight);
+
+        if (freightOpt.isPresent()) {
+            FreightCalculation fc = freightOpt.get();
+            dto.setFreightMethod(fc.getMethod());
+            dto.setFreightRate(fc.getRate());
+            dto.setFreightTotal(fc.getTotalAmount());
+            dto.setNoRental(Boolean.TRUE.equals(fc.getNoRental()));
+            dto.setAdvancePaid(fc.getAdvancePaid());
+        }
+
+        List<ArrivalSellerFullDTO> sellerFullList = new ArrayList<>();
+        for (SellerInVehicle siv : sellers) {
+            ArrivalSellerFullDTO sellerFull = new ArrivalSellerFullDTO();
+            sellerFull.setContactId(siv.getContactId());
+            if (siv.getContactId() != null) {
+                sellerFull.setSellerName(contactNameById.getOrDefault(siv.getContactId(), ""));
+                sellerFull.setSellerPhone(contactPhoneById.getOrDefault(siv.getContactId(), ""));
+                sellerFull.setSellerMark(contactMarkById.getOrDefault(siv.getContactId(), ""));
+            } else {
+                sellerFull.setSellerName(siv.getSellerName() != null ? siv.getSellerName() : "");
+                sellerFull.setSellerPhone(siv.getSellerPhone() != null ? siv.getSellerPhone() : "");
+                sellerFull.setSellerMark(siv.getSellerMark() != null ? siv.getSellerMark() : null);
+            }
+            List<Lot> sellerLots = lots.stream().filter(l -> l.getSellerVehicleId().equals(siv.getId())).toList();
+            List<ArrivalLotFullDTO> lotFullList = sellerLots.stream().map(lot -> {
+                ArrivalLotFullDTO lf = new ArrivalLotFullDTO();
+                lf.setId(lot.getId());
+                lf.setLotName(lot.getLotName());
+                lf.setCommodityName(commodityNameById.getOrDefault(lot.getCommodityId(), ""));
+                lf.setBagCount(lot.getBagCount() != null ? lot.getBagCount() : 0);
+                lf.setBrokerTag(lot.getBrokerTag());
+                lf.setVariant(lot.getVariant());
+                return lf;
+            }).toList();
+            sellerFull.setLots(lotFullList);
+            sellerFullList.add(sellerFull);
+        }
+        dto.setSellers(sellerFullList);
+        return dto;
+    }
+
+    /**
+     * Update arrival: vehicle metadata, weights, and/or freight. All fields optional. Trader-scoped.
+     */
+    @Transactional
+    public ArrivalSummaryDTO updateArrival(Long vehicleId, ArrivalUpdateDTO update) {
+        Long traderId = resolveTraderId();
+        Vehicle vehicle = vehicleRepository.findById(vehicleId)
+            .orElseThrow(() -> new IllegalArgumentException("Arrival not found: " + vehicleId));
+        if (!vehicle.getTraderId().equals(traderId)) {
+            throw new IllegalArgumentException("Arrival not found: " + vehicleId);
+        }
+
+        if (update.getVehicleNumber() != null && !update.getVehicleNumber().isBlank()) {
+            vehicle.setVehicleNumber(update.getVehicleNumber().trim().toUpperCase());
+        }
+        if (update.getGodown() != null) vehicle.setGodown(update.getGodown());
+        if (update.getGatepassNumber() != null) vehicle.setGatepassNumber(update.getGatepassNumber());
+        if (update.getOrigin() != null) vehicle.setOrigin(update.getOrigin());
+        if (update.getBrokerName() != null) vehicle.setBrokerName(update.getBrokerName().trim());
+        if (update.getNarration() != null) vehicle.setNarration(update.getNarration().trim());
+        vehicle = vehicleRepository.save(vehicle);
+        final Vehicle vehicleRef = vehicle;
+
+        if (update.getLoadedWeight() != null || update.getEmptyWeight() != null || update.getDeductedWeight() != null) {
+            VehicleWeight weight = vehicleWeightRepository.findOneByVehicleId(vehicleId).orElseGet(() -> {
+                VehicleWeight w = new VehicleWeight();
+                w.setVehicleId(vehicleId);
+                w.setLoadedWeight(0d);
+                w.setEmptyWeight(0d);
+                w.setDeductedWeight(0d);
+                w.setNetWeight(0d);
+                w.setRecordedAt(vehicleRef.getArrivalDatetime() != null ? vehicleRef.getArrivalDatetime() : Instant.now());
+                return w;
+            });
+            if (update.getLoadedWeight() != null) weight.setLoadedWeight(update.getLoadedWeight());
+            if (update.getEmptyWeight() != null) weight.setEmptyWeight(update.getEmptyWeight());
+            if (update.getDeductedWeight() != null) weight.setDeductedWeight(update.getDeductedWeight());
+            double lw = weight.getLoadedWeight() != null ? weight.getLoadedWeight() : 0d;
+            double ew = weight.getEmptyWeight() != null ? weight.getEmptyWeight() : 0d;
+            weight.setNetWeight(Math.max(0d, lw - ew));
+            vehicleWeightRepository.save(weight);
+        }
+
+        boolean sellersReplaced = false;
+        List<Lot> currentLots = new ArrayList<>();
+        if (update.getSellers() != null && !update.getSellers().isEmpty()) {
+            validateUpdateSellers(update.getSellers(), update.getMultiSeller());
+            List<SellerInVehicle> existingSellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
+            List<Long> existingSellerVehicleIds = existingSellers.stream().map(SellerInVehicle::getId).toList();
+            if (!existingSellerVehicleIds.isEmpty()) {
+                freightCalculationRepository.findOneByVehicleId(vehicleId)
+                    .ifPresent(fc -> freightDistributionRepository.deleteByFreightId(fc.getId()));
+                List<Lot> lotsToRemove = lotRepository.findAllBySellerVehicleIdIn(existingSellerVehicleIds);
+                List<Long> lotIdsToRemove = lotsToRemove.stream().map(Lot::getId).toList();
+                if (!lotIdsToRemove.isEmpty()) {
+                    List<Auction> auctionsForLots = auctionRepository.findAllByLotIdIn(lotIdsToRemove);
+                    List<Long> auctionIds = auctionsForLots.stream().map(Auction::getId).toList();
+                    if (!auctionIds.isEmpty()) {
+                        auctionEntryRepository.deleteByAuctionIdIn(auctionIds);
+                    }
+                    auctionRepository.deleteByLotIdIn(lotIdsToRemove);
+                }
+                lotRepository.deleteBySellerVehicleIdIn(existingSellerVehicleIds);
+            }
+            sellerInVehicleRepository.deleteByVehicleId(vehicleId);
+
+            Instant now = Instant.now();
+            int sellerSerial = 0;
+            Long updateBrokerContactId = update.getBrokerContactId();
+            for (ArrivalSellerDTO sellerDTO : update.getSellers()) {
+                SellerInVehicle siv = new SellerInVehicle();
+                siv.setVehicleId(vehicleId);
+                Long contactId = sellerDTO.getContactId();
+                if (contactId != null) {
+                    contactRepository.findById(contactId).orElseThrow(() ->
+                        new IllegalArgumentException("Seller contact not found: " + contactId));
+                    siv.setContactId(contactId);
+                } else {
+                    if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
+                        throw new IllegalArgumentException("Free-text seller must have a name");
+                    }
+                    String phone = sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null;
+                    if (phone != null && !phone.isEmpty()) {
+                        if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
+                            throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
+                        }
+                    }
+                    siv.setContactId(null);
+                    siv.setSellerName(sellerDTO.getSellerName().trim());
+                    siv.setSellerPhone(phone);
+                    siv.setSellerMark(sellerDTO.getSellerMark() != null ? sellerDTO.getSellerMark().trim() : null);
+                }
+                if (updateBrokerContactId != null) {
+                    siv.setBrokerId(updateBrokerContactId);
+                }
+                siv = sellerInVehicleRepository.save(siv);
+                sellerSerial++;
+                for (ArrivalLotDTO lotDTO : sellerDTO.getLots()) {
+                    Lot lot = new Lot();
+                    lot.setSellerVehicleId(siv.getId());
+                    lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
+                    lot.setLotName(lotDTO.getLotName());
+                    lot.setBagCount(lotDTO.getBagCount());
+                    if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
+                    if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
+                    lot.setSellerSerialNo(sellerSerial);
+                    lot.setCreatedAt(now);
+                    currentLots.add(lot);
+                }
+            }
+            if (!currentLots.isEmpty()) {
+                lotRepository.saveAll(currentLots);
+            }
+            sellersReplaced = true;
+        }
+
+        Optional<FreightCalculation> freightOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        boolean updateFreight = update.getFreightMethod() != null || update.getFreightRate() != null
+            || update.getNoRental() != null || update.getAdvancePaid() != null || sellersReplaced;
+        if (updateFreight && freightOpt.isPresent()) {
+            FreightCalculation freight = freightOpt.get();
+            if (update.getFreightMethod() != null) freight.setMethod(update.getFreightMethod());
+            if (update.getFreightRate() != null) freight.setRate(update.getFreightRate());
+            if (update.getNoRental() != null) freight.setNoRental(update.getNoRental());
+            if (update.getAdvancePaid() != null) freight.setAdvancePaid(update.getAdvancePaid());
+
+            Optional<VehicleWeight> currentWeight = vehicleWeightRepository.findOneByVehicleId(vehicleId);
+            double netWeight = currentWeight.map(VehicleWeight::getNetWeight).orElse(0d);
+            double deducted = currentWeight.map(VehicleWeight::getDeductedWeight).orElse(0d);
+            double finalBillable = Math.max(0d, netWeight - deducted);
+            List<Lot> lotsForFreight = sellersReplaced && !currentLots.isEmpty() ? currentLots
+                : lotRepository.findAllBySellerVehicleIdIn(
+                    sellerInVehicleRepository.findAllByVehicleId(vehicleId).stream().map(SellerInVehicle::getId).toList());
+            double freightTotal = computeFreightTotal(
+                freight.getMethod(),
+                freight.getRate(),
+                finalBillable,
+                lotsForFreight,
+                Boolean.TRUE.equals(freight.getNoRental())
+            );
+            freight.setTotalAmount(freightTotal);
+            freight = freightCalculationRepository.save(freight);
+
+            voucherRepository.deleteByReferenceTypeAndReferenceId("FREIGHT", vehicleId);
+            voucherRepository.deleteByReferenceTypeAndReferenceId("ADVANCE", vehicleId);
+            Instant now = Instant.now();
+            if (!Boolean.TRUE.equals(freight.getNoRental()) && freightTotal > 0d) {
+                createVoucher(traderId, "FREIGHT", vehicleId, freightTotal, now);
+            }
+            if (freight.getAdvancePaid() != null && freight.getAdvancePaid() > 0d) {
+                createVoucher(traderId, "ADVANCE", vehicleId, freight.getAdvancePaid(), now);
+            }
+
+            if (freight.getMethod() == FreightMethod.DIVIDE_BY_WEIGHT && !lotsForFreight.isEmpty() && freightTotal > 0d) {
+                freightDistributionRepository.deleteByFreightId(freight.getId());
+                distributeFreight(freight, lotsForFreight, freightTotal);
+            }
+        }
+
+        return toSummary(vehicle);
+    }
+
+    /**
+     * Delete arrival (vehicle and all related records). Trader-scoped.
+     */
+    @Transactional
+    public void deleteArrival(Long vehicleId) {
+        Long traderId = resolveTraderId();
+        Vehicle vehicle = vehicleRepository.findById(vehicleId)
+            .orElseThrow(() -> new IllegalArgumentException("Arrival not found: " + vehicleId));
+        if (!vehicle.getTraderId().equals(traderId)) {
+            throw new IllegalArgumentException("Arrival not found: " + vehicleId);
+        }
+        Optional<FreightCalculation> freightOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        freightOpt.ifPresent(fc -> freightDistributionRepository.deleteByFreightId(fc.getId()));
+        freightCalculationRepository.deleteByVehicleId(vehicleId);
+        voucherRepository.deleteByReferenceTypeAndReferenceId("FREIGHT", vehicleId);
+        voucherRepository.deleteByReferenceTypeAndReferenceId("ADVANCE", vehicleId);
+        voucherRepository.deleteByReferenceTypeAndReferenceId("COOLIE", vehicleId);
+        List<SellerInVehicle> sellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
+        List<Long> sellerVehicleIds = sellers.stream().map(SellerInVehicle::getId).toList();
+        if (!sellerVehicleIds.isEmpty()) {
+            List<Lot> lotsToRemove = lotRepository.findAllBySellerVehicleIdIn(sellerVehicleIds);
+            List<Long> lotIdsToRemove = lotsToRemove.stream().map(Lot::getId).toList();
+            if (!lotIdsToRemove.isEmpty()) {
+                List<Auction> auctionsForLots = auctionRepository.findAllByLotIdIn(lotIdsToRemove);
+                List<Long> auctionIds = auctionsForLots.stream().map(Auction::getId).toList();
+                if (!auctionIds.isEmpty()) {
+                    auctionEntryRepository.deleteByAuctionIdIn(auctionIds);
+                }
+                auctionRepository.deleteByLotIdIn(lotIdsToRemove);
+            }
+            lotRepository.deleteBySellerVehicleIdIn(sellerVehicleIds);
+        }
+        sellerInVehicleRepository.deleteByVehicleId(vehicleId);
+        vehicleWeightRepository.deleteByVehicleId(vehicleId);
+        vehicleRepository.delete(vehicle);
+    }
+
+    private ArrivalSummaryDTO toSummary(Vehicle v) {
+        Optional<VehicleWeight> weightOpt = vehicleWeightRepository.findOneByVehicleId(v.getId());
+        Optional<FreightCalculation> freightOpt = freightCalculationRepository.findOneByVehicleId(v.getId());
+        List<SellerInVehicle> sellers = sellerInVehicleRepository.findAllByVehicleId(v.getId());
+        int lotCount = (int) lotRepository.findAllBySellerVehicleIdIn(
+            sellers.stream().map(SellerInVehicle::getId).toList()
+        ).stream().count();
+        double netWeight = weightOpt.map(VehicleWeight::getNetWeight).orElse(0d);
+        double freightTotal = freightOpt.map(FreightCalculation::getTotalAmount).orElse(0d);
+        FreightMethod method = freightOpt.map(FreightCalculation::getMethod).orElse(null);
+        ArrivalSummaryDTO dto = new ArrivalSummaryDTO();
+        dto.setVehicleId(v.getId());
+        dto.setVehicleNumber(v.getVehicleNumber());
+        dto.setSellerCount(sellers.size());
+        dto.setLotCount(lotCount);
+        dto.setNetWeight(netWeight);
+        dto.setFinalBillableWeight(Math.max(0d, netWeight - weightOpt.map(VehicleWeight::getDeductedWeight).orElse(0d)));
+        dto.setFreightTotal(freightTotal);
+        dto.setFreightMethod(method);
+        dto.setArrivalDatetime(v.getArrivalDatetime());
+        dto.setGodown(v.getGodown());
+        dto.setGatepassNumber(v.getGatepassNumber());
+        dto.setOrigin(v.getOrigin());
+        return dto;
     }
 
     /**
@@ -250,7 +595,7 @@ public class ArrivalService {
         List<SellerInVehicle> sellers = sellerInVehicleRepository.findAllByVehicleIdIn(vehicleIds);
         List<Long> sellerVehicleIds = sellers.stream().map(SellerInVehicle::getId).toList();
         List<Lot> lots = sellerVehicleIds.isEmpty() ? List.of() : lotRepository.findAllBySellerVehicleIdIn(sellerVehicleIds);
-        List<Long> contactIds = sellers.stream().map(SellerInVehicle::getContactId).distinct().toList();
+        List<Long> contactIds = sellers.stream().map(SellerInVehicle::getContactId).filter(java.util.Objects::nonNull).distinct().toList();
         List<Contact> contacts = contactIds.isEmpty() ? List.of() : contactRepository.findAllById(contactIds);
 
         java.util.Map<Long, String> contactNameById = contacts.stream()
@@ -266,7 +611,9 @@ public class ArrivalService {
             List<ArrivalSellerDetailDTO> sellerDetailList = new ArrayList<>();
             for (SellerInVehicle siv : vehicleSellers) {
                 ArrivalSellerDetailDTO sellerDetail = new ArrivalSellerDetailDTO();
-                sellerDetail.setSellerName(contactNameById.getOrDefault(siv.getContactId(), ""));
+                sellerDetail.setSellerName(siv.getContactId() != null
+                    ? contactNameById.getOrDefault(siv.getContactId(), "")
+                    : (siv.getSellerName() != null ? siv.getSellerName() : ""));
                 List<Lot> sellerLots = lots.stream().filter(l -> l.getSellerVehicleId().equals(siv.getId())).toList();
                 List<ArrivalLotDetailDTO> lotDetails = sellerLots.stream().map(lot -> {
                     ArrivalLotDetailDTO ld = new ArrivalLotDetailDTO();
@@ -284,17 +631,52 @@ public class ArrivalService {
         return new PageImpl<>(content, pageable, vehiclePage.getTotalElements());
     }
 
+    private void validateUpdateSellers(List<ArrivalSellerDTO> sellers, Boolean multiSeller) {
+        if (Boolean.FALSE.equals(multiSeller) && sellers.size() > 1) {
+            throw new IllegalArgumentException("Single-seller arrival allows only one seller");
+        }
+        for (ArrivalSellerDTO seller : sellers) {
+            if (seller.getContactId() == null && seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
+                String phone = seller.getSellerPhone().trim();
+                if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
+                    throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
+                }
+            }
+            if (seller.getLots() != null) {
+                for (ArrivalLotDTO lot : seller.getLots()) {
+                    if (lot.getLotName() != null && !lot.getLotName().trim().isEmpty() && !lot.getLotName().trim().matches("^[0-9]+$")) {
+                        throw new IllegalArgumentException("Lot name must contain only numbers (digits), not letters: " + lot.getLotName());
+                    }
+                }
+            }
+        }
+    }
+
     private void validateRequest(ArrivalRequestDTO request) {
         if (request.getSellers() == null || request.getSellers().isEmpty()) {
             throw new IllegalArgumentException("At least one seller is required");
         }
+        if (!request.isMultiSeller() && request.getSellers().size() > 1) {
+            throw new IllegalArgumentException("Single-seller arrival allows only one seller");
+        }
         for (ArrivalSellerDTO seller : request.getSellers()) {
+            if (seller.getContactId() == null) {
+                if (seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
+                    String phone = seller.getSellerPhone().trim();
+                    if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
+                        throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
+                    }
+                }
+            }
             if (seller.getLots() == null || seller.getLots().isEmpty()) {
                 throw new IllegalArgumentException("Each seller must have at least one lot");
             }
             for (ArrivalLotDTO lot : seller.getLots()) {
                 if (lot.getLotName() == null || lot.getLotName().isBlank()) {
                     throw new IllegalArgumentException("Lot name is required");
+                }
+                if (!lot.getLotName().trim().matches("^[0-9]+$")) {
+                    throw new IllegalArgumentException("Lot name must contain only numbers (digits), not letters: " + lot.getLotName());
                 }
                 if (lot.getBagCount() <= 0) {
                     throw new IllegalArgumentException("Lot bag count must be greater than 0");

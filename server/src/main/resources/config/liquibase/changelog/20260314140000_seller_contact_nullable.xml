@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Allow free-text sellers: contact_id nullable; add seller_name/seller_phone for name-only sellers -->
+    <changeSet id="20260314140000-1" author="mercotrace">
+        <dropNotNullConstraint tableName="seller_in_vehicle" columnName="contact_id" columnDataType="bigint"/>
+    </changeSet>
+    <changeSet id="20260314140000-2" author="mercotrace">
+        <addColumn tableName="seller_in_vehicle">
+            <column name="seller_name" type="varchar(150)"/>
+            <column name="seller_phone" type="varchar(20)"/>
+        </addColumn>
+    </changeSet>
+    <changeSet id="20260314140000-3" author="mercotrace">
+        <addColumn tableName="seller_in_vehicle">
+            <column name="seller_mark" type="varchar(50)"/>
+        </addColumn>
+    </changeSet>
+</databaseChangeLog>

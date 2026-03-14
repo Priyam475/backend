@@ -2,6 +2,7 @@ package com.mercotrace.repository;
 
 import com.mercotrace.domain.Auction;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -22,6 +23,8 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
     Page<Auction> findAllByAuctionDatetimeBetween(Instant from, Instant to, Pageable pageable);
 
     List<Auction> findAllByLotIdIn(Iterable<Long> lotIds);
+
+    void deleteByLotIdIn(Collection<Long> lotIds);
 
     /**
      * Completed auctions only (used for "results" list).

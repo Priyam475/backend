@@ -1,17 +1,22 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
   ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, Trash2,
-  AlertTriangle, Search, Package, Users, Banknote, FileText
+  AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
-import type { ArrivalSummary, ArrivalCreatePayload } from '@/services/api/arrivals';
+import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail } from '@/services/api/arrivals';
+import ArrivalStatusBadge, { getArrivalStatus, ALL_STATUSES, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
+import FreightDetailsCard from '@/components/arrivals/FreightDetailsCard';
+import SellerInfoCard from '@/components/arrivals/SellerInfoCard';
+import BuyerMarkSection from '@/components/arrivals/BuyerMarkSection';
+import LocationSearchInput from '@/components/LocationSearchInput';
 import type { Vehicle, Contact, FreightMethod } from '@/types/models';
 import { toast } from 'sonner';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -39,6 +44,7 @@ interface LotEntry {
   quantity: number; // bag count
   commodity_name: string;
   broker_tag: string;
+  variant: string;
 }
 
 interface SellerEntry {
@@ -83,6 +89,46 @@ const NARRATION_PRESETS = [
   'Rental charges — partial payment',
 ];
 
+/** Variant options (hardcoded for now; will be dynamic later). */
+const VARIANT_OPTIONS = [
+  { value: '', label: 'None' },
+  { value: 'Small', label: 'Small' },
+  { value: 'Medium', label: 'Medium' },
+  { value: 'Large', label: 'Large' },
+];
+
+/**
+ * Bag totals for a lot header.
+ * - vehicleTotal: total bags for the whole vehicle (all sellers, all lots).
+ * - sellerTotal: total bags for this seller (all lots of that seller).
+ *
+ * This means every lot row for a seller shows the **same** pair:
+ *   - single seller: always X / X
+ *   - multi seller: vehicle total constant, seller total constant per seller
+ */
+function getLotTotals(sellers: SellerEntry[], sellerIdx: number, lotIdx: number): { vehicleTotal: number; sellerTotal: number } {
+  if (!Array.isArray(sellers) || sellers.length === 0) {
+    return { vehicleTotal: 0, sellerTotal: 0 };
+  }
+
+  const vehicleTotal = sellers.reduce(
+    (sum, s) => sum + s.lots.reduce((inner, lot) => inner + (lot.quantity || 0), 0),
+    0,
+  );
+
+  const seller = sellers[sellerIdx];
+  if (!seller) {
+    return { vehicleTotal, sellerTotal: 0 };
+  }
+
+  const sellerTotal = seller.lots.reduce(
+    (sum, lot) => sum + (lot.quantity || 0),
+    0,
+  );
+
+  return { vehicleTotal, sellerTotal };
+}
+
 const ArrivalsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -115,9 +161,25 @@ const ArrivalsPage = () => {
   const [noRental, setNoRental] = useState(false);
   const [advancePaid, setAdvancePaid] = useState('');
   const [brokerName, setBrokerName] = useState('');
+  const [brokerContactId, setBrokerContactId] = useState<number | null>(null);
   const [narration, setNarration] = useState('');
   const [godown, setGodown] = useState('');
   const [gatepassNumber, setGatepassNumber] = useState('');
+  const [origin, setOrigin] = useState('');
+  const [variant, setVariant] = useState('');
+
+  // Expand panel: full detail from API (desktop row expand / mobile card expand)
+  const [expandedDetail, setExpandedDetail] = useState<ArrivalFullDetail | null>(null);
+  const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'ALL'>('ALL');
+  const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Broker: contact search or type any name
+  const [brokerDropdown, setBrokerDropdown] = useState(false);
+  const brokerSearchWrapRef = useRef<HTMLDivElement>(null);
+  const [brokerDropdownPos, setBrokerDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   // Step 2: Sellers & Lots
   const [sellers, setSellers] = useState<SellerEntry[]>([]);
@@ -125,6 +187,13 @@ const ArrivalsPage = () => {
   const [sellerDropdown, setSellerDropdown] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+
+  const refreshBrokerDropdownPos = useCallback(() => {
+    if (brokerSearchWrapRef.current) {
+      const rect = brokerSearchWrapRef.current.getBoundingClientRect();
+      setBrokerDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+  }, []);
 
   const refreshDropdownPos = useCallback(() => {
     if (sellerSearchWrapRef.current) {
@@ -161,17 +230,29 @@ const ArrivalsPage = () => {
     commodityApi.getAllFullConfigs().then(setCommodityConfigs);
   }, []);
 
-  // Close seller dropdown on scroll or resize (portal is fixed-position so it won't follow)
+  // Close seller dropdown on scroll or resize (portal is fixed-position; use document so any scrollable container closes it)
   useEffect(() => {
     if (!sellerDropdown) return;
     const close = () => setSellerDropdown(false);
-    window.addEventListener('scroll', close, true);
+    document.addEventListener('scroll', close, true);
     window.addEventListener('resize', close);
     return () => {
-      window.removeEventListener('scroll', close, true);
+      document.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
     };
   }, [sellerDropdown]);
+
+  // Close broker dropdown on scroll or resize (same: close when any scroll happens so it doesn't stay stuck)
+  useEffect(() => {
+    if (!brokerDropdown) return;
+    const close = () => setBrokerDropdown(false);
+    document.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [brokerDropdown]);
 
   // REQ-ARR-001: Tonnage Calculation
   const netWeight = useMemo(() => {
@@ -201,6 +282,17 @@ const ArrivalsPage = () => {
     }
   }, [freightMethod, freightRate, noRental, finalBillableWeight, sellers]);
 
+  // Broker: filter contacts by name, phone, or mark (same as seller search)
+  const filteredBrokers = useMemo(() => {
+    if (!brokerName.trim()) return [];
+    const q = brokerName.toLowerCase().trim();
+    return contacts.filter(c =>
+      (c.name?.toLowerCase()?.includes(q)) ||
+      (c.phone?.includes(q)) ||
+      (c.mark?.toLowerCase()?.includes(q))
+    ).slice(0, 8);
+  }, [brokerName, contacts]);
+
   // REQ-CON-004 / REQ-ARR-007: Unified contact search via mark or phone
   const filteredContacts = useMemo(() => {
     if (!sellerSearch) return [];
@@ -213,6 +305,10 @@ const ArrivalsPage = () => {
   }, [sellerSearch, contacts]);
 
   const addSeller = (contact: Contact) => {
+    if (!isMultiSeller && sellers.length >= 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
     if (sellers.some(s => s.contact_id === contact.contact_id)) {
       toast.error('Seller already added to this vehicle');
       return;
@@ -228,6 +324,27 @@ const ArrivalsPage = () => {
     setSellers(prev => [...prev, newSeller]);
     setSellerSearch('');
     setSellerDropdown(false);
+  };
+
+  /** Add a seller by name/phone only (no contact). */
+  const addSellerByName = () => {
+    if (!isMultiSeller && sellers.length >= 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
+    const newSeller: SellerEntry = {
+      seller_vehicle_id: crypto.randomUUID(),
+      contact_id: '',
+      seller_name: '',
+      seller_phone: '',
+      seller_mark: '',
+      lots: [],
+    };
+    setSellers(prev => [...prev, newSeller]);
+  };
+
+  const updateSeller = (sellerIdx: number, updates: Partial<Pick<SellerEntry, 'seller_name' | 'seller_phone' | 'seller_mark'>>) => {
+    setSellers(prev => prev.map((s, i) => (i !== sellerIdx ? s : { ...s, ...updates })));
   };
 
   const removeSeller = (idx: number) => {
@@ -296,14 +413,27 @@ const ArrivalsPage = () => {
       toast.error('At least one seller is required');
       return;
     }
+    if (!isMultiSeller && sellers.length > 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
     for (const seller of sellers) {
+      const hasContactId = seller.contact_id !== '' && !Number.isNaN(Number(seller.contact_id));
+      if (!hasContactId && !seller.seller_name?.trim()) {
+        toast.error('Each seller must either be selected from Contacts or have a name entered');
+        return;
+      }
       if (seller.lots.length === 0) {
-        toast.error(`${seller.seller_name}: At least one lot is required`);
+        toast.error(`${seller.seller_name || 'Seller'}: At least one lot is required`);
         return;
       }
       for (const lot of seller.lots) {
         if (!lot.lot_name.trim()) {
           toast.error(`${seller.seller_name}: Lot name is required`);
+          return;
+        }
+        if (!/^[0-9]+$/.test(lot.lot_name.trim())) {
+          toast.error(`Lot name must contain only numbers (digits), not letters: ${lot.lot_name}`);
           return;
         }
         if (lot.quantity <= 0) {
@@ -319,17 +449,17 @@ const ArrivalsPage = () => {
       warnings.forEach(w => toast.warning(w));
     }
 
+    if (editingVehicleId != null) {
+      await handleUpdateArrival();
+      return;
+    }
+
     if (!can('Arrivals', 'Create')) {
       toast.error('You do not have permission to create arrivals.');
       return;
     }
 
     try {
-      const toNumericContactId = (id: string): string => {
-        const n = Number(id);
-        if (Number.isNaN(n)) throw new Error('Use a contact from the Contacts list (numeric ID).');
-        return String(n);
-      };
       const payload: ArrivalCreatePayload = {
         vehicle_number: isMultiSeller ? vehicleNumber.trim().toUpperCase() || undefined : undefined,
         is_multi_seller: isMultiSeller,
@@ -341,19 +471,27 @@ const ArrivalsPage = () => {
         no_rental: noRental,
         advance_paid: parseFloat(advancePaid) || 0,
         broker_name: brokerName || undefined,
+        broker_contact_id: brokerContactId ?? undefined,
         narration: narration || undefined,
-        sellers: sellers.map(s => ({
-          contact_id: toNumericContactId(s.contact_id),
-          seller_name: s.seller_name,
-          seller_phone: s.seller_phone,
-          seller_mark: s.seller_mark || undefined,
-          lots: s.lots.map(l => ({
-            lot_name: l.lot_name,
-            quantity: l.quantity,
-            commodity_name: l.commodity_name,
-            broker_tag: l.broker_tag || undefined,
-          })),
-        })),
+        godown: godown || undefined,
+        gatepass_number: gatepassNumber || undefined,
+        origin: origin || undefined,
+        sellers: sellers.map(s => {
+          const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
+          return {
+            contact_id: hasContactId ? Number(s.contact_id) : null,
+            seller_name: s.seller_name,
+            seller_phone: s.seller_phone,
+            seller_mark: s.seller_mark || undefined,
+            lots: s.lots.map(l => ({
+              lot_name: l.lot_name,
+              quantity: l.quantity,
+              commodity_name: l.commodity_name,
+              broker_tag: l.broker_tag || undefined,
+              variant: l.variant || undefined,
+            })),
+          };
+        }),
       };
       const created = await arrivalsApi.create(payload);
       await loadArrivalsFromApi();
@@ -379,12 +517,146 @@ const ArrivalsPage = () => {
     setNoRental(false);
     setAdvancePaid('');
     setBrokerName('');
+    setBrokerContactId(null);
     setNarration('');
     setGodown('');
     setGatepassNumber('');
+    setOrigin('');
     setSellers([]);
     setSellerSearch('');
     setIsMultiSeller(true);
+    setEditingVehicleId(null);
+  };
+
+  const loadExpandedDetail = async (vehicleId: number | string) => {
+    if (expandedDetail?.vehicleId === vehicleId) {
+      setExpandedDetail(null);
+      return;
+    }
+    setExpandedDetailLoading(true);
+    try {
+      const detail = await arrivalsApi.getById(vehicleId);
+      setExpandedDetail(detail);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load detail');
+      setExpandedDetail(null);
+    } finally {
+      setExpandedDetailLoading(false);
+    }
+  };
+
+  const handleDeleteArrival = async (vehicleId: number | string) => {
+    if (!can('Arrivals', 'Delete')) {
+      toast.error('You do not have permission to delete arrivals.');
+      return;
+    }
+    try {
+      await arrivalsApi.delete(vehicleId);
+      setExpandedDetail(null);
+      await loadArrivalsFromApi();
+      toast.success('Arrival deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete arrival');
+    }
+  };
+
+  const handleEditArrival = async (a: ArrivalSummary) => {
+    setEditingVehicleId(a.vehicleId);
+    setShowAdd(true);
+    setExpandedDetail(null);
+    setEditLoading(true);
+    if (isDesktop) setDesktopTab('new-arrival');
+    try {
+      const detail = await arrivalsApi.getById(a.vehicleId);
+      setVehicleNumber(detail?.vehicleNumber ?? '');
+      setLoadedWeight(detail?.loadedWeight != null ? String(detail.loadedWeight) : '');
+      setEmptyWeight(detail?.emptyWeight != null ? String(detail.emptyWeight) : '');
+      setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
+      setFreightMethod((detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT');
+      setFreightRate(detail?.freightRate != null ? String(detail.freightRate) : '');
+      setNoRental(Boolean(detail?.noRental));
+      setAdvancePaid(detail?.advancePaid != null ? String(detail.advancePaid) : '');
+      setGodown(detail?.godown ?? '');
+      setGatepassNumber(detail?.gatepassNumber ?? '');
+      setOrigin(detail?.origin ?? '');
+      setBrokerName(detail?.brokerName ?? '');
+      setBrokerContactId(detail?.brokerContactId ?? null);
+      setNarration(detail?.narration ?? '');
+      setStep(2);
+      const mappedSellers: SellerEntry[] = (detail?.sellers ?? []).map((s, idx) => ({
+        seller_vehicle_id: `edit-${s?.contactId ?? idx}-${idx}`,
+        contact_id: String(s?.contactId ?? ''),
+        seller_name: s?.sellerName ?? '',
+        seller_phone: s?.sellerPhone ?? '',
+        seller_mark: s?.sellerMark ?? '',
+        lots: (s?.lots ?? []).map((l, lotIdx) => ({
+          lot_id: l?.id != null ? String(l.id) : `lot-${idx}-${lotIdx}`,
+          lot_name: l?.lotName ?? '',
+          quantity: l?.bagCount ?? 0,
+          commodity_name: l?.commodityName ?? '',
+          broker_tag: l?.brokerTag ?? '',
+          variant: l?.variant ?? '',
+        })),
+      }));
+      setSellers(mappedSellers);
+      setIsMultiSeller(mappedSellers.length > 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load arrival for edit');
+      setEditingVehicleId(null);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleUpdateArrival = async () => {
+    if (editingVehicleId == null) return;
+    if (!can('Arrivals', 'Edit')) {
+      toast.error('You do not have permission to edit arrivals.');
+      return;
+    }
+    try {
+      await arrivalsApi.update(editingVehicleId, {
+        vehicle_number: vehicleNumber.trim() || undefined,
+        godown: godown || undefined,
+        gatepass_number: gatepassNumber || undefined,
+        origin: origin || undefined,
+        broker_name: brokerName.trim() || undefined,
+        broker_contact_id: brokerContactId ?? undefined,
+        multi_seller: isMultiSeller,
+        narration: narration.trim() || undefined,
+        loaded_weight: loadedWeight ? parseFloat(loadedWeight) : undefined,
+        empty_weight: emptyWeight ? parseFloat(emptyWeight) : undefined,
+        deducted_weight: deductedWeight ? parseFloat(deductedWeight) : undefined,
+        freight_method: freightMethod,
+        freight_rate: freightRate ? parseFloat(freightRate) : undefined,
+        no_rental: noRental,
+        advance_paid: advancePaid ? parseFloat(advancePaid) : undefined,
+        sellers: sellers.length > 0 ? sellers.map(s => {
+          const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
+          return {
+            contact_id: hasContactId ? Number(s.contact_id) : null,
+            seller_name: s.seller_name,
+            seller_phone: s.seller_phone,
+            seller_mark: s.seller_mark || undefined,
+            lots: s.lots.map(l => ({
+              lot_name: l.lot_name,
+              quantity: l.quantity,
+              commodity_name: l.commodity_name,
+              broker_tag: l.broker_tag || undefined,
+              variant: l.variant || undefined,
+            })),
+          };
+        }) : undefined,
+      });
+      await loadArrivalsFromApi();
+      setEditingVehicleId(null);
+      resetForm();
+      setShowAdd(false);
+      setDesktopTab('summary');
+      toast.success('Arrival updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update arrival');
+    }
   };
 
   return (
@@ -486,35 +758,156 @@ const ArrivalsPage = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="glass-card rounded-2xl overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border/40 bg-muted/30">
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Sellers</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Lots</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Net Wt</th>
-                          <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Freight</th>
-                          <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {apiArrivals.map((a, i) => (
-                          <motion.tr key={a.vehicleId + '-' + i} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                            className="border-b border-border/20 hover:bg-muted/20 transition-colors">
-                            <td className="px-4 py-3 font-semibold text-foreground">
-                              <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.sellerCount}</td>
-                            <td className="px-4 py-3 text-right font-medium text-foreground">{a.lotCount}</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.netWeight}kg</td>
-                            <td className="px-4 py-3 text-right text-muted-foreground">{a.freightTotal > 0 ? `₹${a.freightTotal.toLocaleString()}` : '—'}</td>
-                            <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(a.arrivalDatetime).toLocaleDateString()}</td>
-                          </motion.tr>
+                  <>
+                    <div className="flex gap-2 mb-4">
+                      <div className="relative flex-1 max-w-xs">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="search"
+                          placeholder="Search by vehicle…"
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-muted/30 border border-border/30 focus:outline-none focus:border-primary/50"
+                        />
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setStatusFilter('ALL')}
+                          className={cn('px-3 py-1.5 rounded-full text-xs font-semibold', statusFilter === 'ALL' ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}
+                        >All</button>
+                        {ALL_STATUSES.map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatusFilter(s)}
+                            className={cn('px-3 py-1.5 rounded-full text-xs font-semibold', statusFilter === s ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}
+                          >{s.charAt(0) + s.slice(1).toLowerCase()}</button>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </div>
+                    </div>
+                    <div className="glass-card rounded-2xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border/40 bg-muted/30">
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Status</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Sellers</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Lots</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Net Wt</th>
+                            <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Freight</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Date</th>
+                            <th className="text-center px-4 py-3 font-semibold text-muted-foreground text-xs uppercase w-24">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {apiArrivals
+                            .filter(a => {
+                              if (statusFilter !== 'ALL' && getArrivalStatus(a) !== statusFilter) return false;
+                              if (searchQuery.trim()) {
+                                const q = searchQuery.toLowerCase();
+                                if (!String(a.vehicleNumber).toLowerCase().includes(q)) return false;
+                              }
+                              return true;
+                            })
+                            .map((a, i) => {
+                              const status = getArrivalStatus(a);
+                              const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
+                              return (
+                                <Fragment key={a.vehicleId + '-' + i}>
+                                  <motion.tr
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    transition={{ delay: i * 0.03 }}
+                                    className="border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer"
+                                    onClick={() => loadExpandedDetail(a.vehicleId)}
+                                  >
+                                    <td className="px-4 py-3 font-semibold text-foreground">
+                                      <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
+                                    </td>
+                                    <td className="px-4 py-3"><ArrivalStatusBadge status={status} /></td>
+                                    <td className="px-4 py-3 text-right text-muted-foreground">{a.sellerCount}</td>
+                                    <td className="px-4 py-3 text-right font-medium text-foreground">{a.lotCount}</td>
+                                    <td className="px-4 py-3 text-right text-muted-foreground">{a.netWeight}kg</td>
+                                    <td className="px-4 py-3 text-right text-muted-foreground">{a.freightTotal > 0 ? `₹${a.freightTotal.toLocaleString()}` : '—'}</td>
+                                    <td className="px-4 py-3 text-muted-foreground text-xs">{new Date(a.arrivalDatetime).toLocaleDateString()}</td>
+                                    <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                                      <div className="flex items-center justify-center gap-1">
+                                        {can('Arrivals', 'Edit') && (
+                                          <button type="button" onClick={() => handleEditArrival(a)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit"><Pencil className="w-4 h-4" /></button>
+                                        )}
+                                        {can('Arrivals', 'Delete') && (
+                                          <button type="button" onClick={() => handleDeleteArrival(a.vehicleId)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </motion.tr>
+                                  {isExpanded && (
+                                    <tr key={a.vehicleId + '-exp'} className="border-b border-border/20 bg-muted/10">
+                                      <td colSpan={8} className="px-4 py-4">
+                                        {expandedDetailLoading ? (
+                                          <p className="text-sm text-muted-foreground">Loading…</p>
+                                        ) : expandedDetail ? (
+                                          <div className="grid grid-cols-2 gap-4 text-sm">
+                                            <div className="space-y-3">
+                                              {expandedDetail.netWeight != null && (
+                                                <div className="grid grid-cols-2 gap-2">
+                                                  <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 p-2 text-center">
+                                                    <p className="text-[10px] text-muted-foreground">Net Weight</p>
+                                                    <p className="font-bold text-foreground">{expandedDetail.netWeight}kg</p>
+                                                  </div>
+                                                  <div className="rounded-lg bg-violet-50 dark:bg-violet-950/20 p-2 text-center">
+                                                    <p className="text-[10px] text-muted-foreground">Billable</p>
+                                                    <p className="font-bold text-foreground">{(expandedDetail.netWeight - (expandedDetail.deductedWeight ?? 0))}kg</p>
+                                                  </div>
+                                                </div>
+                                              )}
+                                              <FreightDetailsCard
+                                                freightRate={expandedDetail.freightRate ?? 0}
+                                                netWeight={expandedDetail.netWeight ?? 0}
+                                                freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'}
+                                                freightTotal={expandedDetail.freightTotal ?? 0}
+                                                advancePaid={expandedDetail.advancePaid ?? 0}
+                                                noRental={expandedDetail.noRental ?? false}
+                                              />
+                                            </div>
+                                            <div className="space-y-3">
+                                              <SellerInfoCard
+                                                sellers={expandedDetail.sellers.map(s => ({
+                                                  sellerName: s.sellerName,
+                                                  sellerMark: s.sellerMark,
+                                                  lots: s.lots.map(l => ({
+                                                    id: l.id,
+                                                    lotName: l.lotName,
+                                                    commodityName: l.commodityName,
+                                                    bagCount: l.bagCount,
+                                                    brokerTag: l.brokerTag,
+                                                    variant: l.variant,
+                                                  })),
+                                                }))}
+                                                onRefresh={() => loadExpandedDetail(expandedDetail.vehicleId)}
+                                              />
+                                              <div className="flex gap-2">
+                                                {can('Arrivals', 'Edit') && (
+                                                  <Button type="button" variant="outline" size="sm" onClick={e => { e.stopPropagation(); handleEditArrival(apiArrivals.find(x => x.vehicleId === expandedDetail.vehicleId)!); }}><Pencil className="w-3.5 h-3.5 mr-1" /> Edit</Button>
+                                                )}
+                                                {can('Arrivals', 'Delete') && (
+                                                  <Button type="button" variant="destructive" size="sm" onClick={e => { e.stopPropagation(); handleDeleteArrival(expandedDetail.vehicleId); }}><Trash2 className="w-3.5 h-3.5 mr-1" /> Delete</Button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </motion.div>
             )}
@@ -553,6 +946,12 @@ const ArrivalsPage = () => {
                 </div>
 
                 {/* Desktop form: two-column layout */}
+                {editingVehicleId != null && editLoading ? (
+                  <div className="glass-card rounded-2xl p-12 text-center">
+                    <p className="text-muted-foreground font-medium">Loading arrival details…</p>
+                    <p className="text-xs text-muted-foreground mt-1">Fetching vehicle, sellers and lots</p>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-2 gap-6">
                   {/* LEFT: Vehicle & Tonnage */}
                   <div className="space-y-4">
@@ -624,8 +1023,23 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} className="h-11 rounded-xl text-sm" />
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Origin (location)</label>
+                      <LocationSearchInput value={origin} onChange={setOrigin} placeholder="Search city, market yard, address…" className="h-11" />
+                    </div>
+
+                    <div className="glass-card rounded-2xl p-4">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker (search contact or type any name)</label>
+                      <div ref={brokerSearchWrapRef} className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        <Input
+                          placeholder="Search contact by name, phone, mark — or type any name"
+                          value={brokerName}
+                          onChange={e => { setBrokerName(e.target.value); setBrokerContactId(null); refreshBrokerDropdownPos(); setBrokerDropdown(true); }}
+                          onFocus={() => { if (brokerName.trim()) { refreshBrokerDropdownPos(); setBrokerDropdown(true); } }}
+                          onBlur={() => setTimeout(() => setBrokerDropdown(false), 180)}
+                          className="h-11 rounded-xl pl-10 text-sm"
+                        />
+                      </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -696,20 +1110,26 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className="glass-card rounded-2xl p-4">
+                    <div className={cn("glass-card rounded-2xl p-4", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Search className="w-3.5 h-3.5" /> Add Seller
+                        {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
-                      <div ref={sellerSearchWrapRef} className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                        <Input
-                          placeholder="Search by name, phone, or mark…"
-                          value={sellerSearch}
-                          onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                          onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                          onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                          className="h-11 rounded-xl pl-10 text-sm"
-                        />
+                      <div className="flex gap-2">
+                        <div ref={sellerSearchWrapRef} className="relative flex-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                          <Input
+                            placeholder="Search by name, phone, or mark…"
+                            value={sellerSearch}
+                            onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                            onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                            onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                            className="h-11 rounded-xl pl-10 text-sm"
+                          />
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-11 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
+                          Add by name
+                        </Button>
                       </div>
                     </div>
 
@@ -724,14 +1144,21 @@ const ArrivalsPage = () => {
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
                         <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name.charAt(0)}</span>
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div>
-                              <p className="font-semibold text-sm text-foreground">{seller.seller_name}</p>
-                              <p className="text-[10px] text-muted-foreground">{seller.seller_phone}</p>
-                            </div>
+                            {seller.contact_id !== '' ? (
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
+                                <Input placeholder="Seller name *" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className="h-9 rounded-lg text-sm" />
+                                <Input placeholder="Mark (optional)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className="h-9 rounded-lg text-sm" />
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
@@ -746,18 +1173,20 @@ const ArrivalsPage = () => {
                           {seller.lots.length === 0 && (
                             <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
                           )}
-                          {seller.lots.map((lot, li) => (
+                          {seller.lots.map((lot, li) => {
+                            const { vehicleTotal, sellerTotal } = getLotTotals(sellers, si, li);
+                            return (
                             <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                               <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1}</p>
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
                                 <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name *</label>
-                                  <Input placeholder="e.g., A1" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                    className="h-9 rounded-lg text-sm" />
+                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name * (numbers only)</label>
+                                  <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
+                                    onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
+                                    className="h-9 rounded-lg text-sm" inputMode="numeric" />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
@@ -783,20 +1212,29 @@ const ArrivalsPage = () => {
                                   onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
                                   className="h-9 rounded-lg text-sm" maxLength={4} />
                               </div>
+                              <div>
+                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
+                                <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                  {VARIANT_OPTIONS.map(opt => (
+                                    <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
-                          ))}
+                          ); })}
                         </div>
                       </motion.div>
                     ))}
 
                     {/* Submit */}
                     <Button onClick={handleSubmitArrival}
-                      disabled={sellers.length === 0}
+                      disabled={!editingVehicleId && sellers.length === 0}
                       className="w-full h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
-                      <FileText className="w-4 h-4 mr-2" /> Submit Arrival
+                      <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
                     </Button>
                   </div>
                 </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -806,6 +1244,24 @@ const ArrivalsPage = () => {
       {/* ═══ MOBILE: List + Modal ═══ */}
       {!isDesktop && (
         <>
+          <div className="px-4 mb-3 space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="search"
+                placeholder="Search by vehicle…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-muted/30 border border-border/30 focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+              <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-semibold', statusFilter === 'ALL' ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}>All</button>
+              {ALL_STATUSES.map(s => (
+                <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-semibold', statusFilter === s ? 'bg-foreground text-background' : 'bg-muted/50 text-muted-foreground')}>{s.charAt(0) + s.slice(1).toLowerCase()}</button>
+              ))}
+            </div>
+          </div>
           <div className="px-4 space-y-2.5">
             {apiArrivalsLoading ? (
               <div className="glass-card p-8 rounded-2xl text-center">
@@ -825,34 +1281,90 @@ const ArrivalsPage = () => {
                   <Plus className="w-4 h-4 mr-2" /> New Arrival
                 </Button>
               </motion.div>
-            ) : (
-              apiArrivals.map((a, i) => (
-                <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                  <div className="glass-card rounded-2xl overflow-hidden p-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md">
-                        <Truck className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-foreground">
-                          <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold mr-1.5">{a.vehicleNumber}</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg
-                        </p>
-                      </div>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
-                    </div>
-                    {a.freightTotal > 0 && (
-                      <div className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 p-2 flex justify-between text-xs">
-                        <span className="text-muted-foreground">Freight</span>
-                        <span className="font-bold text-foreground">₹{a.freightTotal.toLocaleString()}</span>
-                      </div>
-                    )}
+            ) : (() => {
+              const filtered = apiArrivals.filter(a => {
+                if (statusFilter !== 'ALL' && getArrivalStatus(a) !== statusFilter) return false;
+                if (searchQuery.trim() && !String(a.vehicleNumber).toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                return true;
+              });
+              if (filtered.length === 0) {
+                return (
+                  <div className="glass-card p-6 rounded-2xl text-center">
+                    <Filter className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No arrivals match your filter</p>
                   </div>
-                </motion.div>
-              ))
-            )}
+                );
+              }
+              return filtered.map((a, i) => {
+                const status = getArrivalStatus(a);
+                const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
+                return (
+                  <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
+                    <div className="glass-card rounded-2xl overflow-hidden">
+                      <button type="button" onClick={() => loadExpandedDetail(a.vehicleId)} className="w-full p-3.5 flex items-center justify-between text-left">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md">
+                            <Truck className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
+                              <ArrivalStatusBadge status={status} />
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg</p>
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
+                        {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                      </button>
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-border/30">
+                            <div className="p-4 space-y-3 text-sm">
+                              {expandedDetailLoading ? (
+                                <p className="text-muted-foreground">Loading…</p>
+                              ) : expandedDetail ? (
+                                <>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 p-2 text-center">
+                                      <p className="text-[10px] text-muted-foreground">Net Weight</p>
+                                      <p className="font-bold text-foreground">{expandedDetail.netWeight ?? 0}kg</p>
+                                    </div>
+                                    <div className="rounded-lg bg-violet-50 dark:bg-violet-950/20 p-2 text-center">
+                                      <p className="text-[10px] text-muted-foreground">Billable</p>
+                                      <p className="font-bold text-foreground">{(expandedDetail.netWeight ?? 0) - (expandedDetail.deductedWeight ?? 0)}kg</p>
+                                    </div>
+                                  </div>
+                                  <FreightDetailsCard freightRate={expandedDetail.freightRate ?? 0} netWeight={expandedDetail.netWeight ?? 0} freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'} freightTotal={expandedDetail.freightTotal ?? 0} advancePaid={expandedDetail.advancePaid ?? 0} noRental={expandedDetail.noRental ?? false} />
+                                  <SellerInfoCard
+                                    sellers={expandedDetail.sellers.map(s => ({
+                                      sellerName: s.sellerName,
+                                      sellerMark: s.sellerMark,
+                                      lots: s.lots.map(l => ({
+                                        id: l.id,
+                                        lotName: l.lotName,
+                                        commodityName: l.commodityName,
+                                        bagCount: l.bagCount,
+                                        brokerTag: l.brokerTag,
+                                        variant: l.variant,
+                                      })),
+                                    }))}
+                                  />
+                                  <div className="flex gap-2 pt-1">
+                                    {can('Arrivals', 'Edit') && <button type="button" onClick={() => handleEditArrival(a)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/50 text-xs font-semibold"><Pencil className="w-3.5 h-3.5" /> Edit</button>}
+                                    {can('Arrivals', 'Delete') && <button type="button" onClick={() => handleDeleteArrival(a.vehicleId)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-50 dark:bg-red-950/20 text-xs font-semibold text-red-600"><Trash2 className="w-3.5 h-3.5" /> Delete</button>}
+                                  </div>
+                                </>
+                              ) : null}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                );
+              });
+            })()}
           </div>
 
           {/* Mobile / Tablet Modal */}
@@ -896,6 +1408,14 @@ const ArrivalsPage = () => {
                   </div>
 
                   <div className="px-4 pt-4 space-y-4 pb-36">
+                    {editingVehicleId != null && editLoading && (
+                      <div className="glass-card rounded-2xl p-8 text-center">
+                        <p className="text-muted-foreground font-medium">Loading arrival details…</p>
+                        <p className="text-xs text-muted-foreground mt-1">Fetching vehicle, sellers and lots</p>
+                      </div>
+                    )}
+                    {!(editingVehicleId != null && editLoading) && (
+                    <>
                     {/* ── Section 1: Arrival Details ── */}
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center">
@@ -984,8 +1504,23 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker</label>
-                      <Input placeholder="Broker name (optional)" value={brokerName} onChange={e => setBrokerName(e.target.value)} className="h-12 rounded-xl" />
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Origin (location)</label>
+                      <LocationSearchInput value={origin} onChange={setOrigin} placeholder="Search city, market yard, address…" />
+                    </div>
+
+                    <div className="glass-card rounded-2xl p-4">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Broker (search contact or type any name)</label>
+                      <div ref={brokerSearchWrapRef} className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        <Input
+                          placeholder="Search contact or type any name"
+                          value={brokerName}
+                          onChange={e => { setBrokerName(e.target.value); setBrokerContactId(null); refreshBrokerDropdownPos(); setBrokerDropdown(true); }}
+                          onFocus={() => { if (brokerName.trim()) { refreshBrokerDropdownPos(); setBrokerDropdown(true); } }}
+                          onBlur={() => setTimeout(() => setBrokerDropdown(false), 180)}
+                          className="h-12 rounded-xl pl-10"
+                        />
+                      </div>
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
@@ -1052,17 +1587,23 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className="glass-card rounded-2xl p-4">
+                    <div className={cn("glass-card rounded-2xl p-4", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5" /> Add Seller
+                        {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
-                      <div ref={sellerSearchWrapRef} className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                        <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
-                          onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                          onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                          onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                          className="h-12 rounded-xl pl-10" />
+                      <div className="flex gap-2">
+                        <div ref={sellerSearchWrapRef} className="relative flex-1">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                          <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
+                            onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                            onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                            onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                            className="h-12 rounded-xl pl-10" />
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-12 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
+                          Add by name
+                        </Button>
                       </div>
                     </div>
 
@@ -1077,14 +1618,21 @@ const ArrivalsPage = () => {
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
                         <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name.charAt(0)}</span>
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div>
-                              <p className="font-semibold text-sm text-foreground">{seller.seller_name}</p>
-                              <p className="text-[10px] text-muted-foreground">{seller.seller_phone}</p>
-                            </div>
+                            {seller.contact_id !== '' ? (
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
+                                <Input placeholder="Seller name *" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className="h-10 rounded-lg text-sm" />
+                                <Input placeholder="Mark (optional)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className="h-10 rounded-lg text-sm" />
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
@@ -1099,18 +1647,20 @@ const ArrivalsPage = () => {
                           {seller.lots.length === 0 && (
                             <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
                           )}
-                          {seller.lots.map((lot, li) => (
+                          {seller.lots.map((lot, li) => {
+                            const { vehicleTotal, sellerTotal } = getLotTotals(sellers, si, li);
+                            return (
                             <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                               <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1}</p>
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
                                 <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                               </div>
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name *</label>
-                                  <Input placeholder="e.g., A1, Ka" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                    className="h-10 rounded-lg text-sm" />
+                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Lot Name * (numbers only)</label>
+                                  <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
+                                    onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
+                                    className="h-10 rounded-lg text-sm" inputMode="numeric" />
                                 </div>
                                 <div>
                                   <label className="text-[9px] text-muted-foreground mb-0.5 block">Bags *</label>
@@ -1136,12 +1686,21 @@ const ArrivalsPage = () => {
                                   onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
                                   className="h-10 rounded-lg text-sm" maxLength={4} />
                               </div>
+                              <div>
+                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
+                                <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                  {VARIANT_OPTIONS.map(opt => (
+                                    <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
-                          ))}
+                          ); })}
                         </div>
                       </motion.div>
                     ))}
 
+                    </> )}
                     {/* ── Sticky Submit Button ── */}
                     <div className="h-4" />
                   </div>
@@ -1150,9 +1709,9 @@ const ArrivalsPage = () => {
                   <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-4 py-3 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
                       <Button onClick={handleSubmitArrival}
-                        disabled={sellers.length === 0}
+                        disabled={!editingVehicleId && sellers.length === 0}
                         className="w-full h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20">
-                        <FileText className="w-5 h-5 mr-2" /> Submit Arrival ({sellers.length} seller{sellers.length !== 1 ? 's' : ''})
+                        <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})`}
                       </Button>
                     </div>
                   </div>
@@ -1192,6 +1751,46 @@ const ArrivalsPage = () => {
               >
                 <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
                   <span className="text-white text-[10px] font-bold">{c.mark || c.name.charAt(0)}</span>
+                </div>
+                <div className="min-w-0">
+                  <span className="text-foreground font-medium">{c.name}</span>
+                  {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
+                </div>
+                <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{c.phone}</span>
+              </button>
+            ))}
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* ── Broker search dropdown (contact or type any name) ── */}
+      {brokerDropdown && filteredBrokers.length > 0 && createPortal(
+        <AnimatePresence>
+          <motion.div
+            key="broker-dropdown-portal"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              position: 'fixed',
+              top: brokerDropdownPos.top,
+              left: brokerDropdownPos.left,
+              width: brokerDropdownPos.width,
+              zIndex: 9999,
+            }}
+            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto"
+          >
+            {filteredBrokers.map(c => (
+              <button
+                key={c.contact_id}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); setBrokerName(c.name ?? ''); setBrokerContactId(Number(c.contact_id) || null); setBrokerDropdown(false); }}
+                className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0"
+              >
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-[10px] font-bold">{c.mark || c.name?.charAt(0) || '?'}</span>
                 </div>
                 <div className="min-w-0">
                   <span className="text-foreground font-medium">{c.name}</span>

@@ -396,7 +396,16 @@ public class RbacAuthorityService {
             )
         );
 
-        register(modules, "arrivals", mapOf("view", AuthoritiesConstants.ARRIVALS_VIEW, "create", AuthoritiesConstants.ARRIVALS_CREATE));
+        register(
+            modules,
+            "arrivals",
+            mapOf(
+                "view", AuthoritiesConstants.ARRIVALS_VIEW,
+                "create", AuthoritiesConstants.ARRIVALS_CREATE,
+                "edit", AuthoritiesConstants.ARRIVALS_EDIT,
+                "delete", AuthoritiesConstants.ARRIVALS_DELETE
+            )
+        );
 
         // Settlement (Patti) module – "Settlement" in UI.
         register(
