@@ -352,6 +352,12 @@ public class RbacAuthorityService {
         names.add(AuthoritiesConstants.RBAC_SETTINGS_DELETE);
         names.add(AuthoritiesConstants.RBAC_SETTINGS_APPROVE);
 
+        // Preset Settings module (Auction margin presets)
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_VIEW);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_CREATE);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_EDIT);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_DELETE);
+
         // Print Templates module
         names.add(AuthoritiesConstants.PRINT_TEMPLATES_VIEW);
         names.add(AuthoritiesConstants.PRINT_TEMPLATES_CREATE);
@@ -529,6 +535,18 @@ public class RbacAuthorityService {
             "manage roles", AuthoritiesConstants.RBAC_SETTINGS_EDIT,
             "manage users", AuthoritiesConstants.RBAC_SETTINGS_EDIT
         ));
+
+        // Preset Settings module (Auction margin presets – separate from RBAC Settings).
+        register(
+            modules,
+            "preset settings",
+            mapOf(
+                "view", AuthoritiesConstants.PRESET_SETTINGS_VIEW,
+                "create", AuthoritiesConstants.PRESET_SETTINGS_CREATE,
+                "edit", AuthoritiesConstants.PRESET_SETTINGS_EDIT,
+                "delete", AuthoritiesConstants.PRESET_SETTINGS_DELETE
+            )
+        );
 
         // Purely-UI modules such as "Home" do not have dedicated backend authorities and are
         // intentionally not mapped here.

@@ -90,4 +90,7 @@ export const AVAILABLE_MODULES: Record<string, string[]> = {
 
   // 19. Settings (trader RBAC surface)
   'Settings': ['View', 'Manage Roles', 'Manage Users'],
+
+  // 20. Preset Settings (Auction margin presets – trader-scoped)
+  'Preset Settings': ['View', 'Create', 'Edit', 'Delete'],
 };

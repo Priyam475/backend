@@ -18,6 +18,8 @@ export { settlementApi } from './api/settlement';
 export { billingApi } from './api/billing';
 export { chartOfAccountsApi } from './api/chartOfAccounts';
 export { writersPadApi } from './api/writersPad';
+export { presetMarksApi } from './api/presetMarks';
+export type { PresetMarkSettingDTO } from './api/presetMarks';
 export type {
   SellerSettlementDTO,
   SettlementLotDTO,

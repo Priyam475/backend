@@ -57,3 +57,5 @@ export type {
 export { voucherLinesApi } from './voucherLines';
 export { arapDocumentsApi } from './arapDocuments';
 export type { ArApDocumentDTO, ArApDocumentPage } from './arapDocuments';
+export { presetMarksApi } from './presetMarks';
+export type { PresetMarkSettingDTO } from './presetMarks';

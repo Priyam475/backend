@@ -59,6 +59,8 @@ import SettingsPage from "./pages/SettingsPage";
 import RoleManagementPage from "./pages/admin/settings/RoleManagementPage";
 import UserManagementPage from "./pages/admin/settings/UserManagementPage";
 import RoleAllocationPage from "./pages/admin/settings/RoleAllocationPage";
+import RbacSettingsPage from "./pages/settings/RbacSettingsPage";
+import PresetSettingsPage from "./pages/settings/PresetSettingsPage";
 
 // Admin (lazy — less frequent access)
 const AdminLayout = lazy(() => import("./components/admin/AdminLayout"));
@@ -73,6 +75,7 @@ const AdminSettingsPage = lazy(() => import("./pages/admin/AdminSettingsPage"));
 const AdminRoleManagementPage = lazy(() => import("./pages/admin/settings/AdminRoleManagementPage"));
 const AdminUserManagementPage = lazy(() => import("./pages/admin/settings/AdminUserManagementPage"));
 const AdminRoleAllocationPage = lazy(() => import("./pages/admin/settings/AdminRoleAllocationPage"));
+const AdminRbacSettingsPage = lazy(() => import("./pages/admin/settings/RbacSettingsPage"));
 
 const queryClient = new QueryClient();
 
@@ -138,6 +141,8 @@ const App = () => (
                   <Route path="/prints" element={<PrintsPage />} />
                   <Route path="/reports" element={<ReportsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/settings/rbac" element={<RbacSettingsPage />} />
+                  <Route path="/settings/preset-settings" element={<PresetSettingsPage />} />
                   <Route path="/settings/roles" element={<RoleManagementPage />} />
                   <Route path="/settings/users" element={<UserManagementPage />} />
                   <Route path="/settings/role-allocation" element={<RoleAllocationPage />} />
@@ -196,6 +201,7 @@ const App = () => (
                   <Route path="contacts" element={<AdminContactsPage />} />
                   <Route path="reports" element={<AdminReportsPage />} />
                   <Route path="settings" element={<AdminSettingsPage />} />
+                  <Route path="settings/rbac" element={<AdminRbacSettingsPage />} />
                   <Route path="settings/roles" element={<AdminRoleManagementPage />} />
                   <Route path="settings/users" element={<AdminUserManagementPage />} />
                   <Route path="settings/role-allocation" element={<AdminRoleAllocationPage />} />

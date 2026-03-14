@@ -270,6 +270,12 @@ public class TraderOwnerAuthorityService {
         names.add(AuthoritiesConstants.RBAC_SETTINGS_DELETE);
         names.add(AuthoritiesConstants.RBAC_SETTINGS_APPROVE);
 
+        // Preset Settings module
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_VIEW);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_CREATE);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_EDIT);
+        names.add(AuthoritiesConstants.PRESET_SETTINGS_DELETE);
+
         // Print Templates module
         names.add(AuthoritiesConstants.PRINT_TEMPLATES_VIEW);
         names.add(AuthoritiesConstants.PRINT_TEMPLATES_CREATE);

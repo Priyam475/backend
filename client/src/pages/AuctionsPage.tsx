@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import ScribblePad from '@/components/ScribblePad';
 import InlineScribblePad from '@/components/InlineScribblePad';
-import { contactApi, auctionApi } from '@/services/api';
+import { contactApi, auctionApi, presetMarksApi } from '@/services/api';
 import type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -64,7 +64,11 @@ interface SaleEntry {
   buyerRate: number;
 }
 
-const presetButtons = [10, 20, 50];
+const DEFAULT_PRESETS = [
+  { label: '10', value: 10 },
+  { label: '20', value: 20 },
+  { label: '50', value: 50 },
+];
 
 // ── In-memory draft only (no localStorage). Session-only; backend draft API not implemented. ──
 interface AuctionDraft {
@@ -191,6 +195,9 @@ const AuctionsPage = () => {
     pendingEntry: Omit<SaleEntry, 'id' | 'bidNumber'>;
   } | null>(null);
 
+  // Preset options from Settings (dynamic); fallback to default
+  const [presetOptions, setPresetOptions] = useState<{ label: string; value: number }[]>(DEFAULT_PRESETS);
+
   // API loading / 409 retry
   const [lotsLoading, setLotsLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
@@ -206,10 +213,23 @@ const AuctionsPage = () => {
   // Skip initial draft restore flag
   const draftRestored = useRef(false);
 
-  // Load buyers and lots from API
+  // Load buyers, lots, and preset settings from API
   useEffect(() => {
     contactApi.list().then(setBuyers);
     loadLots();
+    presetMarksApi
+      .list()
+      .then((list) => {
+        if (list && list.length > 0) {
+          setPresetOptions(
+            list.map((p) => ({
+              label: p.predefined_mark ?? String(p.extra_amount),
+              value: Number(p.extra_amount),
+            }))
+          );
+        }
+      })
+      .catch(() => { /* keep default presets */ });
   }, []);
 
   const loadLots = useCallback(async (opts?: { q?: string; status?: string }) => {
@@ -667,7 +687,7 @@ const AuctionsPage = () => {
     }
   }, [selectedLot]);
 
-  const applyPreset = (value: number) => setPreset(prev => prev === value ? 0 : value);
+  const applyPreset = (value: number) => setPreset((prev) => (prev === value ? 0 : value));
 
   const selectLot = useCallback((lot: LotInfo) => {
     setSelectedLot(lot);
@@ -1112,18 +1132,18 @@ const AuctionsPage = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {presetButtons.map(val => (
+            {presetOptions.map((opt) => (
               <button
-                key={val}
-                onClick={() => applyPreset(val)}
+                key={opt.label + opt.value}
+                onClick={() => applyPreset(opt.value)}
                 className={cn(
                   'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
-                  preset === val
+                  preset === opt.value
                     ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md shadow-primary/20'
                     : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'
                 )}
               >
-                {presetType === 'PROFIT' ? '−' : '+'}{val}
+                {presetType === 'PROFIT' ? '−' : '+'}{opt.label}
               </button>
             ))}
             <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">

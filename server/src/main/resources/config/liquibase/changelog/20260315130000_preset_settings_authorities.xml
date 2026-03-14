@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260315130000-1" author="mercotrace">
+        <comment>Insert Preset Settings module authorities for RBAC (trader-scoped auction margin presets)</comment>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRESET_SETTINGS_VIEW"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRESET_SETTINGS_CREATE"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRESET_SETTINGS_EDIT"/>
+        </insert>
+        <insert tableName="jhi_authority">
+            <column name="name" value="ROLE_PRESET_SETTINGS_DELETE"/>
+        </insert>
+    </changeSet>
+</databaseChangeLog>
