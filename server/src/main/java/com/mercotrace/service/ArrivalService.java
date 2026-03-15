@@ -667,6 +667,8 @@ public class ArrivalService {
             dto.setVehicleId(v.getId());
             dto.setVehicleNumber(v.getVehicleNumber());
             dto.setArrivalDatetime(v.getArrivalDatetime());
+            dto.setGodown(v.getGodown());
+            dto.setOrigin(v.getOrigin());
 
             List<SellerInVehicle> vehicleSellers = sellers.stream().filter(sv -> sv.getVehicleId().equals(v.getId())).toList();
             List<ArrivalSellerDetailDTO> sellerDetailList = new ArrayList<>();

@@ -80,6 +80,8 @@ export interface ArrivalDetail {
   vehicleId: number;
   vehicleNumber: string;
   arrivalDatetime: string;
+  godown?: string;
+  origin?: string;
   sellers: ArrivalSellerDetail[];
 }
 

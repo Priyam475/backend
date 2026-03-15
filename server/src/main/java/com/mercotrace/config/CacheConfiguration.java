@@ -118,6 +118,7 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.FreightDistribution.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Voucher.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.DailySerial.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.DailySerialAllocation.class.getName(), jcacheConfiguration);
             // Accounting: Chart of Accounts
             createCache(cm, com.mercotrace.domain.ChartOfAccount.class.getName(), jcacheConfiguration);
             createCache(cm, ChartOfAccountServiceImpl.CACHE_COA_BY_ID, jcacheConfiguration);

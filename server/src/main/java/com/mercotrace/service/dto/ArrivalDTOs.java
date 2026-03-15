@@ -508,6 +508,8 @@ public final class ArrivalDTOs {
         private Long vehicleId;
         private String vehicleNumber;
         private Instant arrivalDatetime;
+        private String godown;
+        private String origin;
         private List<ArrivalSellerDetailDTO> sellers;
 
         public Long getVehicleId() {
@@ -532,6 +534,22 @@ public final class ArrivalDTOs {
 
         public void setArrivalDatetime(Instant arrivalDatetime) {
             this.arrivalDatetime = arrivalDatetime;
+        }
+
+        public String getGodown() {
+            return godown;
+        }
+
+        public void setGodown(String godown) {
+            this.godown = godown;
+        }
+
+        public String getOrigin() {
+            return origin;
+        }
+
+        public void setOrigin(String origin) {
+            this.origin = origin;
         }
 
         public List<ArrivalSellerDetailDTO> getSellers() {
