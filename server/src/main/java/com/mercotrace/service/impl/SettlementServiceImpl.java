@@ -277,6 +277,19 @@ public class SettlementServiceImpl implements SettlementService {
         return pattiRepository.findAllByTraderIdOrderByCreatedDateDesc(traderId, pageable).map(this::toPattiDTO);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public SellerChargesDTO getSellerCharges(String sellerId) {
+        // For now, seller-scoped freight/advance are not derived from vouchers/ARAP;
+        // return zero amounts but keep the contract in place for future enhancement.
+        SellerChargesDTO dto = new SellerChargesDTO();
+        dto.setFreight(java.math.BigDecimal.ZERO);
+        dto.setAdvance(java.math.BigDecimal.ZERO);
+        dto.setFreightAutoPulled(Boolean.FALSE);
+        dto.setAdvanceAutoPulled(Boolean.FALSE);
+        return dto;
+    }
+
     private PattiDTO toPattiDTO(Patti e) {
         PattiDTO dto = new PattiDTO();
         dto.setId(e.getId());

@@ -64,6 +64,18 @@ public class SettlementResource {
     }
 
     /**
+     * {@code GET  /api/settlements/sellers/:sellerId/charges} :
+     * compute seller-level charges (freight, advance) for a new Patti.
+     */
+    @GetMapping("/sellers/{sellerId}/charges")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<SellerChargesDTO> getSellerCharges(@PathVariable String sellerId) {
+        LOG.debug("REST request to get Settlement seller charges for sellerId : {}", sellerId);
+        SellerChargesDTO dto = settlementService.getSellerCharges(sellerId);
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
      * {@code POST  /api/settlements/pattis} : create a new patti.
      * Patti ID generated server-side (PT-YYYYMMDD-NNNN).
      */

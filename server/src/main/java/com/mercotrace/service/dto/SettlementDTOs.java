@@ -209,4 +209,27 @@ public final class SettlementDTOs {
         public List<SettlementLotDTO> getLots() { return lots; }
         public void setLots(List<SettlementLotDTO> lots) { this.lots = lots; }
     }
+
+    /**
+     * Aggregated seller charges for Settlement (e.g. freight, advance).
+     * Values are computed server-side so the frontend does not rely on local state.
+     */
+    public static class SellerChargesDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private java.math.BigDecimal freight;
+        private java.math.BigDecimal advance;
+        private Boolean freightAutoPulled;
+        private Boolean advanceAutoPulled;
+
+        public java.math.BigDecimal getFreight() { return freight; }
+        public void setFreight(java.math.BigDecimal freight) { this.freight = freight; }
+        public java.math.BigDecimal getAdvance() { return advance; }
+        public void setAdvance(java.math.BigDecimal advance) { this.advance = advance; }
+        public Boolean getFreightAutoPulled() { return freightAutoPulled; }
+        public void setFreightAutoPulled(Boolean freightAutoPulled) { this.freightAutoPulled = freightAutoPulled; }
+        public Boolean getAdvanceAutoPulled() { return advanceAutoPulled; }
+        public void setAdvanceAutoPulled(Boolean advanceAutoPulled) { this.advanceAutoPulled = advanceAutoPulled; }
+    }
 }
