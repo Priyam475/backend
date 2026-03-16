@@ -211,6 +211,10 @@ const CommoditySettings = () => {
     }
     const item = items[index];
     const name = item.commodity.commodity_name || 'this commodity';
+    const confirmed = window.confirm(`Do you want to delete "${name}"?`);
+    if (!confirmed) {
+      return;
+    }
     await commodityApi.remove(item.commodity.commodity_id);
     setItems(prev => prev.filter((_, i) => i !== index));
     if (expanded === index) setExpanded(null);
