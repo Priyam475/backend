@@ -66,4 +66,5 @@
     <include file="config/liquibase/changelog/20260315120000_preset_mark_setting_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260315130000_preset_settings_authorities.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260315180000_daily_serial_allocation.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260316120000_commodity_soft_delete.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

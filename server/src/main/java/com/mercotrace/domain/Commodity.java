@@ -37,6 +37,9 @@ public class Commodity extends AbstractAuditingEntity<Long> implements Serializa
     @Column(name = "created_at")
     private Instant createdAt;
 
+    @Column(name = "active", nullable = false)
+    private Boolean active = true;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public Long getId() {
@@ -84,6 +87,14 @@ public class Commodity extends AbstractAuditingEntity<Long> implements Serializa
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

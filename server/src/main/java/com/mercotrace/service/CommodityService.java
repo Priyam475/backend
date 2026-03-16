@@ -42,11 +42,19 @@ public interface CommodityService {
     Optional<CommodityDTO> findOne(Long id);
 
     /**
-     * Delete the "id" commodity.
+     * Delete the "id" commodity (soft delete: sets active = false).
      *
      * @param id the id of the entity.
      */
     void delete(Long id);
+
+    /**
+     * Restore a soft-deleted commodity (sets active = true).
+     *
+     * @param id the id of the entity.
+     * @return the restored entity, or empty if not found.
+     */
+    Optional<CommodityDTO> restore(Long id);
 
     /**
      * Get all commodities (used by frontend list).
@@ -62,4 +70,14 @@ public interface CommodityService {
      * @return list of commodities.
      */
     List<CommodityDTO> findAllByTrader(Long traderId);
+
+    /**
+     * Get a commodity by trader and name (case-insensitive). Returns active or inactive.
+     * Used so the client can get the id to restore when create fails with "name exists but inactive".
+     *
+     * @param traderId the owning trader id.
+     * @param name the commodity name.
+     * @return the commodity if found.
+     */
+    Optional<CommodityDTO> findOneByTraderIdAndName(Long traderId, String name);
 }

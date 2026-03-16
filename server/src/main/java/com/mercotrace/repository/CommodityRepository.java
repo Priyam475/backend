@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface CommodityRepository extends JpaRepository<Commodity, Long> {
 
-    List<Commodity> findAllByTraderId(Long traderId);
+    List<Commodity> findAllByTraderIdAndActiveTrue(Long traderId);
 
     Optional<Commodity> findOneByTraderIdAndCommodityNameIgnoreCase(Long traderId, String commodityName);
 }

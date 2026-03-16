@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
-import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, ArrowLeft, Save, Package } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, ArrowLeft, Save, Package, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { commodityApi } from '@/services/api';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
+import { CommodityApiError } from '@/services/api/commodities';
 import type { Commodity, CommodityConfiguration, ChargeType, AppliesTo } from '@/types/models';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { toast } from 'sonner';
 import { usePermissions } from '@/lib/permissions';
 import ForbiddenPage from '@/components/ForbiddenPage';
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 import onionImg from '@/assets/commodities/onion.jpg';
 import potatoImg from '@/assets/commodities/potato.jpg';
@@ -94,6 +97,9 @@ const CommoditySettings = () => {
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newCommodityName, setNewCommodityName] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [restorePendingName, setRestorePendingName] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
     const load = async () => {
@@ -120,7 +126,7 @@ const CommoditySettings = () => {
       }
     };
     load();
-  }, [canView]);
+  }, [canView, refreshTrigger]);
 
   const updateConfig = (index: number, updates: Partial<CommodityConfiguration>) => {
     setItems(prev => prev.map((item, i) => {
@@ -179,46 +185,91 @@ const CommoditySettings = () => {
     }
     const name = newCommodityName.trim();
     if (!name) { toast.error('Please enter a commodity name'); return; }
-    // Check duplicate
+    // Check duplicate (only in current list; server also checks and may return "inactive" case)
     if (items.some(it => it.commodity.commodity_name?.toLowerCase() === name.toLowerCase())) {
       toast.error(`"${name}" already exists`);
       return;
     }
-    const created = await commodityApi.create({ commodity_name: name, trader_id: '' });
-    const newItem: LocalCommodityConfig = {
-      commodity: created,
-      config: {
-        config_id: crypto.randomUUID(), commodity_id: created.commodity_id,
-        rate_per_unit: 0, min_weight: 0, max_weight: 0,
-        govt_deduction_enabled: false, roundoff_enabled: false,
-        commission_percent: 0, user_fee_percent: 0, hsn_code: '',
-        created_at: new Date().toISOString(),
-      },
-      charges: [], deductionRules: [], hamaliSlabs: [],
-      hamaliEnabled: false, billPrefix: '', gstApplicable: false,
-    };
-    setItems(prev => [...prev, newItem]);
-    setNewCommodityName('');
-    setShowAddForm(false);
-    setExpanded(items.length); // expand the newly added
-    toast.success(`"${name}" added successfully`);
+    try {
+      const created = await commodityApi.create({ commodity_name: name, trader_id: '' });
+      const newItem: LocalCommodityConfig = {
+        commodity: created,
+        config: {
+          config_id: crypto.randomUUID(), commodity_id: created.commodity_id,
+          rate_per_unit: 0, min_weight: 0, max_weight: 0,
+          govt_deduction_enabled: false, roundoff_enabled: false,
+          commission_percent: 0, user_fee_percent: 0, hsn_code: '',
+          created_at: new Date().toISOString(),
+        },
+        charges: [], deductionRules: [], hamaliSlabs: [],
+        hamaliEnabled: false, billPrefix: '', gstApplicable: false,
+      };
+      setItems(prev => [...prev, newItem]);
+      setNewCommodityName('');
+      setShowAddForm(false);
+      setExpanded(items.length);
+      toast.success(`"${name}" added successfully`);
+    } catch (err) {
+      if (err instanceof CommodityApiError && err.errorKey === 'commoditynameexistsinactive') {
+        setRestorePendingName(name);
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to add commodity');
+    }
   };
 
-  const handleDeleteCommodity = async (index: number) => {
+  const handleRestoreCommodity = async () => {
+    if (!restorePendingName || !canEdit) return;
+    try {
+      const existing = await commodityApi.getByName(restorePendingName);
+      if (!existing) {
+        toast.error('Commodity no longer found');
+        setRestorePendingName(null);
+        return;
+      }
+      await commodityApi.restore(existing.commodity_id);
+      setRestorePendingName(null);
+      setNewCommodityName('');
+      setRefreshTrigger(prev => prev + 1);
+      toast.success(`"${restorePendingName}" restored. You can use it again.`);
+    } catch (err) {
+      console.error('Restore commodity error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to restore commodity');
+    }
+  };
+
+  const handleDeleteCommodity = async (commodityId: string) => {
     if (!canDelete) {
       toast.error('You do not have permission to delete commodities.');
       return;
     }
-    const item = items[index];
-    const name = item.commodity.commodity_name || 'this commodity';
-    const confirmed = window.confirm(`Do you want to delete "${name}"?`);
-    if (!confirmed) {
+    const item = items.find(it => it.commodity.commodity_id === commodityId);
+    if (!item) {
       return;
     }
-    await commodityApi.remove(item.commodity.commodity_id);
-    setItems(prev => prev.filter((_, i) => i !== index));
-    if (expanded === index) setExpanded(null);
-    toast.success(`"${name}" removed`);
+    const name = item.commodity.commodity_name || 'this commodity';
+    try {
+      await commodityApi.remove(item.commodity.commodity_id);
+      setItems(prev => prev.filter(it => it.commodity.commodity_id !== commodityId));
+      setExpanded(null);
+      setDeleteConfirmId(null);
+      toast.success(`"${name}" removed`);
+    } catch (err) {
+      console.error('Delete commodity error:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes('fk_lot_commodity') ||
+        message.toLowerCase().includes('still referenced from table "lot"')
+      ) {
+        toast.error(
+          `"${name}" is already used in arrivals/auctions and has linked lots. ` +
+            'Deleting this commodity would also remove related transaction data. ' +
+            'Please clear or archive those records before deleting.',
+        );
+      } else {
+        toast.error(message || 'Failed to delete commodity');
+      }
+    }
   };
 
   const saveSettings = async (index: number) => {
@@ -486,7 +537,7 @@ const CommoditySettings = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDeleteCommodity(index);
+                      setDeleteConfirmId(item.commodity.commodity_id);
                     }}
                     disabled={!canDelete}
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -985,6 +1036,54 @@ const CommoditySettings = () => {
           );
         })}
       </div>
+
+      <ConfirmDeleteDialog
+        open={!!deleteConfirmId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteConfirmId(null);
+          }
+        }}
+        title="Delete Commodity?"
+        description={
+          deleteConfirmId
+            ? `Do you want to delete "${items.find(it => it.commodity.commodity_id === deleteConfirmId)?.commodity.commodity_name || 'this commodity'}"?`
+            : 'Do you want to delete this commodity?'
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (deleteConfirmId) {
+            handleDeleteCommodity(deleteConfirmId);
+          }
+        }}
+      />
+
+      {/* Restore previously removed commodity (same name exists but inactive) */}
+      <Dialog open={!!restorePendingName} onOpenChange={(open) => { if (!open) setRestorePendingName(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                <RotateCcw className="w-5 h-5 text-primary" />
+              </div>
+              <DialogTitle>Restore commodity?</DialogTitle>
+            </div>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            A commodity named <strong>&quot;{restorePendingName}&quot;</strong> was previously removed. Restore it to use again instead of creating a new one?
+          </p>
+          {!canEdit && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">You need Edit permission to restore.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestorePendingName(null)}>Cancel</Button>
+            <Button onClick={handleRestoreCommodity} disabled={!canEdit}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <BottomNav />
     </div>
