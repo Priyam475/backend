@@ -17,10 +17,12 @@ const ContactPortalSignupPage = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [touched, setTouched] = useState({ phone: false, password: false, email: false });
+  const [touched, setTouched] = useState({ phone: false, password: false, email: false, name: false });
 
   const phoneRegex = /^[6-9]\d{9}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  /** Allows letters and spaces only (no digits, punctuation, or other symbols) */
+  const nameRegex = /^[A-Za-z ]+$/;
 
   const phoneError =
     touched.phone && !phone
@@ -39,14 +41,18 @@ const ContactPortalSignupPage = () => {
   const emailError =
     touched.email && email && !emailRegex.test(email) ? 'Enter a valid email address' : '';
 
+  const nameError =
+    touched.name && name && !nameRegex.test(name) ? 'Only letters and spaces allowed' : '';
+
   const isFormValid =
     phoneRegex.test(phone) &&
     password.length >= 6 &&
-    (!email || emailRegex.test(email));
+    (!email || emailRegex.test(email)) &&
+    (!name || nameRegex.test(name));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ phone: true, password: true, email: true });
+    setTouched({ phone: true, password: true, email: true, name: true });
     if (!isFormValid) return;
     try {
       await signup({
@@ -230,9 +236,16 @@ const ContactPortalSignupPage = () => {
                     setName(e.target.value);
                     clearError();
                   }}
+                  onBlur={() => setTouched(p => ({ ...p, name: true }))}
                   className="pl-12 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-white/90 border-0 text-emerald-900 placeholder:text-emerald-400"
+                  aria-invalid={!!nameError}
                 />
               </div>
+              {nameError && (
+                <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
+                  {nameError}
+                </p>
+              )}
             </div>
 
             <Button
