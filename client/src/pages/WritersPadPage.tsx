@@ -62,6 +62,34 @@ function consideredWt(w: number): number {
   return Math.round(w);
 }
 
+// ── Validation constants & helpers ────────────────────────
+const MIN_WEIGHT = 1;
+const MAX_WEIGHT = 1_000_000;
+const MIN_BID_NUMBER = 1;
+const MAX_BID_NUMBER = 9999;
+const MAX_MARK_LENGTH = 50;
+const ALLOWED_MARK_PATTERN = /^[a-zA-Z0-9\s\[\]\(\)\{\}\-_.]+$/;
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 1_000_000;
+
+function isValidWeight(w: number): boolean {
+  return !Number.isNaN(w) && w >= MIN_WEIGHT && w <= MAX_WEIGHT;
+}
+
+function isValidBidNumber(n: number): boolean {
+  return Number.isInteger(n) && n >= MIN_BID_NUMBER && n <= MAX_BID_NUMBER;
+}
+
+function isValidBuyerMark(mark: string): boolean {
+  if (!mark || mark.trim().length === 0) return false;
+  if (mark.length > MAX_MARK_LENGTH) return false;
+  return ALLOWED_MARK_PATTERN.test(mark);
+}
+
+function isValidQuantity(qty: number): boolean {
+  return Number.isInteger(qty) && qty >= MIN_QUANTITY && qty <= MAX_QUANTITY;
+}
+
 const WritersPadPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -138,8 +166,11 @@ const WritersPadPage = () => {
 
   // Req 5: Add bid card by bid number
   const addBidCard = async () => {
-    const num = parseInt(bidNumberInput);
-    if (!num || num <= 0) { toast.error('Enter a valid bid number'); return; }
+    const num = parseInt(bidNumberInput, 10);
+    if (Number.isNaN(num) || !isValidBidNumber(num)) {
+      toast.error(`Bid number must be an integer between ${MIN_BID_NUMBER} and ${MAX_BID_NUMBER}`);
+      return;
+    }
     if (bidCards.some(c => c.bidNumber === num)) { toast.error('Bid card already added'); return; }
 
     let foundEntry: any = null;
@@ -155,6 +186,15 @@ const WritersPadPage = () => {
     });
 
     if (!foundEntry) { toast.error(`Bid #${num} not found`); return; }
+
+    if (!isValidBuyerMark(foundEntry.buyerMark)) {
+      toast.error(`Buyer's mark is invalid (max ${MAX_MARK_LENGTH} chars, alphanumeric + spaces + braces)`);
+      return;
+    }
+    if (!isValidQuantity(foundEntry.quantity)) {
+      toast.error(`Bid quantity must be between ${MIN_QUANTITY} and ${MAX_QUANTITY.toLocaleString()}`);
+      return;
+    }
 
     if (!can("Writer's Pad", 'Create')) {
       toast.error('You do not have permission to create Writer\'s Pad sessions.');
@@ -197,10 +237,18 @@ const WritersPadPage = () => {
   const attachWeight = async (card: BidCard) => {
     if (card.isComplete) { toast.error('All bags weighed for this bid'); return; }
     if (currentWeight <= 0) { toast.error('No load on scale'); return; }
+    if (!isValidWeight(currentWeight)) {
+      toast.error(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT.toLocaleString()} kg`);
+      return;
+    }
     if (weightLocked) { toast.error('Weight recorded — remove load to reset'); return; }
     if (!card.sessionId) { toast.error('Session not initialized for this bid'); return; }
 
     const cw = consideredWt(currentWeight);
+    if (!isValidWeight(cw)) {
+      toast.error(`Considered weight out of valid range (${MIN_WEIGHT}–${MAX_WEIGHT.toLocaleString()} kg)`);
+      return;
+    }
     if (!can("Writer's Pad", 'Edit')) {
       toast.error('You do not have permission to record Writer\'s Pad weights.');
       return;
@@ -208,6 +256,16 @@ const WritersPadPage = () => {
 
     try {
       const saved = await writersPadApi.attachWeight(card.sessionId, currentWeight, cw, connectedScale?.id);
+
+      if (!isValidBidNumber(saved.bidNumber)) {
+        console.warn(`Weight log: bid number ${saved.bidNumber} outside valid range`);
+      }
+      if (saved.buyerMark && !isValidBuyerMark(saved.buyerMark)) {
+        console.warn(`Weight log: buyer mark "${saved.buyerMark}" fails validation`);
+      }
+      if (!isValidWeight(saved.rawWeight) || !isValidWeight(saved.consideredWeight)) {
+        console.warn(`Weight log: weight values out of range (raw=${saved.rawWeight}, considered=${saved.consideredWeight})`);
+      }
 
       const logEntry: WeightLogEntry = {
         id: String(saved.id),
@@ -241,9 +299,17 @@ const WritersPadPage = () => {
   // Req 10: Retag weight
   const confirmRetag = async () => {
     if (!retagEntry || !retagTarget) return;
-    const newBidNum = parseInt(retagTarget);
+    const newBidNum = parseInt(retagTarget, 10);
+    if (Number.isNaN(newBidNum) || !isValidBidNumber(newBidNum)) {
+      toast.error(`Target bid number must be between ${MIN_BID_NUMBER} and ${MAX_BID_NUMBER}`);
+      return;
+    }
     const targetCard = bidCards.find(c => c.bidNumber === newBidNum);
     if (!targetCard) { toast.error('Target bid not found'); return; }
+    if (targetCard.isComplete) {
+      toast.error(`Bid #${newBidNum} has already been fully weighed`);
+      return;
+    }
     if (!can("Writer's Pad", 'Edit')) {
       toast.error('You do not have permission to retag Writer\'s Pad weights.');
       return;
@@ -299,6 +365,26 @@ const WritersPadPage = () => {
       toast.error(msg);
     }
   };
+
+  // ── Derived validation flags for UI feedback ──
+  const isBidNumberInputInvalid = useMemo(() => {
+    if (!bidNumberInput) return false;
+    const n = parseInt(bidNumberInput, 10);
+    if (Number.isNaN(n)) return true;
+    return n < MIN_BID_NUMBER || n > MAX_BID_NUMBER;
+  }, [bidNumberInput]);
+
+  const isRetagTargetInvalid = useMemo(() => {
+    if (!retagTarget) return false;
+    const n = parseInt(retagTarget, 10);
+    if (Number.isNaN(n)) return true;
+    return n < MIN_BID_NUMBER || n > MAX_BID_NUMBER;
+  }, [retagTarget]);
+
+  const isWeightOutOfRange = useMemo(() => {
+    if (currentWeight <= 0) return false;
+    return !isValidWeight(currentWeight);
+  }, [currentWeight]);
 
   const filteredCards = useMemo(() => {
     if (!searchQuery) return bidCards;
@@ -428,7 +514,7 @@ const WritersPadPage = () => {
                 <motion.p key={currentWeight}
                   initial={{ scale: 1.05 }} animate={{ scale: 1 }}
                   className={cn("text-4xl font-black tracking-tight",
-                    currentWeight > 0 ? "text-white" : "text-white/30")}>
+                    isWeightOutOfRange ? "text-red-300" : currentWeight > 0 ? "text-white" : "text-white/30")}>
                   {currentWeight.toFixed(1)}
                   <span className="text-sm font-semibold ml-0.5">kg</span>
                 </motion.p>
@@ -443,10 +529,12 @@ const WritersPadPage = () => {
                 <p className="text-[8px] text-white/40">Rounded OFF</p>
               </div>
             </div>
-            <p className="text-[9px] text-white/50 mt-2 text-center">
-              {currentWeight > 0
-                ? (weightLocked ? '✓ Weight recorded — remove load to reset' : 'Tap a bid card below to attach this weight')
-                : 'Place load on scale to read weight'}
+            <p className={cn("text-[9px] mt-2 text-center", isWeightOutOfRange ? "text-red-300 font-semibold" : "text-white/50")}>
+              {isWeightOutOfRange
+                ? `⚠ Weight out of range (${MIN_WEIGHT}–${MAX_WEIGHT.toLocaleString()} kg)`
+                : currentWeight > 0
+                  ? (weightLocked ? '✓ Weight recorded — remove load to reset' : 'Tap a bid card below to attach this weight')
+                  : 'Place load on scale to read weight'}
             </p>
           </div>
         </div>
@@ -465,10 +553,12 @@ const WritersPadPage = () => {
             </span>
           </div>
           <div className="grid grid-cols-4 gap-4">
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-cyan-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">{connectedScale?.name} Reading</p>
+            <div className={cn("glass-card rounded-2xl p-4 border-l-4", isWeightOutOfRange ? "border-l-red-500" : "border-l-cyan-500")}>
+              <p className={cn("text-[10px] uppercase font-semibold", isWeightOutOfRange ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                {connectedScale?.name} Reading {isWeightOutOfRange && `⚠ ${MIN_WEIGHT}–${MAX_WEIGHT.toLocaleString()}`}
+              </p>
               <motion.p key={currentWeight} initial={{ scale: 1.05 }} animate={{ scale: 1 }}
-                className={cn("text-3xl font-black", currentWeight > 0 ? "text-foreground" : "text-muted-foreground/30")}>
+                className={cn("text-3xl font-black", isWeightOutOfRange ? "text-red-500" : currentWeight > 0 ? "text-foreground" : "text-muted-foreground/30")}>
                 {currentWeight.toFixed(1)}<span className="text-sm ml-1">kg</span>
               </motion.p>
             </div>
@@ -505,12 +595,16 @@ const WritersPadPage = () => {
 
         {/* Req 5: Add Bid Card */}
         <div className="glass-card rounded-2xl p-3">
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Add Bid Card</p>
+          <p className={cn("text-[10px] font-semibold uppercase tracking-wider mb-2", isBidNumberInputInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+            Add Bid Card {isBidNumberInputInvalid && "⚠ 1–9999"}
+          </p>
           <div className="flex gap-2">
             <Input type="number" value={bidNumberInput} onChange={e => setBidNumberInput(e.target.value)}
-              placeholder="Enter Bid Number" className="flex-1 h-11 rounded-xl text-center font-bold text-lg bg-muted/20"
+              placeholder="Enter Bid Number (1–9999)"
+              className={cn("flex-1 h-11 rounded-xl text-center font-bold text-lg bg-muted/20", isBidNumberInputInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
               onKeyDown={e => e.key === 'Enter' && addBidCard()} />
-            <Button onClick={addBidCard} className="h-11 px-6 rounded-xl bg-gradient-to-r from-primary to-accent text-white font-bold shadow-md">
+            <Button onClick={addBidCard} disabled={isBidNumberInputInvalid}
+              className="h-11 px-6 rounded-xl bg-gradient-to-r from-primary to-accent text-white font-bold shadow-md">
               <Plus className="w-5 h-5" />
             </Button>
           </div>
@@ -657,11 +751,14 @@ const WritersPadPage = () => {
                 Move {retagEntry.weight}kg from Bid #{retagEntry.bidNumber} ({retagEntry.buyerMark}) to another bid
               </p>
               <Input type="number" value={retagTarget} onChange={e => setRetagTarget(e.target.value)}
-                placeholder="Target Bid Number"
-                className="h-12 rounded-xl text-center font-bold text-lg mb-3" />
+                placeholder="Target Bid Number (1–9999)"
+                className={cn("h-12 rounded-xl text-center font-bold text-lg", isRetagTargetInvalid ? "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20 mb-1" : "mb-3")} />
+              {isRetagTargetInvalid && (
+                <p className="text-[9px] text-red-500 font-semibold mb-2 text-center">⚠ Bid number must be 1–9999</p>
+              )}
               <div className="flex gap-3">
                 <Button onClick={() => setRetagEntry(null)} variant="outline" className="flex-1 h-11 rounded-xl">Cancel</Button>
-                <Button onClick={confirmRetag} disabled={!retagTarget}
+                <Button onClick={confirmRetag} disabled={!retagTarget || isRetagTargetInvalid}
                   className="flex-1 h-11 rounded-xl bg-gradient-to-r from-primary to-accent text-white">
                   Retag
                 </Button>

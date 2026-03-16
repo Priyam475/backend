@@ -50,6 +50,7 @@ const AccountingPage = () => {
   const [newName, setNewName] = useState('');
   const [newClassification, setNewClassification] = useState<LedgerClassification>('RECEIVABLE');
   const [newOpening, setNewOpening] = useState('0');
+  const [errors, setErrors] = useState<{ name?: string; opening?: string; classification?: string }>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -105,23 +106,47 @@ const AccountingPage = () => {
   const apSubledgerSum = ledgers.filter(l => l.classification === 'PAYABLE' && !l.is_system).reduce((s, l) => s + l.current_balance, 0);
 
   const handleAdd = async () => {
-    if (!newName.trim()) return;
+    const trimmedName = newName.trim();
+    const nextErrors: { name?: string; classification?: string; opening?: string } = {};
+
+    if (!trimmedName) {
+      nextErrors.name = 'Ledger name is required';
+    } else if (trimmedName.length < 4) {
+      nextErrors.name = 'Ledger name must be at least 4 characters';
+    } else if (trimmedName.length > 50) {
+      nextErrors.name = 'Ledger name must be at most 50 characters';
+    }
+
+    if (!newClassification) {
+      nextErrors.classification = 'Classification is required';
+    }
+
+    const openingNum = parseFloat(newOpening);
+    if (newOpening.trim() !== '' && !Number.isFinite(openingNum)) {
+      nextErrors.opening = 'Enter a valid number';
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
     const parentId = newClassification === 'RECEIVABLE' ? arControlLedger?.ledger_id : newClassification === 'PAYABLE' ? apControlLedger?.ledger_id : undefined;
     const parentControlId = parentId != null && parentId !== '' ? Number(parentId) : null;
     if (!can('Chart of Accounts', 'Create')) {
-      // We intentionally do not block viewing Chart of Accounts here; only creation.
       return;
     }
     try {
       const dto = await chartOfAccountsApi.create({
-        ledgerName: newName.trim(),
+        ledgerName: trimmedName,
         classification: newClassification,
-        openingBalance: parseFloat(newOpening) || 0,
+        openingBalance: Number.isFinite(openingNum) ? openingNum : 0,
         parentControlId: parentControlId ?? undefined,
       });
       setLedgers(prev => [...prev, dtoToCOALedger(dto)]);
       setNewName('');
       setNewOpening('0');
+      setErrors({});
       setShowAdd(false);
     } catch (err) {
       console.error('Failed to create ledger', err);
@@ -311,15 +336,17 @@ const AccountingPage = () => {
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wide">Ledger Name</label>
-                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g., ABC Traders – Receivable"
-                    className="w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border border-border outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input value={newName} onChange={e => { setNewName(e.target.value); setErrors(prev => ({ ...prev, name: undefined })); }} placeholder="e.g., ABC Traders – Receivable"
+                    className={cn('w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border outline-none focus:ring-2 focus:ring-primary/30', errors.name ? 'border-destructive' : 'border-border')} />
+                  {errors.name && <p className="text-xs text-destructive mt-1">{errors.name}</p>}
                 </div>
                 <div>
                   <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wide">Classification</label>
-                  <select value={newClassification} onChange={e => setNewClassification(e.target.value as LedgerClassification)}
-                    className="w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border border-border outline-none">
+                  <select value={newClassification} onChange={e => { setNewClassification(e.target.value as LedgerClassification); setErrors(prev => ({ ...prev, classification: undefined })); }}
+                    className={cn('w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border outline-none', errors.classification ? 'border-destructive' : 'border-border')}>
                     {CLASSIFICATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                  {errors.classification && <p className="text-xs text-destructive mt-1">{errors.classification}</p>}
                   <p className="text-[10px] text-muted-foreground mt-1">
                     {newClassification === 'RECEIVABLE' && 'Auto-mapped to AR Control.'}
                     {newClassification === 'PAYABLE' && 'Auto-mapped to AP Control.'}
@@ -329,10 +356,11 @@ const AccountingPage = () => {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wide">Opening Balance (₹)</label>
-                  <input type="number" value={newOpening} onChange={e => setNewOpening(e.target.value)}
-                    className="w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border border-border outline-none focus:ring-2 focus:ring-primary/30" />
+                  <input type="number" value={newOpening} onChange={e => { setNewOpening(e.target.value); setErrors(prev => ({ ...prev, opening: undefined })); }}
+                    className={cn('w-full px-4 py-3.5 rounded-xl bg-muted text-foreground text-sm border outline-none focus:ring-2 focus:ring-primary/30', errors.opening ? 'border-destructive' : 'border-border')} />
+                  {errors.opening && <p className="text-xs text-destructive mt-1">{errors.opening}</p>}
                 </div>
-                <button onClick={handleAdd} disabled={!newName.trim()}
+                <button onClick={handleAdd} disabled={!newName.trim() || newName.trim().length < 4 || newName.trim().length > 50}
                   className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-500 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 disabled:opacity-50 active:scale-[0.98] transition-transform">
                   Create Ledger
                 </button>

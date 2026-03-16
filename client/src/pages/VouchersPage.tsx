@@ -7,10 +7,15 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import type { VoucherHeader, VoucherLine, VoucherType, VoucherLifecycle, COALedger, PaymentModeType } from '@/types/accounting';
 import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccounts';
 import { voucherHeadersApi } from '@/services/api/voucherHeaders';
+import { toast } from 'sonner';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
+
+const AMOUNT_MAX = 1_000_000;
+const NARRATION_MIN_LEN = 2;
+const NARRATION_MAX_LEN = 100;
 
 const VOUCHER_CONFIG: Record<VoucherType, { label: string; icon: typeof FileText; gradient: string; debitLabel: string; creditLabel: string }> = {
   SALES_BILL: { label: 'Sales Bill', icon: FileText, gradient: 'from-blue-400 to-cyan-500', debitLabel: 'Receivable', creditLabel: 'Income/Payable' },
@@ -137,8 +142,60 @@ const VouchersPage = () => {
   /** Round to 2 decimals so floating-point noise is not sent to the API. */
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
+  type CreateValidationErrors = { amount?: string; narration?: string; paymentMode?: string };
+
+  const validateCreateVoucher = (): { isValid: boolean; errors: CreateValidationErrors } => {
+    const errors: CreateValidationErrors = {};
+
+    // Receiver/Payee (narration): required, 2–100 chars
+    const trimmed = narration.trim();
+    if (trimmed.length === 0) {
+      errors.narration = 'Required (2–100 characters)';
+    } else if (trimmed.length < NARRATION_MIN_LEN) {
+      errors.narration = `Minimum ${NARRATION_MIN_LEN} characters`;
+    } else if (trimmed.length > NARRATION_MAX_LEN) {
+      errors.narration = `Maximum ${NARRATION_MAX_LEN} characters`;
+    }
+
+    // Payment Mode: required for RECEIPT/PAYMENT/CONTRA (always set via state; validate non-null)
+    const needsPaymentMode = createType === 'RECEIPT' || createType === 'PAYMENT' || createType === 'CONTRA';
+    if (needsPaymentMode && !paymentMode) {
+      errors.paymentMode = 'Payment mode is required';
+    }
+
+    // Amount: required, 0–1,000,000, precision 2 (map to totalDebit when balanced)
+    const payloadLines = lines.filter(l => l.ledger_id && (parseFloat(l.debit) || parseFloat(l.credit)));
+    const total = totalDebit;
+    const balanced = total > 0 && totalDebit === totalCredit;
+
+    if (!balanced || payloadLines.length === 0) {
+      errors.amount = 'Entries must be balanced (Dr = Cr) with at least one line';
+    } else {
+      if (total < 0) errors.amount = 'Amount must be at least ₹0';
+      else if (total > AMOUNT_MAX) errors.amount = `Amount must not exceed ₹${AMOUNT_MAX.toLocaleString()}`;
+      else {
+        // Check decimal precision (max 2) on each debit/credit
+        const hasInvalidPrecision = (s: string) => {
+          if (!s.trim()) return false;
+          const parts = s.split('.');
+          return parts.length === 2 && parts[1].length > 2;
+        };
+        for (const l of lines) {
+          if (hasInvalidPrecision(l.debit) || hasInvalidPrecision(l.credit)) {
+            errors.amount = 'Amount must have at most 2 decimal places';
+            break;
+          }
+        }
+      }
+    }
+
+    return { isValid: Object.keys(errors).length === 0, errors };
+  };
+
+  const createValidation = useMemo(() => validateCreateVoucher(), [createType, narration, lines, paymentMode, totalDebit, totalCredit]);
+
   const handleCreate = async () => {
-    if (!isBalanced || !narration.trim()) return;
+    if (!createValidation.isValid) return;
     const payloadLines = lines
       .filter(l => l.ledger_id && (parseFloat(l.debit) || parseFloat(l.credit)))
       .map(l => ({
@@ -445,13 +502,19 @@ const VouchersPage = () => {
                       </button>
                     ))}
                   </div>
+                  {createValidation.errors.paymentMode && (
+                    <p className="text-xs text-destructive mt-1">{createValidation.errors.paymentMode}</p>
+                  )}
                 </div>
               )}
 
               {/* Narration */}
               <div className="mb-4">
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Narration</label>
-                <input value={narration} onChange={e => setNarration(e.target.value)} placeholder="e.g., Receipt from Vijay Traders" className="w-full px-4 py-3 rounded-xl bg-muted text-foreground text-sm border border-border outline-none focus:ring-2 focus:ring-primary/30" />
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Narration (Receiver/Payee)</label>
+                <input value={narration} onChange={e => setNarration(e.target.value)} placeholder="e.g., Receipt from Vijay Traders" className={cn('w-full px-4 py-3 rounded-xl bg-muted text-foreground text-sm border outline-none focus:ring-2 focus:ring-primary/30', createValidation.errors.narration ? 'border-destructive' : 'border-border')} />
+                {createValidation.errors.narration && (
+                  <p className="text-xs text-destructive mt-1">{createValidation.errors.narration}</p>
+                )}
               </div>
 
               {/* Debit/Credit Lines */}
@@ -481,9 +544,12 @@ const VouchersPage = () => {
                     Dr ₹{totalDebit.toLocaleString()} = Cr ₹{totalCredit.toLocaleString()} {isBalanced ? '✓' : '✗'}
                   </span>
                 </div>
+                {createValidation.errors.amount && (
+                  <p className="text-xs text-destructive mt-1">{createValidation.errors.amount}</p>
+                )}
               </div>
 
-              <button onClick={handleCreate} disabled={!isBalanced || !narration.trim()} className="w-full py-3.5 rounded-xl bg-gradient-to-r from-violet-400 to-purple-500 text-white font-semibold text-sm shadow-lg shadow-violet-500/20 disabled:opacity-50">
+              <button onClick={handleCreate} disabled={!createValidation.isValid} className="w-full py-3.5 rounded-xl bg-gradient-to-r from-violet-400 to-purple-500 text-white font-semibold text-sm shadow-lg shadow-violet-500/20 disabled:opacity-50">
                 Create as Draft
               </button>
             </motion.div>

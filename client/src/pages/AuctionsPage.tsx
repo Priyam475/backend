@@ -327,6 +327,77 @@ const AuctionsPage = () => {
   const remaining = selectedLot ? selectedLot.bag_count - totalSold : 0;
   const highestBid = useMemo(() => Math.max(0, ...entries.map(e => e.rate)), [entries]);
 
+  // ── Field validations (Arrivals-page pattern: useMemo returning boolean) ──────────────────
+
+  const isBuyerMarkInvalid = useMemo(() => {
+    const mark = entryMode === 'scribble' ? scribbleMark : (selectedBuyer?.mark || '');
+    if (!mark.trim()) return false; // not yet entered — don't flag until user types
+    if (mark.length > 50) return true;
+    return !/^[a-zA-Z0-9\s\[\]\(\)\{\}\-_.]+$/.test(mark);
+  }, [entryMode, scribbleMark, selectedBuyer]);
+
+  const isRateInvalid = useMemo(() => {
+    if (!rate || !rate.trim()) return false;
+    const r = parseFloat(rate);
+    if (Number.isNaN(r)) return true;
+    return r < 0.01 || r > 1_000_000;
+  }, [rate]);
+
+  const isQtyInvalid = useMemo(() => {
+    if (!qty || !qty.trim()) return false;
+    const q = parseInt(qty, 10);
+    if (Number.isNaN(q)) return true;
+    if (q < 1) return true;
+    if (q > 1_000_000) return true;
+    return false;
+  }, [qty]);
+
+  const isQtyExceedsRemaining = useMemo(() => {
+    if (!qty || !qty.trim()) return false;
+    const q = parseInt(qty, 10);
+    if (Number.isNaN(q) || q <= 0) return false;
+    return remaining > 0 && q > remaining;
+  }, [qty, remaining]);
+
+  const isExtraRateInvalid = useMemo(() => {
+    if (!showExtraRate) return false;
+    if (!extraRate || !extraRate.trim()) return false;
+    const e = parseFloat(extraRate);
+    if (Number.isNaN(e)) return true;
+    return e < 0 || e > 1_000_000;
+  }, [showExtraRate, extraRate]);
+
+  const isTokenAdvanceFieldInvalid = useCallback((value: string | number) => {
+    const v = typeof value === 'string' ? parseFloat(value) : value;
+    if (Number.isNaN(v)) return true;
+    return v < 0 || v > 1_000_000;
+  }, []);
+
+  const isLotSearchInvalid = useMemo(() => {
+    if (!lotSearchQuery) return false;
+    return lotSearchQuery.length > 50;
+  }, [lotSearchQuery]);
+
+  const isLotNumberSearchInvalid = useMemo(() => {
+    if (!lotNumberSearch) return false;
+    if (!/^\d+$/.test(lotNumberSearch.trim())) return true;
+    const n = parseInt(lotNumberSearch.trim(), 10);
+    return n < 1 || n > 9999;
+  }, [lotNumberSearch]);
+
+  const isBuyerSearchInvalid = useMemo(() => {
+    if (!buyerSearch) return false;
+    return buyerSearch.length > 10;
+  }, [buyerSearch]);
+
+  const hasScribbleValidationErrors = useMemo(() => {
+    return isBuyerMarkInvalid || isRateInvalid || isQtyInvalid || isExtraRateInvalid;
+  }, [isBuyerMarkInvalid, isRateInvalid, isQtyInvalid, isExtraRateInvalid]);
+
+  const hasSearchValidationErrors = useMemo(() => {
+    return isRateInvalid || isQtyInvalid || isExtraRateInvalid;
+  }, [isRateInvalid, isQtyInvalid, isExtraRateInvalid]);
+
   // ── Lot navigation (prev/next) ─────────────────────────
   const currentLotIndex = useMemo(() => {
     if (!selectedLot) return -1;
@@ -501,6 +572,10 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
+    if (hasSearchValidationErrors) {
+      toast.error('Please fix validation errors before adding a bid.');
+      return;
+    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -524,6 +599,10 @@ const AuctionsPage = () => {
   const handleScribbleConfirm = (initials: string, quantity: number) => {
     const currentRate = parseInt(rate) || highestBid || 0;
     if (currentRate <= 0) return;
+    if (isRateInvalid || isExtraRateInvalid) {
+      toast.error('Please fix validation errors before adding a bid.');
+      return;
+    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -551,6 +630,10 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
+    if (hasScribbleValidationErrors) {
+      toast.error('Please fix validation errors before adding a bid.');
+      return;
+    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -614,6 +697,10 @@ const AuctionsPage = () => {
     if (!selectedLot) return;
     if (!can('Auctions / Sales', 'Edit')) {
       toast.error('You do not have permission to edit auction bids.');
+      return;
+    }
+    if (isTokenAdvanceFieldInvalid(amount)) {
+      toast.error('Token advance must be between ₹0 and ₹10,00,000.');
       return;
     }
     try {
@@ -688,8 +775,11 @@ const AuctionsPage = () => {
                   placeholder="Search lot, seller, vehicle…"
                   value={lotSearchQuery}
                   onChange={e => setLotSearchQuery(e.target.value)}
-                  className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
+                  maxLength={50}
+                  className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30",
+                    isLotSearchInvalid && "border-red-400 ring-2 ring-red-400/30")}
                 />
+                {isLotSearchInvalid && <p className="text-[9px] text-red-300 mt-0.5 ml-1">⚠ Max 50 characters</p>}
               </div>
               {/* Lot Number search */}
               <div className="relative">
@@ -697,9 +787,12 @@ const AuctionsPage = () => {
                 <input
                   placeholder="Search by Lot Number…"
                   value={lotNumberSearch}
-                  onChange={e => setLotNumberSearch(e.target.value)}
-                  className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
+                  onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                  maxLength={4}
+                  className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30",
+                    isLotNumberSearchInvalid && "border-red-400 ring-2 ring-red-400/30")}
                 />
+                {isLotNumberSearchInvalid && <p className="text-[9px] text-red-300 mt-0.5 ml-1">⚠ Numeric, 1–9999</p>}
               </div>
             </div>
           </div>
@@ -721,9 +814,12 @@ const AuctionsPage = () => {
                   <input
                     placeholder="Lot Number…"
                     value={lotNumberSearch}
-                    onChange={e => setLotNumberSearch(e.target.value)}
-                    className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
+                    onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                    maxLength={4}
+                    className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50",
+                      isLotNumberSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                   />
+                  {isLotNumberSearchInvalid && <p className="text-[9px] text-red-500 mt-0.5 ml-1">⚠ Numeric, 1–9999</p>}
                 </div>
                 <div className="relative w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -731,8 +827,11 @@ const AuctionsPage = () => {
                     placeholder="Search lot, seller, vehicle…"
                     value={lotSearchQuery}
                     onChange={e => setLotSearchQuery(e.target.value)}
-                    className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
+                    maxLength={50}
+                    className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50",
+                      isLotSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                   />
+                  {isLotSearchInvalid && <p className="text-[9px] text-red-500 mt-0.5 ml-1">⚠ Max 50 characters</p>}
                 </div>
               </div>
             </div>
@@ -996,8 +1095,11 @@ const AuctionsPage = () => {
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Quick Lot Navigation</p>
                 <div className="relative w-40">
                   <Hash className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                  <input placeholder="Lot #" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
-                    className="w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50" />
+                  <input placeholder="Lot #" value={lotNumberSearch}
+                    onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                    maxLength={4}
+                    className={cn("w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50",
+                      isLotNumberSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                 </div>
               </div>
               <div className="space-y-1">
@@ -1126,34 +1228,47 @@ const AuctionsPage = () => {
                   <div className="space-y-2">
                     {scribbleMark && (
                       <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-semibold text-muted-foreground uppercase">Mark:</span>
-                        <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold shadow-sm">{scribbleMark}</span>
+                        <span className={cn("text-[9px] font-semibold uppercase", isBuyerMarkInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Mark: {isBuyerMarkInvalid && "⚠ Max 50, alphanumeric + spaces"}
+                        </span>
+                        <span className={cn("px-2.5 py-1 rounded-lg text-white text-sm font-bold shadow-sm",
+                          isBuyerMarkInvalid ? "bg-red-500" : "bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                        )}>{scribbleMark}</span>
                       </div>
                     )}
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
+                        <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Rate (₹) {isRateInvalid && "⚠ 0.01–10,00,000"}
+                        </label>
                         <Input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={highestBid ? String(highestBid) : '0'}
-                          className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                          min={0.01} max={1000000} step="0.01"
+                          className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", isRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                       </div>
                       <div>
-                        <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
+                        <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isQtyInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                          Qty (Bags) {isQtyInvalid ? "⚠ Must be ≥ 1" : isQtyExceedsRemaining ? "⚠ Exceeds remaining" : ""}
+                        </label>
                         <Input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
-                          className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                          min={1} max={1000000}
+                          className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", (isQtyInvalid || isQtyExceedsRemaining) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                       </div>
                     </div>
                     <AnimatePresence>
                       {showExtraRate && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
-                          <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
+                          <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isExtraRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                            Extra Rate (₹) {isExtraRateInvalid && "⚠ 0–10,00,000"}
+                          </label>
                           <Input type="number" value={extraRate} onChange={e => setExtraRate(e.target.value)} placeholder="0"
-                            className="h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30" />
+                            min={0} max={1000000} step="0.01"
+                            className={cn("h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30", isExtraRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                         </motion.div>
                       )}
                     </AnimatePresence>
                     <div className="flex gap-2">
                       <Button onClick={handleScribbleInlineAdd}
-                        disabled={!scribbleMark || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                        disabled={!scribbleMark || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0 || hasScribbleValidationErrors}
                         className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20">
                         <Plus className="w-4 h-4 mr-1" /> Add Bid
                       </Button>
@@ -1212,30 +1327,39 @@ const AuctionsPage = () => {
 
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <div>
-                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
+                    <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                      Rate (₹) {isRateInvalid && "⚠ 0.01–10,00,000"}
+                    </label>
                     <Input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={highestBid ? String(highestBid) : '0'}
-                      className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                      min={0.01} max={1000000} step="0.01"
+                      className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", isRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                   </div>
                   <div>
-                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
+                    <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isQtyInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                      Qty (Bags) {isQtyInvalid ? "⚠ Must be ≥ 1" : isQtyExceedsRemaining ? "⚠ Exceeds remaining" : ""}
+                    </label>
                     <Input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
-                      className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                      min={1} max={1000000}
+                      className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", (isQtyInvalid || isQtyExceedsRemaining) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                   </div>
                 </div>
 
                 <AnimatePresence>
                   {showExtraRate && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3">
-                      <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
+                      <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isExtraRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                        Extra Rate (₹) {isExtraRateInvalid && "⚠ 0–10,00,000"}
+                      </label>
                       <Input type="number" value={extraRate} onChange={e => setExtraRate(e.target.value)} placeholder="0"
-                        className="h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30" />
+                        min={0} max={1000000} step="0.01"
+                        className={cn("h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30", isExtraRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
                     </motion.div>
                   )}
                 </AnimatePresence>
 
                 <div className="flex gap-2 mt-3">
                   <Button onClick={handleFormSubmit}
-                    disabled={!selectedBuyer || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                    disabled={!selectedBuyer || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0 || hasSearchValidationErrors}
                     className="flex-1 h-11 rounded-xl bg-gradient-to-r from-primary to-accent text-white font-semibold shadow-md shadow-primary/20">
                     <Plus className="w-4 h-4 mr-1" /> Add Bid
                   </Button>
@@ -1339,9 +1463,27 @@ const AuctionsPage = () => {
                             type="number"
                             defaultValue={entry.tokenAdvance || ''}
                             placeholder="0"
+                            min={0}
+                            max={1000000}
                             className="h-8 rounded-lg text-xs text-center flex-1"
-                            onBlur={e => setTokenAdvanceAmount(entry.id, parseInt(e.target.value) || 0)}
-                            onKeyDown={e => { if (e.key === 'Enter') setTokenAdvanceAmount(entry.id, parseInt((e.target as HTMLInputElement).value) || 0); }}
+                            onBlur={e => {
+                              const v = parseInt(e.target.value) || 0;
+                              if (isTokenAdvanceFieldInvalid(v)) {
+                                toast.error('Token advance must be between ₹0 and ₹10,00,000.');
+                                return;
+                              }
+                              setTokenAdvanceAmount(entry.id, v);
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const v = parseInt((e.target as HTMLInputElement).value) || 0;
+                                if (isTokenAdvanceFieldInvalid(v)) {
+                                  toast.error('Token advance must be between ₹0 and ₹10,00,000.');
+                                  return;
+                                }
+                                setTokenAdvanceAmount(entry.id, v);
+                              }
+                            }}
                           />
                           {entry.tokenAdvance > 0 && <span className="text-[10px] text-success font-semibold">✓ ₹{entry.tokenAdvance}</span>}
                         </div>
