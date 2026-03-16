@@ -32,9 +32,22 @@ interface InlineScribblePadProps {
   onMarkDetected: (mark: string) => void;
   className?: string;
   canvasHeight?: number;
+  /** When this value changes, the canvas is cleared (e.g. after selecting a contact/mark from list). */
+  resetTrigger?: number;
+  /** Hide status/candidate row for compact dock usage. */
+  showStatus?: boolean;
+  /** Fill parent height (used in dock to avoid blank area). */
+  fillAvailableHeight?: boolean;
 }
 
-const InlineScribblePad = ({ onMarkDetected, className, canvasHeight = 140 }: InlineScribblePadProps) => {
+const InlineScribblePad = ({
+  onMarkDetected,
+  className,
+  canvasHeight = 140,
+  resetTrigger,
+  showStatus = true,
+  fillAvailableHeight = false,
+}: InlineScribblePadProps) => {
   const [recognizing, setRecognizing] = useState(false);
   const [recognizeStatus, setRecognizeStatus] = useState('');
   const [candidates, setCandidates] = useState<string[]>([]);
@@ -55,12 +68,28 @@ const InlineScribblePad = ({ onMarkDetected, className, canvasHeight = 140 }: In
       if (!parent) return;
       const rect = parent.getBoundingClientRect();
       canvas.width = rect.width;
-      canvas.height = canvasHeight;
+      canvas.height = fillAvailableHeight ? rect.height : canvasHeight;
     };
     const t = setTimeout(resize, 50);
     window.addEventListener('resize', resize);
     return () => { clearTimeout(t); window.removeEventListener('resize', resize); };
-  }, [canvasHeight]);
+  }, [canvasHeight, fillAvailableHeight]);
+
+  // Reset canvas when parent signals (e.g. after selecting contact or mark from list)
+  useEffect(() => {
+    if (resetTrigger === undefined) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    strokesRef.current = [];
+    currentStroke.current = { xs: [], ys: [], ts: [] };
+    setSelectedMark('');
+    setRecognizeStatus('');
+    setCandidates([]);
+    if (drawTimeout.current) clearTimeout(drawTimeout.current);
+  }, [resetTrigger]);
 
   const doRecognition = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -172,13 +201,13 @@ const InlineScribblePad = ({ onMarkDetected, className, canvasHeight = 140 }: In
   };
 
   return (
-    <div className={className}>
+    <div className={`${className ?? ''} ${fillAvailableHeight ? 'h-full' : ''}`}>
       {/* Canvas */}
-      <div className="relative rounded-xl overflow-hidden border-2 border-dashed border-violet-400/30 bg-white dark:bg-slate-50">
+      <div className={`relative rounded-xl overflow-hidden border-2 border-dashed border-violet-400/30 bg-white dark:bg-slate-50 ${fillAvailableHeight ? 'h-full' : ''}`}>
         <canvas
           ref={canvasRef}
           className="w-full touch-none cursor-crosshair"
-          style={{ height: canvasHeight }}
+          style={{ height: fillAvailableHeight ? '100%' : canvasHeight }}
           onMouseDown={startDraw}
           onMouseMove={draw}
           onMouseUp={endDraw}
@@ -199,6 +228,7 @@ const InlineScribblePad = ({ onMarkDetected, className, canvasHeight = 140 }: In
       </div>
 
       {/* Status + Candidates */}
+      {showStatus && (
       <div className="mt-2 flex items-center gap-2 flex-wrap min-h-[28px]">
         {recognizing ? (
           <div className="flex items-center gap-1.5 text-violet-500">
@@ -233,6 +263,7 @@ const InlineScribblePad = ({ onMarkDetected, className, canvasHeight = 140 }: In
           )}
         </AnimatePresence>
       </div>
+      )}
     </div>
   );
 };

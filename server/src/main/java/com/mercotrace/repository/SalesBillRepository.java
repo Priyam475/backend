@@ -25,7 +25,12 @@ public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
         BigDecimal getPendingBalance();
     }
 
-    @EntityGraph(attributePaths = { "commodityGroups", "commodityGroups.items", "versions" })
+    // NOTE:
+    // Hibernate does not allow fetching multiple bag collections in a single query
+    // (see MultipleBagFetchException). We eagerly fetch only the top-level
+    // commodityGroups; nested items and versions will be loaded lazily via
+    // separate queries as needed to avoid MultipleBagFetchException.
+    @EntityGraph(attributePaths = { "commodityGroups" })
     @Query("SELECT s FROM SalesBill s WHERE s.id = :id")
     Optional<SalesBill> findByIdWithGroupsAndVersions(@Param("id") Long id);
 

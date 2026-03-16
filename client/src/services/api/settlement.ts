@@ -67,6 +67,13 @@ export interface SellerSettlementDTO {
   lots: SettlementLotDTO[];
 }
 
+export interface SellerChargesDTO {
+  freight: number;
+  advance: number;
+  freightAutoPulled?: boolean;
+  advanceAutoPulled?: boolean;
+}
+
 export interface ListSellersParams {
   page?: number;
   size?: number;
@@ -157,5 +164,18 @@ export const settlementApi = {
     const dto = await res.json();
     if (dto.createdAt) dto.createdAt = typeof dto.createdAt === 'string' ? dto.createdAt : new Date(dto.createdAt).toISOString();
     return dto;
+  },
+
+  /** Get computed seller-level charges (freight, advance) for a new patti. */
+  async getSellerCharges(sellerId: string): Promise<SellerChargesDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/charges`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load seller charges');
+    const data = await res.json();
+    return {
+      freight: Number(data.freight ?? 0),
+      advance: Number(data.advance ?? 0),
+      freightAutoPulled: Boolean(data.freightAutoPulled),
+      advanceAutoPulled: Boolean(data.advanceAutoPulled),
+    };
   },
 };

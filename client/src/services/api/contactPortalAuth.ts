@@ -11,6 +11,8 @@ export interface ContactPortalProfile {
   name: string;
   phone: string;
   email?: string;
+  /** Contact type: BUYER, BROKER, AGENT, SELLER. */
+  type?: string;
   can_login?: boolean;
   /** True when this session is a guest (no persisted Contact). */
   is_guest?: boolean;
@@ -21,6 +23,7 @@ type ContactDto = {
   name?: string;
   phone?: string;
   email?: string;
+  type?: string;
   canLogin?: boolean;
   can_login?: boolean;
 };
@@ -32,6 +35,7 @@ function mapDtoToProfile(dto: ContactDto): ContactPortalProfile {
     name: dto.name ?? '',
     phone: dto.phone ?? '',
     email: dto.email,
+    type: dto.type,
     can_login: dto.can_login ?? dto.canLogin,
     is_guest: false,
   };
@@ -55,6 +59,7 @@ export const contactPortalAuthApi = {
     password: string;
     email?: string;
     name?: string;
+    type: string;
   }): Promise<ContactPortalProfile> {
     const res = await apiFetch('/auth/register-contact', {
       method: 'POST',
@@ -63,6 +68,7 @@ export const contactPortalAuthApi = {
         password: data.password,
         email: data.email,
         name: data.name,
+        type: data.type,
       }),
     });
 
@@ -75,8 +81,8 @@ export const contactPortalAuthApi = {
           const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
 
           if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
-            message =
-              'This mobile number is already registered for a Trader account and cannot be used for a Contact login.';
+            // Do not reveal whether this mobile belongs to a trader, staff user, or admin.
+            message = 'This mobile number is already in use.';
           } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
           } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
@@ -164,6 +170,9 @@ export const contactPortalAuthApi = {
 
           if (errorKey === 'error.contactPortal.phone.notRegistered') {
             message = 'This mobile number is not registered for a Contact login.';
+          } else if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
+            // Do not reveal which account type owns this mobile; just block OTP flow.
+            message = 'This mobile number is already in use.';
           } else if (errorKey === 'error.otp.provider.not_configured') {
             message =
               'We are unable to send OTPs right now. Please try again later or contact support.';
@@ -207,6 +216,9 @@ export const contactPortalAuthApi = {
           if (errorKey === 'error.otp.invalid_or_expired') {
             message =
               'The OTP you entered is invalid or has expired. Please request a new one.';
+          } else if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
+            // Do not reveal which account type owns this mobile; just block guest login.
+            message = 'This mobile number is already in use.';
           } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
             message = problem.detail;
           } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {

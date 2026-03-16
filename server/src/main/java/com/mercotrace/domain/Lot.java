@@ -41,6 +41,12 @@ public class Lot extends AbstractAuditingEntity<Long> implements Serializable {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "variant", length = 50)
+    private String variant;
+
+    @Column(name = "broker_tag", length = 100)
+    private String brokerTag;
+
     @Override
     public Long getId() {
         return id;
@@ -96,6 +102,22 @@ public class Lot extends AbstractAuditingEntity<Long> implements Serializable {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getVariant() {
+        return variant;
+    }
+
+    public void setVariant(String variant) {
+        this.variant = variant;
+    }
+
+    public String getBrokerTag() {
+        return brokerTag;
+    }
+
+    public void setBrokerTag(String brokerTag) {
+        this.brokerTag = brokerTag;
     }
 
     @Override

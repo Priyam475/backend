@@ -20,12 +20,12 @@ import { useTheme } from '@/context/ThemeContext';
 import { useContactAuth } from '@/context/ContactAuthContext';
 
 const portalNavItems = [
-  { icon: LayoutDashboard, title: 'Dashboard', path: '/portal' },
-  { icon: Truck, title: 'Arrivals', path: '/portal/arrivals' },
-  { icon: ShoppingBag, title: 'Purchases', path: '/portal/purchases' },
-  { icon: FileText, title: 'Statements', path: '/portal/statements' },
-  { icon: Scale, title: 'Settlements', path: '/portal/settlements' },
-  { icon: User, title: 'Profile', path: '/portal/profile' },
+  { icon: LayoutDashboard, title: 'Dashboard', path: '/contact' },
+  { icon: Truck, title: 'Arrivals', path: '/contact/arrivals' },
+  { icon: ShoppingBag, title: 'Purchases', path: '/contact/purchases' },
+  { icon: FileText, title: 'Statements', path: '/contact/statements' },
+  { icon: Scale, title: 'Settlements', path: '/contact/settlements' },
+  { icon: User, title: 'Profile', path: '/contact/profile' },
 ];
 
 const ContactPortalDesktopSidebar = () => {
@@ -37,7 +37,7 @@ const ContactPortalDesktopSidebar = () => {
 
   const handleLogout = async () => {
     await Promise.resolve(logout());
-    navigate('/portal/login');
+    navigate('/login');
   };
 
   return (
@@ -79,7 +79,7 @@ const ContactPortalDesktopSidebar = () => {
         {portalNavItems.map((item) => {
           const isActive =
             location.pathname === item.path ||
-            (item.path !== '/portal' && location.pathname.startsWith(item.path + '/'));
+            (item.path !== '/contact' && location.pathname.startsWith(item.path + '/'));
           return (
             <button
               key={item.path}

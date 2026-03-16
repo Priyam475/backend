@@ -1,14 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Eye, EyeOff, Mail, Lock, Sun, Moon, Building2, Phone, KeyRound } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Mail, Lock, Sun, Moon, Building2, Phone, KeyRound, LogIn, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
+import { useContactAuth } from '@/context/ContactAuthContext';
 import { authApi } from '@/services/api';
+import { contactPortalAuthApi, type ContactOtpVerifyResult } from '@/services/api/contactPortalAuth';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const loginBg = '/login-bg.webp';
 
@@ -21,27 +31,45 @@ const PARTICLES = Array.from({ length: 10 }, (_, i) => ({
 }));
 
 type LoginMode = 'phone' | 'email';
+type LoginAudience = 'trader' | 'contact';
 
 const LoginScreen = () => {
   const navigate = useNavigate();
+  const [audience, setAudience] = useState<LoginAudience>('trader');
   const [loginMode, setLoginMode] = useState<LoginMode>('phone');
 
-  // Phone + OTP state
+  // Shared phone + OTP state
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
 
-  // Email state
+  // Shared email/password state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const { isDark, toggleTheme } = useTheme();
-  const { login, loginWithOtp, isLoading, error, clearError } = useAuth();
+  const { login, loginWithOtp, isLoading: traderLoading, error: traderError, clearError: clearTraderError } = useAuth();
+  const {
+    login: contactLogin,
+    loginWithProfile,
+    loginAsGuest,
+    isLoading: contactLoading,
+    error: contactError,
+    clearError: clearContactError,
+  } = useContactAuth();
 
   const [touched, setTouched] = useState({ email: false, password: false, phone: false });
   const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
+
+  const [guestDialogOpen, setGuestDialogOpen] = useState(false);
+  const [guestResult, setGuestResult] = useState<ContactOtpVerifyResult | null>(null);
+
+  const isLoading = audience === 'trader' ? traderLoading : contactLoading;
+  const error = audience === 'trader' ? traderError : contactError;
+  const clearError = audience === 'trader' ? clearTraderError : clearContactError;
 
   // Email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -58,13 +86,18 @@ const LoginScreen = () => {
     setTouched(p => ({ ...p, phone: true }));
     if (!isPhoneValid || isSendingOtp || otpCooldown > 0) return;
     setIsSendingOtp(true);
+    clearError();
     try {
-      await authApi.requestOtp(phone);
+      if (audience === 'trader') {
+        await authApi.requestOtp(phone);
+      } else {
+        await contactPortalAuthApi.requestOtp(phone);
+      }
       setOtpSent(true);
       setOtpCooldown(30);
       toast.success('OTP sent', { description: 'Please check your phone for the 4-digit OTP.' });
     } catch (e: any) {
-      toast.error(e.message || 'Failed to send OTP. Please try again.');
+      toast.error(e?.message || 'Failed to send OTP. Please try again.');
     } finally {
       setIsSendingOtp(false);
     }
@@ -72,12 +105,50 @@ const LoginScreen = () => {
 
   const handleVerifyOtp = async () => {
     if (otp.length !== 4) return;
-    try {
-      await loginWithOtp(phone, otp);
-      navigate('/home', { replace: true });
-    } catch (e: any) {
-      toast.error(e.message || 'Invalid or expired OTP.');
+    clearError();
+    if (audience === 'trader') {
+      try {
+        await loginWithOtp(phone, otp);
+        navigate('/home', { replace: true });
+      } catch (e: any) {
+        toast.error(e?.message || 'Invalid or expired OTP.');
+      }
+      return;
     }
+
+    setIsVerifyingOtp(true);
+    try {
+      const result = await contactPortalAuthApi.verifyOtp(phone, otp);
+      if (result.guest) {
+        setGuestResult(result);
+        setGuestDialogOpen(true);
+      } else if (result.profile) {
+        loginWithProfile(result.profile);
+        navigate('/contact', { replace: true });
+      } else {
+        toast.error('We could not complete sign-in. Please try again.');
+      }
+    } catch (e: any) {
+      toast.error(
+        e?.message ||
+          'The OTP you entered is invalid or has expired. Please request a new one.',
+      );
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  const handleGuestLogin = () => {
+    if (!guestResult) return;
+    loginAsGuest(guestResult.phone);
+    setGuestDialogOpen(false);
+    navigate('/contact', { replace: true });
+  };
+
+  const handleContinueToSignup = () => {
+    if (!guestResult) return;
+    setGuestDialogOpen(false);
+    navigate('/contact-registartion', { replace: false });
   };
 
   useEffect(() => {
@@ -102,11 +173,17 @@ const LoginScreen = () => {
     e.preventDefault();
     setTouched({ email: true, password: true, phone: false });
     if (!isEmailValid) return;
+    clearError();
     try {
-      await login(email, password);
-      navigate('/home', { replace: true });
+      if (audience === 'trader') {
+        await login(email, password);
+        navigate('/home', { replace: true });
+      } else {
+        await contactLogin(email, password);
+        navigate('/contact', { replace: true });
+      }
     } catch {
-      // error is set in context
+      // error is set in respective context
     }
   };
 
@@ -170,8 +247,44 @@ const LoginScreen = () => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="text-center mb-6">
               <h1 className="lg:hidden text-2xl sm:text-3xl font-bold text-white mb-1 drop-shadow-lg">Welcome Back</h1>
               <h2 className="hidden lg:block text-2xl sm:text-3xl font-bold text-white mb-1 drop-shadow-lg">Welcome Back</h2>
-              <p className="text-white/70 text-sm sm:text-base">Sign in to continue to Mercotrace</p>
+              <p className="text-white/70 text-sm sm:text-base">
+                {audience === 'trader'
+                  ? 'Sign in as Trader or Trader Staff'
+                  : 'Sign in as Contact (Seller / Buyer / Broker / Agent)'}
+              </p>
             </motion.div>
+
+            {/* Audience Toggle */}
+            <div className="w-full max-w-sm flex gap-1 mb-3 bg-white/10 backdrop-blur-md rounded-xl p-1 border border-white/15">
+              <button
+                type="button"
+                onClick={() => {
+                  setAudience('trader');
+                  setOtpSent(false);
+                  setOtp('');
+                  clearContactError();
+                }}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                  audience === 'trader' ? 'bg-white text-blue-600 shadow-md' : 'text-white/70 hover:text-white'
+                }`}
+              >
+                <Building2 className="w-4 h-4" /> Trader / Staff
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAudience('contact');
+                  setOtpSent(false);
+                  setOtp('');
+                  clearTraderError();
+                }}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                  audience === 'contact' ? 'bg-white text-blue-600 shadow-md' : 'text-white/70 hover:text-white'
+                }`}
+              >
+                <Phone className="w-4 h-4" /> Contact / Guest
+              </button>
+            </div>
 
             {/* Login Mode Toggle */}
             <div className="w-full max-w-sm flex gap-1 mb-4 bg-white/10 backdrop-blur-md rounded-xl p-1 border border-white/15">
@@ -250,9 +363,9 @@ const LoginScreen = () => {
                       )}
                     </Button>
                   ) : (
-                    <Button onClick={handleVerifyOtp} disabled={otp.length !== 4 || isLoading}
+                    <Button onClick={handleVerifyOtp} disabled={otp.length !== 4 || isLoading || isVerifyingOtp}
                       className="w-full h-12 sm:h-14 rounded-xl text-base sm:text-lg font-semibold bg-white text-blue-600 hover:bg-white/90 shadow-xl disabled:opacity-70">
-                      {isLoading ? (
+                      {isLoading || isVerifyingOtp ? (
                         <motion.div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} aria-label="Loading" />
                       ) : (
                         <>Verify &amp; Sign In <ArrowRight className="w-5 h-5 ml-2" /></>
@@ -318,32 +431,39 @@ const LoginScreen = () => {
                 <Building2 className="w-4 h-4 mr-2" /> Register as Trader
               </Button>
               <Button
-                onClick={() => navigate('/portal/login')}
+                onClick={() => navigate('/contact-registartion')}
                 variant="outline"
                 className="w-full h-12 rounded-xl text-sm font-semibold bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white backdrop-blur-sm"
               >
-                Login as Contact (Seller/Buyer/Broker/Agent)
+                <LogIn className="w-4 h-4 mr-2" /> Register as Contact
               </Button>
             </div>
-            <p className="text-sm text-white/70">
-              New here?{' '}
-              <button
-                onClick={() => navigate('/trader-setup')}
-                className="text-white font-semibold underline min-h-[44px]"
-              >
-                Sign up as Trader
-              </button>{' '}
-              or{' '}
-              <button
-                onClick={() => navigate('/portal/signup')}
-                className="text-white font-semibold underline min-h-[44px]"
-              >
-                Sign up as Contact
-              </button>
-            </p>
           </div>
         </main>
       </div>
+      <Dialog open={guestDialogOpen} onOpenChange={open => setGuestDialogOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No contact account found</DialogTitle>
+            <DialogDescription>
+              We verified this mobile number but couldn&apos;t find a contact portal account. You can
+              register now to save your details and see your history, or continue as a guest without
+              creating an account. You can use OTP again later to come back as a guest or register
+              when you&apos;re ready.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleContinueToSignup} className="flex-1 gap-2">
+              <UserPlus className="w-4 h-4" />
+              Continue to register
+            </Button>
+            <Button onClick={handleGuestLogin} className="flex-1 gap-2">
+              <LogIn className="w-4 h-4" />
+              Login as guest
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

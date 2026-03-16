@@ -28,6 +28,8 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
   [normalize('Arrivals')]: {
     view: 'ROLE_ARRIVALS_VIEW',
     create: 'ROLE_ARRIVALS_CREATE',
+    edit: 'ROLE_ARRIVALS_EDIT',
+    delete: 'ROLE_ARRIVALS_DELETE',
   },
   [normalize('Auctions / Sales')]: {
     view: 'ROLE_AUCTIONS_VIEW',
@@ -86,6 +88,13 @@ const MODULE_FEATURE_TO_AUTHORITY: ModuleFeatureAuthorityMap = {
     'manage roles': 'ROLE_RBAC_SETTINGS_EDIT',
     'manage users': 'ROLE_RBAC_SETTINGS_EDIT',
   },
+  // Preset Settings (Auction margin presets – separate RBAC module).
+  [normalize('Preset Settings')]: {
+    view: 'ROLE_PRESET_SETTINGS_VIEW',
+    create: 'ROLE_PRESET_SETTINGS_CREATE',
+    edit: 'ROLE_PRESET_SETTINGS_EDIT',
+    delete: 'ROLE_PRESET_SETTINGS_DELETE',
+  },
   // Settlement (Patti) module.
   [normalize('Settlement')]: {
     view: 'ROLE_SETTLEMENTS_VIEW',
@@ -133,6 +142,7 @@ export function canWithAuthorities(
 // Route → module name mapping. Centralized so menus and pages stay consistent.
 export function getModuleKeyForRoute(pathname: string): ModuleKey | null {
   if (pathname.startsWith('/home')) return 'Home';
+  if (pathname.startsWith('/settings/preset-settings')) return 'Preset Settings';
   if (pathname.startsWith('/settings')) return 'Settings';
   if (pathname.startsWith('/contacts')) return 'Contacts';
   if (pathname.startsWith('/commodity-settings')) return 'Commodity Settings';

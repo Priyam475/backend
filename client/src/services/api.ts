@@ -11,6 +11,7 @@ export { rbacApi, traderRbacApi } from './api/rbac';
 export { auctionApi, fetchAllAuctionResults } from './api/auction';
 export { weighingApi } from './api/weighing';
 export { printLogApi } from './api/printLog';
+export { logisticsApi } from './api/logistics';
 export { selfSaleApi } from './api/selfSale';
 export { stockPurchaseApi } from './api/stockPurchase';
 export { cdnApi } from './api/cdn';
@@ -18,6 +19,8 @@ export { settlementApi } from './api/settlement';
 export { billingApi } from './api/billing';
 export { chartOfAccountsApi } from './api/chartOfAccounts';
 export { writersPadApi } from './api/writersPad';
+export { presetMarksApi } from './api/presetMarks';
+export type { PresetMarkSettingDTO } from './api/presetMarks';
 export type {
   SellerSettlementDTO,
   SettlementLotDTO,

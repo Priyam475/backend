@@ -1,6 +1,7 @@
 package com.mercotrace.service;
 
 import com.mercotrace.service.dto.SelfSaleDTOs.ClosureDTO;
+import com.mercotrace.service.dto.SelfSaleDTOs.ClosuresSummaryDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.CreateClosureRequestDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.OpenLotDTO;
 import jakarta.validation.Valid;
@@ -26,4 +27,9 @@ public interface SelfSaleService {
      * Paginated list of closed self-sales for the current trader.
      */
     Page<ClosureDTO> getClosures(Pageable pageable);
+
+    /**
+     * Summary of all closures for the current trader (total amount and count). For client "Total Sold" header (align with client_origin).
+     */
+    ClosuresSummaryDTO getClosuresSummary();
 }

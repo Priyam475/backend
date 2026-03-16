@@ -9,6 +9,7 @@ export { rbacApi, traderRbacApi } from './rbac';
 export { auctionApi, fetchAllAuctionResults } from './auction';
 export { weighingApi } from './weighing';
 export { printLogApi } from './printLog';
+export { logisticsApi } from './logistics';
 export { stockPurchaseApi } from './stockPurchase';
 export { settlementApi } from './settlement';
 export { billingApi } from './billing';
@@ -57,3 +58,5 @@ export type {
 export { voucherLinesApi } from './voucherLines';
 export { arapDocumentsApi } from './arapDocuments';
 export type { ArApDocumentDTO, ArApDocumentPage } from './arapDocuments';
+export { presetMarksApi } from './presetMarks';
+export type { PresetMarkSettingDTO } from './presetMarks';

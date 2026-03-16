@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Users, UserCog, Cog, ChevronRight, Sparkles } from 'lucide-react';
+import { Shield, Cog, ChevronRight, Sparkles, Sliders } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BottomNav from '@/components/BottomNav';
 import { usePermissions } from '@/lib/permissions';
@@ -9,33 +9,23 @@ import ForbiddenPage from '@/components/ForbiddenPage';
 const settingsCards = [
   {
     icon: Shield,
-    title: 'Role Management',
-    desc: 'Create roles, define module-level & feature-level permissions',
-    path: '/settings/roles',
+    title: 'RBAC (Role-based Access Control)',
+    desc: 'Roles, user management, and role allocation',
+    path: '/settings/rbac',
     gradient: 'from-blue-500 to-indigo-600',
     glow: 'shadow-blue-500/20',
     accent: 'from-blue-400/15 to-indigo-500/10',
     iconBg: 'from-blue-500/20 to-indigo-600/15',
   },
   {
-    icon: Users,
-    title: 'User Management',
-    desc: 'Create, edit, activate/deactivate users',
-    path: '/settings/users',
-    gradient: 'from-emerald-500 to-teal-600',
-    glow: 'shadow-emerald-500/20',
-    accent: 'from-emerald-400/15 to-teal-500/10',
-    iconBg: 'from-emerald-500/20 to-teal-600/15',
-  },
-  {
-    icon: UserCog,
-    title: 'Role Allocation',
-    desc: 'Assign and manage roles for users',
-    path: '/settings/role-allocation',
-    gradient: 'from-violet-500 to-purple-600',
-    glow: 'shadow-violet-500/20',
-    accent: 'from-violet-400/15 to-purple-500/10',
-    iconBg: 'from-violet-500/20 to-purple-600/15',
+    icon: Sliders,
+    title: 'Preset Settings',
+    desc: 'Predefined marks and extra amounts for auction margin',
+    path: '/settings/preset-settings',
+    gradient: 'from-amber-500 to-orange-600',
+    glow: 'shadow-amber-500/20',
+    accent: 'from-amber-400/15 to-orange-500/10',
+    iconBg: 'from-amber-500/20 to-orange-600/15',
   },
 ];
 
@@ -51,13 +41,11 @@ const SettingsPage = () => {
     return <ForbiddenPage moduleName="Settings" />;
   }
 
+  const canViewPresetSettings = can('Preset Settings', 'View');
+
   const visibleCards = settingsCards.filter(card => {
-    if (card.path === '/settings/roles' || card.path === '/settings/role-allocation') {
-      return canManageRoles;
-    }
-    if (card.path === '/settings/users') {
-      return canManageUsers;
-    }
+    if (card.path === '/settings/rbac') return canManageRoles || canManageUsers;
+    if (card.path === '/settings/preset-settings') return canViewPresetSettings;
     return true;
   });
 
@@ -90,7 +78,7 @@ const SettingsPage = () => {
         </motion.div>
 
         {/* Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {visibleCards.map((card, i) => (
             <motion.button
               key={card.title}

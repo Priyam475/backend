@@ -1,20 +1,21 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Gavel, Eye, EyeOff, PenLine, Plus, Trash2,
+  ArrowLeft, Gavel, Eye, EyeOff, Plus, Trash2,
   ShoppingCart, User, Package, Truck, CircleDollarSign, Banknote, ChevronDown,
-  Search, AlertTriangle, Merge, TrendingUp, TrendingDown, Hash,
+  Search, AlertTriangle, Merge, Hash,
   ChevronLeft, ChevronRight, List, Filter
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import { isNative, hapticSelection, hapticImpact, hapticNotification, hideNativeKeyboard, NotificationType } from '@/hooks/use-native';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import ScribblePad from '@/components/ScribblePad';
 import InlineScribblePad from '@/components/InlineScribblePad';
-import { contactApi, auctionApi } from '@/services/api';
+import { contactApi, auctionApi, presetMarksApi } from '@/services/api';
 import type {
   LotSummaryDTO,
   AuctionSessionDTO,
@@ -64,7 +65,11 @@ interface SaleEntry {
   buyerRate: number;
 }
 
-const presetButtons = [10, 20, 50];
+const DEFAULT_PRESETS = [
+  { label: '10', value: 10 },
+  { label: '20', value: 20 },
+  { label: '50', value: 50 },
+];
 
 // ── In-memory draft only (no localStorage). Session-only; backend draft API not implemented. ──
 interface AuctionDraft {
@@ -76,7 +81,6 @@ interface AuctionDraft {
   preset: number;
   presetType: PresetType;
   showExtraRate: boolean;
-  entryMode: 'scribble' | 'search';
   scribbleMark: string;
 }
 
@@ -98,7 +102,8 @@ function clearDraft() {
 function getLotStatus(lotId: string, bagCount: number, apiStatus?: string): LotStatus {
   const draft = loadDraft();
   if (draft?.selectedLotId === lotId && draft.entries.length > 0) return 'pending';
-  if (apiStatus === 'sold' || apiStatus === 'partial' || apiStatus === 'available') return apiStatus as LotStatus;
+  if (apiStatus === 'sold' || apiStatus === 'partial' || apiStatus === 'available' || apiStatus === 'pending')
+    return apiStatus as LotStatus;
   return 'available';
 }
 
@@ -108,6 +113,11 @@ const STATUS_CONFIG: Record<LotStatus, { label: string; bg: string; text: string
   partial: { label: 'Partial', bg: 'bg-amber-500/15', text: 'text-amber-600 dark:text-amber-400', dot: 'bg-amber-500' },
   pending: { label: 'Pending', bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
 };
+
+/** Lot display name: vehicle number | seller name (qty) — used in list and inside auction. */
+function formatLotDisplayName(lot: { vehicle_number: string; seller_name: string; bag_count: number }): string {
+  return `${lot.vehicle_number} | ${lot.seller_name} (${lot.bag_count})`;
+}
 
 // ── Map API DTOs to UI types ──────────────────────────────
 function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
@@ -122,7 +132,7 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     seller_vehicle_id: String(dto.seller_vehicle_id ?? ''),
     vehicle_number: dto.vehicle_number ?? '',
     was_modified: dto.was_modified ?? false,
-    status: (dto.status as LotStatus) ?? 'available',
+    status: (dto.status?.toLowerCase() as LotStatus) ?? 'available',
   };
 }
 
@@ -160,12 +170,15 @@ const AuctionsPage = () => {
   const [showExtraRate, setShowExtraRate] = useState(false);
   const [showScribble, setShowScribble] = useState(false);
   const [scribbleMark, setScribbleMark] = useState('');
-  const [entryMode, setEntryMode] = useState<'scribble' | 'search'>('scribble');
   const [preset, setPreset] = useState(0);
   const [presetType, setPresetType] = useState<PresetType>('PROFIT');
-  const [showBuyerDropdown, setShowBuyerDropdown] = useState(false);
   const [showTokenInput, setShowTokenInput] = useState<string | null>(null);
-  const [buyerSearch, setBuyerSearch] = useState('');
+  const [scribblePadResetTrigger, setScribblePadResetTrigger] = useState(0);
+  const [activeNumpadField, setActiveNumpadField] = useState<'rate' | 'qty' | 'extraRate'>('rate');
+  const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
+  const rateInputRef = useRef<HTMLInputElement>(null);
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+  const extraRateInputRef = useRef<HTMLInputElement>(null);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -190,6 +203,9 @@ const AuctionsPage = () => {
     pendingEntry: Omit<SaleEntry, 'id' | 'bidNumber'>;
   } | null>(null);
 
+  // Preset options from Settings (dynamic); fallback to default
+  const [presetOptions, setPresetOptions] = useState<{ label: string; value: number }[]>(DEFAULT_PRESETS);
+
   // API loading / 409 retry
   const [lotsLoading, setLotsLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
@@ -201,14 +217,78 @@ const AuctionsPage = () => {
   const [rate, setRate] = useState('');
   const [qty, setQty] = useState('');
   const [extraRate, setExtraRate] = useState('');
+  const isTouchLayout = !isDesktop;
 
   // Skip initial draft restore flag
   const draftRestored = useRef(false);
 
-  // Load buyers and lots from API
+  // Horizontal scroll: mouse-drag and arrow-key support (desktop + touch)
+  const contactScrollRef = useRef<HTMLDivElement>(null);
+  const markScrollRef = useRef<HTMLDivElement>(null);
+  const dragStartX = useRef(0);
+  const dragStartScroll = useRef(0);
+  const didDragContactRef = useRef(false);
+  const didDragMarkRef = useRef(false);
+
+  const makeScrollHandlers = useCallback((
+    ref: React.RefObject<HTMLDivElement | null>,
+    didDragRef: React.MutableRefObject<boolean>
+  ) => {
+    return {
+      onMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+        if (!ref.current) return;
+        dragStartX.current = e.clientX;
+        dragStartScroll.current = ref.current.scrollLeft;
+        didDragContactRef.current = false;
+        didDragMarkRef.current = false;
+        const onMove = (moveE: MouseEvent) => {
+          if (!ref.current) return;
+          const dx = dragStartX.current - moveE.clientX;
+          ref.current.scrollLeft = dragStartScroll.current + dx;
+          if (Math.abs(dx) > 5) didDragRef.current = true;
+        };
+        const onUp = () => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          setTimeout(() => {
+            didDragContactRef.current = false;
+            didDragMarkRef.current = false;
+          }, 0);
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      },
+      onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+        if (!ref.current) return;
+        if (e.key === 'ArrowLeft') {
+          ref.current.scrollLeft -= 140;
+          e.preventDefault();
+        }
+        if (e.key === 'ArrowRight') {
+          ref.current.scrollLeft += 140;
+          e.preventDefault();
+        }
+      },
+    };
+  }, []);
+
+  // Load buyers, lots, and preset settings from API
   useEffect(() => {
     contactApi.list().then(setBuyers);
     loadLots();
+    presetMarksApi
+      .list()
+      .then((list) => {
+        if (list && list.length > 0) {
+          setPresetOptions(
+            list.map((p) => ({
+              label: p.predefined_mark ?? String(p.extra_amount),
+              value: Number(p.extra_amount),
+            }))
+          );
+        }
+      })
+      .catch(() => { /* keep default presets */ });
   }, []);
 
   const loadLots = useCallback(async (opts?: { q?: string; status?: string }) => {
@@ -248,7 +328,6 @@ const AuctionsPage = () => {
     setPreset(draft.preset || 0);
     setPresetType(draft.presetType || 'PROFIT');
     setShowExtraRate(draft.showExtraRate || false);
-    setEntryMode(draft.entryMode || 'scribble');
     setScribbleMark(draft.scribbleMark || '');
     setSessionLoading(true);
     auctionApi
@@ -273,10 +352,9 @@ const AuctionsPage = () => {
       preset,
       presetType,
       showExtraRate,
-      entryMode,
       scribbleMark,
     });
-  }, [selectedLot, entries, rate, qty, extraRate, preset, presetType, showExtraRate, entryMode, scribbleMark]);
+  }, [selectedLot, entries, rate, qty, extraRate, preset, presetType, showExtraRate, scribbleMark]);
 
   // Filter lots
   const filteredLots = useMemo(() => {
@@ -312,91 +390,29 @@ const AuctionsPage = () => {
     return map;
   }, [filteredLots]);
 
-  // Filtered buyers for dropdown
-  const filteredBuyers = useMemo(() => {
-    if (!buyerSearch) return buyers;
-    const q = buyerSearch.toLowerCase();
-    return buyers.filter(b =>
+  // Row 1: Contacts from contact module — filter by scribble pad search (name/mark/phone)
+  const filteredContacts = useMemo(() => {
+    const q = (scribbleMark || '').trim().toLowerCase();
+    const list = buyers;
+    if (!q) return list;
+    return list.filter(b =>
       b.name?.toLowerCase().includes(q) ||
-      b.phone?.includes(q) ||
-      b.mark?.toLowerCase().includes(q)
+      (b.phone && b.phone.includes(q)) ||
+      (b.mark && b.mark.toLowerCase().includes(q))
     );
-  }, [buyers, buyerSearch]);
+  }, [buyers, scribbleMark]);
+
+  // Row 2: Distinct buyer marks from existing auction (current session) — filter by scribble pad search
+  const existingAuctionMarks = useMemo(() => {
+    const marks = Array.from(new Set(entries.map(e => e.buyerMark).filter(Boolean))) as string[];
+    const q = (scribbleMark || '').trim().toLowerCase();
+    if (!q) return marks;
+    return marks.filter(m => m.toLowerCase().includes(q));
+  }, [entries, scribbleMark]);
 
   const totalSold = useMemo(() => entries.reduce((s, e) => s + e.quantity, 0), [entries]);
   const remaining = selectedLot ? selectedLot.bag_count - totalSold : 0;
   const highestBid = useMemo(() => Math.max(0, ...entries.map(e => e.rate)), [entries]);
-
-  // ── Field validations (Arrivals-page pattern: useMemo returning boolean) ──────────────────
-
-  const isBuyerMarkInvalid = useMemo(() => {
-    const mark = entryMode === 'scribble' ? scribbleMark : (selectedBuyer?.mark || '');
-    if (!mark.trim()) return false; // not yet entered — don't flag until user types
-    if (mark.length > 50) return true;
-    return !/^[a-zA-Z0-9\s\[\]\(\)\{\}\-_.]+$/.test(mark);
-  }, [entryMode, scribbleMark, selectedBuyer]);
-
-  const isRateInvalid = useMemo(() => {
-    if (!rate || !rate.trim()) return false;
-    const r = parseFloat(rate);
-    if (Number.isNaN(r)) return true;
-    return r < 0.01 || r > 1_000_000;
-  }, [rate]);
-
-  const isQtyInvalid = useMemo(() => {
-    if (!qty || !qty.trim()) return false;
-    const q = parseInt(qty, 10);
-    if (Number.isNaN(q)) return true;
-    if (q < 1) return true;
-    if (q > 1_000_000) return true;
-    return false;
-  }, [qty]);
-
-  const isQtyExceedsRemaining = useMemo(() => {
-    if (!qty || !qty.trim()) return false;
-    const q = parseInt(qty, 10);
-    if (Number.isNaN(q) || q <= 0) return false;
-    return remaining > 0 && q > remaining;
-  }, [qty, remaining]);
-
-  const isExtraRateInvalid = useMemo(() => {
-    if (!showExtraRate) return false;
-    if (!extraRate || !extraRate.trim()) return false;
-    const e = parseFloat(extraRate);
-    if (Number.isNaN(e)) return true;
-    return e < 0 || e > 1_000_000;
-  }, [showExtraRate, extraRate]);
-
-  const isTokenAdvanceFieldInvalid = useCallback((value: string | number) => {
-    const v = typeof value === 'string' ? parseFloat(value) : value;
-    if (Number.isNaN(v)) return true;
-    return v < 0 || v > 1_000_000;
-  }, []);
-
-  const isLotSearchInvalid = useMemo(() => {
-    if (!lotSearchQuery) return false;
-    return lotSearchQuery.length > 50;
-  }, [lotSearchQuery]);
-
-  const isLotNumberSearchInvalid = useMemo(() => {
-    if (!lotNumberSearch) return false;
-    if (!/^\d+$/.test(lotNumberSearch.trim())) return true;
-    const n = parseInt(lotNumberSearch.trim(), 10);
-    return n < 1 || n > 9999;
-  }, [lotNumberSearch]);
-
-  const isBuyerSearchInvalid = useMemo(() => {
-    if (!buyerSearch) return false;
-    return buyerSearch.length > 10;
-  }, [buyerSearch]);
-
-  const hasScribbleValidationErrors = useMemo(() => {
-    return isBuyerMarkInvalid || isRateInvalid || isQtyInvalid || isExtraRateInvalid;
-  }, [isBuyerMarkInvalid, isRateInvalid, isQtyInvalid, isExtraRateInvalid]);
-
-  const hasSearchValidationErrors = useMemo(() => {
-    return isRateInvalid || isQtyInvalid || isExtraRateInvalid;
-  }, [isRateInvalid, isQtyInvalid, isExtraRateInvalid]);
 
   // ── Lot navigation (prev/next) ─────────────────────────
   const currentLotIndex = useMemo(() => {
@@ -491,11 +507,38 @@ const AuctionsPage = () => {
     try {
       const session = await auctionApi.addBid(selectedLot.lot_id, body);
       setEntries(session.entries.map(sessionEntryToSaleEntry));
+      hapticNotification(NotificationType.Success);
+      // Align with client_origin: update selectedLot/availableLots from session.lot so remaining bags and progress bar stay correct (e.g. after quantity increase).
+      if (session.lot) {
+        const lotId = selectedLot.lot_id;
+        setSelectedLot(prev =>
+          prev && prev.lot_id === lotId
+            ? {
+                ...prev,
+                bag_count: session.lot!.bag_count ?? prev.bag_count,
+                original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
+                was_modified: session.lot!.was_modified ?? prev.was_modified,
+              }
+            : prev
+        );
+        setAvailableLots(prev =>
+          prev.map(l =>
+            l.lot_id === lotId && session.lot
+              ? {
+                  ...l,
+                  bag_count: session.lot!.bag_count ?? l.bag_count,
+                  original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
+                  was_modified: session.lot!.was_modified ?? l.was_modified,
+                }
+              : l
+          )
+        );
+      }
       setRate('');
       setQty('');
       setExtraRate('');
       setSelectedBuyer(null);
-      setBuyerSearch('');
+      setScribbleMark('');
       setAddBidRetryAllowIncrease(false);
     } catch (err: unknown) {
       const isConflict = err && typeof err === 'object' && (err as { isConflict?: boolean }).isConflict === true;
@@ -536,6 +579,21 @@ const AuctionsPage = () => {
           token_advance: existingEntry.tokenAdvance ?? 0,
         });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
+        if (session.lot) {
+          const lotId = selectedLot.lot_id;
+          setSelectedLot(prev =>
+            prev && prev.lot_id === lotId
+              ? { ...prev, bag_count: session.lot!.bag_count ?? prev.bag_count, original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count, was_modified: session.lot!.was_modified ?? prev.was_modified }
+              : prev
+          );
+          setAvailableLots(prev =>
+            prev.map(l =>
+              l.lot_id === lotId && session.lot
+                ? { ...l, bag_count: session.lot!.bag_count ?? l.bag_count, original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count, was_modified: session.lot!.was_modified ?? l.was_modified }
+                : l
+            )
+          );
+        }
         toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
@@ -572,10 +630,6 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
-    if (hasSearchValidationErrors) {
-      toast.error('Please fix validation errors before adding a bid.');
-      return;
-    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -599,10 +653,6 @@ const AuctionsPage = () => {
   const handleScribbleConfirm = (initials: string, quantity: number) => {
     const currentRate = parseInt(rate) || highestBid || 0;
     if (currentRate <= 0) return;
-    if (isRateInvalid || isExtraRateInvalid) {
-      toast.error('Please fix validation errors before adding a bid.');
-      return;
-    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -630,10 +680,6 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
-    if (hasScribbleValidationErrors) {
-      toast.error('Please fix validation errors before adding a bid.');
-      return;
-    }
     const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
 
     tryAddEntry({
@@ -658,8 +704,113 @@ const AuctionsPage = () => {
     setExtraRate('');
   };
 
+  // Unified Add Bid: use selected contact (name + mark) or scribble mark only — fast path for live auction
+  const handleUnifiedAdd = () => {
+    const entryRate = parseInt(rate);
+    const entryQty = parseInt(qty);
+    if (!rate || !qty || entryRate <= 0 || entryQty <= 0) return;
+    const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
+
+    hapticImpact();
+
+    if (selectedBuyer) {
+      tryAddEntry({
+        buyerName: selectedBuyer.name,
+        buyerMark: selectedBuyer.mark || selectedBuyer.name.charAt(0),
+        buyerContactId: selectedBuyer.contact_id,
+        rate: entryRate,
+        quantity: entryQty,
+        amount: entryRate * entryQty,
+        isSelfSale: false,
+        isScribble: false,
+        tokenAdvance: 0,
+        extraRate: extra,
+        presetApplied: preset,
+        presetType,
+        sellerRate: calcSellerRate(entryRate, preset, presetType),
+        buyerRate: entryRate,
+      });
+      setSelectedBuyer(null);
+    } else if (scribbleMark.trim()) {
+      tryAddEntry({
+        buyerName: `[${scribbleMark}]`,
+        buyerMark: scribbleMark,
+        buyerContactId: null,
+        rate: entryRate,
+        quantity: entryQty,
+        amount: entryRate * entryQty,
+        isSelfSale: false,
+        isScribble: true,
+        tokenAdvance: 0,
+        extraRate: extra,
+        presetApplied: preset,
+        presetType,
+        sellerRate: calcSellerRate(entryRate, preset, presetType),
+        buyerRate: entryRate,
+      });
+    } else return;
+
+    setScribbleMark('');
+    setRate('');
+    setQty('');
+    setExtraRate('');
+  };
+
+  const updateActiveNumpadField = (next: string) => {
+    if (activeNumpadField === 'rate') setRate(next);
+    else if (activeNumpadField === 'qty') setQty(next);
+    else setExtraRate(next);
+  };
+
+  const getCurrentNumpadValue = () => {
+    if (activeNumpadField === 'rate') return rate;
+    if (activeNumpadField === 'qty') return qty;
+    return extraRate;
+  };
+
+  const handleNumpadKey = (key: string) => {
+    const current = getCurrentNumpadValue();
+    if (key >= '0' && key <= '9') {
+      updateActiveNumpadField(`${current}${key}`.slice(0, 8));
+      return;
+    }
+    if (key === '.') {
+      if (activeNumpadField === 'rate' || activeNumpadField === 'extraRate') {
+        // Fast entry helper: dot key appends double-zero for rates.
+        updateActiveNumpadField(`${current}00`.slice(0, 8));
+      }
+      return;
+    }
+    if (key === '+') {
+      const n = parseInt(String(current || '0'), 10) || 0;
+      updateActiveNumpadField(String(n + 1));
+      return;
+    }
+    if (key === '*') {
+      const n = parseInt(String(current || '0'), 10) || 0;
+      updateActiveNumpadField(String(n * 10));
+    }
+  };
+
+  const handleNumpadBackspace = () => {
+    const current = getCurrentNumpadValue();
+    updateActiveNumpadField(String(current).slice(0, -1));
+  };
+
+  const handleNumpadClear = () => {
+    updateActiveNumpadField('');
+  };
+
+  const handleOpenSystemKeyboard = () => {
+    setMobileKeyboardEnabled(true);
+    if (activeNumpadField === 'rate') rateInputRef.current?.focus();
+    else if (activeNumpadField === 'qty') qtyInputRef.current?.focus();
+    else extraRateInputRef.current?.focus();
+  };
+
   const handleSelfSale = () => {
     if (remaining <= 0 || !selectedLot) return;
+    hapticImpact();
     const currentRate = highestBid || parseInt(rate) || 0;
     tryAddEntry({
       buyerName: 'Self Sale',
@@ -677,6 +828,29 @@ const AuctionsPage = () => {
       sellerRate: currentRate,
       buyerRate: currentRate,
     });
+  };
+
+  const handleSaveAndCompleteAuction = async () => {
+    if (!selectedLot) return;
+    setCompleteLoading(true);
+    if (!can('Auctions / Sales', 'Approve')) {
+      toast.error('You do not have permission to complete auctions.');
+      setCompleteLoading(false);
+      return;
+    }
+    try {
+      await auctionApi.completeAuction(selectedLot.lot_id);
+      clearDraft();
+      setShowLotSelector(true);
+      setSelectedLot(null);
+      setEntries([]);
+      loadLots();
+      toast.success(remaining > 0 ? 'Auction saved (partial). Navigate to Logistics or Weighing.' : 'Auction saved! Navigate to Logistics or Weighing.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to complete auction');
+    } finally {
+      setCompleteLoading(false);
+    }
   };
 
   const removeEntry = useCallback(async (id: string) => {
@@ -699,10 +873,6 @@ const AuctionsPage = () => {
       toast.error('You do not have permission to edit auction bids.');
       return;
     }
-    if (isTokenAdvanceFieldInvalid(amount)) {
-      toast.error('Token advance must be between ₹0 and ₹10,00,000.');
-      return;
-    }
     try {
       const session = await auctionApi.updateBid(selectedLot.lot_id, Number(id), { token_advance: amount });
       setEntries(session.entries.map(sessionEntryToSaleEntry));
@@ -712,7 +882,11 @@ const AuctionsPage = () => {
     }
   }, [selectedLot]);
 
-  const applyPreset = (value: number) => setPreset(prev => prev === value ? 0 : value);
+  const applyPreset = (value: number) => {
+    const next = preset === value ? 0 : value;
+    setPreset(next);
+    if (next !== 0) setPresetType(value >= 0 ? 'PROFIT' : 'LOSS');
+  };
 
   const selectLot = useCallback((lot: LotInfo) => {
     setSelectedLot(lot);
@@ -727,7 +901,14 @@ const AuctionsPage = () => {
       .getOrStartSession(lot.lot_id)
       .then((session: AuctionSessionDTO) => {
         const info = lotSummaryToLotInfo(session.lot);
-        setSelectedLot(info);
+        // Keep seller/vehicle/commodity from list lot if session.lot has empty (backend may omit in some paths)
+        setSelectedLot({
+          ...info,
+          seller_name: info.seller_name || lot.seller_name || '',
+          seller_mark: info.seller_mark || lot.seller_mark || '',
+          vehicle_number: info.vehicle_number || lot.vehicle_number || '',
+          commodity_name: info.commodity_name || lot.commodity_name || '',
+        });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
       })
       .catch(() => toast.error('Failed to load session'))
@@ -737,6 +918,8 @@ const AuctionsPage = () => {
   const goBackToSelector = () => {
     // Don't clear entries — they're auto-saved
     setShowLotSelector(true);
+    // Refetch lots so status (Available / Pending / Partial / Sold) is up to date
+    loadLots();
   };
 
   // ═══ LOT SELECTOR SCREEN ═══
@@ -775,11 +958,8 @@ const AuctionsPage = () => {
                   placeholder="Search lot, seller, vehicle…"
                   value={lotSearchQuery}
                   onChange={e => setLotSearchQuery(e.target.value)}
-                  maxLength={50}
-                  className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30",
-                    isLotSearchInvalid && "border-red-400 ring-2 ring-red-400/30")}
+                  className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
                 />
-                {isLotSearchInvalid && <p className="text-[9px] text-red-300 mt-0.5 ml-1">⚠ Max 50 characters</p>}
               </div>
               {/* Lot Number search */}
               <div className="relative">
@@ -787,12 +967,9 @@ const AuctionsPage = () => {
                 <input
                   placeholder="Search by Lot Number…"
                   value={lotNumberSearch}
-                  onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-                  maxLength={4}
-                  className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30",
-                    isLotNumberSearchInvalid && "border-red-400 ring-2 ring-red-400/30")}
+                  onChange={e => setLotNumberSearch(e.target.value)}
+                  className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
                 />
-                {isLotNumberSearchInvalid && <p className="text-[9px] text-red-300 mt-0.5 ml-1">⚠ Numeric, 1–9999</p>}
               </div>
             </div>
           </div>
@@ -814,12 +991,9 @@ const AuctionsPage = () => {
                   <input
                     placeholder="Lot Number…"
                     value={lotNumberSearch}
-                    onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-                    maxLength={4}
-                    className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50",
-                      isLotNumberSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                    onChange={e => setLotNumberSearch(e.target.value)}
+                    className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
                   />
-                  {isLotNumberSearchInvalid && <p className="text-[9px] text-red-500 mt-0.5 ml-1">⚠ Numeric, 1–9999</p>}
                 </div>
                 <div className="relative w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -827,11 +1001,8 @@ const AuctionsPage = () => {
                     placeholder="Search lot, seller, vehicle…"
                     value={lotSearchQuery}
                     onChange={e => setLotSearchQuery(e.target.value)}
-                    maxLength={50}
-                    className={cn("w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50",
-                      isLotSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                    className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
                   />
-                  {isLotSearchInvalid && <p className="text-[9px] text-red-500 mt-0.5 ml-1">⚠ Max 50 characters</p>}
                 </div>
               </div>
             </div>
@@ -945,14 +1116,17 @@ const AuctionsPage = () => {
             ))
           )}
         </div>
-        <BottomNav />
+        {isDesktop && <BottomNav />}
       </div>
     );
   }
 
   // ═══ SALES PAD (AUCTION) SCREEN ═══
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+    <div className={cn(
+      "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
+      isDesktop ? "pb-28" : showExtraRate ? "pb-[38rem]" : "pb-[34rem]"
+    )}>
       {/* Mobile Header */}
       {!isDesktop && (
       <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
@@ -1004,7 +1178,7 @@ const AuctionsPage = () => {
               {[
                 { icon: User, label: 'Seller', value: selectedLot.seller_name },
                 { icon: Truck, label: 'Vehicle', value: selectedLot.vehicle_number },
-                { icon: Package, label: 'Lot', value: `${selectedLot.lot_name} • ${selectedLot.commodity_name}` },
+                { icon: Package, label: 'Lot', value: formatLotDisplayName(selectedLot) },
                 { icon: ShoppingCart, label: 'Bags', value: `${remaining}/${selectedLot.bag_count}${selectedLot.was_modified ? '*' : ''}` },
               ].map((item) => (
                 <div key={item.label} className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
@@ -1035,7 +1209,7 @@ const AuctionsPage = () => {
                 <Gavel className="w-5 h-5 text-blue-500" /> Sales Pad — Live Auction
               </h2>
               <p className="text-sm text-muted-foreground">
-                {selectedLot ? `${selectedLot.lot_name} · ${selectedLot.seller_name} · ${selectedLot.commodity_name}` : 'No lot selected'}
+                {selectedLot ? formatLotDisplayName(selectedLot) : 'No lot selected'}
                 {selectedLot && <span className="ml-2 text-primary font-medium">({currentLotIndex + 1}/{availableLots.length})</span>}
               </p>
             </div>
@@ -1095,11 +1269,8 @@ const AuctionsPage = () => {
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Quick Lot Navigation</p>
                 <div className="relative w-40">
                   <Hash className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                  <input placeholder="Lot #" value={lotNumberSearch}
-                    onChange={e => setLotNumberSearch(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-                    maxLength={4}
-                    className={cn("w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50",
-                      isLotNumberSearchInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
+                  <input placeholder="Lot #" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
+                    className="w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50" />
                 </div>
               </div>
               <div className="space-y-1">
@@ -1115,10 +1286,8 @@ const AuctionsPage = () => {
                       className={cn("w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs transition-all",
                         isActive ? 'bg-primary/15 ring-1 ring-primary/30' : 'hover:bg-muted/50')}>
                       <span className={cn("w-2 h-2 rounded-full flex-shrink-0", cfg.dot)} />
-                      <span className={cn("font-semibold truncate flex-1", isActive ? 'text-primary' : 'text-foreground')}>{lot.lot_name}</span>
-                      <span className="text-muted-foreground truncate max-w-[80px]">{lot.seller_name}</span>
+                      <span className={cn("font-semibold truncate flex-1", isActive ? 'text-primary' : 'text-foreground')}>{formatLotDisplayName(lot)}</span>
                       <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-bold", cfg.bg, cfg.text)}>{cfg.label}</span>
-                      <span className="text-muted-foreground font-medium">{lot.bag_count}</span>
                     </button>
                   );
                 })}
@@ -1128,239 +1297,286 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <div className="px-4 mt-4 space-y-3">
-        {/* REQ-AUC-003: Preset & Toggle Bar with Profit/Loss */}
+      <div className="px-4 mt-4 flex flex-col gap-3">
+        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
+        {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
             <button
+              type="button"
               onClick={() => setShowExtraRate(!showExtraRate)}
               className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
                 showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
               )}
+              aria-pressed={showExtraRate}
             >
               {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
               Extra Rate
             </button>
           </div>
 
-          {/* Preset Type Toggle (Profit / Loss) */}
-          <div className="flex gap-2 mb-3">
-            <button onClick={() => setPresetType('PROFIT')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                presetType === 'PROFIT'
-                  ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
-                  : 'bg-muted/40 text-muted-foreground')}>
-              <TrendingUp className="w-3.5 h-3.5" /> Profit
-            </button>
-            <button onClick={() => setPresetType('LOSS')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all",
-                presetType === 'LOSS'
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/20'
-                  : 'bg-muted/40 text-muted-foreground')}>
-              <TrendingDown className="w-3.5 h-3.5" /> Loss
-            </button>
-          </div>
-
           <div className="flex items-center gap-2">
-            {presetButtons.map(val => (
+            {presetOptions.map((opt) => (
               <button
-                key={val}
-                onClick={() => applyPreset(val)}
+                key={opt.label + String(opt.value)}
+                type="button"
+                onClick={() => applyPreset(opt.value)}
                 className={cn(
                   'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
-                  preset === val
-                    ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md shadow-primary/20'
-                    : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'
+                  preset === opt.value
+                    ? opt.value >= 0
+                      ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
+                      : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
+                    : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                  preset !== opt.value && opt.value >= 0 && 'text-success',
+                  preset !== opt.value && opt.value < 0 && 'text-destructive'
                 )}
               >
-                {presetType === 'PROFIT' ? '−' : '+'}{val}
+                {opt.label}
               </button>
             ))}
             <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
               <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
-              <span className="text-sm font-bold text-foreground">{preset}</span>
+              <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
             </div>
           </div>
-          {preset > 0 && highestBid > 0 && (
+          {preset !== 0 && highestBid > 0 && (
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
               Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
-              <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-amber-500')}>
+              <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                 ₹{calcSellerRate(highestBid, preset, presetType)}
               </span>
-              <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${preset}`})</span>
+              <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
             </motion.p>
           )}
         </motion.div>
+        )}
 
-        {/* Entry Form with Inline Scribble */}
+        {/* Entry Form — buyer select/search + bid entry (desktop only) */}
+        {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-2xl p-3 space-y-3">
-          {/* Entry mode tabs */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setEntryMode('scribble')}
-              className={cn('flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all',
-                entryMode === 'scribble'
-                  ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-md shadow-violet-500/20'
-                  : 'bg-muted/40 text-muted-foreground')}
-            >
-              <PenLine className="w-3.5 h-3.5" /> Scribble Pad
-            </button>
-            <button
-              onClick={() => setEntryMode('search')}
-              className={cn('flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all',
-                entryMode === 'search'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md shadow-primary/20'
-                  : 'bg-muted/40 text-muted-foreground')}
-            >
-              <Search className="w-3.5 h-3.5" /> Search Buyer
-            </button>
-          </div>
-
-          <AnimatePresence mode="wait">
-            {entryMode === 'scribble' ? (
-              <motion.div key="scribble" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
-                <div className={cn("grid gap-3", isDesktop ? "grid-cols-[1fr_280px]" : "grid-cols-1")}>
+          <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[1fr_280px]' : 'grid-cols-1')}>
+            <div className="space-y-2">
+              {isDesktop ? (
+                <>
                   <InlineScribblePad
-                    onMarkDetected={setScribbleMark}
-                    canvasHeight={isDesktop ? 120 : 140}
+                    onMarkDetected={(mark) => { setScribbleMark(mark); setSelectedBuyer(null); }}
+                    canvasHeight={280}
+                    resetTrigger={scribblePadResetTrigger}
                   />
-                  <div className="space-y-2">
-                    {scribbleMark && (
-                      <div className="flex items-center gap-2">
-                        <span className={cn("text-[9px] font-semibold uppercase", isBuyerMarkInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                          Mark: {isBuyerMarkInvalid && "⚠ Max 50, alphanumeric + spaces"}
-                        </span>
-                        <span className={cn("px-2.5 py-1 rounded-lg text-white text-sm font-bold shadow-sm",
-                          isBuyerMarkInvalid ? "bg-red-500" : "bg-gradient-to-r from-violet-500 to-fuchsia-500"
-                        )}>{scribbleMark}</span>
+                  <Input
+                    type="text"
+                    value={scribbleMark}
+                    onChange={(e) => {
+                      const v = e.target.value.toUpperCase().slice(0, 10);
+                      setScribbleMark(v);
+                      setSelectedBuyer(null);
+                    }}
+                    placeholder="Or type mark / name to search…"
+                    className="h-10 rounded-xl text-sm font-medium bg-muted/20 border-violet-400/20"
+                  />
+                </>
+              ) : null}
+              {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
+              {isDesktop && (
+              <div className="space-y-2">
+                {/* Row 1: Contacts — green. Stays visible even when no match. */}
+                <div>
+                  <div
+                    ref={contactScrollRef}
+                    role="region"
+                    aria-label="Contacts"
+                    tabIndex={0}
+                    {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
+                    className="overflow-x-auto overflow-y-hidden flex gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    style={{
+                      scrollbarWidth: 'thin',
+                      WebkitOverflowScrolling: 'touch',
+                      overscrollBehaviorX: 'contain',
+                    }}
+                  >
+                    {filteredContacts.length > 0 ? (
+                      filteredContacts.slice(0, 50).map((b) => (
+                        <button
+                          key={b.contact_id}
+                          type="button"
+                          onClick={(e) => {
+                            if (didDragContactRef.current) {
+                              e.preventDefault();
+                              return;
+                            }
+                            hapticSelection();
+                            hideNativeKeyboard();
+                            setSelectedBuyer(b);
+                            setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
+                            setScribblePadResetTrigger((t) => t + 1);
+                          }}
+                          className={cn(
+                            'flex-shrink-0 pl-2 pr-3 py-2 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-2',
+                            selectedBuyer?.contact_id === b.contact_id
+                              ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                              : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                          )}
+                        >
+                          <span className={cn(
+                            'w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+                            selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                          )}>
+                            {b.mark || b.name.charAt(0)}
+                          </span>
+                          <span className="text-xs font-semibold truncate max-w-[90px]">{b.name}</span>
+                          {b.mark && <span className="text-[10px] opacity-90 flex-shrink-0">({b.mark})</span>}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="flex-shrink-0 px-4 py-2 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                        No matching contact
                       </div>
                     )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                          Rate (₹) {isRateInvalid && "⚠ 0.01–10,00,000"}
-                        </label>
-                        <Input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={highestBid ? String(highestBid) : '0'}
-                          min={0.01} max={1000000} step="0.01"
-                          className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", isRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                      </div>
-                      <div>
-                        <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isQtyInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                          Qty (Bags) {isQtyInvalid ? "⚠ Must be ≥ 1" : isQtyExceedsRemaining ? "⚠ Exceeds remaining" : ""}
-                        </label>
-                        <Input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
-                          min={1} max={1000000}
-                          className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", (isQtyInvalid || isQtyExceedsRemaining) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                      </div>
-                    </div>
-                    <AnimatePresence>
-                      {showExtraRate && (
-                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
-                          <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isExtraRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Extra Rate (₹) {isExtraRateInvalid && "⚠ 0–10,00,000"}
-                          </label>
-                          <Input type="number" value={extraRate} onChange={e => setExtraRate(e.target.value)} placeholder="0"
-                            min={0} max={1000000} step="0.01"
-                            className={cn("h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30", isExtraRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                    <div className="flex gap-2">
-                      <Button onClick={handleScribbleInlineAdd}
-                        disabled={!scribbleMark || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0 || hasScribbleValidationErrors}
-                        className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20">
-                        <Plus className="w-4 h-4 mr-1" /> Add Bid
-                      </Button>
-                      <Button onClick={handleSelfSale} disabled={remaining <= 0}
-                        variant="outline" className="h-11 rounded-xl px-4 border-amber-400/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
-                        Self Sale
-                      </Button>
-                    </div>
                   </div>
                 </div>
-              </motion.div>
-            ) : (
-              <motion.div key="search" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}>
-                <div className="relative">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      placeholder={selectedBuyer ? `${selectedBuyer.name} ${selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}` : 'Search buyer by name, phone, mark…'}
-                      value={buyerSearch}
-                      onChange={e => { setBuyerSearch(e.target.value); setShowBuyerDropdown(true); if (selectedBuyer) setSelectedBuyer(null); }}
-                      onFocus={() => setShowBuyerDropdown(true)}
-                      className={cn(
-                        "w-full h-11 rounded-xl bg-muted/30 border border-border/50 pl-10 pr-3 text-sm focus:outline-none focus:border-primary/50",
-                        selectedBuyer ? 'text-foreground font-medium' : 'text-muted-foreground'
-                      )}
-                    />
-                    {selectedBuyer && (
-                      <button onClick={() => { setSelectedBuyer(null); setBuyerSearch(''); }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+
+                {/* Row 2: Existing auction marks — grey. Stays visible even when no mark. */}
+                <div>
+                  <div
+                    ref={markScrollRef}
+                    role="region"
+                    aria-label="Auction marks"
+                    tabIndex={0}
+                    {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
+                    className="overflow-x-auto overflow-y-hidden flex gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    style={{
+                      scrollbarWidth: 'thin',
+                      WebkitOverflowScrolling: 'touch',
+                      overscrollBehaviorX: 'contain',
+                    }}
+                  >
+                    {existingAuctionMarks.length > 0 ? (
+                      existingAuctionMarks.slice(0, 50).map((mark) => {
+                        const isSelected = !selectedBuyer && scribbleMark === mark;
+                        return (
+                          <button
+                            key={mark}
+                            type="button"
+                            onClick={(e) => {
+                              if (didDragMarkRef.current) {
+                                e.preventDefault();
+                                return;
+                              }
+                              hapticSelection();
+                              hideNativeKeyboard();
+                              setSelectedBuyer(null);
+                              setScribbleMark(mark);
+                              setScribblePadResetTrigger((t) => t + 1);
+                            }}
+                            className={cn(
+                              'flex-shrink-0 pl-2 pr-3 py-2 rounded-xl text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-2',
+                              isSelected
+                                ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                                : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                            )}
+                          >
+                            <span className={cn(
+                              'w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+                              isSelected ? 'bg-white/20' : 'bg-gray-400/20 text-gray-600 dark:text-gray-400'
+                            )}>
+                              {mark}
+                            </span>
+                            <span className="text-xs font-semibold">{mark}</span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="flex-shrink-0 px-4 py-2 rounded-xl border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-xs font-medium">
+                        No mark in this session
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              )}
+              {(scribbleMark || selectedBuyer) && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selectedBuyer ? (
+                    <>
+                      <span className="text-[9px] font-semibold text-muted-foreground uppercase">Buyer:</span>
+                      <span className="px-2.5 py-1 rounded-lg bg-primary/15 text-primary text-sm font-bold border border-primary/30">
+                        {selectedBuyer.name} {selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}
+                      </span>
+                      <button type="button" onClick={() => { setSelectedBuyer(null); setScribbleMark(''); }} className="text-muted-foreground hover:text-foreground p-0.5">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    )}
-                  </div>
-                  <AnimatePresence>
-                    {showBuyerDropdown && filteredBuyers.length > 0 && !selectedBuyer && (
-                      <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-12 left-0 right-0 z-20 bg-card border border-border/50 rounded-xl shadow-xl max-h-40 overflow-y-auto">
-                        {filteredBuyers.slice(0, 8).map(b => (
-                          <button key={b.contact_id} onClick={() => {
-                            setSelectedBuyer(b);
-                            setBuyerSearch('');
-                            setShowBuyerDropdown(false);
-                          }}
-                            className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0">
-                            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center flex-shrink-0">
-                              <span className="text-white text-[10px] font-bold">{b.mark || b.name.charAt(0)}</span>
-                            </div>
-                            <span className="text-foreground">{b.name}</span>
-                            {b.mark && <span className="text-muted-foreground text-xs">({b.mark})</span>}
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div>
-                    <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                      Rate (₹) {isRateInvalid && "⚠ 0.01–10,00,000"}
-                    </label>
-                    <Input type="number" value={rate} onChange={e => setRate(e.target.value)} placeholder={highestBid ? String(highestBid) : '0'}
-                      min={0.01} max={1000000} step="0.01"
-                      className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", isRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                  </div>
-                  <div>
-                    <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isQtyInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                      Qty (Bags) {isQtyInvalid ? "⚠ Must be ≥ 1" : isQtyExceedsRemaining ? "⚠ Exceeds remaining" : ""}
-                    </label>
-                    <Input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0"
-                      min={1} max={1000000}
-                      className={cn("h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20", (isQtyInvalid || isQtyExceedsRemaining) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                  </div>
-                </div>
-
-                <AnimatePresence>
-                  {showExtraRate && (
-                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mt-3">
-                      <label className={cn("text-[9px] font-semibold uppercase mb-0.5 block", isExtraRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                        Extra Rate (₹) {isExtraRateInvalid && "⚠ 0–10,00,000"}
-                      </label>
-                      <Input type="number" value={extraRate} onChange={e => setExtraRate(e.target.value)} placeholder="0"
-                        min={0} max={1000000} step="0.01"
-                        className={cn("h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30", isExtraRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} />
-                    </motion.div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[9px] font-semibold text-muted-foreground uppercase">Mark:</span>
+                      <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold shadow-sm">{scribbleMark}</span>
+                    </>
                   )}
-                </AnimatePresence>
+                </div>
+              )}
+            </div>
 
-                <div className="flex gap-2 mt-3">
-                  <Button onClick={handleFormSubmit}
-                    disabled={!selectedBuyer || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0 || hasSearchValidationErrors}
-                    className="flex-1 h-11 rounded-xl bg-gradient-to-r from-primary to-accent text-white font-semibold shadow-md shadow-primary/20">
+            <div className={cn("space-y-2", !isDesktop && "hidden")}>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
+                  <Input
+                    ref={rateInputRef}
+                    type="number"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                    onFocus={(e) => {
+                      setActiveNumpadField('rate');
+                      if (isTouchLayout && !mobileKeyboardEnabled) {
+                        e.currentTarget.blur();
+                        hideNativeKeyboard();
+                      }
+                    }}
+                    onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
+                    readOnly={isTouchLayout && !mobileKeyboardEnabled}
+                    inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
+                    placeholder={highestBid ? String(highestBid) : '0'}
+                    className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
+                  <Input
+                    ref={qtyInputRef}
+                    type="number"
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    onFocus={(e) => {
+                      setActiveNumpadField('qty');
+                      if (isTouchLayout && !mobileKeyboardEnabled) {
+                        e.currentTarget.blur();
+                        hideNativeKeyboard();
+                      }
+                    }}
+                    onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
+                    readOnly={isTouchLayout && !mobileKeyboardEnabled}
+                    inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
+                    placeholder="0"
+                    className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                </div>
+              </div>
+              <AnimatePresence>
+                {showExtraRate && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
+                    <Input type="number" value={extraRate} onChange={(e) => setExtraRate(e.target.value)} placeholder="0"
+                      className="h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {isDesktop && (
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleUnifiedAdd}
+                    disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                    className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
+                  >
                     <Plus className="w-4 h-4 mr-1" /> Add Bid
                   </Button>
                   <Button onClick={handleSelfSale} disabled={remaining <= 0}
@@ -1368,13 +1584,14 @@ const AuctionsPage = () => {
                     Self Sale
                   </Button>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              )}
+            </div>
+          </div>
         </motion.div>
+        )}
 
         {/* Auction Grid — entries list */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className={cn(!isDesktop && "order-2")}>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Auction Grid · {entries.length} entries
@@ -1392,7 +1609,7 @@ const AuctionsPage = () => {
               <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className={cn("space-y-2", !isDesktop && "max-h-[34dvh] overflow-y-auto pr-1")}>
               {entries.map((entry, i) => (
                 <motion.div
                   key={entry.id}
@@ -1431,8 +1648,8 @@ const AuctionsPage = () => {
                         <span>₹{entry.rate}/bag</span>
                         <span>{entry.quantity} bags</span>
                         {entry.extraRate > 0 && showExtraRate && <span className="text-amber-500">+₹{entry.extraRate}</span>}
-                        {entry.presetApplied > 0 && !entry.isSelfSale && (
-                          <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-amber-500')}>
+                        {entry.presetApplied !== 0 && !entry.isSelfSale && (
+                          <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                             SR: ₹{entry.sellerRate}
                           </span>
                         )}
@@ -1463,27 +1680,9 @@ const AuctionsPage = () => {
                             type="number"
                             defaultValue={entry.tokenAdvance || ''}
                             placeholder="0"
-                            min={0}
-                            max={1000000}
                             className="h-8 rounded-lg text-xs text-center flex-1"
-                            onBlur={e => {
-                              const v = parseInt(e.target.value) || 0;
-                              if (isTokenAdvanceFieldInvalid(v)) {
-                                toast.error('Token advance must be between ₹0 and ₹10,00,000.');
-                                return;
-                              }
-                              setTokenAdvanceAmount(entry.id, v);
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                const v = parseInt((e.target as HTMLInputElement).value) || 0;
-                                if (isTokenAdvanceFieldInvalid(v)) {
-                                  toast.error('Token advance must be between ₹0 and ₹10,00,000.');
-                                  return;
-                                }
-                                setTokenAdvanceAmount(entry.id, v);
-                              }
-                            }}
+                            onBlur={e => setTokenAdvanceAmount(entry.id, parseInt(e.target.value) || 0)}
+                            onKeyDown={e => { if (e.key === 'Enter') setTokenAdvanceAmount(entry.id, parseInt((e.target as HTMLInputElement).value) || 0); }}
                           />
                           {entry.tokenAdvance > 0 && <span className="text-[10px] text-success font-semibold">✓ ₹{entry.tokenAdvance}</span>}
                         </div>
@@ -1498,7 +1697,7 @@ const AuctionsPage = () => {
 
         {/* Remaining indicator */}
         {entries.length > 0 && selectedLot && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-card rounded-2xl p-3">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn("glass-card rounded-2xl p-3", !isDesktop && "order-1")}>
             <div className="flex items-center justify-between text-sm mb-2">
               <span className="text-muted-foreground">Sold</span>
               <span className="font-bold text-foreground">
@@ -1512,40 +1711,352 @@ const AuctionsPage = () => {
                 className={cn('h-full rounded-full', totalSold >= selectedLot.bag_count ? 'bg-success' : 'bg-gradient-to-r from-primary to-accent')}
               />
             </div>
-            {remaining > 0 && <p className="text-[10px] text-muted-foreground mt-1">{remaining} bags remaining</p>}
+            {remaining > 0 && (
+              <>
+                <p className="text-[10px] text-muted-foreground mt-1">{remaining} bags remaining</p>
+                {isDesktop && (
+                  <Button
+                    disabled={completeLoading}
+                    onClick={handleSaveAndCompleteAuction}
+                    className="mt-2 w-full h-10 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-sm shadow-md">
+                    {completeLoading ? 'Completing…' : `✓ Save & Complete (${remaining} unsold)`}
+                  </Button>
+                )}
+              </>
+            )}
             {remaining <= 0 && (
               <>
                 <p className="text-[10px] text-success font-semibold mt-1">✓ All bags sold!</p>
-                <Button
-                  disabled={completeLoading}
-                  onClick={async () => {
-                    if (!selectedLot) return;
-                    setCompleteLoading(true);
-                    if (!can('Auctions / Sales', 'Approve')) {
-                      toast.error('You do not have permission to complete auctions.');
-                      return;
-                    }
-                    try {
-                      await auctionApi.completeAuction(selectedLot.lot_id);
-                      clearDraft();
-                      setShowLotSelector(true);
-                      setSelectedLot(null);
-                      setEntries([]);
-                      toast.success('Auction saved! Navigate to Logistics or Weighing.');
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : 'Failed to complete auction');
-                    } finally {
-                      setCompleteLoading(false);
-                    }
-                  }}
-                  className="mt-2 w-full h-10 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-sm shadow-md">
-                  {completeLoading ? 'Completing…' : '✓ Save & Complete Auction'}
-                </Button>
+                {isDesktop && (
+                  <Button
+                    disabled={completeLoading}
+                    onClick={handleSaveAndCompleteAuction}
+                    className="mt-2 w-full h-10 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-sm shadow-md">
+                    {completeLoading ? 'Completing…' : '✓ Save & Complete Auction'}
+                  </Button>
+                )}
               </>
             )}
           </motion.div>
         )}
+
+        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
+        {!isDesktop && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3 order-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
+              <button
+                type="button"
+                onClick={() => setShowExtraRate(!showExtraRate)}
+                className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
+                  showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
+                )}
+                aria-pressed={showExtraRate}
+              >
+                {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                Extra Rate
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {presetOptions.map((opt) => (
+                <button
+                  key={opt.label + String(opt.value)}
+                  type="button"
+                  onClick={() => applyPreset(opt.value)}
+                  className={cn(
+                    'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
+                    preset === opt.value
+                      ? opt.value >= 0
+                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
+                      : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                    preset !== opt.value && opt.value >= 0 && 'text-success',
+                    preset !== opt.value && opt.value < 0 && 'text-destructive'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
+                <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
+                <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
+              </div>
+            </div>
+            {preset !== 0 && highestBid > 0 && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
+                Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
+                <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
+                  ₹{calcSellerRate(highestBid, preset, presetType)}
+                </span>
+                <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
+              </motion.p>
+            )}
+          </motion.div>
+        )}
       </div>
+
+      {/* Mobile/Tablet Dock: left scribble pad, right numpad. Fast entry; default keyboard stays disabled. */}
+      {!isDesktop && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="space-y-2 mb-2">
+            <div
+              ref={contactScrollRef}
+              role="region"
+              aria-label="Contacts"
+              tabIndex={0}
+              {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
+              className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+              style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
+            >
+              {filteredContacts.length > 0 ? (
+                filteredContacts.slice(0, 50).map((b) => (
+                  <button
+                    key={b.contact_id}
+                    type="button"
+                    onClick={(e) => {
+                      if (didDragContactRef.current) { e.preventDefault(); return; }
+                      hapticSelection();
+                      hideNativeKeyboard();
+                      setSelectedBuyer(b);
+                      setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
+                      setScribblePadResetTrigger((t) => t + 1);
+                    }}
+                    className={cn(
+                      'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1.5',
+                      selectedBuyer?.contact_id === b.contact_id
+                        ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                        : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                    )}
+                  >
+                    <span className={cn(
+                      'w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold flex-shrink-0',
+                      selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                    )}>
+                      {b.mark || b.name.charAt(0)}
+                    </span>
+                    <span className="text-[11px] font-semibold truncate max-w-[80px]">{b.name}</span>
+                    {b.mark && <span className="text-[9px] opacity-90 flex-shrink-0">({b.mark})</span>}
+                  </button>
+                ))
+              ) : (
+                <div className="flex-shrink-0 px-3 py-1.5 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-[10px] font-medium">
+                  No matching contact
+                </div>
+              )}
+            </div>
+            <div
+              ref={markScrollRef}
+              role="region"
+              aria-label="Auction marks"
+              tabIndex={0}
+              {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
+              className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+              style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
+            >
+              {existingAuctionMarks.length > 0 ? (
+                existingAuctionMarks.slice(0, 50).map((mark) => {
+                  const isSelected = !selectedBuyer && scribbleMark === mark;
+                  return (
+                    <button
+                      key={mark}
+                      type="button"
+                      onClick={(e) => {
+                        if (didDragMarkRef.current) { e.preventDefault(); return; }
+                        hapticSelection();
+                        hideNativeKeyboard();
+                        setSelectedBuyer(null);
+                        setScribbleMark(mark);
+                        setScribblePadResetTrigger((t) => t + 1);
+                      }}
+                      className={cn(
+                        'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-xl text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-1.5',
+                        isSelected ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary' : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                      )}
+                    >
+                      <span className={cn(
+                        'w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold flex-shrink-0',
+                        isSelected ? 'bg-white/20' : 'bg-gray-400/20 text-gray-600 dark:text-gray-400'
+                      )}>
+                        {mark}
+                      </span>
+                      <span className="text-[11px] font-semibold">{mark}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="flex-shrink-0 px-3 py-1.5 rounded-xl border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-[10px] font-medium">
+                  No mark in this session
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <Input
+              ref={rateInputRef}
+              type="number"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+              onFocus={(e) => {
+                setActiveNumpadField('rate');
+                if (!mobileKeyboardEnabled) {
+                  e.currentTarget.blur();
+                  hideNativeKeyboard();
+                }
+              }}
+              onBlur={() => setMobileKeyboardEnabled(false)}
+              readOnly={!mobileKeyboardEnabled}
+              inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+              placeholder={highestBid ? String(highestBid) : 'Rate'}
+              className={cn(
+                "h-10 rounded-xl text-center font-bold text-base bg-muted/20 border-primary/20",
+                activeNumpadField === 'rate' && "ring-1 ring-primary/40"
+              )}
+            />
+            <Input
+              ref={qtyInputRef}
+              type="number"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              onFocus={(e) => {
+                setActiveNumpadField('qty');
+                if (!mobileKeyboardEnabled) {
+                  e.currentTarget.blur();
+                  hideNativeKeyboard();
+                }
+              }}
+              onBlur={() => setMobileKeyboardEnabled(false)}
+              readOnly={!mobileKeyboardEnabled}
+              inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+              placeholder="Qty"
+              className={cn(
+                "h-10 rounded-xl text-center font-bold text-base bg-muted/20 border-primary/20",
+                activeNumpadField === 'qty' && "ring-1 ring-primary/40"
+              )}
+            />
+          </div>
+          <AnimatePresence>
+            {showExtraRate && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mb-2"
+              >
+                <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
+                <Input
+                  ref={extraRateInputRef}
+                  type="number"
+                  value={extraRate}
+                  onChange={(e) => setExtraRate(e.target.value)}
+                  onFocus={(e) => {
+                    setActiveNumpadField('extraRate');
+                    if (!mobileKeyboardEnabled) {
+                      e.currentTarget.blur();
+                      hideNativeKeyboard();
+                    }
+                  }}
+                  onBlur={() => setMobileKeyboardEnabled(false)}
+                  placeholder="0"
+                  readOnly={!mobileKeyboardEnabled}
+                  inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+                  className={cn(
+                    "h-10 rounded-xl text-center font-bold text-base bg-amber-500/10 border-amber-400/30",
+                    activeNumpadField === 'extraRate' && "ring-1 ring-amber-400"
+                  )}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="grid grid-cols-[1.4fr_1fr] gap-2 items-stretch">
+            <div className="rounded-2xl border border-violet-400/20 bg-card/80 p-1 h-full min-h-[19rem]">
+              <InlineScribblePad
+                onMarkDetected={(mark) => {
+                  setScribbleMark(mark);
+                  setSelectedBuyer(null);
+                }}
+                canvasHeight={280}
+                resetTrigger={scribblePadResetTrigger}
+                showStatus={false}
+                fillAvailableHeight
+                className="h-full"
+              />
+            </div>
+            <div className="rounded-2xl border border-primary/20 bg-card/80 p-2 space-y-2">
+              <div className="grid grid-cols-3 gap-1.5">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '*'].map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => handleNumpadKey(k)}
+                    className="h-9 rounded-lg bg-muted/50 hover:bg-muted text-sm font-bold text-foreground transition-colors"
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleNumpadKey('+')}
+                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenSystemKeyboard}
+                  className="h-9 rounded-lg bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-xs font-semibold"
+                >
+                  Keyboard
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleNumpadBackspace}
+                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                >
+                  {'<-'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNumpadClear}
+                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSelfSale}
+                  disabled={remaining <= 0}
+                  className="h-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold disabled:opacity-50"
+                >
+                  Self Sale
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUnifiedAdd}
+                  disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                  className="h-9 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-xs font-bold disabled:opacity-50"
+                >
+                  + Add Bid
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={completeLoading || entries.length === 0}
+                onClick={handleSaveAndCompleteAuction}
+                className="w-full h-9 rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {completeLoading ? 'Completing…' : 'Save & Complete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Scribble Pad */}
       <ScribblePad open={showScribble} onClose={() => setShowScribble(false)} onConfirm={handleScribbleConfirm} />
@@ -1611,7 +2122,7 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <BottomNav />
+      {isDesktop && <BottomNav />}
     </div>
   );
 };
@@ -1631,7 +2142,7 @@ const LotRow = ({ lot, onSelect }: { lot: LotInfo; onSelect: (lot: LotInfo) => v
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <p className="font-semibold text-sm text-foreground truncate">
-            {lot.lot_name}{lot.was_modified ? '*' : ''} — {lot.commodity_name}
+            {formatLotDisplayName(lot)}{lot.was_modified ? '*' : ''}
           </p>
           <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-1 flex-shrink-0", cfg.bg, cfg.text)}>
             <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
@@ -1639,7 +2150,7 @@ const LotRow = ({ lot, onSelect }: { lot: LotInfo; onSelect: (lot: LotInfo) => v
           </span>
         </div>
         <p className="text-xs text-muted-foreground truncate">
-          {lot.seller_name} {lot.seller_mark && `(${lot.seller_mark})`} · {lot.vehicle_number}
+          {lot.commodity_name}
         </p>
       </div>
       <div className="text-right flex-shrink-0">

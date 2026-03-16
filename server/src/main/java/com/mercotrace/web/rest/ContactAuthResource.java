@@ -8,11 +8,15 @@ import static com.mercotrace.security.SecurityUtils.TOKEN_TYPE_CONTACT;
 
 import com.mercotrace.domain.Contact;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.TraderRepository;
+import com.mercotrace.repository.UserRepository;
 import com.mercotrace.service.ContactOtpService;
 import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.service.mapper.ContactMapper;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
+import com.mercotrace.web.rest.errors.ConflictAlertException;
+import com.mercotrace.web.rest.errors.ErrorConstants;
 import com.mercotrace.web.rest.errors.ServiceUnavailableAlertException;
 import com.mercotrace.web.rest.errors.UnauthorizedAlertException;
 import com.mercotrace.web.rest.vm.ContactRegisterVM;
@@ -68,6 +72,8 @@ public class ContactAuthResource {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContactAuthResource.class);
 
+    private static final Set<String> ALLOWED_CONTACT_TYPES = Set.of("BUYER", "BROKER", "AGENT", "SELLER");
+
     private final ContactRepository contactRepository;
 
     private final ContactMapper contactMapper;
@@ -79,6 +85,12 @@ public class ContactAuthResource {
     private final ContactOtpService contactOtpService;
 
     private final ContactIdentityService contactIdentityService;
+
+    private final TraderRepository traderRepository;
+
+    private final UserRepository userRepository;
+
+    private final com.mercotrace.admin.identity.AdminUserRepository adminUserRepository;
 
     @Value("${jhipster.security.authentication.jwt.token-validity-in-seconds:0}")
     private long tokenValidityInSeconds;
@@ -98,7 +110,10 @@ public class ContactAuthResource {
         PasswordEncoder passwordEncoder,
         JwtEncoder jwtEncoder,
         ContactOtpService contactOtpService,
-        ContactIdentityService contactIdentityService
+        ContactIdentityService contactIdentityService,
+        TraderRepository traderRepository,
+        UserRepository userRepository,
+        com.mercotrace.admin.identity.AdminUserRepository adminUserRepository
     ) {
         this.contactRepository = contactRepository;
         this.contactMapper = contactMapper;
@@ -106,6 +121,9 @@ public class ContactAuthResource {
         this.jwtEncoder = jwtEncoder;
         this.contactOtpService = contactOtpService;
         this.contactIdentityService = contactIdentityService;
+        this.traderRepository = traderRepository;
+        this.userRepository = userRepository;
+        this.adminUserRepository = adminUserRepository;
     }
 
     /**
@@ -117,6 +135,7 @@ public class ContactAuthResource {
      * Optional:
      * - email
      * - name
+     * - type (required in UI; one of BUYER, BROKER, AGENT, SELLER)
      *
      * On success, returns ContactDTO and issues a CONTACT JWT via httpOnly cookie.
      */
@@ -128,6 +147,18 @@ public class ContactAuthResource {
         if (vm.getPassword() == null || vm.getPassword().length() < 6) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
         }
+
+        String rawType = vm.getType();
+        if (rawType == null || rawType.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contact type is required");
+        }
+        String normalizedType = rawType.trim().toUpperCase();
+        if (!ALLOWED_CONTACT_TYPES.contains(normalizedType)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid contact type");
+        }
+
+        // Ensure this phone number is not already used by any trader, trader staff user, or admin user.
+        assertPhoneAvailableForContactRegistration(phone);
 
         // Enforce uniqueness among login-capable contacts.
         contactIdentityService.assertNoLoginConflictForRegistration(phone, email);
@@ -145,6 +176,7 @@ public class ContactAuthResource {
         }
         contact.setPasswordHash(passwordEncoder.encode(vm.getPassword()));
         contact.setCanLogin(true);
+        contact.setType(normalizedType);
         if (contact.getCreatedAt() == null) {
             contact.setCreatedAt(Instant.now());
         }
@@ -246,6 +278,20 @@ public class ContactAuthResource {
 
         String phone = normalizePhone(identifier);
 
+        // If this mobile already belongs to any trader, trader staff user, or admin user,
+        // do not allow OTP-based guest login or OTP login via the contact portal.
+        boolean hasTraderByMobile = traderRepository.findOneByMobile(phone).isPresent();
+        boolean hasUserByMobile = userRepository.findOneByMobile(phone).isPresent();
+        boolean hasAdminByMobile = adminUserRepository.findOneByMobile(phone).isPresent();
+        if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile) {
+            throw new ConflictAlertException(
+                ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                "This mobile number is already in use.",
+                "contactPortal",
+                "contactPortal.phone.alreadyUsedByTrader"
+            );
+        }
+
         try {
             String clientIp = request.getRemoteAddr();
             contactOtpService.generateOtpForMobile(phone, clientIp);
@@ -310,6 +356,22 @@ public class ContactAuthResource {
             ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(false, phone, dto);
             return ResponseEntity.ok().headers(headers).body(body);
         } else {
+            // If this mobile already belongs to any trader, trader staff user, admin user, or contact,
+            // do not allow guest login for security reasons.
+            boolean hasTraderByMobile = traderRepository.findOneByMobile(phone).isPresent();
+            boolean hasUserByMobile = userRepository.findOneByMobile(phone).isPresent();
+            boolean hasAdminByMobile = adminUserRepository.findOneByMobile(phone).isPresent();
+            boolean hasAnyContact = contactRepository.findOneByPhone(phone).isPresent();
+
+            if (hasTraderByMobile || hasUserByMobile || hasAdminByMobile || hasAnyContact) {
+                throw new ConflictAlertException(
+                    ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                    "This mobile number is already in use.",
+                    "contactPortal",
+                    "contactPortal.phone.alreadyUsedByTrader"
+                );
+            }
+
             String jwt = createGuestContactToken(phone);
             HttpHeaders headers = buildAuthHeaders(jwt);
             ContactOtpVerifyResponseVM body = new ContactOtpVerifyResponseVM(true, phone, null);
@@ -409,6 +471,49 @@ public class ContactAuthResource {
         HttpHeaders headers = new HttpHeaders();
         headers.add(HttpHeaders.SET_COOKIE, deleteCookie.toString());
         return ResponseEntity.noContent().headers(headers).build();
+    }
+
+    /**
+     * Ensure the given phone number is not already used by any trader, trader staff user, or admin user.
+     * This keeps login-capable identities globally unique across the platform.
+     */
+    private void assertPhoneAvailableForContactRegistration(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return;
+        }
+
+        traderRepository
+            .findOneByMobile(phone)
+            .ifPresent(existing -> {
+                throw new ConflictAlertException(
+                    ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                    "This mobile number is already in use.",
+                    "contactPortal",
+                    "contactPortal.phone.alreadyUsedByTrader"
+                );
+            });
+
+        userRepository
+            .findOneByMobile(phone)
+            .ifPresent(existing -> {
+                throw new ConflictAlertException(
+                    ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                    "This mobile number is already in use.",
+                    "contactPortal",
+                    "contactPortal.phone.alreadyUsedByTrader"
+                );
+            });
+
+        adminUserRepository
+            .findOneByMobile(phone)
+            .ifPresent(existing -> {
+                throw new ConflictAlertException(
+                    ErrorConstants.TRADER_MOBILE_ALREADY_REGISTERED_TYPE,
+                    "This mobile number is already in use.",
+                    "contactPortal",
+                    "contactPortal.phone.alreadyUsedByTrader"
+                );
+            });
     }
 
     private String normalizePhone(String phone) {

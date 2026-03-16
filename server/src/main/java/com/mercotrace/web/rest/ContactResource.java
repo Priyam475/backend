@@ -2,6 +2,7 @@ package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ContactDTO;
@@ -45,14 +46,18 @@ public class ContactResource {
 
     private final TraderContextService traderContextService;
 
+    private final ContactIdentityService contactIdentityService;
+
     public ContactResource(
         ContactService contactService,
         ContactRepository contactRepository,
-        TraderContextService traderContextService
+        TraderContextService traderContextService,
+        ContactIdentityService contactIdentityService
     ) {
         this.contactService = contactService;
         this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
+        this.contactIdentityService = contactIdentityService;
     }
 
     /**
@@ -74,6 +79,9 @@ public class ContactResource {
         // Resolve trader ownership from authenticated user
         Long traderId = resolveTraderId();
         contactDTO.setTraderId(traderId);
+
+        // Enforce global mobile uniqueness across trader owner, trader staff and contacts
+        contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), null);
 
         // Enforce phone uniqueness per trader, aligned with frontend validation
         if (contactRepository.findOneByTraderIdAndPhone(traderId, contactDTO.getPhone()).isPresent()) {
@@ -120,6 +128,9 @@ public class ContactResource {
             });
 
         contactDTO.setTraderId(traderId);
+
+        // Enforce global mobile uniqueness across trader owner, trader staff and contacts (exclude current contact)
+        contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), id);
 
         // Enforce phone uniqueness per trader, excluding the current record
         contactRepository
@@ -169,6 +180,11 @@ public class ContactResource {
                     throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
                 }
             });
+
+        // If phone is being updated, enforce global mobile uniqueness
+        if (contactDTO.getPhone() != null) {
+            contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), id);
+        }
 
         Optional<ContactDTO> result = contactService.partialUpdate(contactDTO);
 

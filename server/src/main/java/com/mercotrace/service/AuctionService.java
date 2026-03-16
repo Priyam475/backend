@@ -485,11 +485,23 @@ public class AuctionService {
         lotSummary.setBagCount(lot.getBagCount());
         lotSummary.setOriginalBagCount(lot.getBagCount());
         lotSummary.setSellerVehicleId(lot.getSellerVehicleId());
-        lotSummary.setCommodityName(null);
-        lotSummary.setSellerName(null);
-        lotSummary.setSellerMark(null);
-        lotSummary.setVehicleNumber(null);
         lotSummary.setWasModified(false);
+
+        // Populate seller, vehicle, commodity so client can show them in the Sales Pad toolbar (same as list lots).
+        if (lot.getSellerVehicleId() != null) {
+            SellerInVehicle siv = sellerInVehicleRepository.findById(lot.getSellerVehicleId()).orElse(null);
+            if (siv != null) {
+                Vehicle v = siv.getVehicleId() != null ? vehicleRepository.findById(siv.getVehicleId()).orElse(null) : null;
+                Contact c = siv.getContactId() != null ? contactRepository.findById(siv.getContactId()).orElse(null) : null;
+                lotSummary.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
+                lotSummary.setSellerName(c != null ? c.getName() : null);
+                lotSummary.setSellerMark(c != null ? c.getMark() : null);
+            }
+        }
+        if (lot.getCommodityId() != null) {
+            Commodity commodity = commodityRepository.findById(lot.getCommodityId()).orElse(null);
+            lotSummary.setCommodityName(commodity != null ? commodity.getCommodityName() : null);
+        }
 
         int totalSold = entries.stream().mapToInt(e -> e.getQuantity() != null ? e.getQuantity() : 0).sum();
         int bagCount = lot.getBagCount() != null ? lot.getBagCount() : 0;

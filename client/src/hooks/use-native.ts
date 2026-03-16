@@ -1,9 +1,12 @@
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { Keyboard } from '@capacitor/keyboard';
 import { PushNotifications } from '@capacitor/push-notifications';
 
-/** True when running inside a native Capacitor shell */
+export { NotificationType };
+
+/** True when running inside a native Capacitor shell (Android/iOS) */
 export const isNative = Capacitor.isNativePlatform();
 
 /* ───── Camera ───── */
@@ -43,6 +46,24 @@ export async function hapticNotification(type: NotificationType = NotificationTy
 export async function hapticVibrate() {
   if (!isNative) return;
   await Haptics.vibrate();
+}
+
+/** Light impact for list/selection taps (native only). */
+export async function hapticSelection() {
+  if (!isNative) return;
+  await Haptics.impact({ style: ImpactStyle.Light });
+}
+
+/* ───── Keyboard (native only) ───── */
+
+/** Hide the native keyboard. No-op on web. Use after selecting from list so UI is visible. */
+export async function hideNativeKeyboard() {
+  if (!isNative) return;
+  try {
+    await Keyboard.hide();
+  } catch {
+    // ignore if plugin unavailable
+  }
 }
 
 /* ───── Push Notifications ───── */

@@ -13,7 +13,12 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface UserRoleRepository extends JpaRepository<UserRole, Long> {
 
-    List<UserRole> findByUserId(Long userId);
+    /**
+     * Fetch user-role mappings for a single user, eagerly loading the associated {@link com.mercotrace.domain.Role}
+     * to avoid LazyInitializationException when accessing role fields outside of the repository call site.
+     */
+    @Query("select ur from UserRole ur left join fetch ur.role where ur.user.id = :userId")
+    List<UserRole> findByUserId(@Param("userId") Long userId);
 
     List<UserRole> findByRoleId(Long roleId);
 

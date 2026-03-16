@@ -41,4 +41,10 @@ public interface SettlementService {
      * List pattis for current trader. Paginated.
      */
     Page<PattiDTO> listPattis(Pageable pageable);
+
+    /**
+     * Compute seller-level charges (e.g. freight, advance) for a new Patti.
+     * This replaces prototype localStorage-based voucher lookups.
+     */
+    SellerChargesDTO getSellerCharges(String sellerId);
 }

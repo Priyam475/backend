@@ -57,4 +57,13 @@
     <include file="config/liquibase/changelog/20260309120000_contact_login_identity.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260309121000_contact_otp_token_schema.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260312120000_trader_user_mobile.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314120000_vehicle_godown_gatepass_origin.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314130000_vehicle_broker_narration.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314140000_seller_contact_nullable.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314150000_vehicle_variant.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314160000_lot_variant_move_from_vehicle.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260314170000_lot_broker_tag.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260315120000_preset_mark_setting_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260315130000_preset_settings_authorities.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260315180000_daily_serial_allocation.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

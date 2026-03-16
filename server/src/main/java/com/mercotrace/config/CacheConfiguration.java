@@ -118,6 +118,7 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.FreightDistribution.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.Voucher.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.DailySerial.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.DailySerialAllocation.class.getName(), jcacheConfiguration);
             // Accounting: Chart of Accounts
             createCache(cm, com.mercotrace.domain.ChartOfAccount.class.getName(), jcacheConfiguration);
             createCache(cm, ChartOfAccountServiceImpl.CACHE_COA_BY_ID, jcacheConfiguration);
@@ -125,6 +126,7 @@ public class CacheConfiguration {
             // Auction module (Sales Pad)
             createCache(cm, com.mercotrace.domain.Auction.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.AuctionEntry.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.PresetMarkSetting.class.getName(), jcacheConfiguration);
             // Weighing: entity L2 cache + by-bid lookup (TTL from Redis config)
             createCache(cm, com.mercotrace.domain.WeighingSession.class.getName(), jcacheConfiguration);
             createCache(cm, "weighingSessionByBid", jcacheConfiguration);

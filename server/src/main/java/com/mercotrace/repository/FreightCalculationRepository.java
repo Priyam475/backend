@@ -12,5 +12,7 @@ public interface FreightCalculationRepository extends JpaRepository<FreightCalcu
     Optional<FreightCalculation> findOneByVehicleId(Long vehicleId);
 
     List<FreightCalculation> findAllByVehicleIdIn(Iterable<Long> vehicleIds);
+
+    void deleteByVehicleId(Long vehicleId);
 }
 

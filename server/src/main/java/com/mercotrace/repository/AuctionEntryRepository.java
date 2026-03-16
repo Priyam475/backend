@@ -2,6 +2,7 @@ package com.mercotrace.repository;
 
 import com.mercotrace.domain.AuctionEntry;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -18,6 +19,8 @@ public interface AuctionEntryRepository extends JpaRepository<AuctionEntry, Long
     List<AuctionEntry> findAllByAuctionId(Long auctionId);
 
     List<AuctionEntry> findAllByAuctionIdIn(Iterable<Long> auctionIds);
+
+    void deleteByAuctionIdIn(Collection<Long> auctionIds);
 
     Optional<AuctionEntry> findFirstByBidNumber(Integer bidNumber);
 

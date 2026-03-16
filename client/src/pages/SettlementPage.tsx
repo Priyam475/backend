@@ -224,7 +224,7 @@ const SettlementPage = () => {
       ? totalBags * 5
       : Math.round(totalWeight / 50) * 5;
 
-    const deductions: DeductionItem[] = [
+    const baseDeductions: DeductionItem[] = [
       {
         key: 'freight',
         label: 'Freight',
@@ -262,21 +262,59 @@ const SettlementPage = () => {
       },
     ];
     
-    // REQ-PUT-004: NP = GA − TD
-    const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
-    const netPayable = grossAmount - totalDeductions;
+    const baseTotalDeductions = baseDeductions.reduce((s, d) => s + d.amount, 0);
+    const baseNetPayable = grossAmount - baseTotalDeductions;
     
+    const createdAt = new Date().toISOString();
+
     setPattiData({
       pattiId: '', // Server assigns pattiId on save (PT-YYYYMMDD-NNNN).
       sellerName: seller.sellerName,
       rateClusters,
       grossAmount,
-      deductions,
-      totalDeductions,
-      netPayable,
-      createdAt: new Date().toISOString(),
+      deductions: baseDeductions,
+      totalDeductions: baseTotalDeductions,
+      netPayable: baseNetPayable,
+      createdAt,
       useAverageWeight: useAvgWeight,
     });
+
+    // After base patti is prepared, pull seller-level charges from backend
+    // to mirror client_origin's auto-pull of freight/advance.
+    void settlementApi
+      .getSellerCharges(seller.sellerId)
+      .then(charges => {
+        setPattiData(current => {
+          if (!current) return current;
+          const updatedDeductions = current.deductions.map(d => {
+            if (d.key === 'freight') {
+              return {
+                ...d,
+                amount: charges.freight,
+                autoPulled: Boolean(charges.freightAutoPulled) && charges.freight !== 0,
+              };
+            }
+            if (d.key === 'advance') {
+              return {
+                ...d,
+                amount: charges.advance,
+                autoPulled: Boolean(charges.advanceAutoPulled) && charges.advance !== 0,
+              };
+            }
+            return d;
+          });
+          const totalDeductions = updatedDeductions.reduce((s, d) => s + d.amount, 0);
+          return {
+            ...current,
+            deductions: updatedDeductions,
+            totalDeductions,
+            netPayable: current.grossAmount - totalDeductions,
+          };
+        });
+      })
+      .catch(() => {
+        // If seller charges cannot be loaded, keep base deductions as-is.
+      });
   }, [coolieMode, hamaliEnabled, gunniesAmount, useAvgWeight]);
 
   // Update deduction amount (clamped to 0..10,000,000, 2 decimal precision)

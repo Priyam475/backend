@@ -5,6 +5,7 @@ import com.mercotrace.repository.*;
 import com.mercotrace.service.SelfSaleService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SelfSaleDTOs.ClosureDTO;
+import com.mercotrace.service.dto.SelfSaleDTOs.ClosuresSummaryDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.CreateClosureRequestDTO;
 import com.mercotrace.service.dto.SelfSaleDTOs.OpenLotDTO;
 import com.mercotrace.service.mapper.SelfSaleClosureMapper;
@@ -221,5 +222,17 @@ public class SelfSaleServiceImpl implements SelfSaleService {
         }).toList();
 
         return new PageImpl<>(content, pageable, page.getTotalElements());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ClosuresSummaryDTO getClosuresSummary() {
+        Long traderId = traderContextService.getCurrentTraderId();
+        BigDecimal totalAmount = selfSaleClosureRepository.sumAmountByTraderId(traderId);
+        long totalCount = selfSaleClosureRepository.countByTraderIdAndIsDeletedFalse(traderId);
+        ClosuresSummaryDTO dto = new ClosuresSummaryDTO();
+        dto.setTotalAmount(totalAmount != null ? totalAmount : BigDecimal.ZERO);
+        dto.setTotalCount(totalCount);
+        return dto;
     }
 }

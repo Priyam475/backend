@@ -2,6 +2,9 @@ package com.mercotrace.service;
 
 import com.mercotrace.domain.Contact;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.TraderRepository;
+import com.mercotrace.repository.UserRepository;
+import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import com.mercotrace.web.rest.errors.ConflictAlertException;
 import java.util.Optional;
 import org.springframework.http.HttpStatus;
@@ -22,8 +25,22 @@ public class ContactIdentityService {
 
     private final ContactRepository contactRepository;
 
-    public ContactIdentityService(ContactRepository contactRepository) {
+    private final TraderRepository traderRepository;
+
+    private final UserRepository userRepository;
+
+    private final com.mercotrace.admin.identity.AdminUserRepository adminUserRepository;
+
+    public ContactIdentityService(
+        ContactRepository contactRepository,
+        TraderRepository traderRepository,
+        UserRepository userRepository,
+        com.mercotrace.admin.identity.AdminUserRepository adminUserRepository
+    ) {
         this.contactRepository = contactRepository;
+        this.traderRepository = traderRepository;
+        this.userRepository = userRepository;
+        this.adminUserRepository = adminUserRepository;
     }
 
     public String normalizePhoneOrThrow(String phone) {
@@ -89,6 +106,51 @@ public class ContactIdentityService {
                         HttpStatus.CONFLICT,
                         "A contact is already registered with this email address"
                     );
+                }
+            });
+    }
+
+    /**
+     * Ensure the given mobile number is not already used by any trader owner, trader staff user,
+     * admin user or another contact (other than the current one).
+     *
+     * This is used by the trader Contacts module so that contacts do not conflict with
+     * login identities across the platform.
+     */
+    public void assertMobileAvailableForContact(String mobile, Long currentContactId) {
+        if (mobile == null || mobile.isBlank()) {
+            return;
+        }
+
+        String normalized = mobile.trim();
+
+        // Check trader owner (Trader.mobile)
+        traderRepository
+            .findOneByMobile(normalized)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
+            });
+
+        // Check trader staff user (User.mobile)
+        userRepository
+            .findOneByMobile(normalized)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
+            });
+
+        // Check admin user (AdminUser.mobile)
+        adminUserRepository
+            .findOneByMobile(normalized)
+            .ifPresent(existing -> {
+                throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
+            });
+
+        // Check other contacts (Contact.phone)
+        contactRepository
+            .findOneByPhone(normalized)
+            .ifPresent(existing -> {
+                if (currentContactId == null || !existing.getId().equals(currentContactId)) {
+                    throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
                 }
             });
     }

@@ -8,7 +8,7 @@ const ContactPortalProfilePage = () => {
   const { contact, isGuest, loginWithProfile, clearError } = useContactAuth();
   const [name, setName] = useState(contact?.name ?? '');
   const [email, setEmail] = useState(contact?.email ?? '');
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(contact?.address ?? '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -94,7 +94,7 @@ const ContactPortalProfilePage = () => {
             type="button"
             className="h-9 rounded-lg px-3 text-xs"
             onClick={() => {
-              window.location.href = '/portal/signup';
+              window.location.href = '/contact-registartion';
             }}
           >
             Go to registration

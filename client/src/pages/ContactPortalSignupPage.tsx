@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useContactAuth } from '@/context/ContactAuthContext';
 
@@ -17,7 +18,8 @@ const ContactPortalSignupPage = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [touched, setTouched] = useState({ phone: false, password: false, email: false, name: false });
+  const [type, setType] = useState('');
+  const [touched, setTouched] = useState({ phone: false, password: false, email: false, name: false, type: false });
 
   const phoneRegex = /^[6-9]\d{9}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,15 +46,19 @@ const ContactPortalSignupPage = () => {
   const nameError =
     touched.name && name && !nameRegex.test(name) ? 'Only letters and spaces allowed' : '';
 
+  const typeError =
+    touched.type && !type ? 'Contact type is required' : '';
+
   const isFormValid =
     phoneRegex.test(phone) &&
     password.length >= 6 &&
     (!email || emailRegex.test(email)) &&
-    (!name || nameRegex.test(name));
+    (!name || nameRegex.test(name)) &&
+    !!type;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ phone: true, password: true, email: true, name: true });
+    setTouched({ phone: true, password: true, email: true, name: true, type: true });
     if (!isFormValid) return;
     try {
       await signup({
@@ -60,8 +66,9 @@ const ContactPortalSignupPage = () => {
         password,
         email: email || undefined,
         name: name || undefined,
+        type,
       });
-      navigate('/portal', { replace: true });
+      navigate('/contact', { replace: true });
     } catch {
       // error handled in context
     }
@@ -82,13 +89,16 @@ const ContactPortalSignupPage = () => {
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/80 via-emerald-800/70 to-slate-900/80 z-[1]" />
 
       <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-y-auto">
-        <div className="flex justify-end px-5 pt-[max(1rem,env(safe-area-inset-top))]">
-          <Link
-            to="/portal/login"
-            className="text-sm font-semibold text-white/80 underline min-h-[44px] flex items-center"
+        <div className="flex items-center justify-between px-5 pt-[max(1rem,env(safe-area-inset-top))]">
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="inline-flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white px-3 h-9 min-w-[44px] min-h-[44px] border border-white/30 shadow-sm transition-colors"
+            aria-label="Back to login"
           >
-            Already have an account?
-          </Link>
+            <ArrowLeft className="w-4 h-4 mr-1.5" />
+            <span className="text-xs font-semibold hidden sm:inline">Back to login</span>
+          </button>
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
@@ -244,6 +254,34 @@ const ContactPortalSignupPage = () => {
               {nameError && (
                 <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
                   {nameError}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-1 block">
+                Contact Type *
+              </label>
+              <Select
+                value={type}
+                onValueChange={value => {
+                  setType(value);
+                  clearError();
+                }}
+              >
+                <SelectTrigger className="h-12 sm:h-14 rounded-xl bg-white/90 border-0 text-emerald-900">
+                  <SelectValue placeholder="Select contact type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BUYER">Buyer</SelectItem>
+                  <SelectItem value="BROKER">Broker</SelectItem>
+                  <SelectItem value="AGENT">Agent</SelectItem>
+                  <SelectItem value="SELLER">Seller</SelectItem>
+                </SelectContent>
+              </Select>
+              {typeError && (
+                <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
+                  {typeError}
                 </p>
               )}
             </div>

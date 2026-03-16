@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Logistics (PrintHub): daily serial allocation per seller/lot for REQ-LOG-001, REQ-LOG-002. -->
+    <changeSet id="20260315180000-1" author="mercotrace">
+        <createTable tableName="daily_serial_allocation">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="serial_date" type="date">
+                <constraints nullable="false"/>
+            </column>
+            <column name="key_type" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="key_value" type="varchar(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="serial_number" type="integer">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addUniqueConstraint tableName="daily_serial_allocation" columnNames="trader_id, serial_date, key_type, key_value" constraintName="uk_daily_serial_allocation_trader_date_key"/>
+        <createIndex tableName="daily_serial_allocation" indexName="idx_daily_serial_allocation_trader_date">
+            <column name="trader_id"/>
+            <column name="serial_date"/>
+            <column name="key_type"/>
+        </createIndex>
+    </changeSet>
+</databaseChangeLog>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Variant belongs to each lot, not vehicle. Add to lot, drop from vehicle. -->
+    <changeSet id="20260314160000-1" author="mercotrace">
+        <addColumn tableName="lot">
+            <column name="variant" type="varchar(50)"/>
+        </addColumn>
+    </changeSet>
+    <changeSet id="20260314160000-2" author="mercotrace">
+        <dropColumn tableName="vehicle" columnName="variant"/>
+    </changeSet>
+</databaseChangeLog>

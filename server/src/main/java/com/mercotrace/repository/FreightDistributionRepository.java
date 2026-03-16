@@ -9,5 +9,7 @@ import org.springframework.stereotype.Repository;
 public interface FreightDistributionRepository extends JpaRepository<FreightDistribution, Long> {
 
     List<FreightDistribution> findAllByFreightId(Long freightId);
+
+    void deleteByFreightId(Long freightId);
 }
 

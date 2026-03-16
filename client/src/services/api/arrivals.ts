@@ -6,10 +6,12 @@ export interface ArrivalLotPayload {
   quantity: number;
   commodity_name: string;
   broker_tag?: string;
+  variant?: string;
 }
 
+/** When from contact: contact_id set. When free-text: contact_id null/omitted, seller_name + seller_phone required. */
 export interface ArrivalSellerPayload {
-  contact_id: string;
+  contact_id?: number | null;
   seller_name: string;
   seller_phone: string;
   seller_mark?: string;
@@ -27,7 +29,11 @@ export interface ArrivalCreatePayload {
   no_rental: boolean;
   advance_paid: number;
   broker_name?: string;
+  broker_contact_id?: number;
   narration?: string;
+  godown?: string;
+  gatepass_number?: string;
+  origin?: string;
   sellers: ArrivalSellerPayload[];
 }
 
@@ -44,6 +50,17 @@ export interface ArrivalSummary {
   freightTotal: number;
   freightMethod: FreightMethod | null;
   arrivalDatetime: string;
+  godown?: string;
+  gatepassNumber?: string;
+  origin?: string;
+  /** First seller name for table: vehicle | seller name */
+  primarySellerName?: string;
+  /** Total bags across all lots of this arrival */
+  totalBags?: number;
+  /** Number of lots with at least one bid */
+  bidsCount?: number;
+  /** Number of lots with a weighing session */
+  weighedCount?: number;
 }
 
 /** Lot in arrival detail (id for lot lookup, e.g. WeighingPage bid enrichment). */
@@ -65,7 +82,69 @@ export interface ArrivalDetail {
   vehicleId: number;
   vehicleNumber: string;
   arrivalDatetime: string;
+  godown?: string;
+  origin?: string;
   sellers: ArrivalSellerDetail[];
+}
+
+/** Full arrival detail for expand panel; mirrors backend ArrivalFullDetailDTO. */
+export interface ArrivalFullDetail {
+  vehicleId: number;
+  vehicleNumber: string;
+  arrivalDatetime: string;
+  godown?: string;
+  gatepassNumber?: string;
+  origin?: string;
+  brokerName?: string;
+  brokerContactId?: number;
+  narration?: string;
+  loadedWeight?: number;
+  emptyWeight?: number;
+  deductedWeight?: number;
+  netWeight?: number;
+  freightMethod?: FreightMethod | null;
+  freightRate?: number;
+  freightTotal?: number;
+  noRental?: boolean;
+  advancePaid?: number;
+  sellers: ArrivalSellerFullDetail[];
+}
+
+export interface ArrivalLotFullDetail {
+  id: number;
+  lotName: string;
+  commodityName: string;
+  bagCount: number;
+  brokerTag?: string | null;
+  variant?: string | null;
+}
+
+export interface ArrivalSellerFullDetail {
+  contactId?: number;
+  sellerName: string;
+  sellerPhone?: string;
+  sellerMark?: string;
+  lots: ArrivalLotFullDetail[];
+}
+
+/** PATCH body for updating arrival (all fields optional). When sellers present, replaces all sellers/lots. */
+export interface ArrivalUpdatePayload {
+  vehicle_number?: string;
+  godown?: string;
+  gatepass_number?: string;
+  origin?: string;
+  broker_name?: string;
+  broker_contact_id?: number;
+  narration?: string;
+  loaded_weight?: number;
+  empty_weight?: number;
+  deducted_weight?: number;
+  freight_method?: FreightMethod;
+  freight_rate?: number;
+  no_rental?: boolean;
+  advance_paid?: number;
+  multi_seller?: boolean;
+  sellers?: ArrivalSellerPayload[];
 }
 
 async function handleArrivalResponse<T>(res: Response, defaultMessage: string): Promise<T> {
@@ -96,10 +175,11 @@ async function handleArrivalResponse<T>(res: Response, defaultMessage: string): 
 }
 
 export const arrivalsApi = {
-  async list(page = 0, size = 10): Promise<ArrivalSummary[]> {
+  async list(page = 0, size = 10, status?: string): Promise<ArrivalSummary[]> {
     const searchParams = new URLSearchParams();
     searchParams.set('page', String(page));
     searchParams.set('size', String(size));
+    if (status && status !== 'ALL') searchParams.set('status', status);
 
     const res = await apiFetch(`/arrivals?${searchParams.toString()}`, { method: 'GET' });
     const data = await handleArrivalResponse<ArrivalSummary[]>(res, 'Failed to load arrivals');
@@ -132,9 +212,13 @@ export const arrivalsApi = {
       noRental: payload.no_rental,
       advancePaid: payload.advance_paid,
       brokerName: payload.broker_name,
+      brokerContactId: payload.broker_contact_id,
       narration: payload.narration,
+      godown: payload.godown,
+      gatepassNumber: payload.gatepass_number,
+      origin: payload.origin,
       sellers: payload.sellers.map(s => ({
-        contactId: Number(s.contact_id),
+        contactId: s.contact_id !== undefined && s.contact_id !== null ? s.contact_id : null,
         sellerName: s.seller_name,
         sellerPhone: s.seller_phone,
         sellerMark: s.seller_mark,
@@ -143,6 +227,7 @@ export const arrivalsApi = {
           bagCount: l.quantity,
           commodityName: l.commodity_name,
           brokerTag: l.broker_tag,
+          variant: l.variant,
         })),
       })),
     };
@@ -154,6 +239,57 @@ export const arrivalsApi = {
 
     const created = await handleArrivalResponse<ArrivalSummary>(res, 'Failed to submit arrival');
     return created;
+  },
+
+  async getById(vehicleId: number | string): Promise<ArrivalFullDetail> {
+    const res = await apiFetch(`/arrivals/${vehicleId}`, { method: 'GET' });
+    return handleArrivalResponse<ArrivalFullDetail>(res, 'Failed to load arrival detail');
+  },
+
+  async update(vehicleId: number | string, payload: ArrivalUpdatePayload): Promise<ArrivalSummary> {
+    const body: Record<string, unknown> = {};
+    if (payload.vehicle_number !== undefined) body.vehicleNumber = payload.vehicle_number;
+    if (payload.godown !== undefined) body.godown = payload.godown;
+    if (payload.gatepass_number !== undefined) body.gatepassNumber = payload.gatepass_number;
+    if (payload.origin !== undefined) body.origin = payload.origin;
+    if (payload.broker_name !== undefined) body.brokerName = payload.broker_name;
+    if (payload.broker_contact_id !== undefined) body.brokerContactId = payload.broker_contact_id;
+    if (payload.narration !== undefined) body.narration = payload.narration;
+    if (payload.loaded_weight !== undefined) body.loadedWeight = payload.loaded_weight;
+    if (payload.empty_weight !== undefined) body.emptyWeight = payload.empty_weight;
+    if (payload.deducted_weight !== undefined) body.deductedWeight = payload.deducted_weight;
+    if (payload.freight_method !== undefined) body.freightMethod = payload.freight_method;
+    if (payload.freight_rate !== undefined) body.freightRate = payload.freight_rate;
+    if (payload.no_rental !== undefined) body.noRental = payload.no_rental;
+    if (payload.advance_paid !== undefined) body.advancePaid = payload.advance_paid;
+    if (payload.multi_seller !== undefined) body.multiSeller = payload.multi_seller;
+    if (payload.sellers !== undefined && payload.sellers.length > 0) {
+      body.sellers = payload.sellers.map(s => ({
+        contactId: s.contact_id !== undefined && s.contact_id !== null ? s.contact_id : null,
+        sellerName: s.seller_name,
+        sellerPhone: s.seller_phone,
+        sellerMark: s.seller_mark,
+        lots: s.lots.map(l => ({
+          lotName: l.lot_name,
+          bagCount: l.quantity,
+          commodityName: l.commodity_name,
+          brokerTag: l.broker_tag,
+          variant: l.variant,
+        })),
+      }));
+    }
+    const res = await apiFetch(`/arrivals/${vehicleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    return handleArrivalResponse<ArrivalSummary>(res, 'Failed to update arrival');
+  },
+
+  async delete(vehicleId: number | string): Promise<void> {
+    const res = await apiFetch(`/arrivals/${vehicleId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      await handleArrivalResponse<never>(res, 'Failed to delete arrival');
+    }
   },
 };
 

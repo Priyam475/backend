@@ -12,5 +12,7 @@ public interface VehicleWeightRepository extends JpaRepository<VehicleWeight, Lo
     Optional<VehicleWeight> findOneByVehicleId(Long vehicleId);
 
     List<VehicleWeight> findAllByVehicleIdIn(Iterable<Long> vehicleIds);
+
+    void deleteByVehicleId(Long vehicleId);
 }
 
