@@ -1,6 +1,7 @@
 import { Outlet, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Moon, Sun, Bell, User, AlertCircle } from 'lucide-react';
 import DesktopSidebar from '@/components/DesktopSidebar';
+import FontSizeControls from '@/components/FontSizeControls';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
@@ -109,6 +110,7 @@ const TraderLayout = () => {
             <h2 className="text-lg font-bold text-foreground">{pageTitle}</h2>
           </div>
           <div className="relative z-10 flex items-center gap-3">
+            <FontSizeControls />
             <button aria-label="Notifications" className="w-9 h-9 rounded-xl glass flex items-center justify-center hover:bg-muted/50 transition-all relative border border-border/30">
               <Bell className="w-4 h-4 text-muted-foreground" />
               <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-gradient-to-r from-primary to-violet-500 shadow-sm shadow-primary/40" />
