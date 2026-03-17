@@ -43,8 +43,14 @@ function firmHeader(): string {
     <div class="firm-name">MERCOTRACE</div>
     <div class="firm-line">Agricultural Produce Market Committee</div>
     <div class="firm-line">APMC Market Yard</div>
-    <div class="firm-code">APMC Code: MT-001</div>
-    <div class="firm-date">Date: ${todayStr()}</div>
+    <div class="firm-info-row">
+      <span class="firm-lbl">APMC Code</span>
+      <span class="firm-val">MT-001</span>
+    </div>
+    <div class="firm-info-row">
+      <span class="firm-lbl">Date</span>
+      <span class="firm-val">${todayStr()}</span>
+    </div>
   </div>`;
 }
 
@@ -344,6 +350,7 @@ function firmHeaderCSS(): string {
   return `.firm-header { text-align: center; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 6px; }
     .firm-name { font-size: 16px; font-weight: 900; text-transform: uppercase; }
     .firm-line { font-size: 10px; color: #555; }
-    .firm-code { font-size: 9px; color: #888; margin-top: 2px; }
-    .firm-date { font-size: 10px; color: #333; font-weight: 600; }`;
+    .firm-info-row { display: flex; align-items: baseline; gap: 6px; font-size: 10px; margin-top: 2px; justify-content: center; }
+    .firm-lbl { color: #666; font-size: 9px; text-transform: uppercase; font-weight: 400; flex-shrink: 0; }
+    .firm-val { font-weight: 700; font-size: 10px; }`;
 }
