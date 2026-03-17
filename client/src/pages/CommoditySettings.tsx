@@ -318,8 +318,8 @@ const CommoditySettings = () => {
       if (decimalPart != null && decimalPart.length > 2) {
         toast.error(`${commodityName}: GST rate allows max 2 decimal places (e.g. 12.50)`); return;
       }
-    } else if (gstRateValue != null && gstRateValue <= 0) {
-      toast.error(`${commodityName}: GST Rate must be greater than 0 when provided`); return;
+    } else if (gstRateValue != null && (!Number.isInteger(gstRateValue) || gstRateValue < 0 || gstRateValue > 99)) {
+      toast.error(`${commodityName}: GST Rate must be a 2-digit whole number (0–99) when provided`); return;
     }
 
     const weighingThresholdValue = (cfg.weighing_threshold ?? undefined) as number | undefined;
@@ -665,7 +665,7 @@ const CommoditySettings = () => {
                           <div className="space-y-3 mt-2">
                             <div>
                               <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
-                                HSN/SAC Code <span className="text-red-500">*</span>
+                                HSN (6 digits) / SAC (8 digits) <span className="text-red-500">*</span>
                               </label>
                               <Input
                                 type="text"
