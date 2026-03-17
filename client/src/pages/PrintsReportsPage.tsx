@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Printer, BarChart3, Search, FileText, Download, Filter,
@@ -12,7 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
-import { contactApi, arrivalsApi, billingApi, settlementApi } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { contactApi, arrivalsApi, billingApi, settlementApi, printLogApi } from '@/services/api';
+import { directPrint } from '@/utils/printTemplates';
+import { generateTemplateHTML, type FirmInfo } from '@/utils/printPreviewTemplates';
+import type { ArrivalDetail } from '@/services/api/arrivals';
 import { reportsApi, type DailySalesSummaryDTO } from '@/services/api/reports';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
@@ -70,14 +74,35 @@ const PrintsReportsPage = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [contacts, setContacts] = useState<any[]>([]);
   const [arrivals, setArrivals] = useState<any[]>([]);
+  const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [bills, setBills] = useState<SalesBillDTO[]>([]);
   const [settlements, setSettlements] = useState<PattiDTO[]>([]);
   const [dailySummary, setDailySummary] = useState<DailySalesSummaryDTO | null>(null);
   const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const { trader } = useAuth();
+  const firm: FirmInfo = useMemo(() => {
+    const addressParts = [trader?.address, trader?.city, trader?.state, trader?.pin_code].filter(Boolean);
+    return {
+      name: trader?.business_name ?? '',
+      about: trader?.category ?? '',
+      address: addressParts.join(', '),
+      apmcCode: '',
+      phone: trader?.mobile ?? '',
+      email: trader?.email ?? '',
+      gstin: '',
+      bank: { name: '', acc: '', ifsc: '', branch: '' },
+    };
+  }, [trader]);
 
   useEffect(() => {
     contactApi.list().then(setContacts);
     arrivalsApi.list(0, 500).then(setArrivals);
+  }, []);
+
+  useEffect(() => {
+    arrivalsApi.listDetail(0, 100).then(setArrivalDetails).catch(() => setArrivalDetails([]));
   }, []);
 
   useEffect(() => {
@@ -168,9 +193,28 @@ const PrintsReportsPage = () => {
     toast.info(`Exports from Prints & Reports will be powered by backend data in a future release (requested: ${format.toUpperCase()}).`);
   };
 
-  const triggerPrint = () => {
-    toast.success(`Printing ${selectedPrint?.name}…`);
-    setShowPreview(false);
+  const templateHTML = selectedPrint ? generateTemplateHTML(selectedPrint.id, arrivalDetails, firm) : '';
+
+  const handleDoPrint = async () => {
+    if (!selectedPrint) return;
+    toast.info(`Printing ${selectedPrint.name}…`);
+    try {
+      await printLogApi.create({
+        reference_type: selectedPrint.id.toUpperCase().replace(/-/g, '_'),
+        reference_id: undefined,
+        print_type: selectedPrint.id.toUpperCase().replace(/-/g, '_'),
+      });
+    } catch {
+      // optional
+    }
+    const fullHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:0;}</style></head><body>${templateHTML}</body></html>`;
+    const ok = directPrint(fullHtml);
+    if (ok) {
+      toast.success('Sent to printer!');
+      setShowPreview(false);
+    } else {
+      toast.error('Printer not connected.');
+    }
   };
 
   const riskColor = (level: string) => {
@@ -391,7 +435,7 @@ const PrintsReportsPage = () => {
 
       {/* Print Preview Dialog */}
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className={cn("sm:max-w-xl", isDesktop && "glass-card")}>
+        <DialogContent className={cn("max-w-3xl max-h-[90vh] overflow-y-auto", isDesktop && "glass-card border-primary/10")}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Printer className="w-5 h-5 text-primary" /> {selectedPrint?.name}
@@ -400,22 +444,12 @@ const PrintsReportsPage = () => {
           </DialogHeader>
 
           <div className="py-4">
-            {/* Print Preview Placeholder */}
-            <div className="border-2 border-dashed border-border rounded-xl p-6 text-center min-h-[300px] flex flex-col items-center justify-center bg-white dark:bg-card">
-              <div className="text-xs text-muted-foreground mb-4 uppercase tracking-wider">Print Preview</div>
-              <div className="space-y-2 text-sm">
-                <p className="font-bold text-lg">Krishna Trading Co.</p>
-                <p className="text-xs text-muted-foreground">Smart Mandi Operations Platform</p>
-                <p className="text-xs text-muted-foreground">Market Yard, Pune</p>
-                <div className="border-t border-border mt-4 pt-4 text-left max-w-sm mx-auto">
-                  <p className="text-xs font-semibold mb-2">Template: {selectedPrint?.name}</p>
-                  <p className="text-xs text-muted-foreground">Format: {selectedPrint?.size}</p>
-                  <p className="text-xs text-muted-foreground">Stage: {selectedPrint?.stage}</p>
-                  <p className="text-xs text-muted-foreground mt-2">Date: {new Date().toLocaleDateString()}</p>
-                </div>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-6">Powered by MERCOTRACE</p>
-            </div>
+            <div
+              ref={printRef}
+              className="border border-border rounded-xl p-4 bg-white text-black min-h-[300px] overflow-auto shadow-inner"
+              style={{ colorScheme: 'light' }}
+              dangerouslySetInnerHTML={{ __html: templateHTML }}
+            />
           </div>
 
           <DialogFooter className="gap-2">
@@ -423,7 +457,7 @@ const PrintsReportsPage = () => {
             <Button variant="outline" disabled title="Exports will be enabled once backend export flows are wired.">
               <Download className="w-4 h-4 mr-1" /> Export PDF
             </Button>
-            <Button onClick={triggerPrint} className="bg-gradient-to-r from-primary to-accent text-white">
+            <Button onClick={handleDoPrint} className="bg-gradient-to-r from-primary to-accent text-white">
               <Printer className="w-4 h-4 mr-1" /> Print
             </Button>
           </DialogFooter>

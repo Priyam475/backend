@@ -1,0 +1,304 @@
+// ── Print Templates for Print Hub ──────────────────────────
+// REQ-LOG-002: All print formats per SRS (same format as client_origin)
+
+export interface BidInfo {
+  bidNumber: number;
+  buyerMark: string;
+  buyerName: string;
+  quantity: number;
+  rate: number;
+  lotId: string;
+  lotName: string;
+  sellerName: string;
+  sellerSerial: number;
+  lotNumber: number;
+  vehicleNumber: string;
+  commodityName: string;
+  origin?: string;
+  godown?: string;
+  weight?: number;
+}
+
+// ── Helpers ───────────────────────────────────────────────
+function lotDisplay(bid: BidInfo): string {
+  if (bid.lotName && bid.lotName !== String(bid.lotNumber)) {
+    return `${bid.lotNumber} / ${bid.lotName}`;
+  }
+  return String(bid.lotNumber);
+}
+
+function todayStr(): string {
+  return new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function firmHeader(): string {
+  return `<div class="firm-header">
+    <div class="firm-name">MERCOTRACE</div>
+    <div class="firm-line">Agricultural Produce Market Committee</div>
+    <div class="firm-line">APMC Market Yard</div>
+    <div class="firm-code">APMC Code: MT-001</div>
+    <div class="firm-date">Date: ${todayStr()}</div>
+  </div>`;
+}
+
+// ── Direct Print Engine ──────────────────────────────────
+export function directPrint(html: string): boolean {
+  const printFrame = document.createElement('iframe');
+  printFrame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:0;height:0';
+  document.body.appendChild(printFrame);
+  const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
+  if (!frameDoc) {
+    document.body.removeChild(printFrame);
+    return false;
+  }
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+  setTimeout(() => {
+    try {
+      printFrame.contentWindow?.print();
+    } catch {
+      // ignore
+    }
+    setTimeout(() => document.body.removeChild(printFrame), 1000);
+  }, 300);
+  return true;
+}
+
+// ── 1. Sales Sticker (Thermal Adhesive, Landscape) ──────
+export function generateSalesSticker(bid: BidInfo): string {
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: landscape; margin: 2mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 4mm; }
+    .sticker { border: 2px dashed #333; border-radius: 8px; padding: 10px; max-width: 400px; }
+    .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 11px; }
+    .row .lbl { color: #666; font-size: 9px; text-transform: uppercase; font-weight: 600; }
+    .row .val { font-weight: 800; font-size: 13px; }
+    .lot-big { text-align: center; font-size: 36px; font-weight: 900; padding: 8px 0; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin: 6px 0; }
+    .mark-big { text-align: center; font-size: 28px; font-weight: 900; letter-spacing: 3px; background: #f0f0f0; border-radius: 6px; padding: 6px; margin: 4px 0; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    @media print { body { margin: 0; padding: 2mm; } }
+  </style></head><body>
+    <div class="sticker">
+      <div class="grid2">
+        <div class="row"><span class="lbl">Seller</span><span class="val">${bid.sellerName}</span></div>
+        <div class="row"><span class="lbl">Sl No</span><span class="val">${bid.sellerSerial}</span></div>
+      </div>
+      <div class="lot-big">${lotDisplay(bid)}</div>
+      <div class="mark-big">[${bid.buyerMark}]</div>
+      <div class="grid2">
+        <div class="row"><span class="lbl">Origin</span><span class="val">${bid.origin || '—'}</span></div>
+        <div class="row"><span class="lbl">Qty</span><span class="val">${bid.quantity} bags</span></div>
+        <div class="row"><span class="lbl">Godown</span><span class="val">${bid.godown || '—'}</span></div>
+        <div class="row"><span class="lbl">V.No</span><span class="val">${bid.vehicleNumber}</span></div>
+        <div class="row"><span class="lbl">Commodity</span><span class="val">${bid.commodityName}</span></div>
+        <div class="row"><span class="lbl">Date</span><span class="val">${todayStr()}</span></div>
+      </div>
+    </div>
+  </body></html>`;
+}
+
+// ── 2. Buyer Chiti (80mm thermal) ────────────────────────
+export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+  const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
+  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
+  const rows = bids.map(b => `
+    <tr>
+      <td>${lotDisplay(b)}</td>
+      <td>${b.godown || '—'}</td>
+      <td>${b.quantity}</td>
+      <td>[${b.buyerMark}]</td>
+      <td>₹${b.rate}</td>
+      ${stage === 'post-weighing' ? `<td>${b.weight ?? '—'} kg</td>` : ''}
+    </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: 80mm auto; margin: 2mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 11px; }
+    .header { text-align: center; border-bottom: 1px dashed #333; padding-bottom: 6px; margin-bottom: 6px; }
+    .header h3 { margin: 2px 0; font-size: 14px; }
+    .header small { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; }
+    .buyer-info { background: #f5f5f5; border-radius: 4px; padding: 6px; margin-bottom: 6px; text-align: center; }
+    .buyer-info .mark { font-size: 22px; font-weight: 900; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 9px; text-transform: uppercase; }
+    td { padding: 3px 2px; border-bottom: 1px dotted #ddd; }
+    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; }
+    .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .stage { text-align: center; font-size: 8px; color: #999; margin-top: 4px; text-transform: uppercase; }
+    @media print { body { margin: 0; } }
+  </style></head><body>
+    <div class="header"><small>Buyer Chiti</small><h3>Mercotrace</h3></div>
+    <div class="buyer-info">
+      <div style="font-size:11px;color:#666">${buyerName}</div>
+      <div class="mark">[${buyerMark}]</div>
+    </div>
+    <table>
+      <thead><tr><th>Lot</th><th>Gdwn</th><th>Qty</th><th>Mark</th><th>Rate</th>${stage === 'post-weighing' ? '<th>Wt</th>' : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="row"><span>Total Qty</span><span>${totalQty} bags</span></div>
+      <div class="row"><span>Total Amount</span><span>₹${totalAmt.toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="stage">${stage === 'post-weighing' ? 'Post Weighing' : 'Post Auction'}</div>
+  </body></html>`;
+}
+
+// ── 3. Seller Chiti (80mm thermal) ───────────────────────
+export function generateSellerChiti(sellerName: string, sellerSerial: number, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+  const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
+  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
+  const rows = bids.map(b => `
+    <tr>
+      <td>${lotDisplay(b)}</td>
+      <td>[${b.buyerMark}]</td>
+      <td>${b.quantity}</td>
+      <td>₹${b.rate}</td>
+      ${stage === 'post-weighing' ? `<td>${b.weight ?? '—'} kg</td>` : ''}
+    </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: 80mm auto; margin: 2mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 11px; }
+    .header { text-align: center; border-bottom: 1px dashed #333; padding-bottom: 6px; margin-bottom: 6px; }
+    .header h3 { margin: 2px 0; font-size: 14px; }
+    .header small { color: #666; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; }
+    .seller-info { background: #f5f5f5; border-radius: 4px; padding: 6px; margin-bottom: 6px; }
+    .seller-info .name { font-size: 13px; font-weight: 800; }
+    .seller-info .serial { font-size: 10px; color: #666; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 9px; text-transform: uppercase; }
+    td { padding: 3px 2px; border-bottom: 1px dotted #ddd; }
+    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; }
+    .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .stage { text-align: center; font-size: 8px; color: #999; margin-top: 4px; text-transform: uppercase; }
+    @media print { body { margin: 0; } }
+  </style></head><body>
+    <div class="header"><small>Seller Chiti</small><h3>Mercotrace</h3></div>
+    <div class="seller-info">
+      <div class="name">${sellerName}</div>
+      <div class="serial">S.No: ${sellerSerial}</div>
+    </div>
+    <table>
+      <thead><tr><th>Lot</th><th>Mark</th><th>Qty</th><th>Rate</th>${stage === 'post-weighing' ? '<th>Wt</th>' : ''}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="row"><span>Total Qty</span><span>${totalQty} bags</span></div>
+      <div class="row"><span>Total Amount</span><span>₹${totalAmt.toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="stage">${stage === 'post-weighing' ? 'Post Weighing' : 'Post Auction'}</div>
+  </body></html>`;
+}
+
+// ── 4. Sale Pad Print (A5 Portrait) ─────────────────────
+export function generateSalePadPrint(bids: BidInfo[]): string {
+  const rows = bids.map(b => `
+    <tr>
+      <td>${b.sellerSerial}</td>
+      <td>${b.sellerName}</td>
+      <td>${lotDisplay(b)}</td>
+      <td>[${b.buyerMark}]</td>
+      <td>${b.quantity}</td>
+      <td>₹${b.rate}</td>
+      <td>₹${b.quantity * b.rate}</td>
+    </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: A5 portrait; margin: 8mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 8mm; font-size: 11px; }
+    ${firmHeaderCSS()}
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th { background: #333; color: #fff; padding: 4px 6px; font-size: 9px; text-transform: uppercase; text-align: left; }
+    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 10px; }
+    tr:nth-child(even) { background: #f9f9f9; }
+    @media print { body { margin: 0; padding: 8mm; } }
+  </style></head><body>
+    ${firmHeader()}
+    <table>
+      <thead><tr><th>Sl</th><th>Seller</th><th>Lot</th><th>Mark</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </body></html>`;
+}
+
+// ── 5. Tender Slip for Buyers (A4 Landscape, Triplicate) ─
+export function generateTenderSlip(bids: BidInfo[]): string {
+  const rows = bids.map(b => `<tr><td>${lotDisplay(b)}</td><td>${b.quantity}</td><td>₹${b.rate}</td></tr>`).join('');
+  const singleSlip = `<div class="slip">
+    ${firmHeader()}
+    <table><thead><tr><th>LOT</th><th>BAGS</th><th>RATE</th></tr></thead><tbody>${rows}</tbody></table>
+  </div>`;
+
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: A4 landscape; margin: 6mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 6mm; }
+    .triplicate { display: flex; flex-direction: column; gap: 8px; }
+    .slip { border: 1px solid #ccc; border-radius: 4px; padding: 8px; page-break-inside: avoid; }
+    ${firmHeaderCSS()}
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    th { background: #eee; padding: 3px 6px; font-size: 10px; text-transform: uppercase; text-align: left; border: 1px solid #ccc; }
+    td { padding: 3px 6px; font-size: 11px; border: 1px solid #ddd; }
+    @media print { body { margin: 0; padding: 6mm; } }
+  </style></head><body>
+    <div class="triplicate">
+      ${singleSlip}
+      ${singleSlip}
+      ${singleSlip}
+    </div>
+  </body></html>`;
+}
+
+// ── 6. Dispatch Control for Coolie (A5 Portrait) ────────
+export function generateDispatchControl(bids: BidInfo[]): string {
+  const sellerGroups: Record<string, BidInfo[]> = {};
+  bids.forEach(b => {
+    const key = b.sellerName;
+    if (!sellerGroups[key]) sellerGroups[key] = [];
+    sellerGroups[key].push(b);
+  });
+
+  let sections = '';
+  Object.entries(sellerGroups).forEach(([seller, sBids]) => {
+    const sellerQty = sBids.reduce((s, b) => s + b.quantity, 0);
+    sections += `<div class="seller-block">
+      <div class="seller-head">
+        <span class="sname">${seller}</span>
+        <span class="sqty">Total: ${sellerQty} bags</span>
+      </div>`;
+    sBids.forEach(b => {
+      sections += `<div class="lot-row">
+        <span>Lot ${lotDisplay(b)}</span>
+        <span>Gdwn: ${b.godown || '—'}</span>
+        <span>[${b.buyerMark}]</span>
+        <span>${b.quantity} bags</span>
+      </div>`;
+    });
+    sections += `</div>`;
+  });
+
+  return `<!DOCTYPE html><html><head><style>
+    @page { size: A5 portrait; margin: 6mm; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 6mm; font-size: 11px; }
+    .title { text-align: center; font-size: 14px; font-weight: 900; margin-bottom: 8px; border-bottom: 2px solid #333; padding-bottom: 4px; }
+    .stage { text-align: center; font-size: 9px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+    .seller-block { margin-bottom: 8px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+    .seller-head { background: #333; color: #fff; padding: 4px 8px; display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; }
+    .lot-row { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 10px; border-bottom: 1px dotted #eee; }
+    .lot-row:last-child { border-bottom: none; }
+    @media print { body { margin: 0; padding: 6mm; } }
+  </style></head><body>
+    <div class="title">Dispatch Control — Coolie</div>
+    <div class="stage">Post Auction — Pre Weighing</div>
+    ${sections}
+  </body></html>`;
+}
+
+function firmHeaderCSS(): string {
+  return `.firm-header { text-align: center; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 6px; }
+    .firm-name { font-size: 16px; font-weight: 900; text-transform: uppercase; }
+    .firm-line { font-size: 10px; color: #555; }
+    .firm-code { font-size: 9px; color: #888; margin-top: 2px; }
+    .firm-date { font-size: 10px; color: #333; font-weight: 600; }`;
+}
