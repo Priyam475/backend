@@ -44,11 +44,28 @@ public interface ContactService {
     Optional<ContactDTO> findOne(Long id);
 
     /**
-     * Delete the "id" contact.
+     * Delete the "id" contact (soft delete: sets active = false).
      *
      * @param id the id of the entity.
      */
     void delete(Long id);
+
+    /**
+     * Restore a soft-deleted contact (sets active = true).
+     *
+     * @param id the id of the entity.
+     * @return the restored entity, or empty if not found.
+     */
+    Optional<ContactDTO> restore(Long id);
+
+    /**
+     * Get a contact by trader and phone (active or inactive). For restore flow.
+     *
+     * @param traderId the owning trader id.
+     * @param phone the phone number.
+     * @return the contact if found.
+     */
+    Optional<ContactDTO> findOneByTraderIdAndPhone(Long traderId, String phone);
 
     /**
      * Get all contacts for a trader.

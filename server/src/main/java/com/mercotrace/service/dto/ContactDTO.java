@@ -13,6 +13,8 @@ import java.util.Objects;
 @SuppressWarnings("common-java:DuplicatedBlocks")
 public class ContactDTO implements Serializable {
 
+    private static final long serialVersionUID = -8733523392348609622L;
+
     private Long id;
 
     // Logical trader owner (mapped from traderId)
@@ -46,6 +48,8 @@ public class ContactDTO implements Serializable {
     /** Contact type: SELLER (vendor), BUYER, BROKER. Returned in API as "type". */
     @Size(max = 20)
     private String type;
+
+    private Boolean active;
 
     public Long getId() {
         return id;
@@ -141,6 +145,14 @@ public class ContactDTO implements Serializable {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     @Override

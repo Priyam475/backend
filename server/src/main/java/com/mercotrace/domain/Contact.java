@@ -74,6 +74,9 @@ public class Contact implements Serializable {
     @Column(name = "contact_type", length = 20)
     private String type;
 
+    @Column(name = "active", nullable = false)
+    private Boolean active = true;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public Long getId() {
@@ -208,6 +211,14 @@ public class Contact implements Serializable {
     public Contact type(String type) {
         this.setType(type);
         return this;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

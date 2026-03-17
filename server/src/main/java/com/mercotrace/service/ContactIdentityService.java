@@ -145,9 +145,9 @@ public class ContactIdentityService {
                 throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
             });
 
-        // Check other contacts (Contact.phone)
+        // Check other contacts (Contact.phone) — only active contacts, so soft-deleted don't block
         contactRepository
-            .findOneByPhone(normalized)
+            .findOneByPhoneAndActiveTrue(normalized)
             .ifPresent(existing -> {
                 if (currentContactId == null || !existing.getId().equals(currentContactId)) {
                     throw new BadRequestAlertException("This mobile number is already in use.", "contact", "mobileinuse");
