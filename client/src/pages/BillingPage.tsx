@@ -97,6 +97,97 @@ function isBackendBillId(billId: string): boolean {
   return /^\d+$/.test(billId);
 }
 
+// ── Validation ────────────────────────────────────────────
+type ValidationErrors = Record<string, string>;
+
+function validateBill(b: BillData): { isValid: boolean; errors: ValidationErrors } {
+  const errors: ValidationErrors = {};
+
+  const trimmedName = (b.billingName ?? '').trim();
+  if (!trimmedName) {
+    errors.billingName = 'Billing name is required';
+  } else if (trimmedName.length < 2) {
+    errors.billingName = 'Minimum 2 characters';
+  } else if (trimmedName.length > 150) {
+    errors.billingName = 'Maximum 150 characters';
+  }
+
+  const v = (b.outboundVehicle ?? '').trim();
+  if (v.length > 0) {
+    if (v.length < 2 || v.length > 12) {
+      errors.outboundVehicle = 'Must be 2–12 characters';
+    } else if (v !== v.toUpperCase()) {
+      errors.outboundVehicle = 'Must be uppercase';
+    }
+  }
+
+  if (!Number.isFinite(b.brokerageValue) || b.brokerageValue < 0) {
+    errors.brokerageValue = 'Must be a positive number';
+  } else if (b.brokerageType === 'PERCENT' && b.brokerageValue > 100) {
+    errors.brokerageValue = 'Percent cannot exceed 100';
+  } else if (b.brokerageType === 'AMOUNT' && b.brokerageValue > 10000000) {
+    errors.brokerageValue = 'Cannot exceed ₹1,00,00,000';
+  }
+
+  if (!Number.isFinite(b.globalOtherCharges) || b.globalOtherCharges < 0) {
+    errors.globalOtherCharges = 'Must be a positive number';
+  } else if (b.globalOtherCharges > 100000) {
+    errors.globalOtherCharges = 'Cannot exceed ₹1,00,000';
+  }
+
+  if (!Number.isFinite(b.buyerCoolie) || b.buyerCoolie < 0) {
+    errors.buyerCoolie = 'Must be a positive number';
+  } else if (b.buyerCoolie > 100000) {
+    errors.buyerCoolie = 'Cannot exceed ₹1,00,000';
+  }
+
+  if (!Number.isFinite(b.outboundFreight) || b.outboundFreight < 0) {
+    errors.outboundFreight = 'Must be a positive number';
+  } else if (b.outboundFreight > 100000) {
+    errors.outboundFreight = 'Cannot exceed ₹1,00,000';
+  }
+
+  if (!Number.isFinite(b.discount) || b.discount < 0) {
+    errors.discount = 'Must be a positive number';
+  } else if (b.discountType === 'PERCENT' && b.discount > 100) {
+    errors.discount = 'Percent cannot exceed 100';
+  } else if (b.discountType === 'AMOUNT' && b.discount > 100000) {
+    errors.discount = 'Cannot exceed ₹1,00,000';
+  }
+
+  if (!Number.isFinite(b.manualRoundOff)) {
+    errors.manualRoundOff = 'Must be a valid number';
+  } else if (Math.abs(b.manualRoundOff) > 100000) {
+    errors.manualRoundOff = 'Cannot exceed ±₹1,00,000';
+  }
+
+  b.commodityGroups.forEach((group, gi) => {
+    group.items.forEach((item, ii) => {
+      if (item.quantity < 1) {
+        errors[`items.${gi}.${ii}.quantity`] = 'Quantity must be at least 1';
+      }
+      if (!item.weight || item.weight <= 0) {
+        errors[`items.${gi}.${ii}.weight`] = 'Weight cannot be zero';
+      }
+      if (!Number.isFinite(item.brokerage) || item.brokerage < 0) {
+        errors[`items.${gi}.${ii}.brokerage`] = 'Invalid';
+      } else if (item.brokerage > 10000000) {
+        errors[`items.${gi}.${ii}.brokerage`] = 'Too large';
+      }
+      if (!Number.isFinite(item.otherCharges) || item.otherCharges < 0) {
+        errors[`items.${gi}.${ii}.otherCharges`] = 'Invalid';
+      } else if (item.otherCharges > 10000) {
+        errors[`items.${gi}.${ii}.otherCharges`] = 'Max ₹10,000';
+      }
+      if (item.newRate < 0.01 || item.newRate > 100000) {
+        errors[`items.${gi}.${ii}.newRate`] = 'Rate out of range (0.01–1,00,000)';
+      }
+    });
+  });
+
+  return { isValid: Object.keys(errors).length === 0, errors };
+}
+
 const BillingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -115,6 +206,9 @@ const BillingPage = () => {
   const [editLocked, setEditLocked] = useState(true);
   const [showPrint, setShowPrint] = useState(false);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+
+  // Validation
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   // Search mode for bill search
   const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
@@ -377,6 +471,15 @@ const BillingPage = () => {
   // Save bill (backend assigns bill number; vouchers created by backend when coolie/freight > 0)
   const saveBill = async () => {
     if (!bill) return;
+
+    const { isValid, errors } = validateBill(bill);
+    setValidationErrors(errors);
+    if (!isValid) {
+      const count = Object.keys(errors).length;
+      toast.error(`Please fix ${count} validation ${count === 1 ? 'error' : 'errors'} before saving`);
+      return;
+    }
+
     const payload = {
       buyerName: bill.buyerName,
       buyerMark: bill.buyerMark,
@@ -662,10 +765,11 @@ const BillingPage = () => {
           {/* Billing Name text box */}
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             className="glass-card rounded-2xl p-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Billing Name (appears on print)</p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Billing Name (appears on print) <span className="text-destructive">*</span></p>
             <Input value={bill.billingName}
-              onChange={e => setBill({ ...bill, billingName: e.target.value })}
-              className="h-10 rounded-xl text-sm font-medium bg-muted/20 border-border/30" />
+              onChange={e => { setBill({ ...bill, billingName: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.billingName; return n; }); }}
+              className={cn("h-10 rounded-xl text-sm font-medium bg-muted/20 border-border/30", validationErrors.billingName && "border-destructive ring-1 ring-destructive/30")} />
+            {validationErrors.billingName && <p className="text-[10px] text-destructive mt-1">{validationErrors.billingName}</p>}
           </motion.div>
 
           {/* Global Brokerage & Other Charges — Apply to all */}
@@ -681,15 +785,17 @@ const BillingPage = () => {
                     {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
                   </button>
                   <Input type="number" value={bill.brokerageValue || ''}
-                    onChange={e => setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 })}
-                    className="h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1" />
+                    onChange={e => { setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 }); setValidationErrors(prev => { const n = { ...prev }; delete n.brokerageValue; return n; }); }}
+                    className={cn("h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1", validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30")} />
                 </div>
+                {validationErrors.brokerageValue && <p className="text-[9px] text-destructive mt-0.5">{validationErrors.brokerageValue}</p>}
               </div>
               <div>
                 <p className="text-[9px] text-muted-foreground mb-0.5">Other Charges (₹)</p>
                 <Input type="number" value={bill.globalOtherCharges || ''}
-                  onChange={e => setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 })}
-                  className="h-8 rounded-lg text-xs text-center font-bold bg-muted/10" />
+                  onChange={e => { setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 }); setValidationErrors(prev => { const n = { ...prev }; delete n.globalOtherCharges; return n; }); }}
+                  className={cn("h-8 rounded-lg text-xs text-center font-bold bg-muted/10", validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30")} />
+                {validationErrors.globalOtherCharges && <p className="text-[9px] text-destructive mt-0.5">{validationErrors.globalOtherCharges}</p>}
               </div>
             </div>
             <Button onClick={applyGlobalCharges} size="sm"
@@ -724,23 +830,29 @@ const BillingPage = () => {
                         <p className="text-muted-foreground">Base</p>
                         <p className="font-bold text-foreground">₹{item.baseRate}</p>
                       </div>
-                      <div className="text-center p-1 rounded bg-muted/20">
+                      <div className={cn("text-center p-1 rounded bg-muted/20", validationErrors[`items.${gi}.${ii}.brokerage`] && "ring-1 ring-destructive/40")}>
                         <p className="text-muted-foreground">BRK</p>
                         <Input type="number" value={item.brokerage || ''}
-                          onChange={e => updateLineItem(gi, ii, 'brokerage', parseFloat(e.target.value) || 0)}
+                          onChange={e => { updateLineItem(gi, ii, 'brokerage', parseFloat(e.target.value) || 0); setValidationErrors(prev => { const n = { ...prev }; delete n[`items.${gi}.${ii}.brokerage`]; return n; }); }}
                           className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
+                        {validationErrors[`items.${gi}.${ii}.brokerage`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.brokerage`]}</p>}
                       </div>
-                      <div className="text-center p-1 rounded bg-muted/20">
+                      <div className={cn("text-center p-1 rounded bg-muted/20", validationErrors[`items.${gi}.${ii}.otherCharges`] && "ring-1 ring-destructive/40")}>
                         <p className="text-muted-foreground">Other</p>
                         <Input type="number" value={item.otherCharges || ''}
-                          onChange={e => updateLineItem(gi, ii, 'otherCharges', parseFloat(e.target.value) || 0)}
+                          onChange={e => { updateLineItem(gi, ii, 'otherCharges', parseFloat(e.target.value) || 0); setValidationErrors(prev => { const n = { ...prev }; delete n[`items.${gi}.${ii}.otherCharges`]; return n; }); }}
                           className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
+                        {validationErrors[`items.${gi}.${ii}.otherCharges`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.otherCharges`]}</p>}
                       </div>
-                      <div className="text-center p-1 rounded bg-primary/10">
+                      <div className={cn("text-center p-1 rounded bg-primary/10", validationErrors[`items.${gi}.${ii}.newRate`] && "ring-1 ring-destructive/40")}>
                         <p className="text-primary text-[8px]">New Rate</p>
-                        <p className="font-bold text-primary">₹{item.newRate}</p>
+                        <p className={cn("font-bold", validationErrors[`items.${gi}.${ii}.newRate`] ? "text-destructive" : "text-primary")}>₹{item.newRate}</p>
+                        {validationErrors[`items.${gi}.${ii}.newRate`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.newRate`]}</p>}
                       </div>
                     </div>
+                    {(validationErrors[`items.${gi}.${ii}.quantity`] || validationErrors[`items.${gi}.${ii}.weight`]) && (
+                      <p className="text-[8px] text-destructive">{validationErrors[`items.${gi}.${ii}.quantity`] || validationErrors[`items.${gi}.${ii}.weight`]}</p>
+                    )}
                   </div>
                 ))}
                 {/* Commodity subtotals */}
@@ -771,24 +883,33 @@ const BillingPage = () => {
             className="glass-card rounded-2xl p-3">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Additions</p>
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-foreground flex-1">Buyer Coolie (Rate × Qty)</p>
-                <Input type="number" value={bill.buyerCoolie || ''}
-                  onChange={e => setBill(recalcGrandTotal({ ...bill, buyerCoolie: parseInt(e.target.value) || 0 }))}
-                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-foreground flex-1">Buyer Coolie (Rate × Qty)</p>
+                  <Input type="number" value={bill.buyerCoolie || ''}
+                    onChange={e => { setBill(recalcGrandTotal({ ...bill, buyerCoolie: parseInt(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.buyerCoolie; return n; }); }}
+                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")} />
+                </div>
+                {validationErrors.buyerCoolie && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.buyerCoolie}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-foreground flex-1">Outbound Freight</p>
-                <Input type="number" value={bill.outboundFreight || ''}
-                  onChange={e => setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value) || 0 }))}
-                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-foreground flex-1">Outbound Freight</p>
+                  <Input type="number" value={bill.outboundFreight || ''}
+                    onChange={e => { setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundFreight; return n; }); }}
+                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")} />
+                </div>
+                {validationErrors.outboundFreight && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundFreight}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
-                <Input value={bill.outboundVehicle}
-                  onChange={e => setBill({ ...bill, outboundVehicle: e.target.value })}
-                  placeholder="MH-12-XX-1234"
-                  className="h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
+                  <Input value={bill.outboundVehicle}
+                    onChange={e => { setBill({ ...bill, outboundVehicle: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundVehicle; return n; }); }}
+                    placeholder="MH-12-XX-1234"
+                    className={cn("h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")} />
+                </div>
+                {validationErrors.outboundVehicle && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundVehicle}</p>}
               </div>
             </div>
           </motion.div>
@@ -798,22 +919,28 @@ const BillingPage = () => {
             className="glass-card rounded-2xl p-3">
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Discount & Adjustments</p>
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-foreground flex-1">Discount</p>
-                <button onClick={() => setBill({ ...bill, discountType: bill.discountType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
-                  className="px-2 py-1 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
-                  {bill.discountType === 'PERCENT' ? '%' : '₹'}
-                </button>
-                <Input type="number" value={bill.discount || ''}
-                  onChange={e => setBill(recalcGrandTotal({ ...bill, discount: parseFloat(e.target.value) || 0 }))}
-                  className="h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-foreground flex-1">Discount</p>
+                  <button onClick={() => setBill({ ...bill, discountType: bill.discountType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
+                    className="px-2 py-1 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
+                    {bill.discountType === 'PERCENT' ? '%' : '₹'}
+                  </button>
+                  <Input type="number" value={bill.discount || ''}
+                    onChange={e => { setBill(recalcGrandTotal({ ...bill, discount: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.discount; return n; }); }}
+                    className={cn("h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")} />
+                </div>
+                {validationErrors.discount && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.discount}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-foreground flex-1">Manual Round Off</p>
-                <Input type="number" value={bill.manualRoundOff || ''}
-                  onChange={e => setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 }))}
-                  className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10"
-                  placeholder="±" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-foreground flex-1">Manual Round Off</p>
+                  <Input type="number" value={bill.manualRoundOff || ''}
+                    onChange={e => { setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.manualRoundOff; return n; }); }}
+                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
+                    placeholder="±" />
+                </div>
+                {validationErrors.manualRoundOff && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.manualRoundOff}</p>}
               </div>
             </div>
           </motion.div>

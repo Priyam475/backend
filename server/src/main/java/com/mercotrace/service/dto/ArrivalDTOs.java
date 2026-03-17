@@ -481,6 +481,8 @@ public final class ArrivalDTOs {
     public static class ArrivalSellerDetailDTO implements Serializable {
 
         private String sellerName;
+        private Long contactId;
+        private String origin;
         private List<ArrivalLotDetailDTO> lots;
 
         public String getSellerName() {
@@ -489,6 +491,22 @@ public final class ArrivalDTOs {
 
         public void setSellerName(String sellerName) {
             this.sellerName = sellerName;
+        }
+
+        public Long getContactId() {
+            return contactId;
+        }
+
+        public void setContactId(Long contactId) {
+            this.contactId = contactId;
+        }
+
+        public String getOrigin() {
+            return origin;
+        }
+
+        public void setOrigin(String origin) {
+            this.origin = origin;
         }
 
         public List<ArrivalLotDetailDTO> getLots() {

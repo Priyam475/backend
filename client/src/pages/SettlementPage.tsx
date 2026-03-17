@@ -109,6 +109,22 @@ function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
   };
 }
 
+// ── Validation constants (from Buyer Selection Section.ini) ──
+const DEDUCTION_MAX = 10_000_000;
+const VOUCHER_AMOUNT_MAX = 100_000;
+const VOUCHER_LABEL_MIN = 5;
+const VOUCHER_LABEL_MAX = 30;
+const VEHICLE_NUMBER_MIN = 10;
+const VEHICLE_NUMBER_MAX = 13;
+
+function clampMoney(value: number, min = 0, max = DEDUCTION_MAX): number {
+  return Math.max(min, Math.min(max, Math.round(value * 100) / 100));
+}
+
+function isVehicleNumberValid(v: string): boolean {
+  return v.length >= VEHICLE_NUMBER_MIN && v.length <= VEHICLE_NUMBER_MAX;
+}
+
 const SettlementPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -171,6 +187,10 @@ const SettlementPage = () => {
   const generatePatti = useCallback((seller: SellerSettlement) => {
     setExistingPattiId(null);
     setSelectedSeller(seller);
+
+    if (!isVehicleNumberValid(seller.vehicleNumber)) {
+      toast.warning(`Vehicle number should be ${VEHICLE_NUMBER_MIN}–${VEHICLE_NUMBER_MAX} characters`);
+    }
     
     // REQ-PUT-001: Cluster by rate
     const rateMap = new Map<number, RateCluster>();
@@ -299,12 +319,13 @@ const SettlementPage = () => {
       });
   }, [coolieMode, hamaliEnabled, gunniesAmount, useAvgWeight]);
 
-  // Update deduction amount
+  // Update deduction amount (clamped to 0..10,000,000, 2 decimal precision)
   const updateDeduction = (key: string, newAmount: number) => {
     if (!pattiData || (!masterEditMode && !pattiData.deductions.find(d => d.key === key)?.editable)) return;
     
+    const clamped = clampMoney(newAmount);
     const updated = pattiData.deductions.map(d =>
-      d.key === key ? { ...d, amount: newAmount } : d
+      d.key === key ? { ...d, amount: clamped } : d
     );
     const totalDeductions = updated.reduce((s, d) => s + d.amount, 0);
     setPattiData({
@@ -315,14 +336,24 @@ const SettlementPage = () => {
     });
   };
 
-  // Add manual voucher deduction
+  // Add manual voucher deduction (validated: label 5–30 chars, amount ₹0–₹100,000)
   const addManualVoucher = () => {
-    if (!pattiData || !manualVoucherLabel || !manualVoucherAmount) return;
+    if (!pattiData) return;
+    const trimmedLabel = manualVoucherLabel.trim();
+    if (trimmedLabel.length < VOUCHER_LABEL_MIN || trimmedLabel.length > VOUCHER_LABEL_MAX) {
+      toast.error(`Voucher label must be ${VOUCHER_LABEL_MIN}–${VOUCHER_LABEL_MAX} characters`);
+      return;
+    }
+    const rawAmount = parseFloat(manualVoucherAmount);
+    if (isNaN(rawAmount) || rawAmount < 0 || rawAmount > VOUCHER_AMOUNT_MAX) {
+      toast.error(`Voucher amount must be ₹0–₹${VOUCHER_AMOUNT_MAX.toLocaleString()}`);
+      return;
+    }
     const key = `manual_${Date.now()}`;
-    const amount = parseInt(manualVoucherAmount) || 0;
+    const amount = clampMoney(rawAmount, 0, VOUCHER_AMOUNT_MAX);
     const newDed: DeductionItem = {
       key,
-      label: manualVoucherLabel,
+      label: trimmedLabel,
       amount,
       editable: true,
       autoPulled: false,
@@ -363,6 +394,9 @@ const SettlementPage = () => {
         return;
       }
       const data = mapPattiDTOToPattiData(dto);
+      if (data.createdAt && new Date(data.createdAt) > new Date()) {
+        toast.warning('Patti date is in the future — please verify');
+      }
       setPattiData(data);
       setExistingPattiId(dto.id ?? id);
       setSelectedSeller({
@@ -769,8 +803,11 @@ const SettlementPage = () => {
                     <Input
                       type="number"
                       value={deduction.amount || ''}
-                      onChange={e => updateDeduction(deduction.key, parseInt(e.target.value) || 0)}
+                      onChange={e => updateDeduction(deduction.key, parseFloat(e.target.value) || 0)}
                       disabled={!deduction.editable && !masterEditMode}
+                      min={0}
+                      max={DEDUCTION_MAX}
+                      step="0.01"
                       className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-transparent border-border/30"
                     />
                     {deduction.key.startsWith('manual_') && (
@@ -794,9 +831,11 @@ const SettlementPage = () => {
                 <span className="text-xs text-muted-foreground">₹</span>
                 <Input type="number" value={gunniesAmount || ''}
                   onChange={e => {
-                    setGunniesAmount(parseInt(e.target.value) || 0);
+                    setGunniesAmount(clampMoney(parseInt(e.target.value) || 0, 0, DEDUCTION_MAX));
                     setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50);
                   }}
+                  min={0}
+                  max={DEDUCTION_MAX}
                   className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-transparent border-amber-400/30"
                 />
               </div>
@@ -807,13 +846,19 @@ const SettlementPage = () => {
               {showAddVoucher && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
                   className="mt-2 p-3 rounded-xl bg-primary/5 border border-primary/20 space-y-2 overflow-hidden">
-                  <Input placeholder="Voucher / Charge label" value={manualVoucherLabel}
-                    onChange={e => setManualVoucherLabel(e.target.value)}
-                    className="h-8 rounded-lg text-xs" />
+                  <Input placeholder="Voucher / Charge label (5–30 chars)" value={manualVoucherLabel}
+                    onChange={e => setManualVoucherLabel(e.target.value.slice(0, VOUCHER_LABEL_MAX))}
+                    maxLength={VOUCHER_LABEL_MAX}
+                    className={cn("h-8 rounded-lg text-xs",
+                      manualVoucherLabel.trim().length > 0 && manualVoucherLabel.trim().length < VOUCHER_LABEL_MIN && "border-amber-400")} />
                   <div className="flex gap-2">
-                    <Input type="number" placeholder="Amount ₹" value={manualVoucherAmount}
+                    <Input type="number" placeholder="Amount ₹ (0–100,000)" value={manualVoucherAmount}
                       onChange={e => setManualVoucherAmount(e.target.value)}
-                      className="h-8 rounded-lg text-xs flex-1" />
+                      min={0}
+                      max={VOUCHER_AMOUNT_MAX}
+                      step="0.01"
+                      className={cn("h-8 rounded-lg text-xs flex-1",
+                        manualVoucherAmount && (parseFloat(manualVoucherAmount) < 0 || parseFloat(manualVoucherAmount) > VOUCHER_AMOUNT_MAX) && "border-destructive")} />
                     <Button size="sm" onClick={addManualVoucher} className="h-8 rounded-lg text-xs px-4">Add</Button>
                   </div>
                 </motion.div>
@@ -854,7 +899,11 @@ const SettlementPage = () => {
             </div>
 
             <Button onClick={savePatti}
-              className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white font-bold text-base shadow-lg">
+              disabled={!pattiData.rateClusters.length}
+              className={cn("w-full mt-4 h-12 rounded-xl text-white font-bold text-base shadow-lg",
+                pattiData.rateClusters.length
+                  ? "bg-gradient-to-r from-emerald-500 to-green-500"
+                  : "bg-muted cursor-not-allowed opacity-50")}>
               <Save className="w-5 h-5 mr-2" /> {existingPattiId != null ? 'Update' : 'Save'} & Close Patti
             </Button>
             {selectedSeller?.lots?.length ? (

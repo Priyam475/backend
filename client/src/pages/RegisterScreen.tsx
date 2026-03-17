@@ -59,13 +59,15 @@ const RegisterScreen = () => {
   const mobileRegex = /^[6-9]\d{9}$/;
   const pinRegex = /^\d{6}$/;
   const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+  /** Allows letters and spaces only (no digits, punctuation, or other symbols) */
+  const nameRegex = /^[A-Za-z ]+$/;
 
   const validate = (field: string): string => {
     const v = form[field as keyof typeof form];
     if (!touched[field]) return '';
     switch (field) {
-      case 'businessName': return !v ? 'Business name is required' : v.length < 3 ? 'Min 3 characters' : '';
-      case 'ownerName': return !v ? 'Owner name is required' : v.length < 2 ? 'Min 2 characters' : '';
+      case 'businessName': return !v ? 'Business name is required' : v.length < 3 ? 'Min 3 characters' : !nameRegex.test(v) ? 'Only letters and spaces allowed' : '';
+      case 'ownerName': return !v ? 'Owner name is required' : v.length < 2 ? 'Min 2 characters' : !nameRegex.test(v) ? 'Only letters and spaces allowed' : '';
       case 'email': return !v ? 'Email is required' : !emailRegex.test(v) ? 'Enter a valid email' : '';
       case 'mobile': return !v ? 'Mobile number is required' : !mobileRegex.test(v) ? 'Enter valid 10-digit mobile (starts 6-9)' : '';
       case 'password': return !v ? 'Password is required' : v.length < 6 ? 'Min 6 characters' : '';
@@ -79,7 +81,7 @@ const RegisterScreen = () => {
     }
   };
 
-  const step1Valid = form.businessName.length >= 3 && form.ownerName.length >= 2 && emailRegex.test(form.email) && mobileRegex.test(form.mobile) && form.password.length >= 6;
+  const step1Valid = form.businessName.length >= 3 && nameRegex.test(form.businessName) && form.ownerName.length >= 2 && nameRegex.test(form.ownerName) && emailRegex.test(form.email) && mobileRegex.test(form.mobile) && form.password.length >= 6;
   const step2Valid = !!form.address && !!form.city && !!form.state && pinRegex.test(form.pinCode) && !!form.categoryName;
 
   const handleNext = () => {
