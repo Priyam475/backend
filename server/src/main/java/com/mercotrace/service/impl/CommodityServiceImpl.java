@@ -61,6 +61,9 @@ public class CommodityServiceImpl implements CommodityService {
         }
 
         Commodity commodity = commodityMapper.toEntity(commodityDTO);
+        if (commodity.getActive() == null) {
+            commodity.setActive(true);
+        }
         commodity = commodityRepository.save(commodity);
         return commodityMapper.toDto(commodity);
     }
@@ -69,6 +72,9 @@ public class CommodityServiceImpl implements CommodityService {
     public CommodityDTO update(CommodityDTO commodityDTO) {
         LOG.debug("Request to update Commodity : {}", commodityDTO);
         Commodity commodity = commodityMapper.toEntity(commodityDTO);
+        if (commodity.getActive() == null) {
+            commodity.setActive(true);
+        }
         commodity = commodityRepository.save(commodity);
         return commodityMapper.toDto(commodity);
     }
@@ -96,12 +102,25 @@ public class CommodityServiceImpl implements CommodityService {
 
     @Override
     public void delete(Long id) {
-        LOG.debug("Request to delete Commodity : {}", id);
-        commodityConfigRepository.deleteByCommodityId(id);
-        deductionRuleRepository.deleteByCommodityId(id);
-        hamaliSlabRepository.deleteByCommodityId(id);
-        dynamicChargeRepository.deleteByCommodityId(id);
-        commodityRepository.deleteById(id);
+        LOG.debug("Request to soft-delete Commodity : {}", id);
+        commodityRepository
+            .findById(id)
+            .ifPresent(commodity -> {
+                commodity.setActive(false);
+                commodityRepository.save(commodity);
+            });
+    }
+
+    @Override
+    public Optional<CommodityDTO> restore(Long id) {
+        LOG.debug("Request to restore Commodity : {}", id);
+        return commodityRepository
+            .findById(id)
+            .map(commodity -> {
+                commodity.setActive(true);
+                return commodityRepository.save(commodity);
+            })
+            .map(commodityMapper::toDto);
     }
 
     @Override
@@ -120,9 +139,18 @@ public class CommodityServiceImpl implements CommodityService {
     public List<CommodityDTO> findAllByTrader(Long traderId) {
         LOG.debug("Request to get all Commodities for trader : {}", traderId);
         return commodityRepository
-            .findAllByTraderId(traderId)
+            .findAllByTraderIdAndActiveTrue(traderId)
             .stream()
             .map(commodityMapper::toDto)
             .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<CommodityDTO> findOneByTraderIdAndName(Long traderId, String name) {
+        LOG.debug("Request to get Commodity by trader and name : {}, {}", traderId, name);
+        return commodityRepository
+            .findOneByTraderIdAndCommodityNameIgnoreCase(traderId, name)
+            .map(commodityMapper::toDto);
     }
 }

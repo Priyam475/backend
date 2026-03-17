@@ -94,7 +94,7 @@ public class CdnServiceImpl implements CdnService {
             }
         } else if (receivingPartyName != null && !receivingPartyName.isBlank()) {
             final String nameToMatch = receivingPartyName.trim();
-            Optional<Contact> found = contactRepository.findAllByTraderId(traderId).stream()
+            Optional<Contact> found = contactRepository.findAllByTraderIdAndActiveTrue(traderId).stream()
                 .filter(c -> nameToMatch.equalsIgnoreCase(c.getName()))
                 .findFirst();
             if (found.isPresent()) {

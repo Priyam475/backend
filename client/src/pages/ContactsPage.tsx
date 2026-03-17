@@ -8,8 +8,11 @@ import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi } from '@/services/api';
+import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { RotateCcw } from 'lucide-react';
 import { usePermissions } from '@/lib/permissions';
 import ForbiddenPage from '@/components/ForbiddenPage';
 
@@ -35,6 +38,7 @@ const ContactsPage = () => {
   const [formData, setFormData] = useState({ name: '', phone: '', mark: '', address: '', enablePortal: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [restorePendingPhone, setRestorePendingPhone] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadContacts = () => {
@@ -123,8 +127,32 @@ const ContactsPage = () => {
       closeModal();
       toast.success(`✅ ${created.name} registered`);
     } catch (err) {
+      if (err instanceof ContactApiError && err.errorKey === 'phoneexistsinactive') {
+        setRestorePendingPhone(formData.phone.trim());
+        closeModal();
+        return;
+      }
       console.error('Add contact error:', err);
-      toast.error('Failed to register contact');
+      toast.error(err instanceof Error ? err.message : 'Failed to register contact');
+    }
+  };
+
+  const handleRestoreContact = async () => {
+    if (!restorePendingPhone || !canEdit) return;
+    try {
+      const existing = await contactApi.getByPhone(restorePendingPhone);
+      if (!existing) {
+        toast.error('Contact no longer found');
+        setRestorePendingPhone(null);
+        return;
+      }
+      await contactApi.restore(existing.contact_id);
+      setRestorePendingPhone(null);
+      loadContacts();
+      toast.success(`Contact with phone ${restorePendingPhone} restored. You can use it again.`);
+    } catch (err) {
+      console.error('Restore contact error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to restore contact');
     }
   };
 
@@ -389,7 +417,7 @@ const ContactsPage = () => {
               </div>
               <h3 className="text-lg font-bold text-center text-foreground mb-1">Delete Contact?</h3>
                 <p className="text-sm text-center text-muted-foreground mb-5">
-                This will permanently remove <strong>{contacts.find(c => c.contact_id === deleteConfirm)?.name}</strong>.
+                This will remove <strong>{contacts.find(c => c.contact_id === deleteConfirm)?.name}</strong> from the list. You can restore later by adding the same phone again.
               </p>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setDeleteConfirm(null)} className="flex-1 h-12 rounded-xl">Cancel</Button>
@@ -401,6 +429,30 @@ const ContactsPage = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Restore previously removed contact (same phone exists but inactive) */}
+      <Dialog open={!!restorePendingPhone} onOpenChange={(open) => { if (!open) setRestorePendingPhone(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                <RotateCcw className="w-5 h-5 text-primary" />
+              </div>
+              <DialogTitle>Restore contact?</DialogTitle>
+            </div>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            A contact with phone <strong>{restorePendingPhone}</strong> was previously removed. Restore it to use again instead of creating a new one?
+          </p>
+          {!canEdit && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">You need Edit permission to restore.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestorePendingPhone(null)}>Cancel</Button>
+            <Button onClick={handleRestoreContact} disabled={!canEdit}>Restore</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* View / Add / Edit Bottom Sheet */}
       <AnimatePresence>

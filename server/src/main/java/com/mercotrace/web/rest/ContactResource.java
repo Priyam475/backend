@@ -83,9 +83,18 @@ public class ContactResource {
         // Enforce global mobile uniqueness across trader owner, trader staff and contacts
         contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), null);
 
-        // Enforce phone uniqueness per trader, aligned with frontend validation
-        if (contactRepository.findOneByTraderIdAndPhone(traderId, contactDTO.getPhone()).isPresent()) {
-            throw new BadRequestAlertException("This phone number is already registered", ENTITY_NAME, "phoneexists");
+        // Enforce phone uniqueness per trader (active or inactive)
+        Optional<com.mercotrace.domain.Contact> existingByPhone = contactRepository
+            .findOneByTraderIdAndPhone(traderId, contactDTO.getPhone());
+        if (existingByPhone.isPresent()) {
+            if (Boolean.TRUE.equals(existingByPhone.get().getActive())) {
+                throw new BadRequestAlertException("This phone number is already registered", ENTITY_NAME, "phoneexists");
+            }
+            throw new BadRequestAlertException(
+                "A contact with this phone was previously removed. You can restore it instead of creating a new one.",
+                ENTITY_NAME,
+                "phoneexistsinactive"
+            );
         }
 
         contactDTO = contactService.save(contactDTO);
@@ -211,6 +220,22 @@ public class ContactResource {
     }
 
     /**
+     * {@code GET  /contacts/by-phone} : get the contact by phone for the current trader (active or inactive).
+     * Used when create fails with "phone exists but inactive" so the client can get the id to call restore.
+     *
+     * @param phone the phone number.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and body the contactDTO, or {@code 404 (Not Found)}.
+     */
+    @GetMapping("/by-phone")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\")")
+    public ResponseEntity<ContactDTO> getContactByPhone(@RequestParam("phone") String phone) {
+        LOG.debug("REST request to get Contact by phone : {}", phone);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contactDTO = contactService.findOneByTraderIdAndPhone(traderId, phone);
+        return ResponseUtil.wrapOrNotFound(contactDTO);
+    }
+
+    /**
      * {@code GET  /contacts/:id} : get the "id" contact.
      *
      * @param id the id of the contactDTO to retrieve.
@@ -225,6 +250,24 @@ public class ContactResource {
             .findOne(id)
             .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
         return ResponseUtil.wrapOrNotFound(contactDTO);
+    }
+
+    /**
+     * {@code PATCH  /contacts/:id/restore} : restore a soft-deleted contact (set active = true).
+     *
+     * @param id the id of the contact to restore.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and body the restored contactDTO, or {@code 404 (Not Found)}.
+     */
+    @PatchMapping("/{id}/restore")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_EDIT + "\")")
+    public ResponseEntity<ContactDTO> restoreContact(@PathVariable("id") Long id) {
+        LOG.debug("REST request to restore Contact : {}", id);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> restored = contactService.restore(id);
+        if (restored.isEmpty() || !Objects.equals(restored.get().getTraderId(), traderId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok().body(restored.get());
     }
 
     private Long resolveTraderId() {

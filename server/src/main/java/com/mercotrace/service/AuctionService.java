@@ -540,6 +540,10 @@ public class AuctionService {
         if (lot != null) {
             dto.setLotName(lot.getLotName());
             dto.setSellerVehicleId(lot.getSellerVehicleId());
+            if (lot.getCommodityId() != null) {
+                Commodity commodity = commodityRepository.findById(lot.getCommodityId()).orElse(null);
+                dto.setCommodityName(commodity != null ? commodity.getCommodityName() : null);
+            }
         }
         dto.setAuctionDatetime(auction.getAuctionDatetime());
         dto.setConductedBy(auction.getConductedBy());

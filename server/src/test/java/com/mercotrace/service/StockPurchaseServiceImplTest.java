@@ -102,7 +102,7 @@ class StockPurchaseServiceImplTest {
         purchase.setId(1L);
         purchase.setTraderId(TRADER_ID);
         purchase.setVendorId(VENDOR_ID);
-        when(contactRepository.findAllByTraderIdAndNameContainingIgnoreCase(eq(TRADER_ID), eq("Vendor")))
+        when(contactRepository.findAllByTraderIdAndNameContainingIgnoreCaseAndActiveTrue(eq(TRADER_ID), eq("Vendor")))
             .thenReturn(List.of(vendor));
         when(stockPurchaseRepository.findAllByTraderIdAndVendorIdInAndIsDeletedFalse(
             eq(TRADER_ID), eq(List.of(VENDOR_ID)), eq(pageable)))

@@ -64,20 +64,34 @@ function mapContactToUpdatePayload(id: string, data: Partial<Contact>): Record<s
   };
 }
 
+/** Error with optional errorKey from API problem body (e.g. phoneexistsinactive). */
+export class ContactApiError extends Error {
+  errorKey?: string;
+  constructor(message: string, errorKey?: string) {
+    super(message);
+    this.name = 'ContactApiError';
+    this.errorKey = errorKey;
+  }
+}
+
 async function handleResponse<T>(res: Response, defaultMessage: string): Promise<T> {
   if (res.ok) {
     return res.json() as Promise<T>;
   }
 
   let message = defaultMessage;
+  let errorKey: string | undefined;
   try {
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-      const problem = await res.json();
+      const problem = await res.json() as { detail?: string; title?: string; message?: string };
       if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
         message = problem.detail;
       } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
         message = problem.title;
+      }
+      if (typeof problem.message === 'string' && problem.message.startsWith('error.')) {
+        errorKey = problem.message.replace(/^error\./, '');
       }
     } else {
       const text = await res.text();
@@ -88,7 +102,7 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
   } catch {
     // ignore parse errors and keep default message
   }
-  throw new Error(message);
+  throw new ContactApiError(message, errorKey);
 }
 
 export const contactApi = {
@@ -115,6 +129,21 @@ export const contactApi = {
     });
     const created = await handleResponse<ContactDto>(res, 'Failed to register contact');
     return mapDtoToContact(created);
+  },
+
+  /** Get contact by phone (active or inactive) for restore flow. Returns null if 404. */
+  async getByPhone(phone: string): Promise<Contact | null> {
+    const res = await apiFetch(`/contacts/by-phone?phone=${encodeURIComponent(phone)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    const data = await handleResponse<ContactDto>(res, 'Failed to load contact');
+    return mapDtoToContact(data);
+  },
+
+  /** Restore a soft-deleted contact (set active = true). */
+  async restore(contactId: string): Promise<Contact> {
+    const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}/restore`, { method: 'PATCH' });
+    const data = await handleResponse<ContactDto>(res, 'Failed to restore contact');
+    return mapDtoToContact(data);
   },
 
   async update(itemId: string, data: Partial<Contact>): Promise<Contact> {

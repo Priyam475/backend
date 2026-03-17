@@ -215,7 +215,7 @@ class CdnServiceImplTest {
         request.setItems(List.of(item));
         request.setAdvancePaid(BigDecimal.valueOf(500));
 
-        when(contactRepository.findAllByTraderId(TRADER_ID)).thenReturn(List.of());
+        when(contactRepository.findAllByTraderIdAndActiveTrue(TRADER_ID)).thenReturn(List.of());
         when(cdnRepository.findMaxCdnSerialByTrader(TRADER_ID)).thenReturn(0);
         when(cdnRepository.save(any(Cdn.class))).thenAnswer(inv -> {
             Cdn c = inv.getArgument(0);

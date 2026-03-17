@@ -65,7 +65,7 @@ public class StockPurchaseServiceImpl implements StockPurchaseService {
         if (searchTrimmed.isEmpty()) {
             page = stockPurchaseRepository.findAllByTraderIdAndIsDeletedFalse(traderId, pageable);
         } else {
-            List<Contact> contacts = contactRepository.findAllByTraderIdAndNameContainingIgnoreCase(traderId, searchTrimmed);
+            List<Contact> contacts = contactRepository.findAllByTraderIdAndNameContainingIgnoreCaseAndActiveTrue(traderId, searchTrimmed);
             if (contacts.isEmpty()) {
                 page = stockPurchaseRepository.findAllByTraderIdAndIsDeletedFalse(traderId, pageable);
             } else {

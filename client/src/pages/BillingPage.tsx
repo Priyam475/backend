@@ -21,6 +21,8 @@ import { usePermissions } from '@/lib/permissions';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
+import { directPrint } from '@/utils/printTemplates';
+import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
 
 // ── Types ─────────────────────────────────────────────────
 interface BuyerPurchase {
@@ -653,6 +655,7 @@ const BillingPage = () => {
               } catch {
                 // backend optional
               }
+              directPrint(generateSalesBillPrintHTML(bill));
               toast.success('Sales Bill sent to printer!');
             }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">

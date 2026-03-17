@@ -100,20 +100,34 @@ function mapCommodityToUpdatePayload(id: string, data: Partial<Commodity>): Reco
   };
 }
 
+/** Error with optional errorKey from API problem body (e.g. commoditynameexistsinactive). */
+export class CommodityApiError extends Error {
+  errorKey?: string;
+  constructor(message: string, errorKey?: string) {
+    super(message);
+    this.name = 'CommodityApiError';
+    this.errorKey = errorKey;
+  }
+}
+
 async function handleResponse<T>(res: Response, defaultMessage: string): Promise<T> {
   if (res.ok) {
     return res.json() as Promise<T>;
   }
 
   let message = defaultMessage;
+  let errorKey: string | undefined;
   try {
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-      const problem = await res.json();
+      const problem = await res.json() as { detail?: string; title?: string; message?: string };
       if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
         message = problem.detail;
       } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
         message = problem.title;
+      }
+      if (typeof problem.message === 'string' && problem.message.startsWith('error.')) {
+        errorKey = problem.message.replace(/^error\./, '');
       }
     } else {
       const text = await res.text();
@@ -124,7 +138,7 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
   } catch {
     // ignore parse errors and keep default message
   }
-  throw new Error(message);
+  throw new CommodityApiError(message, errorKey);
 }
 
 export const commodityApi = {
@@ -151,6 +165,21 @@ export const commodityApi = {
     });
     const created = await handleResponse<CommodityDto>(res, 'Failed to add commodity');
     return mapDtoToCommodity(created);
+  },
+
+  /** Get commodity by name (active or inactive) for restore flow. Returns null if 404. */
+  async getByName(name: string): Promise<Commodity | null> {
+    const res = await apiFetch(`/commodities/by-name?name=${encodeURIComponent(name)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    const data = await handleResponse<CommodityDto>(res, 'Failed to load commodity');
+    return mapDtoToCommodity(data);
+  },
+
+  /** Restore a soft-deleted commodity (set active = true). */
+  async restore(commodityId: string): Promise<Commodity> {
+    const res = await apiFetch(`/commodities/${encodeURIComponent(commodityId)}/restore`, { method: 'PATCH' });
+    const data = await handleResponse<CommodityDto>(res, 'Failed to restore commodity');
+    return mapDtoToCommodity(data);
   },
 
   async update(itemId: string, data: Partial<Commodity>): Promise<Commodity> {

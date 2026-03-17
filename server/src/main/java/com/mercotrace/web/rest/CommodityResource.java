@@ -78,9 +78,18 @@ public class CommodityResource {
         Long traderId = resolveTraderId(commodityDTO);
         commodityDTO.setTraderId(traderId);
 
-        // Enforce case-insensitive unique name per trader (aligned with frontend validation)
-        if (commodityRepository.findOneByTraderIdAndCommodityNameIgnoreCase(traderId, commodityDTO.getCommodityName()).isPresent()) {
-            throw new BadRequestAlertException("This commodity name already exists", ENTITY_NAME, "commoditynameexists");
+        // Enforce case-insensitive unique name per trader (active or inactive)
+        Optional<com.mercotrace.domain.Commodity> existingByName = commodityRepository
+            .findOneByTraderIdAndCommodityNameIgnoreCase(traderId, commodityDTO.getCommodityName());
+        if (existingByName.isPresent()) {
+            if (Boolean.TRUE.equals(existingByName.get().getActive())) {
+                throw new BadRequestAlertException("This commodity name already exists", ENTITY_NAME, "commoditynameexists");
+            }
+            throw new BadRequestAlertException(
+                "A commodity with this name was previously removed. You can restore it instead of creating a new one.",
+                ENTITY_NAME,
+                "commoditynameexistsinactive"
+            );
         }
 
         commodityDTO = commodityService.save(commodityDTO);
@@ -188,6 +197,22 @@ public class CommodityResource {
     }
 
     /**
+     * {@code GET  /commodities/by-name} : get the commodity by name for the current trader (active or inactive).
+     * Used when create fails with "name exists but inactive" so the client can get the id to call restore.
+     *
+     * @param name the commodity name (case-insensitive).
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and body the commodityDTO, or {@code 404 (Not Found)}.
+     */
+    @GetMapping("/by-name")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_VIEW + "\")")
+    public ResponseEntity<CommodityDTO> getCommodityByName(@RequestParam("name") String name) {
+        LOG.debug("REST request to get Commodity by name : {}", name);
+        Long traderId = traderContextService.getCurrentTraderId();
+        Optional<CommodityDTO> commodityDTO = commodityService.findOneByTraderIdAndName(traderId, name);
+        return ResponseUtil.wrapOrNotFound(commodityDTO);
+    }
+
+    /**
      * {@code GET  /commodities/:id} : get the "id" commodity.
      *
      * @param id the id of the commodityDTO to retrieve.
@@ -202,6 +227,24 @@ public class CommodityResource {
             .findOne(id)
             .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
         return ResponseUtil.wrapOrNotFound(commodityDTO);
+    }
+
+    /**
+     * {@code PATCH  /commodities/:id/restore} : restore a soft-deleted commodity (set active = true).
+     *
+     * @param id the id of the commodity to restore.
+     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and body the restored commodityDTO, or {@code 404 (Not Found)}.
+     */
+    @PatchMapping("/{id}/restore")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.COMMODITY_SETTINGS_EDIT + "\")")
+    public ResponseEntity<CommodityDTO> restoreCommodity(@PathVariable("id") Long id) {
+        LOG.debug("REST request to restore Commodity : {}", id);
+        Long traderId = traderContextService.getCurrentTraderId();
+        Optional<CommodityDTO> restored = commodityService.restore(id);
+        if (restored.isEmpty() || !Objects.equals(restored.get().getTraderId(), traderId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok().body(restored.get());
     }
 
     /**

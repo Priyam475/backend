@@ -60,7 +60,7 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
     public java.util.List<FullCommodityConfigDTO> getAllFullConfigs() {
         Long traderId = traderContextService.getCurrentTraderId();
         return commodityRepository
-            .findAllByTraderId(traderId)
+            .findAllByTraderIdAndActiveTrue(traderId)
             .stream()
             .map(c -> getFullConfig(c.getId()))
             .collect(java.util.stream.Collectors.toList());

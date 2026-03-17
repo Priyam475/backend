@@ -71,6 +71,9 @@ public class ContactServiceImpl implements ContactService {
         }
 
         Contact contact = contactMapper.toEntity(contactDTO);
+        if (contact.getActive() == null) {
+            contact.setActive(true);
+        }
         contact = contactRepository.save(contact);
         return contactMapper.toDto(contact);
     }
@@ -89,6 +92,9 @@ public class ContactServiceImpl implements ContactService {
             contactDTO.setCanLogin(Boolean.FALSE);
         }
         Contact contact = contactMapper.toEntity(contactDTO);
+        if (contact.getActive() == null) {
+            contact.setActive(true);
+        }
         contact = contactRepository.save(contact);
         return contactMapper.toDto(contact);
     }
@@ -125,7 +131,7 @@ public class ContactServiceImpl implements ContactService {
 
     @Override
     public void delete(Long id) {
-        LOG.debug("Request to delete Contact : {}", id);
+        LOG.debug("Request to soft-delete Contact : {}", id);
         contactRepository
             .findById(id)
             .ifPresent(
@@ -134,9 +140,36 @@ public class ContactServiceImpl implements ContactService {
                     if (traderId != null && cacheManager.getCache(STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE) != null) {
                         cacheManager.getCache(STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE).evict(traderId);
                     }
+                    c.setActive(false);
+                    contactRepository.save(c);
                 }
             );
-        contactRepository.deleteById(id);
+    }
+
+    @Override
+    public Optional<ContactDTO> restore(Long id) {
+        LOG.debug("Request to restore Contact : {}", id);
+        return contactRepository
+            .findById(id)
+            .map(
+                c -> {
+                    c.setActive(true);
+                    Contact saved = contactRepository.save(c);
+                    if (saved.getTraderId() != null && cacheManager.getCache(STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE) != null) {
+                        cacheManager.getCache(STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE).evict(saved.getTraderId());
+                    }
+                    return contactMapper.toDto(saved);
+                }
+            );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ContactDTO> findOneByTraderIdAndPhone(Long traderId, String phone) {
+        LOG.debug("Request to get Contact by trader and phone : {}, {}", traderId, phone);
+        return contactRepository
+            .findOneByTraderIdAndPhone(traderId, phone)
+            .map(contactMapper::toDto);
     }
 
     @Override
@@ -145,7 +178,7 @@ public class ContactServiceImpl implements ContactService {
     public List<ContactDTO> findAllByTrader(Long traderId) {
         LOG.debug("Request to get all Contacts for trader : {}", traderId);
         return contactRepository
-            .findAllByTraderId(traderId)
+            .findAllByTraderIdAndActiveTrue(traderId)
             .stream()
             .map(contactMapper::toDto)
             .collect(Collectors.toList());
@@ -171,4 +204,5 @@ public class ContactServiceImpl implements ContactService {
             .collect(Collectors.toList());
     }
 }
+
 

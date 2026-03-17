@@ -39,6 +39,9 @@ public class CommodityDTO implements Serializable {
     @JsonProperty("last_modified_date")
     private Instant lastModifiedDate;
 
+    @JsonProperty("active")
+    private Boolean active;
+
     public Long getId() {
         return id;
     }
@@ -101,6 +104,14 @@ public class CommodityDTO implements Serializable {
 
     public void setLastModifiedDate(Instant lastModifiedDate) {
         this.lastModifiedDate = lastModifiedDate;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     @Override

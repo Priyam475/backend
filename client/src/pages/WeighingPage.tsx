@@ -14,6 +14,8 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, weighingApi, printLogApi, arrivalsApi } from '@/services/api';
+import { directPrint } from '@/utils/printTemplates';
+import { generateWeighingSlipPrintHTML } from '@/utils/printDocumentTemplates';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import ForbiddenPage from '@/components/ForbiddenPage';
@@ -426,6 +428,8 @@ const WeighingPage = () => {
               } catch {
                 // backend optional
               }
+              const totalW = completedSession.bagWeights.reduce((s, b) => s + b.weight, 0);
+              directPrint(generateWeighingSlipPrintHTML(completedSession, totalW));
               toast.success('Weighing slip sent to printer!');
             }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-slate-600 to-slate-800 text-white font-bold shadow-lg">

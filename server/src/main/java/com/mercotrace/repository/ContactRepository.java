@@ -15,13 +15,16 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
 
     Optional<Contact> findOneByTraderIdAndPhone(Long traderId, String phone);
 
-    List<Contact> findAllByTraderId(Long traderId);
+    List<Contact> findAllByTraderIdAndActiveTrue(Long traderId);
 
-    List<Contact> findAllByTraderIdAndMarkContainingIgnoreCase(Long traderId, String mark);
+    List<Contact> findAllByTraderIdAndMarkContainingIgnoreCaseAndActiveTrue(Long traderId, String mark);
 
-    List<Contact> findAllByTraderIdAndNameContainingIgnoreCase(Long traderId, String name);
+    List<Contact> findAllByTraderIdAndNameContainingIgnoreCaseAndActiveTrue(Long traderId, String name);
 
     Optional<Contact> findOneByPhone(String phone);
+
+    /** Same as findOneByPhone but only active contacts (so soft-deleted contacts don't block new registration). */
+    Optional<Contact> findOneByPhoneAndActiveTrue(String phone);
 
     Optional<Contact> findOneByEmailIgnoreCase(String email);
 }

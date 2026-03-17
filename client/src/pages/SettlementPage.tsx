@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { printLogApi, settlementApi, type PattiDTO } from '@/services/api';
+import { directPrint } from '@/utils/printTemplates';
+import { generateSalesPattiPrintHTML } from '@/utils/printDocumentTemplates';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 
@@ -573,6 +575,7 @@ const SettlementPage = () => {
               } catch {
                 // backend optional
               }
+              directPrint(generateSalesPattiPrintHTML(pattiData));
               toast.success('Sales Patti sent to printer!');
             }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold shadow-lg">
