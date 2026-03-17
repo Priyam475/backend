@@ -5,6 +5,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import ContactPortalDesktopSidebar from '@/components/ContactPortalDesktopSidebar';
 import ContactPortalBottomNav from '@/components/ContactPortalBottomNav';
+import FontSizeControls from '@/components/FontSizeControls';
 
 const navItems = [
   { to: '/contact', label: 'Dashboard' },
@@ -61,6 +62,16 @@ const ContactPortalLayout = () => {
                 {contact?.name || contact?.phone}
               </h1>
             </div>
+            <div className="flex items-center gap-2">
+              <FontSizeControls />
+              <button
+                onClick={toggleTheme}
+                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                className="w-10 h-10 min-w-[44px] min-h-[44px] rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 dark:hover:bg-emerald-500/30 transition-all"
+              >
+                {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -101,6 +112,7 @@ const ContactPortalLayout = () => {
             <h2 className="text-lg font-bold text-foreground">{activePageTitle}</h2>
           </div>
           <div className="relative z-10 flex items-center gap-3">
+            <FontSizeControls />
             <button
               aria-label="Notifications"
               className="w-9 h-9 rounded-xl glass flex items-center justify-center hover:bg-muted/50 transition-all relative border border-border/30"

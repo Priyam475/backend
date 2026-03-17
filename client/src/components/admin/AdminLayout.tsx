@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
+import FontSizeControls from '@/components/FontSizeControls';
 import { useTheme } from '@/context/ThemeContext';
 import { useAdminAuth } from '@/context/AdminAuthContext';
 import { useAdminPermissions } from '@/admin/lib/adminPermissions';
@@ -128,6 +129,10 @@ const AdminLayout = () => {
 
         {/* Bottom */}
         <div className="relative z-10 p-3 border-t border-white/15 space-y-2">
+          <div className="flex items-center gap-2 px-3 py-2">
+            <FontSizeControls variant="light" />
+            {!collapsed && <span className="text-sm text-white/75 whitespace-nowrap">Font size</span>}
+          </div>
           <button
             onClick={toggleTheme}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-white/75 hover:text-white hover:bg-white/10 transition-all"
@@ -197,6 +202,7 @@ const AdminLayout = () => {
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            <FontSizeControls />
             <button className="w-9 h-9 rounded-xl bg-muted/50 flex items-center justify-center hover:bg-muted transition-all relative">
               <Bell className="w-4 h-4 text-muted-foreground" />
               <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-destructive" />
