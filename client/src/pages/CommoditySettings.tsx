@@ -288,17 +288,28 @@ const CommoditySettings = () => {
     if (cfg.min_weight > 0 && cfg.max_weight > 0 && cfg.min_weight > cfg.max_weight) { toast.error(`${commodityName}: Min weight cannot exceed Max weight`); return; }
     if (cfg.commission_percent < 0 || cfg.commission_percent > 100) { toast.error(`${commodityName}: Commission must be between 0% and 100%`); return; }
     if (cfg.user_fee_percent < 0 || cfg.user_fee_percent > 100) { toast.error(`${commodityName}: User fee must be between 0% and 100%`); return; }
-    if (item.gstApplicable && !cfg.hsn_code.trim()) { toast.error(`${commodityName}: HSN/SAC Code is required when GST is applicable`); return; }
+    if (item.gstApplicable) {
+      const raw = cfg.hsn_code ?? '';
+      const digitsOnly = raw.replace(/\D/g, '');
+      if (!digitsOnly) {
+        toast.error(`${commodityName}: HSN/SAC Code is required when GST is applicable`);
+        return;
+      }
+      if (!(digitsOnly.length === 6 || digitsOnly.length === 8)) {
+        toast.error(`${commodityName}: HSN must be 6 digits or SAC must be 8 digits`);
+        return;
+      }
+    }
     const gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
     if (item.gstApplicable) {
       if (gstRateValue == null || Number.isNaN(gstRateValue)) {
         toast.error(`${commodityName}: GST Rate (%) is required when GST is applicable`); return;
       }
-      if (gstRateValue <= 0 || gstRateValue > 100) {
-        toast.error(`${commodityName}: GST Rate must be between 0 and 100%`); return;
+      if (!Number.isInteger(gstRateValue) || gstRateValue < 0 || gstRateValue > 99) {
+        toast.error(`${commodityName}: GST Rate must be a 2-digit whole number (0–99)`); return;
       }
-    } else if (gstRateValue != null && gstRateValue <= 0) {
-      toast.error(`${commodityName}: GST Rate must be greater than 0 when provided`); return;
+    } else if (gstRateValue != null && (!Number.isInteger(gstRateValue) || gstRateValue < 0 || gstRateValue > 99)) {
+      toast.error(`${commodityName}: GST Rate must be a 2-digit whole number (0–99) when provided`); return;
     }
 
     const weighingThresholdValue = (cfg.weighing_threshold ?? undefined) as number | undefined;
@@ -644,14 +655,20 @@ const CommoditySettings = () => {
                           <div className="space-y-3 mt-2">
                             <div>
                               <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
-                                HSN/SAC Code <span className="text-red-500">*</span>
+                                HSN (6 digits) / SAC (8 digits) <span className="text-red-500">*</span>
                               </label>
                               <Input
                                 type="text"
                                 value={item.config.hsn_code}
-                                onChange={e => updateConfig(index, { hsn_code: e.target.value })}
-                                placeholder="e.g., 0703"
+                                inputMode="numeric"
+                                autoComplete="off"
+                                onChange={e => {
+                                  const next = e.target.value.replace(/\D/g, '').slice(0, 8);
+                                  updateConfig(index, { hsn_code: next });
+                                }}
+                                placeholder="e.g., 070310 (HSN) or 99859900 (SAC)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                maxLength={8}
                               />
                             </div>
                             <div>
@@ -665,8 +682,8 @@ const CommoditySettings = () => {
                                 placeholder="e.g., 5, 12, 18"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
                                 min={0}
-                                max={100}
-                                step={0.1}
+                                max={99}
+                                step={1}
                               />
                             </div>
                           </div>
