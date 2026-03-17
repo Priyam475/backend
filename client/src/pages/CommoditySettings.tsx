@@ -573,7 +573,7 @@ const CommoditySettings = () => {
                       {/* Rate Per Unit */}
                       <div className="rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-4 border border-blue-200/50 dark:border-blue-800/30">
                         <label className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-blue-500" /> Rate Per Unit (kg)
+                          <span className="w-2 h-2 rounded-full bg-blue-500" /> Rate Per Unit (kg) <span className="text-red-500">*</span>
                         </label>
                         <Input
                           type="number"
