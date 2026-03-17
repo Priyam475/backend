@@ -48,67 +48,137 @@ const LogisticsPage = () => {
     arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
   }, []);
 
-  // REQ-LOG-004: Load bids from completed auctions; enrich with origin/godown; daily serials from API (no localStorage)
+  // REQ-LOG-004: Load bids from completed auctions; enrich with origin/godown/commodity from arrival full detail; daily serials from API
   useEffect(() => {
-    const allBids: BidInfo[] = [];
-    auctionData.forEach((auction: any) => {
-      (auction.entries || []).forEach((entry: any) => {
-        let sellerName = auction.sellerName || 'Unknown';
-        let vehicleNumber = auction.vehicleNumber || 'Unknown';
-        const commodityName = auction.commodityName || '';
-        let lotName = auction.lotName || '';
-        let origin: string | undefined;
-        let godown: string | undefined;
+    let cancelled = false;
 
-        arrivalDetails.forEach((arr) => {
-          (arr.sellers || []).forEach((seller) => {
-            (seller.lots || []).forEach((lot) => {
-              if (String(lot.id) === String(auction.lotId)) {
-                sellerName = seller.sellerName;
-                vehicleNumber = arr.vehicleNumber || vehicleNumber;
-                lotName = lot.lotName || lotName;
-                origin = arr.origin;
-                godown = arr.godown;
-              }
+    (async () => {
+      // Build lotId -> commodityName from arrival full details (so sticker shows commodity when auction API doesn't)
+      const vehicleNumbersFromAuction = new Set<string>();
+      auctionData.forEach((auction: any) => {
+        if (auction.vehicleNumber) vehicleNumbersFromAuction.add(auction.vehicleNumber);
+      });
+      const vehicleIdsToFetch = arrivalDetails
+        .filter((arr) => vehicleNumbersFromAuction.has(arr.vehicleNumber))
+        .map((arr) => arr.vehicleId);
+      const lotIdToCommodity = new Map<string, string>();
+      await Promise.all(
+        [...new Set(vehicleIdsToFetch)].map(async (vehicleId) => {
+          try {
+            const full = await arrivalsApi.getById(vehicleId);
+            (full.sellers || []).forEach((seller) => {
+              (seller.lots || []).forEach((lot) => {
+                const name = (lot as any).commodityName ?? (lot as any).commodity_name ?? '';
+                if (name) lotIdToCommodity.set(String(lot.id), name);
+              });
+            });
+          } catch {
+            // ignore per-vehicle errors
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      const allBids: BidInfo[] = [];
+      auctionData.forEach((auction: any) => {
+        (auction.entries || []).forEach((entry: any) => {
+          let sellerName = auction.sellerName || 'Unknown';
+          let vehicleNumber = auction.vehicleNumber || 'Unknown';
+          const fromAuction = auction.commodityName ?? (auction as any).commodity_name ?? '';
+          const commodityName = lotIdToCommodity.get(String(auction.lotId)) || fromAuction;
+          let lotName = auction.lotName || '';
+          let origin: string | undefined;
+          let godown: string | undefined;
+
+          arrivalDetails.forEach((arr) => {
+            (arr.sellers || []).forEach((seller) => {
+              (seller.lots || []).forEach((lot) => {
+                if (String(lot.id) === String(auction.lotId)) {
+                  sellerName = seller.sellerName;
+                  vehicleNumber = arr.vehicleNumber || vehicleNumber;
+                  lotName = lot.lotName || lotName;
+                  origin = arr.origin;
+                  godown = arr.godown;
+                }
+              });
             });
           });
-        });
 
-        allBids.push({
-          bidNumber: entry.bidNumber,
-          buyerMark: entry.buyerMark,
-          buyerName: entry.buyerName,
-          quantity: entry.quantity,
-          rate: entry.rate,
-          lotId: String(auction.lotId),
-          lotName,
-          sellerName,
-          sellerSerial: 0,
-          lotNumber: 0,
-          vehicleNumber,
-          commodityName,
-          origin,
-          godown,
+          allBids.push({
+            bidNumber: entry.bidNumber,
+            buyerMark: entry.buyerMark,
+            buyerName: entry.buyerName,
+            quantity: entry.quantity,
+            rate: entry.rate,
+            lotId: String(auction.lotId),
+            lotName,
+            sellerName,
+            sellerSerial: 0,
+            lotNumber: 0,
+            vehicleNumber,
+            commodityName,
+            origin,
+            godown,
+          });
         });
       });
+
+      if (cancelled) return;
+
+      // REQ-LOG: Compute vehicle total qty / seller qty per vehicle (lot identifier)
+    const vehicleTotals = new Map<string, number>();
+    const vehicleSellerTotals = new Map<string, number>();
+    allBids.forEach(b => {
+      const vKey = b.vehicleNumber || '';
+      const vsKey = `${vKey}||${b.sellerName}`;
+      vehicleTotals.set(vKey, (vehicleTotals.get(vKey) ?? 0) + b.quantity);
+      vehicleSellerTotals.set(vsKey, (vehicleSellerTotals.get(vsKey) ?? 0) + b.quantity);
     });
 
     const sellerNames = [...new Set(allBids.map(b => b.sellerName).filter(Boolean))];
     const lotIds = [...new Set(allBids.map(b => b.lotId).filter(Boolean))];
     if (sellerNames.length === 0 && lotIds.length === 0) {
-      setBids(allBids);
+      const withQty = allBids.map(b => {
+        const vKey = b.vehicleNumber || '';
+        const vsKey = `${vKey}||${b.sellerName}`;
+        return {
+          ...b,
+          vehicleTotalQty: vehicleTotals.get(vKey) ?? b.quantity,
+          sellerVehicleQty: vehicleSellerTotals.get(vsKey) ?? b.quantity,
+        };
+      });
+      if (!cancelled) setBids(withQty);
       return;
     }
     logisticsApi.allocateDailySerials({ sellerNames, lotIds })
       .then((res) => {
+        if (cancelled) return;
         const withSerials = allBids.map(b => ({
           ...b,
           sellerSerial: res.sellerSerials[b.sellerName] ?? b.sellerSerial,
           lotNumber: res.lotNumbers[b.lotId] ?? b.lotNumber,
+          vehicleTotalQty: vehicleTotals.get(b.vehicleNumber || '') ?? b.quantity,
+          sellerVehicleQty: vehicleSellerTotals.get(`${b.vehicleNumber || ''}||${b.sellerName}`) ?? b.quantity,
         }));
         setBids(withSerials);
       })
-      .catch(() => setBids(allBids));
+      .catch(() => {
+        if (cancelled) return;
+        const withQtyFallback = allBids.map(b => {
+          const vKey = b.vehicleNumber || '';
+          const vsKey = `${vKey}||${b.sellerName}`;
+          return {
+            ...b,
+            vehicleTotalQty: vehicleTotals.get(vKey) ?? b.quantity,
+            sellerVehicleQty: vehicleSellerTotals.get(vsKey) ?? b.quantity,
+          };
+        });
+        setBids(withQtyFallback);
+      });
+    })();
+
+    return () => { cancelled = true; };
   }, [auctionData, arrivalDetails]);
 
   const filteredBids = useMemo(() => {
@@ -347,12 +417,20 @@ const LogisticsPage = () => {
               className="glass-card rounded-2xl p-3 overflow-hidden">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md flex-shrink-0">
-                  <span className="text-white font-black text-xs">L{bid.lotNumber}</span>
+                  <span className="text-white font-black text-[10px]">
+                    {bid.vehicleTotalQty != null && bid.sellerVehicleQty != null
+                      ? `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`
+                      : `L${bid.lotNumber}`}
+                  </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-bold text-foreground truncate">
-                      {bid.lotName !== String(bid.lotNumber) ? `${bid.lotNumber} / ${bid.lotName}` : `Lot #${bid.lotNumber}`}
+                      {bid.vehicleTotalQty != null && bid.sellerVehicleQty != null
+                        ? `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`
+                        : bid.lotName !== String(bid.lotNumber)
+                          ? `${bid.lotNumber} / ${bid.lotName}`
+                          : `Lot #${bid.lotNumber}`}
                     </p>
                     <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-bold">[{bid.buyerMark}]</span>
                   </div>
