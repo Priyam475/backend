@@ -176,7 +176,10 @@ export const authApi = {
         const detail = (problem && typeof problem.detail === 'string') ? problem.detail.trim() : '';
         const title = (problem && typeof problem.title === 'string') ? problem.title.trim() : '';
 
-        if (res.status === 403 && detail.toLowerCase().includes('inactive')) {
+        // Avoid showing raw backend exceptions (e.g. IndexOutOfBoundsException)
+        if (detail.includes('Index') && detail.includes('out of bounds')) {
+          message = 'An unexpected error occurred. Please try again or contact support.';
+        } else if (res.status === 403 && detail.toLowerCase().includes('inactive')) {
           message = cleanMessage(detail);
         } else if (res.status === 403 && detail) {
           message = cleanMessage(detail);
@@ -186,11 +189,11 @@ export const authApi = {
           message = 'Invalid email or password';
         } else if (detail.includes('Password must be at least 6 characters')) {
           message = 'Password must be at least 6 characters';
-        } else if (detail.length > 0) {
+        } else if (detail.length > 0 && !detail.includes('out of bounds')) {
           message = cleanMessage(detail);
-        } else if (title.length > 0 && !/^forbidden$|^403$/i.test(title)) {
+        } else if (title.length > 0 && !/^forbidden$|^403$/i.test(title) && !title.includes('out of bounds')) {
           message = cleanMessage(title);
-        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\.|out of bounds/.i.test(text)) {
           message = cleanMessage(text);
         }
       } catch {
