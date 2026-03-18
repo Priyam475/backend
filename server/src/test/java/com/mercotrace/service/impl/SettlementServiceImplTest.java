@@ -6,9 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.mercotrace.domain.FreightCalculation;
 import com.mercotrace.domain.Patti;
 import com.mercotrace.domain.PattiDeduction;
 import com.mercotrace.domain.PattiRateCluster;
+import com.mercotrace.domain.SellerInVehicle;
 import com.mercotrace.repository.PattiRepository;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SettlementDTOs.*;
@@ -55,6 +57,9 @@ class SettlementServiceImplTest {
     @Mock
     private com.mercotrace.repository.CommodityRepository commodityRepository;
 
+    @Mock
+    private com.mercotrace.repository.FreightCalculationRepository freightCalculationRepository;
+
     private SettlementServiceImpl service;
 
     @BeforeEach
@@ -68,7 +73,8 @@ class SettlementServiceImplTest {
             sellerInVehicleRepository,
             contactRepository,
             vehicleRepository,
-            commodityRepository
+            commodityRepository,
+            freightCalculationRepository
         );
         // Only create stubbing when needed in specific tests to avoid UnnecessaryStubbingException.
     }
@@ -167,12 +173,34 @@ class SettlementServiceImplTest {
     }
 
     @Test
-    void getSellerCharges_returnsZeroFreightAndAdvance() {
+    void getSellerCharges_returnsZeroWhenInvalidSellerId() {
         SellerChargesDTO dto = service.getSellerCharges("any");
         assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(dto.getFreightAutoPulled()).isFalse();
         assertThat(dto.getAdvanceAutoPulled()).isFalse();
+    }
+
+    @Test
+    void getSellerCharges_autoPullsFromFreightCalculationWhenAvailable() {
+        SellerInVehicle siv = new SellerInVehicle();
+        siv.setId(100L);
+        siv.setVehicleId(200L);
+
+        FreightCalculation fc = new FreightCalculation();
+        fc.setVehicleId(200L);
+        fc.setTotalAmount(1500.0);
+        fc.setAdvancePaid(500.0);
+
+        when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
+        when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.of(fc));
+
+        SellerChargesDTO dto = service.getSellerCharges("100");
+
+        assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.valueOf(1500));
+        assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.valueOf(500));
+        assertThat(dto.getFreightAutoPulled()).isTrue();
+        assertThat(dto.getAdvanceAutoPulled()).isTrue();
     }
 
     // generateNextPattiId is indirectly covered via createPatti and logging; explicit reflection-based

@@ -184,7 +184,8 @@ const SettlementPage = () => {
   }, [selectedSeller, pattiData, loadSavedPattis]);
 
   // Generate Patti when seller is selected (new patti; clear edit id).
-  const generatePatti = useCallback((seller: SellerSettlement) => {
+  // Overrides: pass when toggling to avoid stale closure (React state updates are async).
+  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; hamaliEnabled?: boolean; gunniesAmount?: number }) => {
     setExistingPattiId(null);
     setSelectedSeller(seller);
 
@@ -222,7 +223,9 @@ const SettlementPage = () => {
     
     // REQ-PUT-003: Deductions (freight/advance from backend when available; default 0).
     const totalBags = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
-    const coolieAmount = coolieMode === 'FLAT'
+    const effectiveCoolieMode = overrides?.coolieMode ?? coolieMode;
+    const effectiveHamali = overrides?.hamaliEnabled ?? hamaliEnabled;
+    const coolieAmount = effectiveCoolieMode === 'FLAT'
       ? totalBags * 5
       : Math.round(totalWeight / 50) * 5;
 
@@ -236,7 +239,7 @@ const SettlementPage = () => {
       },
       {
         key: 'coolie',
-        label: `Coolie / Unloading (${coolieMode === 'FLAT' ? 'Flat — per bag' : 'Auto-calculated — by weight'})`,
+        label: `Coolie / Unloading (${effectiveCoolieMode === 'FLAT' ? 'Flat — per bag' : 'Auto-calculated — by weight'})`,
         amount: coolieAmount,
         editable: true,
         autoPulled: false,
@@ -244,7 +247,7 @@ const SettlementPage = () => {
       {
         key: 'weighing',
         label: 'Weighing Charges',
-        amount: hamaliEnabled ? Math.round(totalWeight * 0.5) : 0,
+        amount: effectiveHamali ? Math.round(totalWeight * 0.5) : 0,
         editable: true,
         autoPulled: false,
       },
@@ -258,7 +261,7 @@ const SettlementPage = () => {
       {
         key: 'gunnies',
         label: 'Gunnies',
-        amount: gunniesAmount,
+        amount: overrides?.gunniesAmount ?? gunniesAmount,
         editable: true,
         autoPulled: false,
       },
@@ -281,27 +284,23 @@ const SettlementPage = () => {
       useAverageWeight: useAvgWeight,
     });
 
-    // After base patti is prepared, pull seller-level charges from backend
-    // to mirror client_origin's auto-pull of freight/advance.
+    // After base patti is prepared, pull seller-level charges from backend (FreightCalculation).
     void settlementApi
       .getSellerCharges(seller.sellerId)
       .then(charges => {
+        const freight = clampMoney(Number(charges.freight ?? 0));
+        const advance = clampMoney(Number(charges.advance ?? 0));
+        const freightAuto = Boolean(charges.freightAutoPulled) && freight > 0;
+        const advanceAuto = Boolean(charges.advanceAutoPulled) && advance > 0;
+
         setPattiData(current => {
           if (!current) return current;
           const updatedDeductions = current.deductions.map(d => {
             if (d.key === 'freight') {
-              return {
-                ...d,
-                amount: charges.freight,
-                autoPulled: Boolean(charges.freightAutoPulled) && charges.freight !== 0,
-              };
+              return { ...d, amount: freight, autoPulled: freightAuto };
             }
             if (d.key === 'advance') {
-              return {
-                ...d,
-                amount: charges.advance,
-                autoPulled: Boolean(charges.advanceAutoPulled) && charges.advance !== 0,
-              };
+              return { ...d, amount: advance, autoPulled: advanceAuto };
             }
             return d;
           });
@@ -313,9 +312,14 @@ const SettlementPage = () => {
             netPayable: current.grossAmount - totalDeductions,
           };
         });
+
+        if (freightAuto || advanceAuto) {
+          toast.success('Freight & advance loaded from arrival data');
+        }
       })
       .catch(() => {
-        // If seller charges cannot be loaded, keep base deductions as-is.
+        // Keep base deductions; user can enter manually.
+        toast.warning('Could not load freight/advance — enter manually if needed');
       });
   }, [coolieMode, hamaliEnabled, gunniesAmount, useAvgWeight]);
 
@@ -749,12 +753,18 @@ const SettlementPage = () => {
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
               📋 Deductions Panel (All Editable)
             </p>
+            <p className="text-[10px] text-muted-foreground/80 mb-2">
+              Freight & Advance: auto-pulled from arrival data when available; otherwise enter manually.
+            </p>
 
             {/* Coolie mode toggle — Flat vs Recalculated per REQ-CNF-005 */}
             <div className="mb-3">
               <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">Coolie Calculation Mode</p>
               <div className="flex gap-2">
-                <button onClick={() => { setCoolieMode('FLAT'); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
+                <button onClick={() => {
+                  setCoolieMode('FLAT');
+                  selectedSeller?.lots?.length && generatePatti(selectedSeller, { coolieMode: 'FLAT' });
+                }}
                   className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
                     coolieMode === 'FLAT'
                       ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
@@ -762,7 +772,10 @@ const SettlementPage = () => {
                   <span>Flat Rate</span>
                   <span className={cn("text-[9px]", coolieMode === 'FLAT' ? 'text-white/70' : 'text-muted-foreground/60')}>Per bag count</span>
                 </button>
-                <button onClick={() => { setCoolieMode('RECALCULATED'); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
+                <button onClick={() => {
+                  setCoolieMode('RECALCULATED');
+                  selectedSeller?.lots?.length && generatePatti(selectedSeller, { coolieMode: 'RECALCULATED' });
+                }}
                   className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
                     coolieMode === 'RECALCULATED'
                       ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-md'
@@ -773,19 +786,35 @@ const SettlementPage = () => {
               </div>
             </div>
 
-            {/* Hamali toggle */}
-            <div className="flex items-center justify-between mb-3 px-3 py-2.5 rounded-xl bg-muted/10 border border-border/20">
+            {/* Weighing Charges toggle — tap to enable/disable */}
+            <button
+              type="button"
+              onClick={() => {
+                const newVal = !hamaliEnabled;
+                setHamaliEnabled(newVal);
+                selectedSeller?.lots?.length && generatePatti(selectedSeller, { hamaliEnabled: newVal });
+              }}
+              className={cn("w-full flex items-center justify-between mb-3 px-4 py-3 rounded-xl border-2 transition-all text-left",
+                hamaliEnabled
+                  ? "bg-emerald-500/10 border-emerald-500/40"
+                  : "bg-muted/10 border-border/30 hover:border-border/50")}
+            >
               <div>
                 <p className="text-xs font-semibold text-foreground">⚖️ Weighing Charges</p>
-                <p className="text-[9px] text-muted-foreground">Separate from unloading. Charged per weighment session.</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">
+                  {hamaliEnabled ? 'Enabled — ₹0.50 per kg' : 'Tap to enable — ₹0.50 per kg when on'}
+                </p>
               </div>
-              <button onClick={() => { setHamaliEnabled(!hamaliEnabled); setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50); }}
-                className={cn("w-11 h-6 rounded-full transition-all relative",
-                  hamaliEnabled ? "bg-gradient-to-r from-emerald-500 to-green-500" : "bg-muted/40")}>
-                <div className={cn("w-4 h-4 rounded-full bg-white shadow-sm absolute top-1 transition-all",
-                  hamaliEnabled ? "left-6" : "left-1")} />
-              </button>
-            </div>
+              <div className={cn("flex items-center gap-2 shrink-0",
+                hamaliEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
+                <span className="text-[10px] font-bold uppercase">{hamaliEnabled ? 'ON' : 'OFF'}</span>
+                <div className={cn("w-12 h-7 rounded-full transition-all relative ring-2 ring-offset-2 ring-offset-background",
+                  hamaliEnabled ? "bg-emerald-500 ring-emerald-500/30" : "bg-muted ring-muted-foreground/20")}>
+                  <div className={cn("w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-all",
+                    hamaliEnabled ? "left-7" : "left-1")} />
+                </div>
+              </div>
+            </button>
 
             <div className="space-y-2">
               {pattiData.deductions.map(deduction => (
@@ -831,8 +860,9 @@ const SettlementPage = () => {
                 <span className="text-xs text-muted-foreground">₹</span>
                 <Input type="number" value={gunniesAmount || ''}
                   onChange={e => {
-                    setGunniesAmount(clampMoney(parseInt(e.target.value) || 0, 0, DEDUCTION_MAX));
-                    setTimeout(() => selectedSeller?.lots?.length && generatePatti(selectedSeller), 50);
+                    const val = clampMoney(parseFloat(e.target.value) || 0, 0, DEDUCTION_MAX);
+                    setGunniesAmount(val);
+                    selectedSeller?.lots?.length && generatePatti(selectedSeller, { gunniesAmount: val });
                   }}
                   min={0}
                   max={DEDUCTION_MAX}
@@ -882,6 +912,16 @@ const SettlementPage = () => {
           {/* Footer — REQ-PUT-004 */}
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
             className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
+            {pattiData.netPayable < 0 && (
+              <div className="mb-3 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-400/40">
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  ⚠️ Net Payable is negative — deductions exceed gross amount
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Check if Freight/Advance are correct for this sale. Seller may owe balance.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Gross Amount</span>
@@ -893,7 +933,10 @@ const SettlementPage = () => {
               </div>
               <div className="flex justify-between text-lg border-t border-border/50 pt-2">
                 <span className="font-bold text-foreground">Net Payable</span>
-                <span className="font-black text-emerald-600 dark:text-emerald-400">₹{pattiData.netPayable.toLocaleString()}</span>
+                <span className={cn("font-black text-lg",
+                  pattiData.netPayable >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+                  ₹{pattiData.netPayable.toLocaleString()}
+                </span>
               </div>
               <p className="text-[9px] text-muted-foreground text-center">NP = GA − TD</p>
             </div>

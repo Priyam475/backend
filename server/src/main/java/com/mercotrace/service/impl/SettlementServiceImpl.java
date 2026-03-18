@@ -44,6 +44,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final ContactRepository contactRepository;
     private final VehicleRepository vehicleRepository;
     private final CommodityRepository commodityRepository;
+    private final FreightCalculationRepository freightCalculationRepository;
 
     public SettlementServiceImpl(
         TraderContextService traderContextService,
@@ -54,7 +55,8 @@ public class SettlementServiceImpl implements SettlementService {
         SellerInVehicleRepository sellerInVehicleRepository,
         ContactRepository contactRepository,
         VehicleRepository vehicleRepository,
-        CommodityRepository commodityRepository
+        CommodityRepository commodityRepository,
+        FreightCalculationRepository freightCalculationRepository
     ) {
         this.traderContextService = traderContextService;
         this.lotRepository = lotRepository;
@@ -65,6 +67,7 @@ public class SettlementServiceImpl implements SettlementService {
         this.contactRepository = contactRepository;
         this.vehicleRepository = vehicleRepository;
         this.commodityRepository = commodityRepository;
+        this.freightCalculationRepository = freightCalculationRepository;
     }
 
     @Override
@@ -280,13 +283,39 @@ public class SettlementServiceImpl implements SettlementService {
     @Override
     @Transactional(readOnly = true)
     public SellerChargesDTO getSellerCharges(String sellerId) {
-        // For now, seller-scoped freight/advance are not derived from vouchers/ARAP;
-        // return zero amounts but keep the contract in place for future enhancement.
         SellerChargesDTO dto = new SellerChargesDTO();
-        dto.setFreight(java.math.BigDecimal.ZERO);
-        dto.setAdvance(java.math.BigDecimal.ZERO);
+        dto.setFreight(BigDecimal.ZERO);
+        dto.setAdvance(BigDecimal.ZERO);
         dto.setFreightAutoPulled(Boolean.FALSE);
         dto.setAdvanceAutoPulled(Boolean.FALSE);
+
+        if (sellerId == null || sellerId.isBlank()) {
+            return dto;
+        }
+        Long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            LOG.debug("Invalid sellerId for getSellerCharges: {}", sellerId);
+            return dto;
+        }
+
+        Optional<SellerInVehicle> sivOpt = sellerInVehicleRepository.findById(sivId);
+        if (sivOpt.isEmpty()) {
+            return dto;
+        }
+
+        Long vehicleId = sivOpt.get().getVehicleId();
+        Optional<FreightCalculation> fcOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        if (fcOpt.isEmpty()) {
+            return dto;
+        }
+
+        FreightCalculation fc = fcOpt.get();
+        dto.setFreight(BigDecimal.valueOf(fc.getTotalAmount() != null ? fc.getTotalAmount() : 0d));
+        dto.setAdvance(BigDecimal.valueOf(fc.getAdvancePaid() != null ? fc.getAdvancePaid() : 0d));
+        dto.setFreightAutoPulled(fc.getTotalAmount() != null && fc.getTotalAmount() > 0);
+        dto.setAdvanceAutoPulled(fc.getAdvancePaid() != null && fc.getAdvancePaid() > 0);
         return dto;
     }
 
