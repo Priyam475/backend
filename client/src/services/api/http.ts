@@ -9,6 +9,9 @@ import {
 
 const RAW_API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
 
+// Server origin (no path) — use for building authenticated image URLs.
+export const API_ORIGIN = RAW_API_URL.replace(/\/+$/, '').replace(/\/api\/?$/, '') || RAW_API_URL.replace(/\/+$/, '');
+
 // Always talk to the backend under the /api prefix, regardless of whether
 // VITE_API_URL includes it or not.
 export const API_BASE = RAW_API_URL.replace(/\/+$/, '').endsWith('/api')

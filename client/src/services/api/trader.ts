@@ -46,7 +46,7 @@ export const traderApi = {
     const form = new FormData();
     files.forEach(f => form.append('files', f));
 
-    const res = await fetch(`${API_BASE}/traders/${traderId}/photos`, {
+    const res = await apiFetch(`/traders/${traderId}/photos`, {
       method: 'POST',
       body: form,
     });

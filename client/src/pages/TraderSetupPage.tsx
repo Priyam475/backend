@@ -1,13 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft, User, Mail, Phone, Lock } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft, User, Mail, Phone, Lock, ImageIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
-import { categoryApi } from '@/services/api';
+import { categoryApi, traderApi } from '@/services/api';
 import type { BusinessCategory } from '@/types/models';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -17,6 +17,7 @@ const STATES = ['Karnataka'];
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MOBILE_REGEX = /^[6-9]\d{9}$/;
+const ACCEPTED_IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // Deterministic particles (same pattern as login/register)
 const PARTICLES = Array.from({ length: 10 }, (_, i) => ({
@@ -48,9 +49,11 @@ interface FormData {
 const TraderSetupPage = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
-  const { register, isLoading, error, clearError } = useAuth();
+  const { register, refreshProfile, isLoading, error, clearError } = useAuth();
 
   const [categories, setCategories] = useState<BusinessCategory[]>([]);
+  const [companyImage, setCompanyImage] = useState<File | null>(null);
+  const [companyImagePreview, setCompanyImagePreview] = useState<string | null>(null);
 
   const [form, setForm] = useState<FormData>({
     businessName: '',
@@ -179,6 +182,25 @@ const TraderSetupPage = () => {
     return valid;
   };
 
+  const handleCompanyImageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = '.' + (file.name.split('.').pop() ?? '').toLowerCase();
+    if (!ACCEPTED_IMAGE_EXT.includes(ext)) {
+      toast.error('Please use JPEG, PNG, or WebP');
+      return;
+    }
+    if (companyImagePreview) URL.revokeObjectURL(companyImagePreview);
+    setCompanyImage(file);
+    setCompanyImagePreview(URL.createObjectURL(file));
+  }, [companyImagePreview]);
+
+  const clearCompanyImage = useCallback(() => {
+    if (companyImagePreview) URL.revokeObjectURL(companyImagePreview);
+    setCompanyImage(null);
+    setCompanyImagePreview(null);
+  }, [companyImagePreview]);
+
   const handleUseCurrentLocation = useCallback(async () => {
     if (!navigator.geolocation) { toast.error('Geolocation not supported'); return; }
     setIsFetchingLocation(true);
@@ -206,7 +228,7 @@ const TraderSetupPage = () => {
     }
     setIsSubmitting(true);
     try {
-      await register({
+      const result = await register({
         businessName: form.businessName.trim(),
         ownerName: form.ownerName.trim(),
         email: form.email.trim(),
@@ -219,6 +241,14 @@ const TraderSetupPage = () => {
         gstNumber: form.gstNumber.trim() || undefined,
         rmcApmcCode: form.rmcApmcCode.trim() || undefined,
       });
+      if (companyImage && result?.trader?.trader_id) {
+        try {
+          await traderApi.uploadPhotos(result.trader.trader_id, [companyImage]);
+          await refreshProfile();
+        } catch (upErr) {
+          toast.error('Profile saved but image upload failed. You can add it later.');
+        }
+      }
       toast.success('Trader profile saved successfully!');
       navigate('/home', { replace: true });
     } catch (e: unknown) {
@@ -657,6 +687,29 @@ const TraderSetupPage = () => {
                           maxLength={50}
                         />
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Trading Company Image */}
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-3 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5" /> Company Logo (optional)
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <label className="flex-shrink-0 w-24 h-24 rounded-xl bg-white/90 border-2 border-dashed border-blue-300 flex items-center justify-center cursor-pointer overflow-hidden hover:border-blue-500 transition-colors">
+                      <input type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" onChange={handleCompanyImageChange} />
+                      {companyImagePreview ? (
+                        <img src={companyImagePreview} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8 text-blue-400" />
+                      )}
+                    </label>
+                    <div className="flex-1">
+                      <p className="text-sm text-white/80">JPEG, PNG or WebP.</p>
+                      {companyImage && (
+                        <button type="button" onClick={clearCompanyImage} className="mt-1 flex items-center gap-1 text-xs text-red-200 hover:text-red-100">
+                          <X className="w-3.5 h-3.5" /> Remove
+                        </button>
+                      )}
                     </div>
                   </div>
 

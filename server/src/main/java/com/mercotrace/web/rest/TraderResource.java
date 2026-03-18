@@ -1,6 +1,9 @@
 package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.TraderRepository;
+import com.mercotrace.repository.UserTraderRepository;
+import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.security.SecurityUtils;
 import com.mercotrace.service.TraderQueryService;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.criteria.TraderCriteria;
@@ -50,10 +53,27 @@ public class TraderResource {
 
     private final TraderQueryService traderQueryService;
 
-    public TraderResource(TraderService traderService, TraderRepository traderRepository, TraderQueryService traderQueryService) {
+    private final UserTraderRepository userTraderRepository;
+
+    public TraderResource(TraderService traderService, TraderRepository traderRepository, TraderQueryService traderQueryService, UserTraderRepository userTraderRepository) {
         this.traderService = traderService;
         this.traderRepository = traderRepository;
         this.traderQueryService = traderQueryService;
+        this.userTraderRepository = userTraderRepository;
+    }
+
+    /**
+     * Returns true if the current user is allowed to access photos for the given trader:
+     * - user is ROLE_ADMIN, or
+     * - user has an active primary UserTrader mapping for this trader.
+     */
+    private boolean canAccessTraderPhotos(Long traderId) {
+        if (SecurityUtils.hasCurrentUserThisAuthority(AuthoritiesConstants.ADMIN)) {
+            return true;
+        }
+        return SecurityUtils.getCurrentUserId()
+            .flatMap(userId -> userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(userId, traderId))
+            .isPresent();
     }
 
     /**
@@ -206,10 +226,14 @@ public class TraderResource {
     /**
      * {@code POST  /traders/:id/photos} : Upload one or more shop photos for a trader.
      * Stores files on disk and saves comma-separated URLs in trader.shopPhotos.
+     * Only the trader owner or ROLE_ADMIN may upload.
      */
     @PostMapping("/{id}/photos")
     public ResponseEntity<String[]> uploadTraderPhotos(@PathVariable("id") Long id, @RequestParam("files") MultipartFile[] files) {
         LOG.debug("REST request to upload photos for Trader : {}", id);
+        if (!canAccessTraderPhotos(id)) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
         Optional<TraderDTO> existingOpt = traderService.findOne(id);
         if (existingOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -223,6 +247,10 @@ public class TraderResource {
             for (MultipartFile file : files) {
                 if (file.isEmpty()) continue;
                 String original = file.getOriginalFilename() != null ? file.getOriginalFilename() : "photo";
+                String lower = original.toLowerCase();
+                if (!lower.endsWith(".jpg") && !lower.endsWith(".jpeg") && !lower.endsWith(".png") && !lower.endsWith(".webp")) {
+                    return ResponseEntity.badRequest().build();
+                }
                 String sanitized = original.replaceAll("[^a-zA-Z0-9._-]", "_");
                 java.nio.file.Path target = baseDir.resolve(System.currentTimeMillis() + "_" + sanitized);
                 java.nio.file.Files.copy(file.getInputStream(), target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -247,20 +275,33 @@ public class TraderResource {
 
     /**
      * {@code GET  /traders/:id/photos/:filename} : Serve a trader photo from disk.
+     * Private: only the trader owner or ROLE_ADMIN may access.
      */
     @GetMapping("/{id}/photos/{filename}")
     public ResponseEntity<Resource> getTraderPhoto(@PathVariable("id") Long id, @PathVariable("filename") String filename) {
+        if (!canAccessTraderPhotos(id)) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN).build();
+        }
         try {
             java.nio.file.Path file = java.nio.file.Paths.get("uploads", "traders", id.toString()).resolve(filename);
             Resource resource = new UrlResource(file.toUri());
             if (!resource.exists() || !resource.isReadable()) {
                 return ResponseEntity.notFound().build();
             }
-            return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).body(resource);
+            MediaType contentType = getMediaTypeForFilename(filename);
+            return ResponseEntity.ok().contentType(contentType).body(resource);
         } catch (Exception e) {
             LOG.error("Failed to read trader photo {}", filename, e);
             return ResponseEntity.status(500).build();
         }
+    }
+
+    private MediaType getMediaTypeForFilename(String filename) {
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".png")) return MediaType.IMAGE_PNG;
+        if (lower.endsWith(".gif")) return MediaType.IMAGE_GIF;
+        if (lower.endsWith(".webp")) return MediaType.parseMediaType("image/webp");
+        return MediaType.IMAGE_JPEG;
     }
 
     /**
