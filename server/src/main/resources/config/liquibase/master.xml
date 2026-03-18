@@ -70,4 +70,5 @@
     <include file="config/liquibase/changelog/20260316130000_contact_soft_delete.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260318120000_user_trader_soft_delete.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260319120000_trader_active.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260318130000_remove_contact_type_add_mark_unique.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

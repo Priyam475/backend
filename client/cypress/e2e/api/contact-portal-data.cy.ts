@@ -88,6 +88,7 @@ describe('Contact Portal Data API', () => {
         password: ctx.password,
         email: ctx.email,
         name: ctx.name,
+        mark: `CY-DATA-${Date.now()}`,
       },
     }).then(() => {
       return cy

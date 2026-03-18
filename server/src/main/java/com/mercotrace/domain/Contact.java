@@ -14,7 +14,7 @@ import org.hibernate.annotations.CacheConcurrencyStrategy;
  */
 @Entity
 @Table(name = "contact")
-@Cache(usage = CacheConcurrencyStrategy.NONE) /* L2 cache disabled to avoid "Index 8 out of bounds" when cache had entities serialized before contact_type was added */
+@Cache(usage = CacheConcurrencyStrategy.NONE)
 @SuppressWarnings("common-java:DuplicatedBlocks")
 public class Contact implements Serializable {
 
@@ -68,11 +68,6 @@ public class Contact implements Serializable {
     @NotNull
     @Column(name = "can_login", nullable = false)
     private Boolean canLogin = false;
-
-    /** Contact type: SELLER (vendor), BUYER, BROKER. Used so client can filter vendors. */
-    @Size(max = 20)
-    @Column(name = "contact_type", length = 20)
-    private String type;
 
     @Column(name = "active", nullable = false)
     private Boolean active = true;
@@ -200,19 +195,6 @@ public class Contact implements Serializable {
         this.canLogin = canLogin;
     }
 
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public Contact type(String type) {
-        this.setType(type);
-        return this;
-    }
-
     public Boolean getActive() {
         return active;
     }
@@ -251,7 +233,6 @@ public class Contact implements Serializable {
             ", createdAt='" + getCreatedAt() + "'" +
             ", openingBalance=" + getOpeningBalance() +
             ", currentBalance=" + getCurrentBalance() +
-            ", type='" + getType() + "'" +
             "}";
     }
 }

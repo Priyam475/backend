@@ -83,6 +83,7 @@ class ContactAuthResourceTest {
         vm.setPassword("strongpass");
         vm.setEmail("User@Example.com");
         vm.setName("  Jane Contact  ");
+        vm.setMark("VENDOR1");
 
         ResultActions result = mockMvc
             .perform(
@@ -127,6 +128,7 @@ class ContactAuthResourceTest {
         ContactRegisterVM vm = new ContactRegisterVM();
         vm.setPhone("9876543210");
         vm.setPassword("newstrongpass");
+        vm.setMark("UPGRADE1");
 
         mockMvc
             .perform(
@@ -160,6 +162,7 @@ class ContactAuthResourceTest {
         ContactRegisterVM vm = new ContactRegisterVM();
         vm.setPhone("9876543210");
         vm.setPassword("anotherpass");
+        vm.setMark("OTHER1");
 
         mockMvc
             .perform(
@@ -187,6 +190,7 @@ class ContactAuthResourceTest {
         vm.setPhone("9876543211");
         vm.setPassword("anotherpass");
         vm.setEmail("Existing@Example.com");
+        vm.setMark("EMAILDUP1");
 
         mockMvc
             .perform(
@@ -195,6 +199,48 @@ class ContactAuthResourceTest {
                     .content(objectMapper.writeValueAsBytes(vm))
             )
             .andExpect(status().isConflict());
+    }
+
+    @Test
+    @Transactional
+    void registerContact_withDuplicateMark_returns409() throws Exception {
+        Contact existing = new Contact();
+        existing.setPhone("9876543210");
+        existing.setName("First Contact");
+        existing.setMark("DUPMARK");
+        existing.setOpeningBalance(BigDecimal.ZERO);
+        existing.setCurrentBalance(BigDecimal.ZERO);
+        existing.setCanLogin(false);
+        existing.setCreatedAt(Instant.now());
+        contactRepository.saveAndFlush(existing);
+
+        ContactRegisterVM vm = new ContactRegisterVM();
+        vm.setPhone("9876543211");
+        vm.setPassword("strongpass");
+        vm.setMark("DUPMARK");
+
+        mockMvc
+            .perform(
+                post("/api/auth/register-contact")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsBytes(vm))
+            )
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void registerContact_withoutMark_returns400() throws Exception {
+        ContactRegisterVM vm = new ContactRegisterVM();
+        vm.setPhone("9876543210");
+        vm.setPassword("strongpass");
+
+        mockMvc
+            .perform(
+                post("/api/auth/register-contact")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsBytes(vm))
+            )
+            .andExpect(status().isBadRequest());
     }
 
     @Test

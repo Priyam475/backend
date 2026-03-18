@@ -45,10 +45,6 @@ public class ContactDTO implements Serializable {
 
     private Boolean canLogin;
 
-    /** Contact type: SELLER (vendor), BUYER, BROKER. Returned in API as "type". */
-    @Size(max = 20)
-    private String type;
-
     private Boolean active;
 
     public Long getId() {
@@ -139,14 +135,6 @@ public class ContactDTO implements Serializable {
         this.canLogin = canLogin;
     }
 
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
     public Boolean getActive() {
         return active;
     }
@@ -190,7 +178,6 @@ public class ContactDTO implements Serializable {
             ", openingBalance=" + getOpeningBalance() +
             ", currentBalance=" + getCurrentBalance() +
             ", canLogin=" + getCanLogin() +
-            ", type='" + getType() + "'" +
             "}";
     }
 }

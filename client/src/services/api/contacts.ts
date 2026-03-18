@@ -1,4 +1,4 @@
-import type { Contact, ContactType } from '@/types/models';
+import type { Contact } from '@/types/models';
 import { apiFetch } from './http';
 
 type ContactDto = {
@@ -16,7 +16,6 @@ type ContactDto = {
   opening_balance?: number;
   currentBalance?: number;
   current_balance?: number;
-  type?: ContactType;
   email?: string;
   canLogin?: boolean;
   can_login?: boolean;
@@ -34,7 +33,6 @@ function mapDtoToContact(dto: ContactDto): Contact {
     mark: dto.mark ?? '',
     address: dto.address ?? '',
     created_at: dto.created_at ?? dto.createdAt ?? new Date().toISOString(),
-    type: dto.type,
     opening_balance: dto.opening_balance ?? dto.openingBalance ?? 0,
     current_balance: dto.current_balance ?? dto.currentBalance ?? 0,
     email: dto.email,
@@ -49,7 +47,6 @@ function mapContactToCreatePayload(data: Partial<Contact>): Record<string, unkno
     mark: data.mark?.trim() ?? '',
     address: data.address?.trim() ?? '',
     traderId: data.trader_id && data.trader_id.length > 0 ? data.trader_id : undefined,
-    type: data.type ?? undefined,
   };
 }
 
@@ -60,7 +57,6 @@ function mapContactToUpdatePayload(id: string, data: Partial<Contact>): Record<s
     phone: data.phone?.trim() ?? '',
     mark: data.mark?.trim() ?? '',
     address: data.address?.trim() ?? '',
-    type: data.type ?? undefined,
   };
 }
 

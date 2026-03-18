@@ -27,5 +27,8 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
     Optional<Contact> findOneByPhoneAndActiveTrue(String phone);
 
     Optional<Contact> findOneByEmailIgnoreCase(String email);
+
+    /** Find self-registered contact by mark (trader_id IS NULL). Used for uniqueness check during registration. */
+    Optional<Contact> findOneByMarkAndTraderIdIsNull(String mark);
 }
 

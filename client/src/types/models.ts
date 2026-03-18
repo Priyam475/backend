@@ -177,7 +177,6 @@ export interface Contact {
   address: string;
   created_at: string;
   // App-level fields
-  type?: ContactType;
   opening_balance?: number;
   current_balance?: number;
   email?: string;
