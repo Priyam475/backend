@@ -295,6 +295,9 @@ public class TraderAuthResource {
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
         }
+        if (trader != null && !Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
+        }
         TraderAuthDTO dto = buildAuthDto(account, trader);
 
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
@@ -317,6 +320,9 @@ public class TraderAuthResource {
         }
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
+        }
+        if (trader != null && !Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
         }
         return buildAuthDto(account, trader);
     }
@@ -419,6 +425,10 @@ public class TraderAuthResource {
         TraderDTO trader = traderService
             .findOne(traderEntity.getId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Trader not configured"));
+
+        if (!Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
+        }
 
         TraderAuthDTO dto = buildAuthDto(account, trader);
 

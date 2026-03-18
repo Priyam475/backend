@@ -40,6 +40,8 @@ export interface Trader {
   gst_number?: string;
   rmc_apmc_code?: string;
   shop_photos?: string[];
+  /** When false, trader and staff cannot log in. */
+  active?: boolean;
 }
 
 /** 2.2 Roles */

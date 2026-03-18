@@ -92,6 +92,10 @@ public class Trader implements Serializable {
     @Column(name = "rmc_apmc_code", length = 64)
     private String rmcApmcCode;
 
+    @NotNull
+    @Column(name = "active", nullable = false)
+    private Boolean active = true;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public Long getId() {
@@ -286,6 +290,19 @@ public class Trader implements Serializable {
 
     public void setRmcApmcCode(String rmcApmcCode) {
         this.rmcApmcCode = rmcApmcCode;
+    }
+
+    public Boolean getActive() {
+        return this.active;
+    }
+
+    public Trader active(Boolean active) {
+        this.setActive(active);
+        return this;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

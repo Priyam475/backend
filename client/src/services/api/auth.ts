@@ -8,57 +8,92 @@ const REGISTRATION_FAILED = 'Registration failed. Please try again.';
 const EMAIL_ALREADY_REGISTERED =
   'A trader is already registered with this email address. Please sign in or use a different email.';
 
+/** User-friendly message for duplicate mobile. */
+const MOBILE_ALREADY_USED = 'This mobile number is already in use. Please use a different number.';
+
+function isSafeMessage(s: string): boolean {
+  return s.length > 0 && s.length < 300 && !/stack|exception|at\s+\w+\./.i.test(s);
+}
+
+/** Strip HTTP status prefixes like "403 FORBIDDEN" or "Forbidden:" from messages. */
+function cleanMessage(msg: string): string {
+  let out = msg.trim();
+  // Extract quoted message: "403 FORBIDDEN '...'" or "403 FORBIDDEN "...""
+  const quotedMatch = out.match(/^\s*\d{3}\s+\w+\s*['"](.+?)['"]\s*$/s);
+  if (quotedMatch) return quotedMatch[1].trim();
+  // Or extract first quoted substring anywhere (e.g. status prefix + "real message")
+  const innerQuoted = out.match(/['"]([^'"]{10,300})['"]/);
+  if (innerQuoted) return innerQuoted[1].trim();
+  out = out
+    .replace(/^\s*\d{3}\s+(?:FORBIDDEN|Forbidden|UNAUTHORIZED|Unauthorized|BAD_REQUEST|Bad Request|CONFLICT|Conflict)\s*[:\s'"]*/i, '')
+    .replace(/^Forbidden\s*[:\s'"]*/i, '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+  return out;
+}
+
+/**
+ * Reads response body as text (body can only be read once).
+ * Tries to parse as JSON; falls back to raw text for non-JSON responses.
+ */
+async function readErrorBody(res: Response): Promise<{ text: string; problem?: Record<string, unknown> }> {
+  const text = await res.text();
+  let problem: Record<string, unknown> | undefined;
+  if (text && (text.startsWith('{') || text.startsWith('['))) {
+    try {
+      problem = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      // not valid JSON
+    }
+  }
+  return { text, problem };
+}
+
 /**
  * Parses error response for registration: 409 Conflict or 400 with "already used" / "already registered".
- * Returns a safe, user-facing message (no technical jargon or sensitive data).
+ * Reads body as text first to avoid consume-once issues; then parses JSON if applicable.
  */
 async function parseRegistrationError(res: Response): Promise<string> {
   const status = res.status;
   try {
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-      const problem = await res.json();
-      const detail =
-        typeof problem.detail === 'string' ? problem.detail.trim() : '';
-      const title =
-        typeof problem.title === 'string' ? problem.title.trim() : '';
+    const { text, problem } = await readErrorBody(res);
+    if (problem && typeof problem === 'object') {
+      const detail = typeof problem.detail === 'string' ? problem.detail.trim() : '';
+      const title = typeof problem.title === 'string' ? problem.title.trim() : '';
+      const msgKey = typeof problem.message === 'string' ? problem.message : '';
 
-      // 409 Conflict or 400 with duplicate-identity semantics: show exact validation message when safe
+      // Known backend error keys: always use friendly message
+      if (msgKey.includes('traderEmailExists')) return EMAIL_ALREADY_REGISTERED;
+      if (msgKey.includes('traderMobileExists')) return MOBILE_ALREADY_USED;
+
       const isConflict = status === 409;
+      const lowerDetail = detail.toLowerCase();
+      const lowerTitle = title.toLowerCase();
       const isDuplicate =
         status === 400 &&
-        (detail.toLowerCase().includes('already used') ||
-          detail.toLowerCase().includes('already registered') ||
-          detail.toLowerCase().includes('already in use') ||
-          title.toLowerCase().includes('already used') ||
-          title.toLowerCase().includes('already in use'));
+        (lowerDetail.includes('already used') ||
+          lowerDetail.includes('already registered') ||
+          lowerDetail.includes('already in use') ||
+          lowerDetail.includes('in use') ||
+          lowerTitle.includes('already used') ||
+          lowerTitle.includes('already in use'));
 
       if (isConflict || isDuplicate) {
-        // Prefer server message if it looks like a validation message (short, no stack traces)
-        if (detail && detail.length > 0 && detail.length < 300 && !/stack|exception|at\s+\w+\./.i.test(detail)) {
-          return detail;
-        }
-        if (title && title.length > 0 && title.length < 300 && !/stack|exception|at\s+\w+\./.i.test(title)) {
-          return title;
-        }
+        if (detail && isSafeMessage(detail)) return cleanMessage(detail);
+        if (title && isSafeMessage(title)) return cleanMessage(title);
+        if (lowerDetail.includes('mobile') || lowerDetail.includes('phone') || msgKey.includes('Mobile'))
+          return MOBILE_ALREADY_USED;
         return EMAIL_ALREADY_REGISTERED;
       }
 
-      // Other 4xx: use detail/title when safe
-      if (detail && detail.length < 300 && !/stack|exception|at\s+\w+\./.i.test(detail)) {
-        return detail;
-      }
-      if (title && title.length < 300 && !/stack|exception|at\s+\w+\./.i.test(title)) {
-        return title;
-      }
-    } else {
-      const text = await res.text();
-      if (text && text.length < 200 && !/stack|exception|at\s+\w+\./.i.test(text)) {
-        return text;
-      }
+      if (detail && isSafeMessage(detail)) return cleanMessage(detail);
+      if (title && isSafeMessage(title)) return cleanMessage(title);
+    }
+    if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+      return cleanMessage(text);
     }
   } catch {
-    // ignore parse errors
+    // ignore
   }
   return REGISTRATION_FAILED;
 }
@@ -137,23 +172,26 @@ export const authApi = {
     if (!res.ok) {
       let message = 'Login failed. Please try again.';
       try {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-          const problem = await res.json();
-          if (typeof problem.detail === 'string' && problem.detail.includes('Invalid email or password')) {
-            message = 'Invalid email or password';
-          } else if (typeof problem.detail === 'string' && problem.detail.includes('Password must be at least 6 characters')) {
-            message = 'Password must be at least 6 characters';
-          } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
-            message = problem.detail;
-          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
-            message = problem.title;
-          }
-        } else {
-          const text = await res.text();
-          if (text && text.length < 200) {
-            message = text;
-          }
+        const { text, problem } = await readErrorBody(res);
+        const detail = (problem && typeof problem.detail === 'string') ? problem.detail.trim() : '';
+        const title = (problem && typeof problem.title === 'string') ? problem.title.trim() : '';
+
+        if (res.status === 403 && detail.toLowerCase().includes('inactive')) {
+          message = cleanMessage(detail);
+        } else if (res.status === 403 && detail) {
+          message = cleanMessage(detail);
+        } else if (res.status === 403) {
+          message = 'Your account access has been restricted. Please contact support for assistance.';
+        } else if (detail.includes('Invalid email or password')) {
+          message = 'Invalid email or password';
+        } else if (detail.includes('Password must be at least 6 characters')) {
+          message = 'Password must be at least 6 characters';
+        } else if (detail.length > 0) {
+          message = cleanMessage(detail);
+        } else if (title.length > 0 && !/^forbidden$|^403$/i.test(title)) {
+          message = cleanMessage(title);
+        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+          message = cleanMessage(text);
         }
       } catch {
         // ignore parse errors and keep default message
@@ -210,7 +248,25 @@ export const authApi = {
     }
 
     if (!res.ok) {
-      throw new Error('Failed to load profile');
+      let message = 'Failed to load profile';
+      try {
+        const { text, problem } = await readErrorBody(res);
+        if (problem && typeof problem === 'object') {
+          const detail = typeof problem.detail === 'string' ? problem.detail.trim() : '';
+          if (res.status === 403 && (detail.toLowerCase().includes('inactive') || detail.length > 0)) {
+            message = cleanMessage(detail);
+          } else if (res.status === 403) {
+            message = 'Your account access has been restricted. Please contact support for assistance.';
+          } else if (detail.length > 0 && detail.length < 300) {
+            message = cleanMessage(detail);
+          }
+        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+          message = cleanMessage(text);
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
     }
 
     const data = await res.json();
@@ -258,19 +314,14 @@ export const authApi = {
     if (!res.ok) {
       let message = 'Failed to send OTP. Please try again.';
       try {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-          const problem = await res.json();
-          if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
-            message = problem.detail;
-          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
-            message = problem.title;
-          }
-        } else {
-          const text = await res.text();
-          if (text && text.length < 200) {
-            message = text;
-          }
+        const { text, problem } = await readErrorBody(res);
+        if (problem && typeof problem === 'object') {
+          const detail = typeof problem.detail === 'string' ? problem.detail.trim() : '';
+          const title = typeof problem.title === 'string' ? problem.title.trim() : '';
+          if (detail.length > 0) message = cleanMessage(detail);
+          else if (title.length > 0) message = cleanMessage(title);
+        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+          message = cleanMessage(text);
         }
       } catch {
         // ignore
@@ -288,19 +339,21 @@ export const authApi = {
     if (!res.ok) {
       let message = 'OTP verification failed. Please try again.';
       try {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-          const problem = await res.json();
-          if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
-            message = problem.detail;
-          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
-            message = problem.title;
+        const { text, problem } = await readErrorBody(res);
+        if (problem && typeof problem === 'object') {
+          const detail = typeof problem.detail === 'string' ? problem.detail.trim() : '';
+          const title = typeof problem.title === 'string' ? problem.title.trim() : '';
+          if (res.status === 403 && (detail.toLowerCase().includes('inactive') || detail.length > 0)) {
+            message = cleanMessage(detail);
+          } else if (res.status === 403) {
+            message = 'Your account access has been restricted. Please contact support for assistance.';
+          } else if (detail.length > 0) {
+            message = cleanMessage(detail);
+          } else if (title.length > 0) {
+            message = cleanMessage(title);
           }
-        } else {
-          const text = await res.text();
-          if (text && text.length < 200) {
-            message = text;
-          }
+        } else if (text && text.length < 500 && !/stack|exception|at\s+\w+\./.i.test(text)) {
+          message = cleanMessage(text);
         }
       } catch {
         // ignore

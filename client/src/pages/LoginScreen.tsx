@@ -182,8 +182,10 @@ const LoginScreen = () => {
         await contactLogin(email, password);
         navigate('/contact', { replace: true });
       }
-    } catch {
-      // error is set in respective context
+    } catch (e: any) {
+      const msg = e?.message || 'Login failed. Please try again.';
+      toast.error(msg);
+      // error is also set in respective context for inline display
     }
   };
 

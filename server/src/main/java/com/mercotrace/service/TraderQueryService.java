@@ -80,7 +80,8 @@ public class TraderQueryService extends QueryService<Trader> {
                 buildSpecification(criteria.getBusinessMode(), Trader_.businessMode),
                 buildStringSpecification(criteria.getBillPrefix(), Trader_.billPrefix),
                 buildRangeSpecification(criteria.getCreatedAt(), Trader_.createdAt),
-                buildRangeSpecification(criteria.getUpdatedAt(), Trader_.updatedAt)
+                buildRangeSpecification(criteria.getUpdatedAt(), Trader_.updatedAt),
+                buildSpecification(criteria.getActive(), Trader_.active)
             );
         }
         return specification;

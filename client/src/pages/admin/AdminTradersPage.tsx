@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, CheckCircle2, XCircle, Clock, Eye,
-  Building2, Phone, Mail, MapPin, Crown, ShieldAlert, Users2
+  Building2, Phone, Mail, MapPin, Crown, Users2,
+  Power, PowerOff, Trash2, AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -17,11 +18,18 @@ const statusConfig: Record<ApprovalStatus, { color: string; icon: typeof CheckCi
   APPROVED: { color: 'bg-success/10 text-success', icon: CheckCircle2, label: 'Approved' },
 };
 
+type Tab = 'active' | 'inactive';
+
 const AdminTradersPage = () => {
   const [traders, setTraders] = useState<Trader[]>([]);
+  const [inactiveTraders, setInactiveTraders] = useState<Trader[]>([]);
+  const [tab, setTab] = useState<Tab>('active');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<ApprovalStatus | 'ALL'>('ALL');
   const [selectedTrader, setSelectedTrader] = useState<Trader | null>(null);
+  const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<Trader | null>(null);
+  const [deactivateConfirm, setDeactivateConfirm] = useState<Trader | null>(null);
+  const [activateConfirm, setActivateConfirm] = useState<Trader | null>(null);
   const { canAccessModule, can } = useAdminPermissions();
 
   const canView = canAccessModule('Traders');
@@ -31,9 +39,16 @@ const AdminTradersPage = () => {
     return <AdminForbiddenPage moduleName="Traders" />;
   }
 
+  const loadActive = () => traderApi.listForAdmin({ page: 0, size: 500 }).then(setTraders).catch(() => setTraders([]));
+  const loadInactive = () => traderApi.listInactive({ page: 0, size: 500 }).then(setInactiveTraders).catch(() => setInactiveTraders([]));
+
   useEffect(() => {
-    traderApi.listForAdmin({ page: 0, size: 500 }).then(setTraders).catch(() => setTraders([]));
+    loadActive();
   }, []);
+
+  useEffect(() => {
+    if (tab === 'inactive') loadInactive();
+  }, [tab]);
 
   const filtered = traders.filter(t => {
     const matchSearch = t.business_name.toLowerCase().includes(search.toLowerCase()) || t.owner_name.toLowerCase().includes(search.toLowerCase()) || (t.city || '').toLowerCase().includes(search.toLowerCase());
@@ -41,20 +56,57 @@ const AdminTradersPage = () => {
     return matchSearch && matchStatus;
   });
 
+  const filteredInactive = inactiveTraders.filter(t =>
+    t.business_name.toLowerCase().includes(search.toLowerCase()) || t.owner_name.toLowerCase().includes(search.toLowerCase()) || (t.city || '').toLowerCase().includes(search.toLowerCase())
+  );
+
   const handleApprove = async (id: string) => {
-    if (!canApprove) {
-      return;
-    }
+    if (!canApprove) return;
     try {
       const updated = await traderApi.approve(id);
       setTraders(prev => prev.map(t => t.trader_id === id ? updated : t));
       setSelectedTrader(null);
-    } catch {
-      // keep UI state unchanged on error
-    }
+    } catch { /* keep UI state */ }
   };
 
-  const counts = { ALL: traders.length, PENDING: traders.filter(t => t.approval_status === 'PENDING').length, APPROVED: traders.filter(t => t.approval_status === 'APPROVED').length };
+  const handleActivate = async (id: string) => {
+    if (!canApprove) return;
+    try {
+      await traderApi.activate(id);
+      setActivateConfirm(null);
+      setSelectedTrader(null);
+      loadActive();
+      loadInactive();
+    } catch { /* keep UI state */ }
+  };
+
+  const handleDeactivate = async (id: string) => {
+    if (!canApprove) return;
+    try {
+      await traderApi.deactivate(id);
+      setDeactivateConfirm(null);
+      setSelectedTrader(null);
+      loadActive();
+      loadInactive();
+    } catch { /* keep UI state */ }
+  };
+
+  const handlePermanentDelete = async (id: string) => {
+    if (!canApprove) return;
+    try {
+      await traderApi.permanentDelete(id);
+      setPermanentDeleteConfirm(null);
+      setSelectedTrader(null);
+      loadInactive();
+    } catch { /* keep UI state */ }
+  };
+
+  const counts = {
+    ALL: traders.length,
+    PENDING: traders.filter(t => t.approval_status === 'PENDING').length,
+    APPROVED: traders.filter(t => t.approval_status === 'APPROVED').length,
+    INACTIVE: inactiveTraders.length,
+  };
 
   return (
     <div className="space-y-5 relative">
@@ -70,19 +122,20 @@ const AdminTradersPage = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-foreground">Trader Management</h1>
-            <p className="text-sm text-muted-foreground">{traders.length} registered traders</p>
+            <p className="text-sm text-muted-foreground">{traders.length} active, {inactiveTraders.length} inactive</p>
           </div>
         </div>
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="flex gap-3 relative z-10">
         {[
-          { label: 'Total', value: counts.ALL, gradient: 'from-primary to-accent', icon: Crown },
+          { label: 'Active', value: counts.ALL, gradient: 'from-primary to-accent', icon: Crown },
           { label: 'Pending', value: counts.PENDING, gradient: 'from-amber-400 to-orange-500', icon: Clock },
           { label: 'Approved', value: counts.APPROVED, gradient: 'from-emerald-400 to-teal-500', icon: CheckCircle2 },
+          { label: 'Inactive', value: counts.INACTIVE, gradient: 'from-slate-400 to-slate-500', icon: PowerOff },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 + i * 0.06 }}
-            className="glass-card rounded-2xl px-4 py-3 flex items-center gap-3 min-w-[120px]">
+            className="glass-card rounded-2xl px-4 py-3 flex items-center gap-3 min-w-[100px]">
             <div className={cn('w-9 h-9 rounded-xl bg-gradient-to-br flex items-center justify-center shadow-md', s.gradient)}>
               <s.icon className="w-4 h-4 text-white" />
             </div>
@@ -95,18 +148,31 @@ const AdminTradersPage = () => {
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="flex items-center gap-3 flex-wrap relative z-10">
+        <div className="flex gap-2">
+          {([
+            { key: 'active' as Tab, label: 'Active Traders', icon: Power },
+            { key: 'inactive' as Tab, label: 'Inactive Traders', icon: PowerOff },
+          ]).map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all', tab === t.key ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
+        </div>
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input placeholder="Search traders…" value={search} onChange={e => setSearch(e.target.value)} className="pl-10 h-10 rounded-xl" />
         </div>
-        <div className="flex gap-2">
-          {(['ALL', 'PENDING', 'APPROVED'] as const).map(s => (
-            <button key={s} onClick={() => setFilterStatus(s)}
-              className={cn('px-3 py-2 rounded-xl text-xs font-semibold transition-all', filterStatus === s ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
-              {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
-            </button>
-          ))}
-        </div>
+        {tab === 'active' && (
+          <div className="flex gap-2">
+            {(['ALL', 'PENDING', 'APPROVED'] as const).map(s => (
+              <button key={s} onClick={() => setFilterStatus(s)}
+                className={cn('px-3 py-2 rounded-xl text-xs font-semibold transition-all', filterStatus === s ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+                {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        )}
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
@@ -124,7 +190,7 @@ const AdminTradersPage = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t, i) => {
+              {tab === 'active' && filtered.map((t, i) => {
                 const sc = statusConfig[t.approval_status];
                 return (
                   <motion.tr key={t.trader_id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.04 }}
@@ -147,12 +213,58 @@ const AdminTradersPage = () => {
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => setSelectedTrader(t)} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all">
+                        <button onClick={() => setSelectedTrader(t)} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all" title="View">
                           <Eye className="w-4 h-4" />
                         </button>
                         {t.approval_status === 'PENDING' && canApprove && (
-                          <button onClick={() => handleApprove(t.trader_id)} className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all">
+                          <button onClick={() => handleApprove(t.trader_id)} className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all" title="Approve">
                             <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canApprove && (
+                          <button onClick={() => setDeactivateConfirm(t)} className="p-2 rounded-lg bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 transition-all" title="Deactivate">
+                            <PowerOff className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </motion.tr>
+                );
+              })}
+              {tab === 'inactive' && filteredInactive.map((t, i) => {
+                const sc = statusConfig[t.approval_status];
+                return (
+                  <motion.tr key={t.trader_id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.04 }}
+                    className="border-b border-border/20 hover:bg-primary/5 transition-colors">
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-slate-500/30 flex items-center justify-center">
+                          <Building2 className="w-5 h-5 text-slate-400" />
+                        </div>
+                        <span className="font-semibold text-foreground">{t.business_name}</span>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-muted-foreground">{t.owner_name}</td>
+                    <td className="py-3.5 px-4 text-muted-foreground">{t.city}, {t.state}</td>
+                    <td className="py-3.5 px-4"><span className="px-2 py-1 rounded-lg bg-muted/50 text-xs font-medium text-foreground">{t.category}</span></td>
+                    <td className="py-3.5 px-4">
+                      <span className={cn('px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1', sc.color)}>
+                        <sc.icon className="w-3 h-3" /> {sc.label}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => setSelectedTrader(t)} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all" title="View">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {canApprove && (
+                          <button onClick={() => setActivateConfirm(t)} className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all" title="Activate">
+                            <Power className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canApprove && (
+                          <button onClick={() => setPermanentDeleteConfirm(t)} className="p-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all" title="Permanent delete">
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -163,7 +275,8 @@ const AdminTradersPage = () => {
             </tbody>
           </table>
         </div>
-        {filtered.length === 0 && <div className="p-12 text-center text-muted-foreground">No traders found</div>}
+        {tab === 'active' && filtered.length === 0 && <div className="p-12 text-center text-muted-foreground">No active traders found</div>}
+        {tab === 'inactive' && filteredInactive.length === 0 && <div className="p-12 text-center text-muted-foreground">No inactive traders found</div>}
       </motion.div>
 
       <AnimatePresence>
@@ -204,14 +317,113 @@ const AdminTradersPage = () => {
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-3">
-                  {selectedTrader.approval_status === 'PENDING' && (
-                    <Button onClick={() => handleApprove(selectedTrader.trader_id)} className="flex-1 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl h-11">
+                <div className="flex gap-3 flex-wrap">
+                  {selectedTrader.approval_status === 'PENDING' && canApprove && (
+                    <Button onClick={() => handleApprove(selectedTrader.trader_id)} className="flex-1 min-w-[120px] bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl h-11">
                       <CheckCircle2 className="w-4 h-4 mr-2" /> Approve
                     </Button>
                   )}
-                  <Button onClick={() => setSelectedTrader(null)} variant="outline" className="flex-1 rounded-xl h-11">Close</Button>
+                  {canApprove && tab === 'active' && (
+                    <Button onClick={() => { setSelectedTrader(null); setDeactivateConfirm(selectedTrader); }} variant="outline" className="flex-1 min-w-[120px] border-amber-500/50 text-amber-600 hover:bg-amber-500/10 rounded-xl h-11">
+                      <PowerOff className="w-4 h-4 mr-2" /> Deactivate
+                    </Button>
+                  )}
+                  {canApprove && tab === 'inactive' && (
+                    <>
+                      <Button onClick={() => { setSelectedTrader(null); setActivateConfirm(selectedTrader); }} className="flex-1 min-w-[120px] bg-success text-white rounded-xl h-11">
+                        <Power className="w-4 h-4 mr-2" /> Activate
+                      </Button>
+                      <Button onClick={() => { setSelectedTrader(null); setPermanentDeleteConfirm(selectedTrader); }} variant="outline" className="flex-1 min-w-[120px] border-destructive/50 text-destructive hover:bg-destructive/10 rounded-xl h-11">
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete Permanently
+                      </Button>
+                    </>
+                  )}
+                  <Button onClick={() => setSelectedTrader(null)} variant="outline" className="flex-1 min-w-[80px] rounded-xl h-11">Close</Button>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {deactivateConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setDeactivateConfirm(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()}
+              className="w-full max-w-md glass-card rounded-2xl p-6 shadow-elevated border border-amber-500/30">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                  <PowerOff className="w-6 h-6 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Deactivate Trader</h3>
+                  <p className="text-sm text-muted-foreground">Trader and staff will not be able to log in</p>
+                </div>
+              </div>
+              <p className="text-sm text-foreground mb-6">
+                Deactivate <strong>{deactivateConfirm.business_name}</strong>? The trader and their staff will be blocked from logging in until reactivated.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setDeactivateConfirm(null)} variant="outline" className="flex-1 rounded-xl h-11">Cancel</Button>
+                <Button onClick={() => handleDeactivate(deactivateConfirm.trader_id)} className="flex-1 bg-amber-500 text-white hover:bg-amber-600 rounded-xl h-11">
+                  <PowerOff className="w-4 h-4 mr-2" /> Deactivate
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {activateConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setActivateConfirm(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()}
+              className="w-full max-w-md glass-card rounded-2xl p-6 shadow-elevated border border-success/30">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-success/20 flex items-center justify-center">
+                  <Power className="w-6 h-6 text-success" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Activate Trader</h3>
+                  <p className="text-sm text-muted-foreground">Allow trader and staff to log in</p>
+                </div>
+              </div>
+              <p className="text-sm text-foreground mb-6">
+                Activate <strong>{activateConfirm.business_name}</strong>? The trader and their staff will be able to log in again.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setActivateConfirm(null)} variant="outline" className="flex-1 rounded-xl h-11">Cancel</Button>
+                <Button onClick={() => handleActivate(activateConfirm.trader_id)} className="flex-1 bg-success text-white hover:bg-success/90 rounded-xl h-11">
+                  <Power className="w-4 h-4 mr-2" /> Activate
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {permanentDeleteConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => setPermanentDeleteConfirm(null)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={e => e.stopPropagation()}
+              className="w-full max-w-md glass-card rounded-2xl p-6 shadow-elevated border border-destructive/30">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-destructive/20 flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-destructive" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Permanent Delete</h3>
+                  <p className="text-sm text-muted-foreground">This cannot be undone</p>
+                </div>
+              </div>
+              <p className="text-sm text-foreground mb-6">
+                Permanently delete <strong>{permanentDeleteConfirm.business_name}</strong>? This will remove the trader and <strong>all associated data</strong> (users, roles, vehicles, lots, auctions, commodities, vouchers, CDN, stocks, etc.) from the system. <strong>All data will be permanently deleted. No retrieval possible!</strong>
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setPermanentDeleteConfirm(null)} variant="outline" className="flex-1 rounded-xl h-11">Cancel</Button>
+                <Button onClick={() => handlePermanentDelete(permanentDeleteConfirm.trader_id)} className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-xl h-11">
+                  <Trash2 className="w-4 h-4 mr-2" /> Delete Permanently
+                </Button>
               </div>
             </motion.div>
           </motion.div>

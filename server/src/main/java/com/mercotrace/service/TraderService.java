@@ -45,4 +45,30 @@ public interface TraderService {
      * @param id the id of the entity.
      */
     void delete(Long id);
+
+    /**
+     * Set trader active status (true = active, false = inactive).
+     * Inactive traders and their staff cannot log in.
+     *
+     * @param id the trader id.
+     * @param active true to activate, false to deactivate.
+     * @return the updated trader.
+     */
+    TraderDTO setActive(Long id, boolean active);
+
+    /**
+     * Set trader active status via direct DB update. Use when setActive triggers cache issues.
+     *
+     * @param id the trader id.
+     * @param active true to activate, false to deactivate.
+     */
+    void setActiveDirect(Long id, boolean active);
+
+    /**
+     * Permanently delete a trader from the system.
+     * Only allowed for inactive traders. Use with caution.
+     *
+     * @param id the trader id.
+     */
+    void permanentDelete(Long id);
 }
