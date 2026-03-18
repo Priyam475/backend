@@ -32,6 +32,7 @@ export interface BillPrintData {
   commodityGroups: {
     commodityName: string;
     hsnCode?: string;
+    gstRate?: number;
     commissionPercent: number;
     userFeePercent: number;
     items: { quantity: number; weight: number; newRate: number; amount: number }[];
@@ -65,7 +66,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
   for (const group of bill.commodityGroups) {
     body += `
       <div class="section">
-        <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}</p>
+        <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${group.gstRate}%` : ''}</p>
         ${group.items.map((item) => `
           <div class="row" style="font-size:10px">
             <span>${item.quantity}×${item.weight.toFixed(0)}kg @₹${item.newRate}</span>
@@ -76,6 +77,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
           <div class="row"><span class="muted">Subtotal</span><span>₹${group.subtotal.toLocaleString()}</span></div>
           ${group.commissionPercent > 0 ? `<div class="row"><span class="muted">Commission (${group.commissionPercent}%)</span><span>₹${group.commissionAmount.toLocaleString()}</span></div>` : ''}
           ${group.userFeePercent > 0 ? `<div class="row"><span class="muted">User Fee (${group.userFeePercent}%)</span><span>₹${group.userFeeAmount.toLocaleString()}</span></div>` : ''}
+          ${(group.gstRate ?? 0) > 0 ? `<div class="row"><span class="muted">GST (${group.gstRate}%)</span><span>₹${Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span></div>` : ''}
         </div>
       </div>
     `;
@@ -94,11 +96,12 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
   body += `
       <div class="section">
         <p class="bold">TAX SUMMARY</p>
-        ${bill.commodityGroups.filter((g) => g.commissionPercent > 0 || g.userFeePercent > 0).map((g) => `
+        ${bill.commodityGroups.filter((g) => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g) => `
           <div style="font-size:10px">
             <span class="muted">${escapeHtml(g.commodityName)}:</span>
             ${g.commissionPercent > 0 ? `<div class="row" style="padding-left:8px"><span>Commission</span><span>₹${g.commissionAmount}</span></div>` : ''}
             ${g.userFeePercent > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee</span><span>₹${g.userFeeAmount}</span></div>` : ''}
+            ${(g.gstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>GST (${g.gstRate}%)</span><span>₹${Math.round(g.subtotal * (g.gstRate ?? 0) / 100).toLocaleString()}</span></div>` : ''}
           </div>
         `).join('')}
       </div>
