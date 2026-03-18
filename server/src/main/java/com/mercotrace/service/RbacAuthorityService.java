@@ -138,8 +138,9 @@ public class RbacAuthorityService {
             return;
         }
 
-        boolean isTraderOwner = userTraderRepository
-            .findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(userId, traderId)
+        // Only grant trader authorities if user has an active (non soft-deleted) mapping to this trader
+        var mappingOpt = userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(userId, traderId);
+        boolean isTraderOwner = mappingOpt
             .map(mapping -> {
                 String roleInTrader = mapping.getRoleInTrader();
                 return roleInTrader != null && "OWNER".equalsIgnoreCase(roleInTrader);
@@ -148,7 +149,10 @@ public class RbacAuthorityService {
 
         Set<String> rbacAuthorities = new HashSet<>();
 
-        if (isTraderOwner) {
+        if (!mappingOpt.isPresent()) {
+            // User has no active mapping to this trader (soft-deleted or never mapped) - grant only baseline USER
+            rbacAuthorities.add(AuthoritiesConstants.USER);
+        } else if (isTraderOwner) {
             // Trader owners must always have full access to all trader modules for their trader,
             // independent of any RBAC role toggles.
             rbacAuthorities.addAll(TRADER_MODULE_AUTHORITY_NAMES);

@@ -1,39 +1,48 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Plus, Edit2, Search, UserCheck, UserX, Eye, ArrowLeft, Mail, Phone } from 'lucide-react';
+import { Users, Plus, Edit2, Search, UserCheck, UserX, Eye, ArrowLeft, Mail, Phone, Trash2, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import type { Profile, Role, UserRole } from '@/types/rbac';
 import { traderRbacApi } from '@/services/api';
 
+type ProfileWithRoles = Profile & { roles: string[]; mappingActive?: boolean };
+
 const UserManagementPage = () => {
   const navigate = useNavigate();
-  const [profiles, setProfiles] = useState<(Profile & { roles: string[] })[]>([]);
+  const [profiles, setProfiles] = useState<ProfileWithRoles[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [viewDialog, setViewDialog] = useState<(Profile & { roles: string[] }) | null>(null);
+  const [viewDialog, setViewDialog] = useState<ProfileWithRoles | null>(null);
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formMobile, setFormMobile] = useState('');
   const [formMobileError, setFormMobileError] = useState('');
+  const [formEmailError, setFormEmailError] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [restorePendingUserId, setRestorePendingUserId] = useState<string | null>(null);
+  const [restorePendingMobile, setRestorePendingMobile] = useState<string | null>(null);
   const MOBILE_REGEX = /^\d{10}$/;
+  const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
-  const fetchProfiles = async () => {
+  const fetchProfiles = async (includeRemoved = false) => {
     try {
       setLoading(true);
       const [profilesData, userRoles, roles] = await Promise.all([
-        traderRbacApi.listProfiles(),
+        traderRbacApi.listProfiles(includeRemoved),
         traderRbacApi.listUserRoles(),
         traderRbacApi.listRoles(),
       ]);
@@ -46,10 +55,10 @@ const UserManagementPage = () => {
         userRolesMap.set(ur.user_id, arr);
       });
 
-      setProfiles((profilesData || []).map((p: Profile) => ({
+      setProfiles((profilesData || []).map((p) => ({
         ...p,
         roles: userRolesMap.get(p.id) || [],
-      })));
+      })) as ProfileWithRoles[]);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load users');
@@ -59,12 +68,13 @@ const UserManagementPage = () => {
   };
 
   useEffect(() => {
-    fetchProfiles();
+    // Always fetch with includeRemoved so we have accurate count for "Show removed users"
+    fetchProfiles(true);
   }, []);
 
   const openCreate = () => {
     setEditingProfile(null);
-    setFormName(''); setFormEmail(''); setFormMobile(''); setFormPassword(''); setFormMobileError('');
+    setFormName(''); setFormEmail(''); setFormMobile(''); setFormPassword(''); setFormMobileError(''); setFormEmailError('');
     setDialogOpen(true);
   };
 
@@ -74,12 +84,21 @@ const UserManagementPage = () => {
     setFormEmail(profile.email);
     setFormMobile(profile.mobile || '');
     setFormMobileError('');
+    setFormEmailError('');
     setFormPassword('');
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!formName.trim() || !formEmail.trim()) { toast.error('Name and email are required'); return; }
+
+    const emailTrimmed = formEmail.trim();
+    if (!EMAIL_REGEX.test(emailTrimmed)) {
+      setFormEmailError('Please enter a valid email address');
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    setFormEmailError('');
 
     const mobileTrimmed = formMobile.trim();
     if (mobileTrimmed && !MOBILE_REGEX.test(mobileTrimmed)) {
@@ -112,12 +131,50 @@ const UserManagementPage = () => {
         toast.success('User created successfully');
       }
       setDialogOpen(false);
-      fetchProfiles();
+      fetchProfiles(true);
     } catch (error: any) {
+      const msg = error?.message || '';
+      const isRestoreCase = msg.includes('previously removed') || msg.includes('usermobileexistsinactive');
+      if (!editingProfile && isRestoreCase && mobileTrimmed) {
+        const restoredUser = await traderRbacApi.getProfileByMobile(mobileTrimmed);
+        if (restoredUser) {
+          setRestorePendingUserId(restoredUser.id);
+          setRestorePendingMobile(mobileTrimmed);
+          return;
+        }
+      }
       console.error(error);
-      toast.error(error?.message || 'Failed to save user');
+      // Map backend errors to user-friendly messages
+      let userMsg = 'Failed to save user';
+      if (msg.includes('emailinuse') || (msg.toLowerCase().includes('email') && msg.toLowerCase().includes('already in use'))) {
+        userMsg = 'This email is already in use.';
+      } else if (msg.includes('mobileinuse') || (msg.toLowerCase().includes('mobile') && msg.toLowerCase().includes('already in use'))) {
+        userMsg = 'This mobile number is already in use.';
+      } else if (msg.toLowerCase().includes('invalid') && msg.toLowerCase().includes('email')) {
+        userMsg = 'Please enter a valid email address.';
+        setFormEmailError('Please enter a valid email address');
+      } else if (msg.includes('previously removed') || msg.includes('usermobileexistsinactive')) {
+        userMsg = msg; // Keep for restore flow
+      } else if (msg && msg.length < 120 && !msg.includes('Exception') && !msg.includes('at ')) {
+        userMsg = msg;
+      }
+      toast.error(userMsg);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRestoreFromCreate = async () => {
+    if (!restorePendingUserId) return;
+    try {
+      await traderRbacApi.restoreProfile(restorePendingUserId);
+      toast.success('User restored successfully');
+      setRestorePendingUserId(null);
+      setRestorePendingMobile(null);
+      setDialogOpen(false);
+      fetchProfiles(true);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to restore user');
     }
   };
 
@@ -126,14 +183,43 @@ const UserManagementPage = () => {
     try {
       await traderRbacApi.setProfileStatus(profile.id, newStatus);
       toast.success(`User ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
-      fetchProfiles();
+      fetchProfiles(true);
     } catch (error) {
       console.error(error);
       toast.error('Failed to update status');
     }
   };
 
-  const filtered = profiles.filter(p =>
+  const handleDelete = async (profileId: string) => {
+    try {
+      await traderRbacApi.deleteProfile(profileId);
+      toast.success('User removed from this organisation. You can restore them later.');
+      setDeleteConfirm(null);
+      fetchProfiles(true);
+    } catch (error: any) {
+      const msg = error?.message || 'Failed to remove user';
+      if (msg.includes('already been removed') || msg.includes('useralreadyremoved')) {
+        toast.error('This user has already been removed.');
+      } else {
+        toast.error(msg);
+      }
+      setDeleteConfirm(null);
+    }
+  };
+
+  const handleRestore = async (profileId: string) => {
+    try {
+      await traderRbacApi.restoreProfile(profileId);
+      toast.success('User restored successfully');
+      fetchProfiles(true);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to restore user');
+    }
+  };
+
+  const activeProfiles = profiles.filter(p => p.mappingActive !== false);
+  const removedProfiles = profiles.filter(p => p.mappingActive === false);
+  const filtered = activeProfiles.filter(p =>
     p.full_name.toLowerCase().includes(search.toLowerCase()) ||
     p.email.toLowerCase().includes(search.toLowerCase())
   );
@@ -171,13 +257,13 @@ const UserManagementPage = () => {
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="flex gap-3 flex-wrap">
           <div className="glass-card rounded-xl px-4 py-2.5 border border-border/30 flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500" />
-            <span className="text-xs font-semibold text-foreground">{profiles.filter(p => p.status === 'active').length}</span>
-            <span className="text-xs text-muted-foreground">Active</span>
+            <span className="text-xs font-semibold text-foreground">{activeProfiles.length}</span>
+            <span className="text-xs text-muted-foreground">In organisation</span>
           </div>
           <div className="glass-card rounded-xl px-4 py-2.5 border border-border/30 flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
-            <span className="text-xs font-semibold text-foreground">{profiles.filter(p => p.status !== 'active').length}</span>
-            <span className="text-xs text-muted-foreground">Inactive</span>
+            <span className="text-xs font-semibold text-foreground">{removedProfiles.length}</span>
+            <span className="text-xs text-muted-foreground">Removed</span>
           </div>
         </motion.div>
 
@@ -256,6 +342,9 @@ const UserManagementPage = () => {
                             <button onClick={() => openEdit(p)} aria-label="Edit user" className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors border border-primary/15">
                               <Edit2 className="w-3.5 h-3.5 text-primary" />
                             </button>
+                            <button onClick={() => setDeleteConfirm(p.id)} aria-label="Remove user" className="w-8 h-8 rounded-lg bg-destructive/10 flex items-center justify-center hover:bg-destructive/20 transition-colors border border-destructive/15">
+                              <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                            </button>
                           </div>
                         </td>
                       </motion.tr>
@@ -309,6 +398,9 @@ const UserManagementPage = () => {
                       <Button variant="outline" size="sm" onClick={() => openEdit(p)} className="flex-1 gap-1.5 h-9">
                         <Edit2 className="w-3.5 h-3.5" /> Edit
                       </Button>
+                      <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(p.id)} className="gap-1.5 h-9 text-destructive border-destructive/30 hover:bg-destructive/10">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </div>
                 </motion.div>
@@ -335,11 +427,19 @@ const UserManagementPage = () => {
               </div>
               <div>
                 <Label className="text-xs font-semibold uppercase text-muted-foreground">Email *</Label>
-                <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="john@example.com" className="mt-1.5 glass border-border/30" disabled={!!editingProfile} />
+                <Input type="email" value={formEmail} onChange={e => { setFormEmail(e.target.value); setFormEmailError(''); }} placeholder="john@example.com" className="mt-1.5 glass border-border/30" disabled={!!editingProfile} />
+                {formEmailError && <p className="text-xs text-destructive mt-1">{formEmailError}</p>}
               </div>
               <div>
                 <Label className="text-xs font-semibold uppercase text-muted-foreground">Mobile</Label>
-                <Input value={formMobile} onChange={e => setFormMobile(e.target.value)} placeholder="9876543210" className="mt-1.5 glass border-border/30" />
+                <Input
+                  value={formMobile}
+                  onChange={e => setFormMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="9876543210"
+                  maxLength={10}
+                  inputMode="numeric"
+                  className="mt-1.5 glass border-border/30"
+                />
                 {formMobileError && <p className="text-xs text-destructive mt-1">{formMobileError}</p>}
               </div>
               {!editingProfile && (
@@ -399,6 +499,77 @@ const UserManagementPage = () => {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Delete Confirmation */}
+        <ConfirmDeleteDialog
+          open={!!deleteConfirm}
+          onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}
+          title="Remove user?"
+          description={
+            deleteConfirm
+              ? `This will remove "${profiles.find(p => p.id === deleteConfirm)?.full_name || 'this user'}" from your organisation. They can be restored later from the removed users list.`
+              : 'This will remove the user from your organisation. They can be restored later.'
+          }
+          confirmLabel="Remove"
+          onConfirm={() => deleteConfirm && handleDelete(deleteConfirm)}
+        />
+
+        {/* Restore previously removed user (create failed with same mobile) */}
+        <Dialog open={!!restorePendingUserId} onOpenChange={(open) => { if (!open) { setRestorePendingUserId(null); setRestorePendingMobile(null); } }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                  <RotateCcw className="w-5 h-5 text-primary" />
+                </div>
+                <DialogTitle>Restore user?</DialogTitle>
+              </div>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              A user with mobile <strong>{restorePendingMobile}</strong> was previously removed from this organisation. Restore them instead of creating a new one?
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setRestorePendingUserId(null); setRestorePendingMobile(null); }}>Cancel</Button>
+              <Button onClick={handleRestoreFromCreate}>Restore</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Show removed users */}
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowRemoved(!showRemoved)}
+            className="text-sm font-medium text-muted-foreground hover:text-foreground flex items-center gap-2"
+          >
+            {showRemoved ? 'Hide' : 'Show'} removed users ({removedProfiles.length})
+          </button>
+          {showRemoved && removedProfiles.length > 0 && (
+            <div className="rounded-2xl border border-border/40 overflow-hidden glass-card">
+              <div className="px-4 py-2 bg-muted/20 border-b border-border/20">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Removed users — restore to add back</p>
+              </div>
+              <div className="divide-y divide-border/20">
+                {removedProfiles.map((p) => (
+                  <div key={p.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={cn('w-9 h-9 rounded-xl bg-gradient-to-br flex-shrink-0 flex items-center justify-center', avatarGradients[removedProfiles.indexOf(p) % avatarGradients.length])}>
+                        <span className="text-xs font-bold text-white">{p.full_name.charAt(0).toUpperCase()}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate">{p.full_name || 'Unnamed'}</p>
+                        <p className="text-xs text-muted-foreground truncate">{p.email}</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => handleRestore(p.id)} className="gap-1.5 shrink-0">
+                      <RotateCcw className="w-3.5 h-3.5" /> Restore
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <BottomNav />

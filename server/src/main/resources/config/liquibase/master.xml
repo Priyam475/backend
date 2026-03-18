@@ -68,4 +68,5 @@
     <include file="config/liquibase/changelog/20260315180000_daily_serial_allocation.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260316120000_commodity_soft_delete.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260316130000_contact_soft_delete.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260318120000_user_trader_soft_delete.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

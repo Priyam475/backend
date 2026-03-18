@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Soft-delete support for user_trader (trader RBAC staff user mapping).
+        Adds an "active" flag so we never hard-delete user-trader mappings.
+        When a staff user is "removed" from a trader, we set active=false instead of deleting.
+    -->
+    <changeSet id="20260318120000-user-trader-soft-delete" author="cursor-ai">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="user_trader" columnName="active"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="user_trader">
+            <column name="active" type="boolean" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

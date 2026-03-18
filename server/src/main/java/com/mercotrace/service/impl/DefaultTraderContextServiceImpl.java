@@ -27,7 +27,7 @@ public class DefaultTraderContextServiceImpl implements TraderContextService {
             .orElseThrow(() -> new IllegalStateException("No authenticated user found for trader resolution"));
 
         return userTraderRepository
-            .findFirstByUserIdAndPrimaryMappingTrue(userId)
+            .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(userId)
             .map(mapping -> {
                 if (mapping.getTrader() == null || mapping.getTrader().getId() == null) {
                     throw new IllegalStateException("Primary trader mapping has no trader id for user " + userId);
@@ -41,7 +41,7 @@ public class DefaultTraderContextServiceImpl implements TraderContextService {
     public Optional<Long> getCurrentTraderIdOptional() {
         return SecurityUtils
             .getCurrentUserId()
-            .flatMap(userTraderRepository::findFirstByUserIdAndPrimaryMappingTrue)
+            .flatMap(userTraderRepository::findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue)
             .filter(mapping -> mapping.getTrader() != null && mapping.getTrader().getId() != null)
             .map(mapping -> mapping.getTrader().getId());
     }

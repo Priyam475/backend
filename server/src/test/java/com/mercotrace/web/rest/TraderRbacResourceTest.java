@@ -261,9 +261,9 @@ class TraderRbacResourceTest {
         @Test
         @DisplayName("listUsers_withRbacSettingsView_returns200")
         void listUsers_withRbacSettingsView_returns200() throws Exception {
-            when(userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(TRADER_ID)).thenReturn(List.of());
+            when(userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrueAndActiveTrue(TRADER_ID)).thenReturn(List.of());
             mockMvc.perform(get(USERS_URL).with(rbacView())).andExpect(status().isOk());
-            verify(userTraderRepository).findAllWithUserByTraderIdAndPrimaryMappingTrue(TRADER_ID);
+            verify(userTraderRepository).findAllWithUserByTraderIdAndPrimaryMappingTrueAndActiveTrue(TRADER_ID);
         }
     }
 
@@ -350,7 +350,7 @@ class TraderRbacResourceTest {
             mapping.setTrader(t);
 
             when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-            when(userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(userId, TRADER_ID)).thenReturn(Optional.of(mapping));
+            when(userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(userId, TRADER_ID)).thenReturn(Optional.of(mapping));
             when(userRepository.save(any(User.class))).thenReturn(user);
             when(userRoleRepository.findByUserId(userId)).thenReturn(List.of());
 
@@ -392,7 +392,7 @@ class TraderRbacResourceTest {
             role.setTraderId(TRADER_ID);
 
             when(userRepository.findById(userId)).thenReturn(Optional.of(user));
-            when(userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(userId, TRADER_ID)).thenReturn(Optional.of(mapping));
+            when(userTraderRepository.findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(userId, TRADER_ID)).thenReturn(Optional.of(mapping));
             when(userRepository.save(any(User.class))).thenReturn(user);
             when(userRoleRepository.findByUserId(userId)).thenReturn(List.of());
             when(roleRepository.findAllById(Set.of(roleId))).thenReturn(List.of(role));

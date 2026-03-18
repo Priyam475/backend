@@ -263,6 +263,7 @@ type TraderRbacUserVM = {
   activated?: boolean;
   roleInTrader?: string;
   roleIds?: number[];
+  mappingActive?: boolean;
 };
 
 function traderUserToProfile(u: TraderRbacUserVM): RbacProfile {
@@ -295,11 +296,31 @@ export const traderRbacApi = {
     return data.map(mapRoleDtoToRole);
   },
 
-  async listProfiles(): Promise<RbacProfile[]> {
-    const res = await apiFetch('/trader/rbac/users', { method: 'GET' });
+  async listProfiles(includeRemoved = false): Promise<(RbacProfile & { mappingActive?: boolean })[]> {
+    const url = includeRemoved ? '/trader/rbac/users?includeRemoved=true' : '/trader/rbac/users';
+    const res = await apiFetch(url, { method: 'GET' });
     const data = await handleRes<TraderRbacUserVM[]>(res, 'Failed to load users');
     if (!Array.isArray(data)) return [];
-    return data.map(traderUserToProfile);
+    return data.map((u) => ({ ...traderUserToProfile(u), mappingActive: u.mappingActive ?? true }));
+  },
+
+  async deleteProfile(profileId: string): Promise<void> {
+    const res = await apiFetch(`/trader/rbac/users/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+    if (!res.ok) await handleRes<unknown>(res, 'Failed to remove user');
+  },
+
+  async restoreProfile(profileId: string): Promise<void> {
+    const res = await apiFetch(`/trader/rbac/users/${encodeURIComponent(profileId)}/restore`, { method: 'PATCH' });
+    if (!res.ok) await handleRes<unknown>(res, 'Failed to restore user');
+  },
+
+  /** Get a soft-deleted user by mobile (for restore flow when create fails with usermobileexistsinactive). */
+  async getProfileByMobile(mobile: string): Promise<{ id: string; fullName?: string; email?: string } | null> {
+    if (!mobile || !mobile.trim()) return null;
+    const res = await apiFetch(`/trader/rbac/users/by-mobile?mobile=${encodeURIComponent(mobile.trim())}`, { method: 'GET' });
+    if (!res.ok) return null;
+    const u = await res.json() as TraderRbacUserVM;
+    return u?.id != null ? { id: String(u.id), fullName: u.fullName, email: u.email } : null;
   },
 
   async listUserRoles(): Promise<UserRole[]> {
