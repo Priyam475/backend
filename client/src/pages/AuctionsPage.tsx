@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Gavel, Eye, EyeOff, Plus, Trash2,
-  ShoppingCart, User, Package, Truck, CircleDollarSign, Banknote, ChevronDown,
+  ArrowLeft, Gavel, Plus, Trash2,
+  ShoppingCart, User, Package, Truck, IndianRupee, Banknote, ChevronDown,
   Search, AlertTriangle, Merge, Hash,
   ChevronLeft, ChevronRight, List, Filter
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { isNative, hapticSelection, hapticImpact, hapticNotification, hideNative
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import BottomNav from '@/components/BottomNav';
 import ScribblePad from '@/components/ScribblePad';
 import InlineScribblePad from '@/components/InlineScribblePad';
@@ -77,10 +78,9 @@ interface AuctionDraft {
   entries: SaleEntry[];
   rate: string;
   qty: string;
-  extraRate: string;
   preset: number;
   presetType: PresetType;
-  showExtraRate: boolean;
+  showPresetMargin: boolean;
   scribbleMark: string;
 }
 
@@ -167,18 +167,17 @@ const AuctionsPage = () => {
   }
   const [buyers, setBuyers] = useState<Contact[]>([]);
   const [entries, setEntries] = useState<SaleEntry[]>([]);
-  const [showExtraRate, setShowExtraRate] = useState(false);
+  const [showPresetMargin, setShowPresetMargin] = useState(false);
   const [showScribble, setShowScribble] = useState(false);
   const [scribbleMark, setScribbleMark] = useState('');
   const [preset, setPreset] = useState(0);
   const [presetType, setPresetType] = useState<PresetType>('PROFIT');
   const [showTokenInput, setShowTokenInput] = useState<string | null>(null);
   const [scribblePadResetTrigger, setScribblePadResetTrigger] = useState(0);
-  const [activeNumpadField, setActiveNumpadField] = useState<'rate' | 'qty' | 'extraRate'>('rate');
+  const [activeNumpadField, setActiveNumpadField] = useState<'rate' | 'qty'>('rate');
   const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
-  const extraRateInputRef = useRef<HTMLInputElement>(null);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -216,7 +215,6 @@ const AuctionsPage = () => {
   const [selectedBuyer, setSelectedBuyer] = useState<Contact | null>(null);
   const [rate, setRate] = useState('');
   const [qty, setQty] = useState('');
-  const [extraRate, setExtraRate] = useState('');
   const isTouchLayout = !isDesktop;
 
   // Skip initial draft restore flag
@@ -324,10 +322,9 @@ const AuctionsPage = () => {
     setShowLotSelector(false);
     setRate(draft.rate || '');
     setQty(draft.qty || '');
-    setExtraRate(draft.extraRate || '');
     setPreset(draft.preset || 0);
     setPresetType(draft.presetType || 'PROFIT');
-    setShowExtraRate(draft.showExtraRate || false);
+    setShowPresetMargin(draft.showPresetMargin || false);
     setScribbleMark(draft.scribbleMark || '');
     setSessionLoading(true);
     auctionApi
@@ -348,13 +345,12 @@ const AuctionsPage = () => {
       entries,
       rate,
       qty,
-      extraRate,
       preset,
       presetType,
-      showExtraRate,
+      showPresetMargin,
       scribbleMark,
     });
-  }, [selectedLot, entries, rate, qty, extraRate, preset, presetType, showExtraRate, scribbleMark]);
+  }, [selectedLot, entries, rate, qty, preset, presetType, showPresetMargin, scribbleMark]);
 
   // Filter lots
   const filteredLots = useMemo(() => {
@@ -573,7 +569,7 @@ const AuctionsPage = () => {
           quantity: mergedQty,
           is_scribble: duplicateMarkDialog.isScribble,
           is_self_sale: false,
-          extra_rate: showExtraRate ? (parseInt(extraRate) || 0) : 0,
+          extra_rate: 0,
           preset_applied: preset,
           preset_type: presetType,
           token_advance: existingEntry.tokenAdvance ?? 0,
@@ -609,7 +605,7 @@ const AuctionsPage = () => {
         isSelfSale: false,
         isScribble: duplicateMarkDialog.isScribble,
         tokenAdvance: 0,
-        extraRate: showExtraRate ? (parseInt(extraRate) || 0) : 0,
+        extraRate: 0,
         presetApplied: preset,
         presetType,
         sellerRate: calcSellerRate(newRate, preset, presetType),
@@ -630,8 +626,6 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
-    const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
-
     tryAddEntry({
       buyerName: selectedBuyer.name,
       buyerMark: selectedBuyer.mark || selectedBuyer.name.charAt(0),
@@ -642,8 +636,8 @@ const AuctionsPage = () => {
       isSelfSale: false,
       isScribble: false,
       tokenAdvance: 0,
-      extraRate: extra,
-      presetApplied: preset,
+      extraRate: 0,
+      presetApplied: showPresetMargin ? preset : 0,
       presetType,
       sellerRate: calcSellerRate(entryRate, preset, presetType),
       buyerRate: entryRate,
@@ -653,8 +647,7 @@ const AuctionsPage = () => {
   const handleScribbleConfirm = (initials: string, quantity: number) => {
     const currentRate = parseInt(rate) || highestBid || 0;
     if (currentRate <= 0) return;
-    const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
-
+    const effectivePreset = showPresetMargin ? preset : 0;
     tryAddEntry({
       buyerName: `[${initials}]`,
       buyerMark: initials,
@@ -665,10 +658,10 @@ const AuctionsPage = () => {
       isSelfSale: false,
       isScribble: true,
       tokenAdvance: 0,
-      extraRate: extra,
-      presetApplied: preset,
+      extraRate: 0,
+      presetApplied: effectivePreset,
       presetType,
-      sellerRate: calcSellerRate(currentRate, preset, presetType),
+      sellerRate: calcSellerRate(currentRate, effectivePreset, presetType),
       buyerRate: currentRate,
     });
     setShowScribble(false);
@@ -680,8 +673,7 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (entryRate <= 0 || entryQty <= 0) return;
-    const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
-
+    const effectivePreset = showPresetMargin ? preset : 0;
     tryAddEntry({
       buyerName: `[${scribbleMark}]`,
       buyerMark: scribbleMark,
@@ -692,16 +684,15 @@ const AuctionsPage = () => {
       isSelfSale: false,
       isScribble: true,
       tokenAdvance: 0,
-      extraRate: extra,
-      presetApplied: preset,
+      extraRate: 0,
+      presetApplied: effectivePreset,
       presetType,
-      sellerRate: calcSellerRate(entryRate, preset, presetType),
+      sellerRate: calcSellerRate(entryRate, effectivePreset, presetType),
       buyerRate: entryRate,
     });
     setScribbleMark('');
     setRate('');
     setQty('');
-    setExtraRate('');
   };
 
   // Unified Add Bid: use selected contact (name + mark) or scribble mark only — fast path for live auction
@@ -709,7 +700,7 @@ const AuctionsPage = () => {
     const entryRate = parseInt(rate);
     const entryQty = parseInt(qty);
     if (!rate || !qty || entryRate <= 0 || entryQty <= 0) return;
-    const extra = showExtraRate ? (parseInt(extraRate) || 0) : 0;
+    const effectivePreset = showPresetMargin ? preset : 0;
 
     hapticImpact();
 
@@ -724,10 +715,10 @@ const AuctionsPage = () => {
         isSelfSale: false,
         isScribble: false,
         tokenAdvance: 0,
-        extraRate: extra,
-        presetApplied: preset,
+        extraRate: 0,
+        presetApplied: effectivePreset,
         presetType,
-        sellerRate: calcSellerRate(entryRate, preset, presetType),
+        sellerRate: calcSellerRate(entryRate, effectivePreset, presetType),
         buyerRate: entryRate,
       });
       setSelectedBuyer(null);
@@ -742,10 +733,10 @@ const AuctionsPage = () => {
         isSelfSale: false,
         isScribble: true,
         tokenAdvance: 0,
-        extraRate: extra,
-        presetApplied: preset,
+        extraRate: 0,
+        presetApplied: effectivePreset,
         presetType,
-        sellerRate: calcSellerRate(entryRate, preset, presetType),
+        sellerRate: calcSellerRate(entryRate, effectivePreset, presetType),
         buyerRate: entryRate,
       });
     } else return;
@@ -753,19 +744,17 @@ const AuctionsPage = () => {
     setScribbleMark('');
     setRate('');
     setQty('');
-    setExtraRate('');
   };
 
   const updateActiveNumpadField = (next: string) => {
     if (activeNumpadField === 'rate') setRate(next);
     else if (activeNumpadField === 'qty') setQty(next);
-    else setExtraRate(next);
   };
 
   const getCurrentNumpadValue = () => {
     if (activeNumpadField === 'rate') return rate;
     if (activeNumpadField === 'qty') return qty;
-    return extraRate;
+    return '';
   };
 
   const handleNumpadKey = (key: string) => {
@@ -775,7 +764,7 @@ const AuctionsPage = () => {
       return;
     }
     if (key === '.') {
-      if (activeNumpadField === 'rate' || activeNumpadField === 'extraRate') {
+      if (activeNumpadField === 'rate') {
         // Fast entry helper: dot key appends double-zero for rates.
         updateActiveNumpadField(`${current}00`.slice(0, 8));
       }
@@ -805,7 +794,6 @@ const AuctionsPage = () => {
     setMobileKeyboardEnabled(true);
     if (activeNumpadField === 'rate') rateInputRef.current?.focus();
     else if (activeNumpadField === 'qty') qtyInputRef.current?.focus();
-    else extraRateInputRef.current?.focus();
   };
 
   const handleSelfSale = () => {
@@ -1125,7 +1113,7 @@ const AuctionsPage = () => {
   return (
     <div className={cn(
       "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
-      isDesktop ? "pb-28" : showExtraRate ? "pb-[38rem]" : "pb-[34rem]"
+      isDesktop ? "pb-28" : "pb-[42rem]"
     )}>
       {/* Mobile Header */}
       {!isDesktop && (
@@ -1297,25 +1285,20 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <div className="px-4 mt-4 flex flex-col gap-3">
-        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
+      <div className={cn("px-4 mt-4 flex flex-col gap-3", !isDesktop && "pb-24")}>
+        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Toggle to show/hide. */}
         {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
-            <button
-              type="button"
-              onClick={() => setShowExtraRate(!showExtraRate)}
-              className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
-                showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
-              )}
-              aria-pressed={showExtraRate}
-            >
-              {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-              Extra Rate
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">Show</span>
+              <Switch checked={showPresetMargin} onCheckedChange={setShowPresetMargin} aria-label="Show preset margin" />
+            </div>
           </div>
 
+          {showPresetMargin && (
+          <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             {presetOptions.map((opt) => (
               <button
@@ -1337,7 +1320,7 @@ const AuctionsPage = () => {
               </button>
             ))}
             <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
-              <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
+              <IndianRupee className="w-3.5 h-3.5 text-primary" />
               <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
             </div>
           </div>
@@ -1349,6 +1332,8 @@ const AuctionsPage = () => {
               </span>
               <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
             </motion.p>
+          )}
+          </div>
           )}
         </motion.div>
         )}
@@ -1538,7 +1523,10 @@ const AuctionsPage = () => {
                     readOnly={isTouchLayout && !mobileKeyboardEnabled}
                     inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
                     placeholder={highestBid ? String(highestBid) : '0'}
-                    className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                    className={cn(
+                      "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
+                      activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/50"
+                    )} />
                 </div>
                 <div>
                   <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
@@ -1558,18 +1546,12 @@ const AuctionsPage = () => {
                     readOnly={isTouchLayout && !mobileKeyboardEnabled}
                     inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
                     placeholder="0"
-                    className="h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20" />
+                    className={cn(
+                      "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
+                      activeNumpadField === 'qty' && "ring-2 ring-primary border-primary/50"
+                    )} />
                 </div>
               </div>
-              <AnimatePresence>
-                {showExtraRate && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
-                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
-                    <Input type="number" value={extraRate} onChange={(e) => setExtraRate(e.target.value)} placeholder="0"
-                      className="h-11 rounded-xl text-center font-bold bg-amber-500/10 border-amber-400/30" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
               {isDesktop && (
                 <div className="flex gap-2">
                   <Button
@@ -1647,8 +1629,7 @@ const AuctionsPage = () => {
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                         <span>₹{entry.rate}/bag</span>
                         <span>{entry.quantity} bags</span>
-                        {entry.extraRate > 0 && showExtraRate && <span className="text-amber-500">+₹{entry.extraRate}</span>}
-                        {entry.presetApplied !== 0 && !entry.isSelfSale && (
+                        {entry.presetApplied !== 0 && showPresetMargin && !entry.isSelfSale && (
                           <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
                             SR: ₹{entry.sellerRate}
                           </span>
@@ -1740,73 +1721,20 @@ const AuctionsPage = () => {
           </motion.div>
         )}
 
-        {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Extra Rate toggle-only. */}
-        {!isDesktop && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3 order-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
-              <button
-                type="button"
-                onClick={() => setShowExtraRate(!showExtraRate)}
-                className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all',
-                  showExtraRate ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground'
-                )}
-                aria-pressed={showExtraRate}
-              >
-                {showExtraRate ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                Extra Rate
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {presetOptions.map((opt) => (
-                <button
-                  key={opt.label + String(opt.value)}
-                  type="button"
-                  onClick={() => applyPreset(opt.value)}
-                  className={cn(
-                    'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
-                    preset === opt.value
-                      ? opt.value >= 0
-                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
-                        : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
-                      : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-                    preset !== opt.value && opt.value >= 0 && 'text-success',
-                    preset !== opt.value && opt.value < 0 && 'text-destructive'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-              <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
-                <CircleDollarSign className="w-3.5 h-3.5 text-primary" />
-                <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
-              </div>
-            </div>
-            {preset !== 0 && highestBid > 0 && (
-              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
-                Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
-                <span className={cn("font-semibold", presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
-                  ₹{calcSellerRate(highestBid, preset, presetType)}
-                </span>
-                <span className="ml-1">({presetType === 'PROFIT' ? `B − ${preset}` : `B + ${Math.abs(preset)}`})</span>
-              </motion.p>
-            )}
-          </motion.div>
-        )}
+        {/* Preset margin for mobile: now in fixed dock below rate/qty. */}
       </div>
 
-      {/* Mobile/Tablet Dock: left scribble pad, right numpad. Fast entry; default keyboard stays disabled. */}
+      {/* Mobile/Tablet Dock: compact layout, preset below rate/qty. */}
       {!isDesktop && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <div className="space-y-2 mb-2">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="space-y-1 mb-1">
             <div
               ref={contactScrollRef}
               role="region"
               aria-label="Contacts"
               tabIndex={0}
               {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-              className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+              className="overflow-x-auto overflow-y-hidden flex gap-1 py-0.5 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
               style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
             >
               {filteredContacts.length > 0 ? (
@@ -1823,24 +1751,24 @@ const AuctionsPage = () => {
                       setScribblePadResetTrigger((t) => t + 1);
                     }}
                     className={cn(
-                      'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1.5',
+                      'flex-shrink-0 pl-1.5 pr-2 py-1 rounded-lg text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1',
                       selectedBuyer?.contact_id === b.contact_id
                         ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
                         : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                     )}
                   >
                     <span className={cn(
-                      'w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold flex-shrink-0',
+                      'w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold flex-shrink-0',
                       selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
                     )}>
                       {b.mark || b.name.charAt(0)}
                     </span>
-                    <span className="text-[11px] font-semibold truncate max-w-[80px]">{b.name}</span>
-                    {b.mark && <span className="text-[9px] opacity-90 flex-shrink-0">({b.mark})</span>}
+                    <span className="text-[10px] font-semibold truncate max-w-[70px]">{b.name}</span>
+                    {b.mark && <span className="text-[8px] opacity-90 flex-shrink-0">({b.mark})</span>}
                   </button>
                 ))
               ) : (
-                <div className="flex-shrink-0 px-3 py-1.5 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-[10px] font-medium">
+                <div className="flex-shrink-0 px-2 py-1 rounded-lg border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-[9px] font-medium">
                   No matching contact
                 </div>
               )}
@@ -1851,7 +1779,7 @@ const AuctionsPage = () => {
               aria-label="Auction marks"
               tabIndex={0}
               {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-              className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+              className="overflow-x-auto overflow-y-hidden flex gap-1 py-0.5 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
               style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
             >
               {existingAuctionMarks.length > 0 ? (
@@ -1870,28 +1798,64 @@ const AuctionsPage = () => {
                         setScribblePadResetTrigger((t) => t + 1);
                       }}
                       className={cn(
-                        'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-xl text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-1.5',
+                        'flex-shrink-0 pl-1.5 pr-2 py-1 rounded-lg text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-1',
                         isSelected ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary' : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                       )}
                     >
                       <span className={cn(
-                        'w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold flex-shrink-0',
+                        'w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold flex-shrink-0',
                         isSelected ? 'bg-white/20' : 'bg-gray-400/20 text-gray-600 dark:text-gray-400'
                       )}>
                         {mark}
                       </span>
-                      <span className="text-[11px] font-semibold">{mark}</span>
+                      <span className="text-[10px] font-semibold">{mark}</span>
                     </button>
                   );
                 })
               ) : (
-                <div className="flex-shrink-0 px-3 py-1.5 rounded-xl border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-[10px] font-medium">
+                <div className="flex-shrink-0 px-2 py-1 rounded-lg border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-[9px] font-medium">
                   No mark in this session
                 </div>
               )}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 mb-2">
+          {/* Mobile: selected buyer/mark chip with clear — match desktop UX */}
+          {(scribbleMark || selectedBuyer) && (
+            <div className="flex items-center gap-2 flex-wrap mb-1 py-0.5">
+              {selectedBuyer ? (
+                <>
+                  <span className="text-[9px] font-semibold text-muted-foreground uppercase">Buyer:</span>
+                  <span className="px-2 py-1 rounded-lg bg-primary/15 text-primary text-[11px] font-bold border border-primary/30">
+                    {selectedBuyer.name} {selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedBuyer(null); setScribbleMark(''); setScribblePadResetTrigger(t => t + 1); }}
+                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    aria-label="Clear selection"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-[9px] font-semibold text-muted-foreground uppercase">Mark:</span>
+                  <span className="px-2 py-1 rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-400 text-[11px] font-bold border border-violet-400/30">
+                    {scribbleMark}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setScribbleMark(''); setScribblePadResetTrigger(t => t + 1); }}
+                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    aria-label="Clear mark"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-1.5 mb-1">
             <Input
               ref={rateInputRef}
               type="number"
@@ -1909,8 +1873,8 @@ const AuctionsPage = () => {
               inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
               placeholder={highestBid ? String(highestBid) : 'Rate'}
               className={cn(
-                "h-10 rounded-xl text-center font-bold text-base bg-muted/20 border-primary/20",
-                activeNumpadField === 'rate' && "ring-1 ring-primary/40"
+                "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
+                activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
               )}
             />
             <Input
@@ -1930,109 +1894,111 @@ const AuctionsPage = () => {
               inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
               placeholder="Qty"
               className={cn(
-                "h-10 rounded-xl text-center font-bold text-base bg-muted/20 border-primary/20",
-                activeNumpadField === 'qty' && "ring-1 ring-primary/40"
+                "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
+                activeNumpadField === 'qty' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
               )}
             />
           </div>
-          <AnimatePresence>
-            {showExtraRate && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="mb-2"
-              >
-                <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Extra Rate (₹)</label>
-                <Input
-                  ref={extraRateInputRef}
-                  type="number"
-                  value={extraRate}
-                  onChange={(e) => setExtraRate(e.target.value)}
-                  onFocus={(e) => {
-                    setActiveNumpadField('extraRate');
-                    if (!mobileKeyboardEnabled) {
-                      e.currentTarget.blur();
-                      hideNativeKeyboard();
-                    }
-                  }}
-                  onBlur={() => setMobileKeyboardEnabled(false)}
-                  placeholder="0"
-                  readOnly={!mobileKeyboardEnabled}
-                  inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+          {/* Preset margin: compact row below rate/qty */}
+          <div className="flex items-center justify-between gap-2 mb-1 py-0.5">
+            <span className="text-[9px] font-semibold text-muted-foreground uppercase">Preset</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-muted-foreground">Show</span>
+              <Switch checked={showPresetMargin} onCheckedChange={setShowPresetMargin} aria-label="Show preset margin" className="scale-75 origin-right" />
+            </div>
+          </div>
+          {showPresetMargin && (
+            <div className="flex items-center gap-1 mb-1">
+              {presetOptions.map((opt) => (
+                <button
+                  key={opt.label + String(opt.value)}
+                  type="button"
+                  onClick={() => applyPreset(opt.value)}
                   className={cn(
-                    "h-10 rounded-xl text-center font-bold text-base bg-amber-500/10 border-amber-400/30",
-                    activeNumpadField === 'extraRate' && "ring-1 ring-amber-400"
+                    'flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                    preset === opt.value
+                      ? opt.value >= 0
+                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white'
+                        : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
+                      : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                    preset !== opt.value && opt.value >= 0 && 'text-success',
+                    preset !== opt.value && opt.value < 0 && 'text-destructive'
                   )}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <div className="grid grid-cols-[1.4fr_1fr] gap-2 items-stretch">
-            <div className="rounded-2xl border border-violet-400/20 bg-card/80 p-1 h-full min-h-[19rem]">
+                >
+                  {opt.label}
+                </button>
+              ))}
+              <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg bg-muted/30 min-w-[48px] justify-center">
+                <IndianRupee className="w-3 h-3 text-primary" />
+                <span className={cn("text-xs font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-[1.4fr_1fr] gap-1.5 items-stretch">
+            <div className="rounded-xl border border-violet-400/20 bg-card/80 p-1 h-full min-h-[15rem]">
               <InlineScribblePad
                 onMarkDetected={(mark) => {
                   setScribbleMark(mark);
                   setSelectedBuyer(null);
                 }}
-                canvasHeight={280}
+                canvasHeight={240}
                 resetTrigger={scribblePadResetTrigger}
                 showStatus={false}
                 fillAvailableHeight
                 className="h-full"
               />
             </div>
-            <div className="rounded-2xl border border-primary/20 bg-card/80 p-2 space-y-2">
-              <div className="grid grid-cols-3 gap-1.5">
+            <div className="rounded-xl border border-primary/20 bg-card/80 p-1.5 space-y-1.5">
+              <div className="grid grid-cols-3 gap-1">
                 {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '*'].map((k) => (
                   <button
                     key={k}
                     type="button"
                     onClick={() => handleNumpadKey(k)}
-                    className="h-9 rounded-lg bg-muted/50 hover:bg-muted text-sm font-bold text-foreground transition-colors"
+                    className="h-8 rounded-lg bg-muted/50 hover:bg-muted text-xs font-bold text-foreground transition-colors"
                   >
                     {k}
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-1">
                 <button
                   type="button"
                   onClick={() => handleNumpadKey('+')}
-                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                  className="h-8 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
                 >
                   +
                 </button>
                 <button
                   type="button"
                   onClick={handleOpenSystemKeyboard}
-                  className="h-9 rounded-lg bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-xs font-semibold"
+                  className="h-8 rounded-lg bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[10px] font-semibold"
                 >
                   Keyboard
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-1">
                 <button
                   type="button"
                   onClick={handleNumpadBackspace}
-                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                  className="h-8 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
                 >
                   {'<-'}
                 </button>
                 <button
                   type="button"
                   onClick={handleNumpadClear}
-                  className="h-9 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
+                  className="h-8 rounded-lg bg-muted/60 hover:bg-muted text-xs font-semibold text-foreground"
                 >
                   Clear
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-1">
                 <button
                   type="button"
                   onClick={handleSelfSale}
                   disabled={remaining <= 0}
-                  className="h-9 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold disabled:opacity-50"
+                  className="h-8 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold disabled:opacity-50"
                 >
                   Self Sale
                 </button>
@@ -2040,7 +2006,7 @@ const AuctionsPage = () => {
                   type="button"
                   onClick={handleUnifiedAdd}
                   disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                  className="h-9 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-xs font-bold disabled:opacity-50"
+                  className="h-8 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold disabled:opacity-50"
                 >
                   + Add Bid
                 </button>
@@ -2049,7 +2015,7 @@ const AuctionsPage = () => {
                 type="button"
                 disabled={completeLoading || entries.length === 0}
                 onClick={handleSaveAndCompleteAuction}
-                className="w-full h-9 rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 text-white text-xs font-bold disabled:opacity-50"
+                className="w-full h-8 rounded-lg bg-gradient-to-r from-emerald-500 to-green-500 text-white text-[10px] font-bold disabled:opacity-50"
               >
                 {completeLoading ? 'Completing…' : 'Save & Complete'}
               </button>
