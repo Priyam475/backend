@@ -104,6 +104,14 @@ const ContactsPage = () => {
     } else if (contacts.some(c => c.phone === formData.phone.trim() && (!isEdit || c.contact_id !== selectedContact?.contact_id))) {
       errs.phone = 'This phone number is already registered';
     }
+    // Mark uniqueness per trader (case-insensitive)
+    if (formData.mark.trim()) {
+      const markLower = formData.mark.trim().toLowerCase();
+      const hasDuplicate = contacts.some(
+        c => c.mark && c.mark.toLowerCase() === markLower && (!isEdit || c.contact_id !== selectedContact?.contact_id)
+      );
+      if (hasDuplicate) errs.mark = 'This mark is already in use by another contact';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -130,6 +138,10 @@ const ContactsPage = () => {
       if (err instanceof ContactApiError && err.errorKey === 'phoneexistsinactive') {
         setRestorePendingPhone(formData.phone.trim());
         closeModal();
+        return;
+      }
+      if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+        setErrors(prev => ({ ...prev, mark: err.message }));
         return;
       }
       console.error('Add contact error:', err);
@@ -173,8 +185,12 @@ const ContactsPage = () => {
       closeModal();
       toast.success(`✏️ ${updated.name} updated successfully`);
     } catch (err) {
+      if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+        setErrors(prev => ({ ...prev, mark: err.message }));
+        return;
+      }
       console.error('Edit contact error:', err);
-      toast.error('Failed to update contact');
+      toast.error(err instanceof Error ? err.message : 'Failed to update contact');
     }
   };
 
@@ -576,8 +592,9 @@ const ContactsPage = () => {
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Mark <span className="text-muted-foreground/60 font-normal">(Short Code)</span></label>
                     <Input placeholder="e.g., VT, ML, AB" value={formData.mark}
                       onChange={e => setFormData(p => ({ ...p, mark: e.target.value.toUpperCase().slice(0, 4) }))}
-                      className="h-12 rounded-xl" maxLength={4} />
-                    <p className="text-[10px] text-muted-foreground mt-1">Used for quick auto-complete in transaction screens</p>
+                      className={cn("h-12 rounded-xl", errors.mark && "border-destructive")} maxLength={4} />
+                    {errors.mark && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.mark}</p>}
+                    {!errors.mark && <p className="text-[10px] text-muted-foreground mt-1">Used for quick auto-complete in transaction screens</p>}
                   </div>
 
                   <div>

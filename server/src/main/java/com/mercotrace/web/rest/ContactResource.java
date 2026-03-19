@@ -97,6 +97,21 @@ public class ContactResource {
             );
         }
 
+        // Enforce mark uniqueness per trader (when mark is provided)
+        String mark = contactDTO.getMark();
+        if (mark != null && !mark.isBlank()) {
+            String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+        }
+
         contactDTO = contactService.save(contactDTO);
         return ResponseEntity.created(new URI("/api/contacts/" + contactDTO.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, contactDTO.getId().toString()))
@@ -150,6 +165,21 @@ public class ContactResource {
                 }
             });
 
+        // Enforce mark uniqueness per trader, excluding the current record
+        String mark = contactDTO.getMark();
+        if (mark != null && !mark.isBlank()) {
+            String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmedMark, id)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+        }
+
         contactDTO = contactService.update(contactDTO);
         return ResponseEntity.ok()
             .headers(HeaderUtil.createEntityUpdateAlert(applicationName, true, ENTITY_NAME, contactDTO.getId().toString()))
@@ -193,6 +223,20 @@ public class ContactResource {
         // If phone is being updated, enforce global mobile uniqueness
         if (contactDTO.getPhone() != null) {
             contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), id);
+        }
+
+        // If mark is being updated, enforce uniqueness per trader
+        if (contactDTO.getMark() != null && !contactDTO.getMark().isBlank()) {
+            String trimmedMark = contactDTO.getMark().trim();
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmedMark, id)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
         }
 
         Optional<ContactDTO> result = contactService.partialUpdate(contactDTO);

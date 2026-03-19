@@ -30,5 +30,11 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
 
     /** Find self-registered contact by mark (trader_id IS NULL). Used for uniqueness check during registration. */
     Optional<Contact> findOneByMarkAndTraderIdIsNull(String mark);
+
+    /** Find contact by trader and mark (case-insensitive). Used for mark uniqueness check when creating trader contacts. */
+    Optional<Contact> findOneByTraderIdAndMarkIgnoreCase(Long traderId, String mark);
+
+    /** Find contact by trader and mark excluding given id. Used for mark uniqueness check when updating trader contacts. */
+    Optional<Contact> findOneByTraderIdAndMarkIgnoreCaseAndIdNot(Long traderId, String mark, Long id);
 }
 
