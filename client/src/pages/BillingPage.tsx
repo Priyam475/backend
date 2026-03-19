@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
-  DollarSign, Percent, FileText, ChevronDown, ChevronUp,
+  Percent, FileText, ChevronDown, ChevronUp,
   History
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -754,7 +754,7 @@ const BillingPage = () => {
                 <p className="text-[11px] font-semibold text-white">{totalItems}</p>
               </div>
               <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <DollarSign className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-base font-bold text-white/90 mb-0.5">₹</p>
                 <p className="text-[9px] text-white/60 uppercase">Total</p>
                 <p className="text-[11px] font-semibold text-white">₹{bill.grandTotal.toLocaleString()}</p>
               </div>
@@ -1080,33 +1080,32 @@ const BillingPage = () => {
           ))}
         </div>
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+          <div className="flex items-center gap-3 mb-3">
+            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
             <div className="flex-1">
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <Receipt className="w-5 h-5" /> Billing (Sales Bill)
+              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                <span className="text-xl font-black">₹</span> Billing (Sales Bill)
               </h1>
-              <p className="text-white/70 text-xs">Buyer invoicing & bill generation</p>
+              <p className="text-white/70 text-xs mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
             </div>
           </div>
 
-          {/* Search mode tabs */}
           <div className="flex gap-2 mb-3">
             <button onClick={() => setBillSearchMode('buyer')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
                 billSearchMode === 'buyer'
-                  ? 'bg-white/25 text-white border border-white/30'
-                  : 'bg-white/10 text-white/60')}>
-              <User className="w-3.5 h-3.5" /> New Bill
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <User className="w-4 h-4" /> New Bill
             </button>
             <button onClick={() => setBillSearchMode('bill')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
                 billSearchMode === 'bill'
-                  ? 'bg-white/25 text-white border border-white/30'
-                  : 'bg-white/10 text-white/60')}>
-              <FileText className="w-3.5 h-3.5" /> Saved Bills
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <FileText className="w-4 h-4" /> Saved Bills
             </button>
           </div>
 
@@ -1120,32 +1119,30 @@ const BillingPage = () => {
       </div>
       ) : (
       <div className="px-8 py-5">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <Receipt className="w-5 h-5 text-indigo-500" /> Billing (Sales Bill)
-            </h2>
-            <p className="text-sm text-muted-foreground">{buyers.length} buyers · Invoicing & bill generation</p>
+        <div className="mb-4">
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <span className="text-xl font-black text-indigo-500">₹</span> Billing (Sales Bill)
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <div className="flex gap-2">
+            <button onClick={() => setBillSearchMode('buyer')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                billSearchMode === 'buyer' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <User className="w-4 h-4" /> New Bill
+            </button>
+            <button onClick={() => setBillSearchMode('bill')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                billSearchMode === 'bill' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <FileText className="w-4 h-4" /> Saved Bills
+            </button>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex gap-1 bg-muted/30 rounded-xl p-1">
-              <button onClick={() => setBillSearchMode('buyer')}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                  billSearchMode === 'buyer' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
-                New Bill
-              </button>
-              <button onClick={() => setBillSearchMode('bill')}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                  billSearchMode === 'bill' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
-                Saved Bills
-              </button>
-            </div>
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
-                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
-            </div>
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
           </div>
         </div>
       </div>

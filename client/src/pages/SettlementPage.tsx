@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, User, Package, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, ChevronDown, ChevronUp,
-  DollarSign, Minus, Plus, ToggleLeft, ToggleRight, PlusCircle, Receipt
+  Minus, Plus, ToggleLeft, ToggleRight, PlusCircle, Receipt
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { printLogApi, settlementApi, type PattiDTO } from '@/services/api';
@@ -136,6 +137,7 @@ const SettlementPage = () => {
   const [sellers, setSellers] = useState<SellerSettlement[]>([]);
   const [selectedSeller, setSelectedSeller] = useState<SellerSettlement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [settlementMode, setSettlementMode] = useState<'new' | 'saved'>('new');
   
   // Patti state
   const [pattiData, setPattiData] = useState<PattiData | null>(null);
@@ -474,6 +476,15 @@ const SettlementPage = () => {
     );
   }, [sellers, searchQuery]);
 
+  const filteredSavedPattis = useMemo(() => {
+    if (!searchQuery) return savedPattis;
+    const q = searchQuery.toLowerCase();
+    return savedPattis.filter(p =>
+      (p.pattiId ?? '').toLowerCase().includes(q) ||
+      (p.sellerName ?? '').toLowerCase().includes(q)
+    );
+  }, [savedPattis, searchQuery]);
+
   // ═══ PRINT PREVIEW ═══
   if (showPrint && pattiData) {
     return (
@@ -758,63 +769,51 @@ const SettlementPage = () => {
             </p>
 
             {/* Coolie mode toggle — Flat vs Recalculated per REQ-CNF-005 */}
-            <div className="mb-3">
-              <p className="text-[10px] text-muted-foreground mb-1.5 font-medium">Coolie Calculation Mode</p>
-              <div className="flex gap-2">
-                <button onClick={() => {
-                  setCoolieMode('FLAT');
-                  selectedSeller?.lots?.length && generatePatti(selectedSeller, { coolieMode: 'FLAT' });
-                }}
-                  className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
-                    coolieMode === 'FLAT'
-                      ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
-                      : 'bg-muted/40 text-muted-foreground')}>
-                  <span>Flat Rate</span>
-                  <span className={cn("text-[9px]", coolieMode === 'FLAT' ? 'text-white/70' : 'text-muted-foreground/60')}>Per bag count</span>
-                </button>
-                <button onClick={() => {
-                  setCoolieMode('RECALCULATED');
-                  selectedSeller?.lots?.length && generatePatti(selectedSeller, { coolieMode: 'RECALCULATED' });
-                }}
-                  className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-0.5 transition-all",
-                    coolieMode === 'RECALCULATED'
-                      ? 'bg-gradient-to-r from-violet-500 to-purple-500 text-white shadow-md'
-                      : 'bg-muted/40 text-muted-foreground')}>
-                  <span>Auto-calculated</span>
-                  <span className={cn("text-[9px]", coolieMode === 'RECALCULATED' ? 'text-white/70' : 'text-muted-foreground/60')}>By weight (REQ-CNF-005)</span>
-                </button>
+            <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl bg-muted/20 border border-border/30">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-foreground">Coolie Calculation Mode</p>
+                <p className="text-[9px] text-muted-foreground mt-0.5">
+                  {coolieMode === 'FLAT' ? 'Flat — per bag' : 'Auto — by weight (REQ-CNF-005)'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={cn("text-[10px] font-medium", coolieMode === 'FLAT' ? "text-foreground" : "text-muted-foreground")}>Flat</span>
+                <Switch
+                  checked={coolieMode === 'RECALCULATED'}
+                  onCheckedChange={(checked) => {
+                    const mode = checked ? 'RECALCULATED' : 'FLAT';
+                    setCoolieMode(mode);
+                    selectedSeller?.lots?.length && generatePatti(selectedSeller, { coolieMode: mode });
+                  }}
+                  className="scale-90"
+                  aria-label="Coolie mode: Flat or Auto-calculated"
+                />
+                <span className={cn("text-[10px] font-medium", coolieMode === 'RECALCULATED' ? "text-foreground" : "text-muted-foreground")}>Auto</span>
               </div>
             </div>
 
-            {/* Weighing Charges toggle — tap to enable/disable */}
-            <button
-              type="button"
-              onClick={() => {
-                const newVal = !hamaliEnabled;
-                setHamaliEnabled(newVal);
-                selectedSeller?.lots?.length && generatePatti(selectedSeller, { hamaliEnabled: newVal });
-              }}
-              className={cn("w-full flex items-center justify-between mb-3 px-4 py-3 rounded-xl border-2 transition-all text-left",
-                hamaliEnabled
-                  ? "bg-emerald-500/10 border-emerald-500/40"
-                  : "bg-muted/10 border-border/30 hover:border-border/50")}
-            >
-              <div>
-                <p className="text-xs font-semibold text-foreground">⚖️ Weighing Charges</p>
+            {/* Weighing Charges toggle */}
+            <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2.5 rounded-xl bg-muted/20 border border-border/30">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-foreground">⚖️ Weighing Charges</p>
                 <p className="text-[9px] text-muted-foreground mt-0.5">
-                  {hamaliEnabled ? 'Enabled — ₹0.50 per kg' : 'Tap to enable — ₹0.50 per kg when on'}
+                  {hamaliEnabled ? 'Enabled — ₹0.50 per kg' : '₹0.50 per kg when on'}
                 </p>
               </div>
-              <div className={cn("flex items-center gap-2 shrink-0",
-                hamaliEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
-                <span className="text-[10px] font-bold uppercase">{hamaliEnabled ? 'ON' : 'OFF'}</span>
-                <div className={cn("w-12 h-7 rounded-full transition-all relative ring-2 ring-offset-2 ring-offset-background",
-                  hamaliEnabled ? "bg-emerald-500 ring-emerald-500/30" : "bg-muted ring-muted-foreground/20")}>
-                  <div className={cn("w-5 h-5 rounded-full bg-white shadow-md absolute top-1 transition-all",
-                    hamaliEnabled ? "left-7" : "left-1")} />
-                </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={cn("text-[10px] font-medium", !hamaliEnabled ? "text-foreground" : "text-muted-foreground")}>OFF</span>
+                <Switch
+                  checked={hamaliEnabled}
+                  onCheckedChange={(checked) => {
+                    setHamaliEnabled(checked);
+                    selectedSeller?.lots?.length && generatePatti(selectedSeller, { hamaliEnabled: checked });
+                  }}
+                  className="scale-90"
+                  aria-label="Weighing charges on or off"
+                />
+                <span className={cn("text-[10px] font-medium", hamaliEnabled ? "text-foreground" : "text-muted-foreground")}>ON</span>
               </div>
-            </button>
+            </div>
 
             <div className="space-y-2">
               {pattiData.deductions.map(deduction => (
@@ -978,20 +977,36 @@ const SettlementPage = () => {
           ))}
         </div>
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+          <div className="flex items-center gap-3 mb-3">
+            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
             <div className="flex-1">
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5" /> Settlement (Sales Patti)
+              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                <span className="text-xl font-black">₹</span> Settlement (Sales Patti)
               </h1>
-              <p className="text-white/70 text-xs">Seller settlement & payment reconciliation</p>
+              <p className="text-white/70 text-xs mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
             </div>
+          </div>
+          <div className="flex gap-2 mb-3">
+            <button onClick={() => setSettlementMode('new')}
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
+                settlementMode === 'new'
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <User className="w-4 h-4" /> New Patti
+            </button>
+            <button onClick={() => setSettlementMode('saved')}
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
+                settlementMode === 'saved'
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <FileText className="w-4 h-4" /> Saved Pattis
+            </button>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-            <input aria-label="Search" placeholder="Search seller, mark, vehicle…"
+            <input aria-label="Search" placeholder={settlementMode === 'new' ? 'Search seller, mark, vehicle…' : 'Search patti ID, seller…'}
               value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
           </div>
@@ -999,16 +1014,28 @@ const SettlementPage = () => {
       </div>
       ) : (
       <div className="px-8 py-5">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <FileText className="w-5 h-5 text-rose-500" /> Settlement (Sales Patti)
-            </h2>
-            <p className="text-sm text-muted-foreground">{sellers.length} sellers · Settlement & payment reconciliation</p>
+        <div className="mb-4">
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <span className="text-xl font-black text-rose-500">₹</span> Settlement (Sales Patti)
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <div className="flex gap-2">
+            <button onClick={() => setSettlementMode('new')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                settlementMode === 'new' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <User className="w-4 h-4" /> New Patti
+            </button>
+            <button onClick={() => setSettlementMode('saved')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                settlementMode === 'saved' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <FileText className="w-4 h-4" /> Saved Pattis
+            </button>
           </div>
           <div className="relative w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input aria-label="Search" placeholder="Search seller, mark, vehicle…"
+            <input aria-label="Search" placeholder={settlementMode === 'new' ? 'Search seller, mark, vehicle…' : 'Search patti ID, seller…'}
               value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
           </div>
@@ -1017,47 +1044,54 @@ const SettlementPage = () => {
       )}
 
       <div className="px-4 mt-4 space-y-4">
-        {/* Saved pattis — open for edit */}
-        {savedPattis.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Receipt className="w-3.5 h-3.5" /> Saved pattis
-            </p>
-            {loadingPattis ? (
-              <div className="glass-card rounded-2xl p-4 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : (
-              <div className="space-y-2">
-                {savedPattis.map((p) => (
-                  <motion.button
-                    key={p.id ?? p.pattiId}
-                    type="button"
-                    onClick={() => p.id != null && openPattiForEdit(p.id)}
-                    className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group flex items-center gap-3"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow flex-shrink-0">
-                      <Edit3 className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-foreground truncate">{p.pattiId || '(No ID)'}</p>
-                      <p className="text-xs text-muted-foreground truncate">{p.sellerName}</p>
-                      {p.createdAt && (
-                        <p className="text-[10px] text-muted-foreground/80 mt-0.5">
-                          {new Date(p.createdAt).toLocaleDateString()} {new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
-                    </div>
+        {settlementMode === 'saved' ? (
+          /* Saved pattis tab */
+          loadingPattis ? (
+            <div className="glass-card rounded-2xl p-8 text-center text-sm text-muted-foreground">Loading…</div>
+          ) : filteredSavedPattis.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <Receipt className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">
+                {savedPattis.length === 0 ? 'No saved pattis found' : 'No matching pattis'}
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                {savedPattis.length === 0 ? 'Create a patti from the New Patti tab' : 'Try a different search'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredSavedPattis.map((p) => (
+                <motion.button
+                  key={p.id ?? p.pattiId}
+                  type="button"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  onClick={() => p.id != null && openPattiForEdit(p.id)}
+                  className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow flex-shrink-0">
+                    <Edit3 className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{p.pattiId || '(No ID)'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{p.sellerName}</p>
+                    {p.createdAt && (
+                      <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                        {new Date(p.createdAt).toLocaleDateString()} {new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold text-foreground">₹{p.netPayable?.toLocaleString()}</p>
                     <span className="text-xs font-medium text-primary">Open</span>
-                  </motion.button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-          <User className="w-3.5 h-3.5" /> Sellers (new patti)
-        </p>
-        {filteredSellers.length === 0 ? (
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          )
+        ) : (
+          /* New patti tab — sellers list */
+          filteredSellers.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center">
             <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground font-medium">
@@ -1104,6 +1138,7 @@ const SettlementPage = () => {
               </motion.button>
             );
           })
+        )
         )}
       </div>
       {!isDesktop && <BottomNav />}
