@@ -41,6 +41,8 @@ interface LotInfo {
   vehicle_number: string;
   was_modified: boolean;
   status?: LotStatus;
+  vehicle_total_qty?: number;
+  seller_total_qty?: number;
 }
 
 type LotStatus = 'available' | 'sold' | 'partial' | 'pending';
@@ -114,9 +116,24 @@ const STATUS_CONFIG: Record<LotStatus, { label: string; bg: string; text: string
   pending: { label: 'Pending', bg: 'bg-blue-500/15', text: 'text-blue-600 dark:text-blue-400', dot: 'bg-blue-500' },
 };
 
-/** Lot display name: vehicle number | seller name (qty) — used in list and inside auction. */
-function formatLotDisplayName(lot: { vehicle_number: string; seller_name: string; bag_count: number }): string {
-  return `${lot.vehicle_number} | ${lot.seller_name} (${lot.bag_count})`;
+/**
+ * Lot identifier format: Vehicle QTY / Seller QTY / Lot Name - Lot QTY
+ * e.g. 200/150/50-50 (vehicle 200, seller 150, lot "50" with 50 bags)
+ * Falls back to legacy format when vehicle/seller totals are not available.
+ */
+function formatLotDisplayName(lot: {
+  vehicle_number: string;
+  seller_name: string;
+  bag_count: number;
+  lot_name?: string;
+  vehicle_total_qty?: number;
+  seller_total_qty?: number;
+}): string {
+  const vTotal = lot.vehicle_total_qty ?? lot.bag_count;
+  const sTotal = lot.seller_total_qty ?? lot.bag_count;
+  const lotName = lot.lot_name ?? String(lot.bag_count);
+  const lotQty = lot.bag_count;
+  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
 }
 
 // ── Map API DTOs to UI types ──────────────────────────────
@@ -133,6 +150,8 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     vehicle_number: dto.vehicle_number ?? '',
     was_modified: dto.was_modified ?? false,
     status: (dto.status?.toLowerCase() as LotStatus) ?? 'available',
+    vehicle_total_qty: dto.vehicle_total_qty,
+    seller_total_qty: dto.seller_total_qty,
   };
 }
 
@@ -352,7 +371,7 @@ const AuctionsPage = () => {
     });
   }, [selectedLot, entries, rate, qty, preset, presetType, showPresetMargin, scribbleMark]);
 
-  // Filter lots
+  // Filter lots (lot identifier format e.g. 320/320/110-110 also searchable)
   const filteredLots = useMemo(() => {
     let result = availableLots;
     if (lotSearchQuery) {
@@ -362,12 +381,17 @@ const AuctionsPage = () => {
         l.seller_name.toLowerCase().includes(q) ||
         l.seller_mark.toLowerCase().includes(q) ||
         l.vehicle_number.toLowerCase().includes(q) ||
-        l.commodity_name.toLowerCase().includes(q)
+        l.commodity_name.toLowerCase().includes(q) ||
+        formatLotDisplayName(l).toLowerCase().includes(q)
       );
     }
     if (lotNumberSearch) {
       const q = lotNumberSearch.toLowerCase();
-      result = result.filter(l => l.lot_name.toLowerCase().includes(q) || l.lot_id.toLowerCase().includes(q));
+      result = result.filter(l =>
+        l.lot_name.toLowerCase().includes(q) ||
+        l.lot_id.toLowerCase().includes(q) ||
+        formatLotDisplayName(l).toLowerCase().includes(q)
+      );
     }
     if (statusFilter !== 'all') {
       result = result.filter(l => getLotStatus(l.lot_id, l.bag_count, l.status) === statusFilter);
@@ -379,7 +403,18 @@ const AuctionsPage = () => {
   const lotsByVehicle = useMemo(() => {
     const map = new Map<string, LotInfo[]>();
     filteredLots.forEach(l => {
-      const key = l.vehicle_number;
+      const key = l.vehicle_number || 'Unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(l);
+    });
+    return map;
+  }, [filteredLots]);
+
+  // Group lots by seller (same structure as vehicle: seller_vehicle_id = unique seller-in-vehicle)
+  const lotsBySeller = useMemo(() => {
+    const map = new Map<string, LotInfo[]>();
+    filteredLots.forEach(l => {
+      const key = l.seller_vehicle_id || `sv-${l.seller_name}-${l.vehicle_number}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(l);
     });
@@ -943,7 +978,7 @@ const AuctionsPage = () => {
               <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
                 <input
-                  placeholder="Search lot, seller, vehicle…"
+                  placeholder="Search lot, seller, vehicle, or 320/320/110-110…"
                   value={lotSearchQuery}
                   onChange={e => setLotSearchQuery(e.target.value)}
                   className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
@@ -953,7 +988,7 @@ const AuctionsPage = () => {
               <div className="relative">
                 <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
                 <input
-                  placeholder="Search by Lot Number…"
+                  placeholder="Lot # or 320/320/110-110…"
                   value={lotNumberSearch}
                   onChange={e => setLotNumberSearch(e.target.value)}
                   className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
@@ -977,7 +1012,7 @@ const AuctionsPage = () => {
                 <div className="relative w-56">
                   <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    placeholder="Lot Number…"
+                    placeholder="Lot # or 320/320/110-110…"
                     value={lotNumberSearch}
                     onChange={e => setLotNumberSearch(e.target.value)}
                     className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
@@ -986,7 +1021,7 @@ const AuctionsPage = () => {
                 <div className="relative w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    placeholder="Search lot, seller, vehicle…"
+                    placeholder="Search lot, seller, vehicle, or 320/320/110-110…"
                     value={lotSearchQuery}
                     onChange={e => setLotSearchQuery(e.target.value)}
                     className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
@@ -1084,7 +1119,9 @@ const AuctionsPage = () => {
               </Button>
             </div>
           ) : lotNavMode === 'vehicle' ? (
-            Array.from(lotsByVehicle.entries()).map(([vehicle, lots]) => (
+            Array.from(lotsByVehicle.entries())
+              .sort(([a], [b]) => (a || '').localeCompare(b || ''))
+              .map(([vehicle, lots]) => (
               <div key={vehicle} className="glass-card rounded-2xl overflow-hidden">
                 <div className="p-3 bg-gradient-to-r from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 border-b border-border/30 flex items-center gap-2">
                   <Truck className="w-4 h-4 text-primary" />
@@ -1098,6 +1135,35 @@ const AuctionsPage = () => {
                 </div>
               </div>
             ))
+          ) : lotNavMode === 'seller' ? (
+            (() => {
+              const entries = Array.from(lotsBySeller.entries());
+              const toLabel = ([key, lots]: [string, LotInfo[]]) => {
+                const first = lots[0];
+                if (!first) return { key, lots, label: key, sortKey: key };
+                const name = (first.seller_name || '').trim();
+                const mark = (first.seller_mark || '').trim();
+                const vehicle = (first.vehicle_number || '').trim();
+                const label = [name, mark ? `(${mark})` : null, vehicle].filter(Boolean).join(' · ') || `Seller ${key}`;
+                const sortKey = `${name.toLowerCase()}|${vehicle}`;
+                return { key, lots, label, sortKey };
+              };
+              const sorted = entries.map(toLabel).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+              return sorted.map(({ key, lots, label }) => (
+                <div key={key} className="glass-card rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-950/20 dark:to-green-950/20 border-b border-border/30 flex items-center gap-2">
+                    <User className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm font-bold text-foreground truncate min-w-0">{label}</span>
+                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{lots.length} lot(s)</span>
+                  </div>
+                  <div className="divide-y divide-border/20">
+                    {lots.map(lot => (
+                      <LotRow key={lot.lot_id} lot={lot} onSelect={selectLot} />
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()
           ) : (
             filteredLots.map(lot => (
               <LotRow key={lot.lot_id} lot={lot} onSelect={selectLot} />
@@ -1257,13 +1323,17 @@ const AuctionsPage = () => {
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Quick Lot Navigation</p>
                 <div className="relative w-40">
                   <Hash className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                  <input placeholder="Lot #" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
+                  <input placeholder="Lot # or 320/320/110-110" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
                     className="w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50" />
                 </div>
               </div>
               <div className="space-y-1">
                 {(lotNumberSearch
-                  ? availableLots.filter(l => l.lot_name.toLowerCase().includes(lotNumberSearch.toLowerCase()) || l.lot_id.toLowerCase().includes(lotNumberSearch.toLowerCase()))
+                  ? availableLots.filter(l =>
+                      l.lot_name.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
+                      l.lot_id.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
+                      formatLotDisplayName(l).toLowerCase().includes(lotNumberSearch.toLowerCase())
+                    )
                   : availableLots
                 ).map(lot => {
                   const status = getLotStatus(lot.lot_id, lot.bag_count, lot.status);

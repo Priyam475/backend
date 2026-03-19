@@ -16,6 +16,10 @@ export interface LotSummaryDTO {
   was_modified: boolean;
   status?: string;
   sold_bags?: number;
+  /** Total bags for the whole vehicle (all sellers on same vehicle). For lot identifier. */
+  vehicle_total_qty?: number;
+  /** Total bags for this seller (all lots of that seller). For lot identifier. */
+  seller_total_qty?: number;
 }
 
 export type PresetType = 'PROFIT' | 'LOSS';

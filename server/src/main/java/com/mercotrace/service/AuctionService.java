@@ -110,6 +110,29 @@ public class AuctionService {
         Map<Long, List<Auction>> lotToAuctions = auctions.stream().collect(Collectors.groupingBy(Auction::getLotId));
         Map<Long, List<AuctionEntry>> auctionToEntries = entries.stream().collect(Collectors.groupingBy(AuctionEntry::getAuctionId));
 
+        // Compute vehicle total qty and seller total qty for lot identifier (Vehicle QTY / Seller QTY / Lot Name-Lot QTY)
+        List<SellerInVehicle> allSivsForVehicles = sellerInVehicleRepository.findAllByVehicleIdIn(vehicleIds);
+        Set<Long> allSivIds = allSivsForVehicles.stream().map(SellerInVehicle::getId).collect(Collectors.toSet());
+        List<Lot> allLotsOnVehicles = allSivIds.isEmpty() ? List.of() : lotRepository.findAllBySellerVehicleIdIn(allSivIds);
+        Map<Long, Integer> vehicleIdToTotal = new HashMap<>();
+        Map<Long, Integer> sellerVehicleIdToTotal = new HashMap<>();
+        for (Lot l : allLotsOnVehicles) {
+            if (l.getSellerVehicleId() != null) {
+                sellerVehicleIdToTotal.merge(l.getSellerVehicleId(), l.getBagCount() != null ? l.getBagCount() : 0, Integer::sum);
+            }
+        }
+        for (Long vid : vehicleIds) {
+            List<Long> sivIdsOfVehicle = allSivsForVehicles.stream()
+                .filter(s -> vid.equals(s.getVehicleId()))
+                .map(SellerInVehicle::getId)
+                .toList();
+            int total = allLotsOnVehicles.stream()
+                .filter(l -> sivIdsOfVehicle.contains(l.getSellerVehicleId()))
+                .mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0)
+                .sum();
+            vehicleIdToTotal.put(vid, total);
+        }
+
         List<LotSummaryDTO> content = new ArrayList<>();
         for (Lot lot : lots) {
             LotSummaryDTO dto = toLotSummaryDTO(
@@ -119,7 +142,9 @@ public class AuctionService {
                 contactMap,
                 commodityMap.get(lot.getCommodityId()),
                 lotToAuctions.getOrDefault(lot.getId(), List.of()),
-                auctionToEntries
+                auctionToEntries,
+                vehicleIdToTotal,
+                sellerVehicleIdToTotal
             );
             if (statusFilter == null || statusFilter.isBlank() || statusFilter.equalsIgnoreCase(dto.getStatus())) {
                 content.add(dto);
@@ -135,7 +160,9 @@ public class AuctionService {
         Map<Long, Contact> contactMap,
         Commodity commodity,
         List<Auction> lotAuctions,
-        Map<Long, List<AuctionEntry>> auctionToEntries
+        Map<Long, List<AuctionEntry>> auctionToEntries,
+        Map<Long, Integer> vehicleIdToTotal,
+        Map<Long, Integer> sellerVehicleIdToTotal
     ) {
         LotSummaryDTO dto = new LotSummaryDTO();
         dto.setLotId(lot.getId());
@@ -151,6 +178,12 @@ public class AuctionService {
             dto.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
             dto.setSellerName(c != null ? c.getName() : null);
             dto.setSellerMark(c != null ? c.getMark() : null);
+            if (siv.getVehicleId() != null) {
+                dto.setVehicleTotalQty(vehicleIdToTotal.get(siv.getVehicleId()));
+            }
+        }
+        if (lot.getSellerVehicleId() != null) {
+            dto.setSellerTotalQty(sellerVehicleIdToTotal.get(lot.getSellerVehicleId()));
         }
         dto.setCommodityName(commodity != null ? commodity.getCommodityName() : null);
 
@@ -496,6 +529,17 @@ public class AuctionService {
                 lotSummary.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
                 lotSummary.setSellerName(c != null ? c.getName() : null);
                 lotSummary.setSellerMark(c != null ? c.getMark() : null);
+                // Vehicle total: sum of all lots on same vehicle. Seller total: sum of all lots for same seller.
+                if (siv.getVehicleId() != null) {
+                    List<SellerInVehicle> sivsOnVehicle = sellerInVehicleRepository.findAllByVehicleId(siv.getVehicleId());
+                    List<Long> sivIds = sivsOnVehicle.stream().map(SellerInVehicle::getId).toList();
+                    List<Lot> lotsOnVehicle = lotRepository.findAllBySellerVehicleIdIn(sivIds);
+                    int vehicleTotal = lotsOnVehicle.stream().mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0).sum();
+                    lotSummary.setVehicleTotalQty(vehicleTotal);
+                }
+                List<Lot> lotsForSeller = lotRepository.findAllBySellerVehicleIdIn(List.of(lot.getSellerVehicleId()));
+                int sellerTotal = lotsForSeller.stream().mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0).sum();
+                lotSummary.setSellerTotalQty(sellerTotal);
             }
         }
         if (lot.getCommodityId() != null) {
