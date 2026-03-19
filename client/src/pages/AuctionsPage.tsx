@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Gavel, Plus, Trash2,
@@ -1664,87 +1664,107 @@ const AuctionsPage = () => {
               <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
             </div>
           ) : (
-            <div className={cn("space-y-2", !isDesktop && "max-h-[34dvh] overflow-y-auto pr-1")}>
-              {entries.map((entry, i) => (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, x: -15 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className={cn(
-                    'glass-card rounded-2xl p-3 relative overflow-hidden',
-                    entry.isSelfSale && 'border-l-4 border-l-amber-500',
-                    entry.isScribble && 'border-l-4 border-l-violet-500'
-                  )}
-                >
-                  <div className={cn(
-                    'absolute -top-4 -right-4 w-16 h-16 rounded-full blur-xl opacity-15',
-                    entry.isSelfSale ? 'bg-amber-500' : entry.isScribble ? 'bg-violet-500' : 'bg-primary'
-                  )} />
-
-                  <div className="relative z-10 flex items-center gap-3">
-                    <div className={cn(
-                      'w-10 h-10 rounded-xl flex items-center justify-center shadow-md flex-shrink-0',
-                      entry.isSelfSale ? 'bg-gradient-to-br from-amber-400 to-orange-500' :
-                      entry.isScribble ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500' :
-                      'bg-gradient-to-br from-blue-500 to-cyan-400'
-                    )}>
-                      <span className="text-white font-bold text-xs">{entry.buyerMark}</span>
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-bold text-foreground truncate">{entry.buyerName}</p>
-                        <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-bold">#{entry.bidNumber}</span>
-                        {entry.isScribble && <span className="px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-500 text-[8px] font-bold">SCRIBBLE</span>}
-                        {entry.isSelfSale && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[8px] font-bold">SELF</span>}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                        <span>₹{entry.rate}/bag</span>
-                        <span>{entry.quantity} bags</span>
-                        {entry.presetApplied !== 0 && showPresetMargin && !entry.isSelfSale && (
-                          <span className={cn("text-[10px]", entry.presetType === 'PROFIT' ? 'text-success' : 'text-destructive')}>
-                            SR: ₹{entry.sellerRate}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-bold text-foreground">₹{entry.amount.toLocaleString()}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <button onClick={() => setShowTokenInput(showTokenInput === entry.id ? null : entry.id)}
-                          className={cn('p-1 rounded-md transition-colors', entry.tokenAdvance > 0 ? 'bg-success/15 text-success' : 'bg-muted/50 text-muted-foreground hover:text-foreground')}>
-                          <Banknote className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => removeEntry(entry.id)} className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {showTokenInput === entry.id && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                        className="mt-2 pt-2 border-t border-border/30">
-                        <div className="flex items-center gap-2">
-                          <p className="text-[10px] text-muted-foreground whitespace-nowrap">Token ₹</p>
-                          <Input
-                            type="number"
-                            defaultValue={entry.tokenAdvance || ''}
-                            placeholder="0"
-                            className="h-8 rounded-lg text-xs text-center flex-1"
-                            onBlur={e => setTokenAdvanceAmount(entry.id, parseInt(e.target.value) || 0)}
-                            onKeyDown={e => { if (e.key === 'Enter') setTokenAdvanceAmount(entry.id, parseInt((e.target as HTMLInputElement).value) || 0); }}
-                          />
-                          {entry.tokenAdvance > 0 && <span className="text-[10px] text-success font-semibold">✓ ₹{entry.tokenAdvance}</span>}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              ))}
+            <div className={cn("glass-card rounded-2xl overflow-hidden", !isDesktop && "max-h-[34dvh] overflow-y-auto")}>
+              <div className={cn("overflow-x-auto", isDesktop && "max-h-[50vh] overflow-y-auto")}>
+                <table className="w-full min-w-[320px] text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-border/50 bg-muted/30 sticky top-0 z-10">
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Mark / Buyer</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Rate</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Qty</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry, i) => (
+                      <Fragment key={entry.id}>
+                        <motion.tr
+                          initial={{ opacity: 0, x: -15 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.05 }}
+                          className={cn(
+                            "border-b border-border/30 hover:bg-muted/20 transition-colors",
+                            entry.isSelfSale && "border-l-4 border-l-amber-500",
+                            entry.isScribble && "border-l-4 border-l-violet-500"
+                          )}
+                        >
+                          <td className={cn("px-3 py-2", isDesktop ? "" : "px-2 py-1.5")}>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={cn(
+                                "inline-flex items-center justify-center rounded-lg font-bold flex-shrink-0",
+                                isDesktop ? "w-8 h-8 text-xs" : "w-6 h-6 text-[10px]",
+                                entry.isSelfSale ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white" :
+                                entry.isScribble ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white" :
+                                "bg-gradient-to-br from-blue-500 to-cyan-400 text-white"
+                              )}>
+                                {entry.buyerMark}
+                              </span>
+                              <span className={cn("font-medium text-foreground truncate max-w-[120px]", isDesktop ? "text-sm" : "text-xs")} title={entry.buyerName}>
+                                {entry.buyerName}
+                              </span>
+                              {entry.isScribble && <span className="px-1 py-0.5 rounded bg-violet-500/15 text-violet-500 text-[8px] font-bold">SCRIBBLE</span>}
+                              {entry.isSelfSale && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[8px] font-bold">SELF</span>}
+                            </div>
+                          </td>
+                          <td className={cn("font-semibold text-foreground", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
+                            ₹{entry.rate}
+                          </td>
+                          <td className={cn("text-muted-foreground", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
+                            {entry.quantity}
+                          </td>
+                          <td className={cn("text-right", isDesktop ? "px-3 py-2" : "px-2 py-1.5")}>
+                            <div className="flex items-center justify-end gap-0.5">
+                              <button
+                                onClick={() => setShowTokenInput(showTokenInput === entry.id ? null : entry.id)}
+                                className={cn(
+                                  "p-1 rounded-md transition-colors",
+                                  entry.tokenAdvance > 0 ? "bg-success/15 text-success" : "bg-muted/50 text-muted-foreground hover:text-foreground"
+                                )}
+                                title="Token advance"
+                              >
+                                <Banknote className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
+                              </button>
+                              <button
+                                onClick={() => removeEntry(entry.id)}
+                                className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                                title="Delete bid"
+                              >
+                                <Trash2 className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                        <AnimatePresence>
+                          {showTokenInput === entry.id && (
+                            <motion.tr
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="border-b border-border/30 bg-muted/10"
+                            >
+                              <td colSpan={4} className={cn("px-3 py-2", isDesktop ? "" : "px-2 py-1.5")}>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">Token ₹</span>
+                                  <Input
+                                    type="number"
+                                    defaultValue={entry.tokenAdvance || ""}
+                                    placeholder="0"
+                                    className={cn("rounded-lg text-center flex-1", isDesktop ? "h-8 text-xs" : "h-7 text-xs")}
+                                    onBlur={e => setTokenAdvanceAmount(entry.id, parseInt(e.target.value) || 0)}
+                                    onKeyDown={e => { if (e.key === "Enter") setTokenAdvanceAmount(entry.id, parseInt((e.target as HTMLInputElement).value) || 0); }}
+                                  />
+                                  {entry.tokenAdvance > 0 && <span className="text-[10px] text-success font-semibold">✓ ₹{entry.tokenAdvance}</span>}
+                                </div>
+                              </td>
+                            </motion.tr>
+                          )}
+                        </AnimatePresence>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </motion.div>
