@@ -275,10 +275,17 @@ const ArrivalsPage = () => {
     if (!n) return false; // required is enforced on submit
     return n.length < 2 || n.length > 100;
   };
-  const isSellerMarkInvalid = (s: SellerEntry) => {
+  const isSellerMarkInvalid = (s: SellerEntry, sellerIdx?: number) => !!getSellerMarkError(s, sellerIdx);
+  const getSellerMarkError = (s: SellerEntry, sellerIdx?: number): string | null => {
     const m = (s.seller_mark ?? '').trim();
-    if (!m) return false;
-    return m.length < 2 || m.length > 50;
+    if (!m) return null;
+    if (m.length < 2 || m.length > 50) return '2–50 characters if set';
+    const markLower = m.toLowerCase();
+    const dupIdx = sellers.findIndex((o, i) => i !== sellerIdx && (o.seller_mark ?? '').trim().toLowerCase() === markLower);
+    if (dupIdx >= 0) return 'This mark is already in use by another seller';
+    const isDynamic = s.contact_id === '' || Number.isNaN(Number(s.contact_id));
+    if (isDynamic && contacts.some(c => c.mark && c.mark.toLowerCase() === markLower)) return 'This mark is already in use by a contact';
+    return null;
   };
   const isLotNameInvalid = (l: LotEntry) => {
     const ln = (l.lot_name ?? '').trim();
@@ -294,14 +301,15 @@ const ArrivalsPage = () => {
   const isFormInvalid = useMemo(() => {
     if (isVehicleNumberInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
         isGodownInvalid || isGatepassNumberInvalid || isBrokerNameInvalid || isFreightRateInvalid || isAdvancePaidInvalid) return true;
-    for (const s of sellers) {
-      if (isSellerNameInvalid(s) || isSellerMarkInvalid(s)) return true;
+    for (let i = 0; i < sellers.length; i++) {
+      const s = sellers[i];
+      if (isSellerNameInvalid(s) || isSellerMarkInvalid(s, i)) return true;
       for (const l of s.lots) {
         if (isLotNameInvalid(l) || isLotQuantityInvalid(l)) return true;
       }
     }
     return false;
-  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers]);
+  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers, contacts]);
 
   // Summary stats for four cards (mobile-first, same as raghav-style UI)
   const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
@@ -616,6 +624,26 @@ const ArrivalsPage = () => {
         toast.error(`${sName || 'Seller'}: Alias / mark must be between 2 and 50 characters`);
         return;
       }
+    }
+    // Mark uniqueness: no duplicates within vehicle, dynamic seller mark must not exist in contacts
+    const seenMarks = new Set<string>();
+    for (let i = 0; i < sellers.length; i++) {
+      const seller = sellers[i];
+      const sMark = (seller.seller_mark ?? '').trim();
+      if (!sMark) continue;
+      const markLower = sMark.toLowerCase();
+      if (seenMarks.has(markLower)) {
+        toast.error(`Mark "${sMark}" is already in use by another seller in this vehicle. Marks must be unique.`);
+        return;
+      }
+      seenMarks.add(markLower);
+      const isDynamic = seller.contact_id === '' || Number.isNaN(Number(seller.contact_id));
+      if (isDynamic && contacts.some(c => c.mark && c.mark.toLowerCase() === markLower)) {
+        toast.error(`Mark "${sMark}" is already in use by a contact. Please choose a unique mark or select the seller from Contacts.`);
+        return;
+      }
+    }
+    for (const seller of sellers) {
       if (seller.lots.length === 0) {
         toast.error(`${seller.seller_name || 'Seller'}: At least one lot is required`);
         return;
@@ -1510,8 +1538,8 @@ const ArrivalsPage = () => {
                                   {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
                                 </div>
                                 <div>
-                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerMarkInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
-                                  {isSellerMarkInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–50 if set</p>}
+                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                                  {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                 </div>
                               </div>
                             )}
@@ -2112,8 +2140,8 @@ const ArrivalsPage = () => {
                                   {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
                                 </div>
                                 <div>
-                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
-                                  {isSellerMarkInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–50 if set</p>}
+                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                                  {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                 </div>
                               </div>
                             )}

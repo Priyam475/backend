@@ -96,6 +96,7 @@ public class ArrivalService {
         validateRequest(request);
 
         Long traderId = resolveTraderId();
+        validateSellerMarks(request.getSellers(), traderId, null);
 
         Instant now = Instant.now();
         double netWeight = Math.max(0d, request.getLoadedWeight() - request.getEmptyWeight());
@@ -459,7 +460,7 @@ public class ArrivalService {
         boolean sellersReplaced = false;
         List<Lot> currentLots = new ArrayList<>();
         if (update.getSellers() != null && !update.getSellers().isEmpty()) {
-            validateUpdateSellers(update.getSellers(), update.getMultiSeller());
+            validateUpdateSellers(update.getSellers(), update.getMultiSeller(), traderId);
             List<SellerInVehicle> existingSellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
             List<Long> existingSellerVehicleIds = existingSellers.stream().map(SellerInVehicle::getId).toList();
             if (!existingSellerVehicleIds.isEmpty()) {
@@ -694,10 +695,43 @@ public class ArrivalService {
         return new PageImpl<>(content, pageable, vehiclePage.getTotalElements());
     }
 
-    private void validateUpdateSellers(List<ArrivalSellerDTO> sellers, Boolean multiSeller) {
+    /**
+     * Validate seller mark uniqueness:
+     * 1. No duplicate marks among sellers in the same vehicle.
+     * 2. For dynamic sellers (contactId null), mark must not already exist for any contact of this trader.
+     */
+    private void validateSellerMarks(List<ArrivalSellerDTO> sellers, Long traderId, Long excludeContactId) {
+        java.util.Set<String> seenMarks = new java.util.HashSet<>();
+        for (ArrivalSellerDTO seller : sellers) {
+            String mark = seller.getSellerMark();
+            if (mark == null || mark.isBlank()) {
+                continue;
+            }
+            String trimmedMark = mark.trim();
+            String markLower = trimmedMark.toLowerCase();
+
+            // 1. No duplicate marks within the same vehicle
+            if (seenMarks.contains(markLower)) {
+                throw new IllegalArgumentException("This mark is already in use by another seller in this vehicle. Marks must be unique.");
+            }
+            seenMarks.add(markLower);
+
+            // 2. For dynamic sellers: mark must not exist in trader's contacts
+            if (seller.getContactId() == null) {
+                Optional<Contact> existingContact = contactRepository.findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark);
+                if (existingContact.isPresent() && (excludeContactId == null || !existingContact.get().getId().equals(excludeContactId))) {
+                    throw new IllegalArgumentException(
+                        "This mark is already in use by a contact. Please choose a unique mark or select the seller from Contacts.");
+                }
+            }
+        }
+    }
+
+    private void validateUpdateSellers(List<ArrivalSellerDTO> sellers, Boolean multiSeller, Long traderId) {
         if (Boolean.FALSE.equals(multiSeller) && sellers.size() > 1) {
             throw new IllegalArgumentException("Single-seller arrival allows only one seller");
         }
+        validateSellerMarks(sellers, traderId, null);
         for (ArrivalSellerDTO seller : sellers) {
             if (seller.getContactId() == null && seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
                 String phone = seller.getSellerPhone().trim();
