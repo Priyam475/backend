@@ -97,10 +97,19 @@ public class ContactResource {
             );
         }
 
-        // Enforce mark uniqueness per trader (when mark is provided)
+        // Enforce mark uniqueness: per trader + global (self-registered contacts)
         String mark = contactDTO.getMark();
         if (mark != null && !mark.isBlank()) {
             String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
             contactRepository
                 .findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark)
                 .ifPresent(existing -> {
@@ -165,10 +174,19 @@ public class ContactResource {
                 }
             });
 
-        // Enforce mark uniqueness per trader, excluding the current record
+        // Enforce mark uniqueness: global + per trader, excluding the current record
         String mark = contactDTO.getMark();
         if (mark != null && !mark.isBlank()) {
             String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
             contactRepository
                 .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmedMark, id)
                 .ifPresent(existing -> {
@@ -225,7 +243,7 @@ public class ContactResource {
             contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), id);
         }
 
-        // If mark is being updated, enforce uniqueness per trader
+        // If mark is being updated, enforce uniqueness: per trader AND globally
         if (contactDTO.getMark() != null && !contactDTO.getMark().isBlank()) {
             String trimmedMark = contactDTO.getMark().trim();
             contactRepository
@@ -233,6 +251,15 @@ public class ContactResource {
                 .ifPresent(existing -> {
                     throw new BadRequestAlertException(
                         "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
                         ENTITY_NAME,
                         "markexists"
                     );

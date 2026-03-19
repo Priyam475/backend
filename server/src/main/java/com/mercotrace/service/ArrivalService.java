@@ -716,12 +716,17 @@ public class ArrivalService {
             }
             seenMarks.add(markLower);
 
-            // 2. For dynamic sellers: mark must not exist in trader's contacts
+            // 2. For dynamic sellers: mark must not exist in trader's contacts or in global (self-registered) contacts
             if (seller.getContactId() == null) {
-                Optional<Contact> existingContact = contactRepository.findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark);
-                if (existingContact.isPresent() && (excludeContactId == null || !existingContact.get().getId().equals(excludeContactId))) {
+                Optional<Contact> existingTraderContact = contactRepository.findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark);
+                if (existingTraderContact.isPresent() && (excludeContactId == null || !existingTraderContact.get().getId().equals(excludeContactId))) {
                     throw new IllegalArgumentException(
                         "This mark is already in use by a contact. Please choose a unique mark or select the seller from Contacts.");
+                }
+                Optional<Contact> existingGlobalContact = contactRepository.findOneByMarkAndTraderIdIsNull(trimmedMark);
+                if (existingGlobalContact.isPresent()) {
+                    throw new IllegalArgumentException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark or select the seller from Contacts.");
                 }
             }
         }
