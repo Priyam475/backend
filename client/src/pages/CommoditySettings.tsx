@@ -289,13 +289,23 @@ const CommoditySettings = () => {
     if (cfg.commission_percent < 0 || cfg.commission_percent > 100) { toast.error(`${commodityName}: Commission must be between 0% and 100%`); return; }
     if (cfg.user_fee_percent < 0 || cfg.user_fee_percent > 100) { toast.error(`${commodityName}: User fee must be between 0% and 100%`); return; }
     if (item.gstApplicable && !cfg.hsn_code.trim()) { toast.error(`${commodityName}: HSN/SAC Code is required when GST is applicable`); return; }
+    if (item.gstApplicable && cfg.hsn_code.trim()) {
+      const hsn = cfg.hsn_code.trim().replace(/\D/g, '');
+      if (hsn.length !== 6 && hsn.length !== 8) {
+        toast.error(`${commodityName}: HSN must be 6 digits, SAC must be 8 digits (digits only)`); return;
+      }
+    }
     const gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
     if (item.gstApplicable) {
       if (gstRateValue == null || Number.isNaN(gstRateValue)) {
         toast.error(`${commodityName}: GST Rate (%) is required when GST is applicable`); return;
       }
-      if (gstRateValue <= 0 || gstRateValue > 100) {
-        toast.error(`${commodityName}: GST Rate must be between 0 and 100%`); return;
+      if (gstRateValue < 0 || gstRateValue > 100) {
+        toast.error(`${commodityName}: GST rate must be between 0 and 100 (max 2 decimal places)`); return;
+      }
+      const decimalPart = String(gstRateValue).split('.')[1];
+      if (decimalPart != null && decimalPart.length > 2) {
+        toast.error(`${commodityName}: GST rate allows max 2 decimal places (e.g. 12.50)`); return;
       }
     } else if (gstRateValue != null && gstRateValue <= 0) {
       toast.error(`${commodityName}: GST Rate must be greater than 0 when provided`); return;
@@ -648,11 +658,15 @@ const CommoditySettings = () => {
                               </label>
                               <Input
                                 type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 value={item.config.hsn_code}
-                                onChange={e => updateConfig(index, { hsn_code: e.target.value })}
-                                placeholder="e.g., 0703"
+                                onChange={e => updateConfig(index, { hsn_code: e.target.value.replace(/\D/g, '').slice(0, 8) })}
+                                placeholder="HSN 6 digits or SAC 8 digits (e.g. 070310, 99831412)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                maxLength={8}
                               />
+                              <p className="text-[10px] text-muted-foreground mt-1">HSN: 6 digits (goods). SAC: 8 digits (services).</p>
                             </div>
                             <div>
                               <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
@@ -661,12 +675,19 @@ const CommoditySettings = () => {
                               <Input
                                 type="number"
                                 value={item.config.gst_rate ?? ''}
-                                onChange={e => updateConfig(index, { gst_rate: e.target.value === '' ? undefined as any : Number(e.target.value) } as any)}
-                                placeholder="e.g., 5, 12, 18"
+                                onChange={e => {
+                                  const v = e.target.value;
+                                  if (v === '') { updateConfig(index, { gst_rate: undefined as any }); return; }
+                                  const num = Number(v);
+                                  if (Number.isNaN(num)) return;
+                                  const rounded = Math.round(num * 100) / 100;
+                                  updateConfig(index, { gst_rate: rounded } as any);
+                                }}
+                                placeholder="e.g. 5, 12, 18 (max 2 decimals)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
                                 min={0}
                                 max={100}
-                                step={0.1}
+                                step={0.01}
                               />
                             </div>
                           </div>

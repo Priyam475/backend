@@ -141,9 +141,23 @@ public class CommodityConfigServiceImpl implements CommodityConfigService {
         if (configDto != null) {
             if (configDto.getGstRate() != null) {
                 double gstRate = configDto.getGstRate();
-                if (gstRate <= 0D || gstRate > 100D) {
-                    throw new BadRequestAlertException("GST rate must be greater than 0 and at most 100", ENTITY_NAME, "invalidgstrate");
+                if (gstRate < 0D || gstRate > 100D) {
+                    throw new BadRequestAlertException("GST rate must be between 0 and 100 (max 2 decimal places)", ENTITY_NAME, "invalidgstrate");
                 }
+                // Max 2 decimal places
+                double rounded = Math.round(gstRate * 100) / 100.0;
+                if (Math.abs(gstRate - rounded) > 0.0001) {
+                    throw new BadRequestAlertException("GST rate allows max 2 decimal places (e.g. 12.50)", ENTITY_NAME, "invalidgstrate");
+                }
+            }
+            if (configDto.getHsnCode() != null && !configDto.getHsnCode().trim().isEmpty()) {
+                String hsn = configDto.getHsnCode().trim().replaceAll("\\D", "");
+                if (hsn.length() != 6 && hsn.length() != 8) {
+                    throw new BadRequestAlertException("HSN must be 6 digits (goods), SAC must be 8 digits (services). Digits only.", ENTITY_NAME, "invalidhsn");
+                }
+            }
+            if (configDto.getGstRate() != null && configDto.getGstRate() > 0 && (configDto.getHsnCode() == null || configDto.getHsnCode().trim().isEmpty())) {
+                throw new BadRequestAlertException("HSN/SAC code is required when GST is applicable", ENTITY_NAME, "invalidhsn");
             }
             if (configDto.getWeighingThreshold() != null) {
                 double threshold = configDto.getWeighingThreshold();
