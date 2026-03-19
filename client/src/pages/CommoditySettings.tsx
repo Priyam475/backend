@@ -295,15 +295,26 @@ const CommoditySettings = () => {
         toast.error(`${commodityName}: HSN must be 6 digits, SAC must be 8 digits (digits only)`); return;
       }
     }
-    const gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
+    // Parse GST rate (can be string from raw input or number from loaded config)
+    let gstRateValue: number | undefined;
+    if (typeof cfg.gst_rate === 'string') {
+      const s = cfg.gst_rate.trim();
+      if (s === '') gstRateValue = undefined;
+      else {
+        const n = parseFloat(s);
+        gstRateValue = Number.isNaN(n) ? undefined : n;
+      }
+    } else {
+      gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
+    }
     if (item.gstApplicable) {
       if (gstRateValue == null || Number.isNaN(gstRateValue)) {
         toast.error(`${commodityName}: GST Rate (%) is required when GST is applicable`); return;
       }
       if (gstRateValue < 0 || gstRateValue > 100) {
-        toast.error(`${commodityName}: GST rate must be between 0 and 100 (max 2 decimal places)`); return;
+        toast.error(`${commodityName}: GST rate must be between 0 and 100. You entered ${cfg.gst_rate}.`); return;
       }
-      const decimalPart = String(gstRateValue).split('.')[1];
+      const decimalPart = String(cfg.gst_rate).split('.')[1];
       if (decimalPart != null && decimalPart.length > 2) {
         toast.error(`${commodityName}: GST rate allows max 2 decimal places (e.g. 12.50)`); return;
       }
@@ -673,21 +684,22 @@ const CommoditySettings = () => {
                                 GST Rate (%) <span className="text-red-500">*</span>
                               </label>
                               <Input
-                                type="number"
-                                value={item.config.gst_rate ?? ''}
+                                type="text"
+                                inputMode="decimal"
+                                value={(() => {
+                                  const v = item.config.gst_rate;
+                                  if (v === undefined || v === null) return '';
+                                  if (typeof v === 'string') return v;
+                                  return String(v);
+                                })()}
                                 onChange={e => {
                                   const v = e.target.value;
                                   if (v === '') { updateConfig(index, { gst_rate: undefined as any }); return; }
-                                  const num = Number(v);
-                                  if (Number.isNaN(num)) return;
-                                  const rounded = Math.round(num * 100) / 100;
-                                  updateConfig(index, { gst_rate: rounded } as any);
+                                  if (!/^\d*\.?\d*$/.test(v)) return;
+                                  updateConfig(index, { gst_rate: v } as any);
                                 }}
                                 placeholder="e.g. 5, 12, 18 (max 2 decimals)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
-                                min={0}
-                                max={100}
-                                step={0.01}
                               />
                             </div>
                           </div>

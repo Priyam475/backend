@@ -567,7 +567,6 @@ const AuctionsPage = () => {
       }
       setRate('');
       setQty('');
-      setExtraRate('');
       setSelectedBuyer(null);
       setScribbleMark('');
       setAddBidRetryAllowIncrease(false);
@@ -626,6 +625,10 @@ const AuctionsPage = () => {
           );
         }
         toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
+        setRate('');
+        setQty('');
+        setScribbleMark('');
+        setSelectedBuyer(null);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
       }
@@ -1592,7 +1595,7 @@ const AuctionsPage = () => {
                     onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
                     readOnly={isTouchLayout && !mobileKeyboardEnabled}
                     inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
-                    placeholder={highestBid ? String(highestBid) : '0'}
+                    placeholder="0"
                     className={cn(
                       "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
                       activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/50"
@@ -1941,7 +1944,7 @@ const AuctionsPage = () => {
               onBlur={() => setMobileKeyboardEnabled(false)}
               readOnly={!mobileKeyboardEnabled}
               inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
-              placeholder={highestBid ? String(highestBid) : 'Rate'}
+              placeholder="0"
               className={cn(
                 "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
                 activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
@@ -1962,7 +1965,7 @@ const AuctionsPage = () => {
               onBlur={() => setMobileKeyboardEnabled(false)}
               readOnly={!mobileKeyboardEnabled}
               inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
-              placeholder="Qty"
+              placeholder="0"
               className={cn(
                 "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
                 activeNumpadField === 'qty' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
