@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
-import { ArrowLeft, Plus, Search, Phone, User as UserIcon, Users, BookOpen, AlertCircle, Eye, Pencil, Trash2, X, MapPin } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Phone, User as UserIcon, Users, BookOpen, AlertCircle, Eye, Pencil, Trash2, X, MapPin, Wallet } from 'lucide-react';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -15,11 +15,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { RotateCcw } from 'lucide-react';
 import { usePermissions } from '@/lib/permissions';
 import ForbiddenPage from '@/components/ForbiddenPage';
-
-/** Ledger backend not implemented; no-op. See NOT_IMPLEMENTED.md. */
-function createLedgerForContact(_contact: Contact) {
-  // No backend for ledgers — do not create/write.
-}
 
 type ModalMode = 'add' | 'view' | 'edit' | null;
 
@@ -130,7 +125,6 @@ const ContactsPage = () => {
         address: formData.address.trim(),
         trader_id: '',
       });
-      createLedgerForContact(created);
       setContacts(prev => [...prev, created]);
       closeModal();
       toast.success(`✅ ${created.name} registered`);
@@ -548,15 +542,24 @@ const ContactsPage = () => {
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-2">
-                    <Button onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
-                      className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20">
-                      <Pencil className="w-4 h-4 mr-2" /> Edit
+                  <div className="flex flex-col gap-3 pt-2">
+                    <Button
+                      onClick={() => { const id = selectedContact.contact_id; closeModal(); navigate(`/contact-ledger/${id}`); }}
+                      variant="outline"
+                      className="h-12 rounded-xl border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center gap-2"
+                    >
+                      <Wallet className="w-4 h-4" /> View Ledgers
                     </Button>
-                    <Button onClick={() => { const id = selectedContact.contact_id; closeModal(); setTimeout(() => setDeleteConfirm(id), 150); }}
-                      variant="outline" className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10">
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </Button>
+                    <div className="flex gap-3">
+                      <Button onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
+                        className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20">
+                        <Pencil className="w-4 h-4 mr-2" /> Edit
+                      </Button>
+                      <Button onClick={() => { const id = selectedContact.contact_id; closeModal(); setTimeout(() => setDeleteConfirm(id), 150); }}
+                        variant="outline" className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10">
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}
@@ -621,7 +624,7 @@ const ContactsPage = () => {
                   {modalMode === 'add' && (
                     <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 px-3 py-2 flex items-start gap-2">
                       <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact is stored on the server. Ledger feature is not yet implemented.</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact registered. A receivable ledger is created automatically.</p>
                     </div>
                   )}
 

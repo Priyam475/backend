@@ -2,13 +2,18 @@ package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.TraderContextService;
+import com.mercotrace.service.VoucherLineService;
+import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ContactDTO;
+import com.mercotrace.service.dto.VoucherLineDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import java.time.LocalDate;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
@@ -48,16 +53,24 @@ public class ContactResource {
 
     private final ContactIdentityService contactIdentityService;
 
+    private final ChartOfAccountService chartOfAccountService;
+
+    private final VoucherLineService voucherLineService;
+
     public ContactResource(
         ContactService contactService,
         ContactRepository contactRepository,
         TraderContextService traderContextService,
-        ContactIdentityService contactIdentityService
+        ContactIdentityService contactIdentityService,
+        ChartOfAccountService chartOfAccountService,
+        VoucherLineService voucherLineService
     ) {
         this.contactService = contactService;
         this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
         this.contactIdentityService = contactIdentityService;
+        this.chartOfAccountService = chartOfAccountService;
+        this.voucherLineService = voucherLineService;
     }
 
     /**
@@ -364,6 +377,52 @@ public class ContactResource {
         return ResponseEntity.noContent()
             .headers(HeaderUtil.createEntityDeletionAlert(applicationName, true, ENTITY_NAME, id.toString()))
             .build();
+    }
+
+    /**
+     * {@code GET  /contacts/:id/ledgers} : get all ledgers linked to a contact.
+     * Trader-scoped. Validates contact exists and belongs to trader.
+     * Permission: CONTACTS_VIEW or CHART_OF_ACCOUNTS_VIEW.
+     */
+    @GetMapping("/{id}/ledgers")
+    @PreAuthorize(
+        "hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\") or " +
+        "hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")"
+    )
+    public ResponseEntity<List<ChartOfAccountDTO>> getContactLedgers(@PathVariable("id") Long id) {
+        LOG.debug("REST request to get ledgers for contact : {}", id);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        if (contact.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        List<ChartOfAccountDTO> ledgers = chartOfAccountService.getLedgersByContactId(id);
+        return ResponseEntity.ok().body(ledgers);
+    }
+
+    /**
+     * {@code GET  /contacts/:id/ledger-transactions} : get unified chronological transaction timeline
+     * for all ledgers of a contact. Optional dateFrom, dateTo. Excludes REVERSED vouchers.
+     * Permission: CONTACTS_VIEW or CHART_OF_ACCOUNTS_VIEW.
+     */
+    @GetMapping("/{id}/ledger-transactions")
+    @PreAuthorize(
+        "hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\") or " +
+        "hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")"
+    )
+    public ResponseEntity<List<VoucherLineDTO>> getContactLedgerTransactions(
+        @PathVariable("id") Long id,
+        @RequestParam(required = false) LocalDate dateFrom,
+        @RequestParam(required = false) LocalDate dateTo
+    ) {
+        LOG.debug("REST request to get ledger transactions for contact : {}, dateFrom={}, dateTo={}", id, dateFrom, dateTo);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        if (contact.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        List<VoucherLineDTO> lines = voucherLineService.getLinesByContactIdAndDateRange(id, dateFrom, dateTo);
+        return ResponseEntity.ok().body(lines);
     }
 
     /**

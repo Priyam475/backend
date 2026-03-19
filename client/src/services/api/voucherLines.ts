@@ -13,6 +13,12 @@ export interface VoucherLineDTO {
   quantity?: number;
   rate?: number;
   lotId?: string;
+  /** Voucher header fields (when fetched by ledger). */
+  voucherDate?: string;
+  voucherNumber?: string;
+  voucherType?: string;
+  narration?: string;
+  status?: string;
 }
 
 function dtoToVoucherLine(l: VoucherLineDTO): VoucherLine {
@@ -28,6 +34,11 @@ function dtoToVoucherLine(l: VoucherLineDTO): VoucherLine {
     quantity: l.quantity != null ? Number(l.quantity) : undefined,
     rate: l.rate != null ? Number(l.rate) : undefined,
     lot_id: l.lotId,
+    voucher_date: l.voucherDate,
+    voucher_number: l.voucherNumber,
+    voucher_type: l.voucherType as VoucherLine['voucher_type'],
+    narration: l.narration,
+    status: l.status as VoucherLine['status'],
   };
 }
 
@@ -55,6 +66,16 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
 export const voucherLinesApi = {
   async getByDateRange(dateFrom: string, dateTo: string): Promise<VoucherLine[]> {
     const q = new URLSearchParams();
+    q.set('dateFrom', dateFrom);
+    q.set('dateTo', dateTo);
+    const res = await apiFetch(`${BASE}?${q.toString()}`, { method: 'GET' });
+    const list = await handleResponse<VoucherLineDTO[]>(res, 'Failed to load voucher lines');
+    return list.map(dtoToVoucherLine);
+  },
+
+  async getByLedgerAndDateRange(ledgerId: string, dateFrom: string, dateTo: string): Promise<VoucherLine[]> {
+    const q = new URLSearchParams();
+    q.set('ledgerId', ledgerId);
     q.set('dateFrom', dateFrom);
     q.set('dateTo', dateTo);
     const res = await apiFetch(`${BASE}?${q.toString()}`, { method: 'GET' });

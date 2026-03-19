@@ -6,12 +6,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.mercotrace.domain.ChartOfAccount;
 import com.mercotrace.domain.FreightCalculation;
 import com.mercotrace.domain.Patti;
 import com.mercotrace.domain.PattiDeduction;
 import com.mercotrace.domain.PattiRateCluster;
 import com.mercotrace.domain.SellerInVehicle;
+import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.PattiRepository;
+import com.mercotrace.repository.VoucherLineRepository;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
@@ -60,6 +63,12 @@ class SettlementServiceImplTest {
     @Mock
     private com.mercotrace.repository.FreightCalculationRepository freightCalculationRepository;
 
+    @Mock
+    private ChartOfAccountRepository chartOfAccountRepository;
+
+    @Mock
+    private VoucherLineRepository voucherLineRepository;
+
     private SettlementServiceImpl service;
 
     @BeforeEach
@@ -74,7 +83,9 @@ class SettlementServiceImplTest {
             contactRepository,
             vehicleRepository,
             commodityRepository,
-            freightCalculationRepository
+            freightCalculationRepository,
+            chartOfAccountRepository,
+            voucherLineRepository
         );
         // Only create stubbing when needed in specific tests to avoid UnnecessaryStubbingException.
     }
@@ -192,6 +203,7 @@ class SettlementServiceImplTest {
         fc.setTotalAmount(1500.0);
         fc.setAdvancePaid(500.0);
 
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
         when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
         when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.of(fc));
 
@@ -199,6 +211,73 @@ class SettlementServiceImplTest {
 
         assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.valueOf(1500));
         assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.valueOf(500));
+        assertThat(dto.getFreightAutoPulled()).isTrue();
+        assertThat(dto.getAdvanceAutoPulled()).isTrue();
+    }
+
+    @Test
+    void getSellerCharges_addsLedgerAdvanceWhenContactHasReceivableLedger() {
+        SellerInVehicle siv = new SellerInVehicle();
+        siv.setId(100L);
+        siv.setVehicleId(200L);
+        siv.setContactId(50L);
+
+        ChartOfAccount receivableLedger = new ChartOfAccount();
+        receivableLedger.setId(300L);
+        receivableLedger.setTraderId(TRADER_ID);
+        receivableLedger.setContactId(50L);
+        receivableLedger.setClassification("RECEIVABLE");
+
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
+        when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.empty());
+        when(chartOfAccountRepository.findFirstByTraderIdAndContactIdAndClassification(
+            TRADER_ID, 50L, "RECEIVABLE"
+        )).thenReturn(Optional.of(receivableLedger));
+        when(voucherLineRepository.sumCreditByLedgerIdAndVoucherTypeExcludingStatus(
+            any(), any(), any()
+        )).thenReturn(BigDecimal.valueOf(1200));
+
+        SellerChargesDTO dto = service.getSellerCharges("100");
+
+        assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.valueOf(1200));
+        assertThat(dto.getFreightAutoPulled()).isFalse();
+        assertThat(dto.getAdvanceAutoPulled()).isTrue();
+    }
+
+    @Test
+    void getSellerCharges_combinesFreightAndLedgerAdvance() {
+        SellerInVehicle siv = new SellerInVehicle();
+        siv.setId(100L);
+        siv.setVehicleId(200L);
+        siv.setContactId(50L);
+
+        FreightCalculation fc = new FreightCalculation();
+        fc.setVehicleId(200L);
+        fc.setTotalAmount(1500.0);
+        fc.setAdvancePaid(500.0);
+
+        ChartOfAccount receivableLedger = new ChartOfAccount();
+        receivableLedger.setId(300L);
+        receivableLedger.setTraderId(TRADER_ID);
+        receivableLedger.setContactId(50L);
+        receivableLedger.setClassification("RECEIVABLE");
+
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
+        when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.of(fc));
+        when(chartOfAccountRepository.findFirstByTraderIdAndContactIdAndClassification(
+            TRADER_ID, 50L, "RECEIVABLE"
+        )).thenReturn(Optional.of(receivableLedger));
+        when(voucherLineRepository.sumCreditByLedgerIdAndVoucherTypeExcludingStatus(
+            any(), any(), any()
+        )).thenReturn(BigDecimal.valueOf(300));
+
+        SellerChargesDTO dto = service.getSellerCharges("100");
+
+        assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.valueOf(1500));
+        assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.valueOf(800)); // 500 + 300
         assertThat(dto.getFreightAutoPulled()).isTrue();
         assertThat(dto.getAdvanceAutoPulled()).isTrue();
     }

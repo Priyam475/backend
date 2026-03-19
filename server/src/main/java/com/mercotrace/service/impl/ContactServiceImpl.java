@@ -1,9 +1,12 @@
 package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.Contact;
+import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.ContactIdentityService;
 import com.mercotrace.service.ContactService;
+import com.mercotrace.service.dto.ChartOfAccountCreateRequest;
 import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.service.mapper.ContactMapper;
 import java.math.BigDecimal;
@@ -39,22 +42,32 @@ public class ContactServiceImpl implements ContactService {
 
     private final ContactIdentityService contactIdentityService;
 
+    private final ChartOfAccountService chartOfAccountService;
+
+    private final ChartOfAccountRepository chartOfAccountRepository;
+
     public ContactServiceImpl(
         ContactRepository contactRepository,
         ContactMapper contactMapper,
         CacheManager cacheManager,
-        ContactIdentityService contactIdentityService
+        ContactIdentityService contactIdentityService,
+        ChartOfAccountService chartOfAccountService,
+        ChartOfAccountRepository chartOfAccountRepository
     ) {
         this.contactRepository = contactRepository;
         this.contactMapper = contactMapper;
         this.cacheManager = cacheManager;
         this.contactIdentityService = contactIdentityService;
+        this.chartOfAccountService = chartOfAccountService;
+        this.chartOfAccountRepository = chartOfAccountRepository;
     }
 
     @Override
     @CacheEvict(cacheNames = STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE, key = "#contactDTO.traderId")
     public ContactDTO save(ContactDTO contactDTO) {
         LOG.debug("Request to save Contact : {}", contactDTO);
+
+        boolean isNewContact = contactDTO.getId() == null;
 
         // Default values for new contacts (aligned with frontend mock)
         if (contactDTO.getCreatedAt() == null) {
@@ -75,7 +88,53 @@ public class ContactServiceImpl implements ContactService {
             contact.setActive(true);
         }
         contact = contactRepository.save(contact);
+
+        // REQ-CON-003: Auto-create Receivable ledger for new contacts (not on update/restore)
+        if (isNewContact && contact.getTraderId() != null) {
+            createReceivableLedgerForContact(contact);
+        }
+
         return contactMapper.toDto(contact);
+    }
+
+    /**
+     * Creates a Receivable ledger for a newly registered contact.
+     * Wrapped in try-catch so contact creation is never blocked by ledger creation failures.
+     */
+    private void createReceivableLedgerForContact(Contact contact) {
+        try {
+            Long traderId = contact.getTraderId();
+            String baseName = "Receivable - " + (contact.getName() != null ? contact.getName().trim() : "Contact");
+            String ledgerName = resolveUniqueLedgerName(traderId, baseName, contact.getMark(), contact.getPhone());
+
+            ChartOfAccountCreateRequest request = new ChartOfAccountCreateRequest();
+            request.setLedgerName(ledgerName);
+            request.setClassification("RECEIVABLE");
+            request.setContactId(contact.getId());
+
+            chartOfAccountRepository
+                .findFirstByTraderIdAndClassificationAndLedgerNameContainingIgnoreCase(traderId, "CONTROL", "accounts receivable")
+                .map(ar -> ar.getId())
+                .ifPresent(request::setParentControlId);
+
+            chartOfAccountService.create(request);
+            LOG.debug("Created Receivable ledger for contact id={}, name={}", contact.getId(), contact.getName());
+        } catch (Exception e) {
+            LOG.warn("Failed to create Receivable ledger for contact id={}, name={}: {}",
+                contact.getId(), contact.getName(), e.getMessage());
+        }
+    }
+
+    private String resolveUniqueLedgerName(Long traderId, String baseName, String mark, String phone) {
+        if (chartOfAccountRepository.findOneByTraderIdAndLedgerNameIgnoreCase(traderId, baseName).isEmpty()) {
+            return baseName;
+        }
+        String withMark = baseName + " (" + (mark != null && !mark.isBlank() ? mark : (phone != null ? phone : "dup")) + ")";
+        if (chartOfAccountRepository.findOneByTraderIdAndLedgerNameIgnoreCase(traderId, withMark).isEmpty()) {
+            return withMark;
+        }
+        String withPhone = baseName + " - " + (phone != null ? phone : System.currentTimeMillis());
+        return withPhone;
     }
 
     @Override

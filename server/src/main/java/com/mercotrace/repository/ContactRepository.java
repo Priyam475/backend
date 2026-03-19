@@ -13,6 +13,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpecificationExecutor<Contact> {
 
+    Optional<Contact> findOneByTraderIdAndId(Long traderId, Long id);
+
     Optional<Contact> findOneByTraderIdAndPhone(Long traderId, String phone);
 
     List<Contact> findAllByTraderIdAndActiveTrue(Long traderId);

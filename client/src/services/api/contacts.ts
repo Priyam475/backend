@@ -1,5 +1,7 @@
 import type { Contact } from '@/types/models';
 import { apiFetch } from './http';
+import type { ChartOfAccountDTO } from './chartOfAccounts';
+import type { VoucherLineDTO } from './voucherLines';
 
 type ContactDto = {
   id?: string | number;
@@ -127,6 +129,14 @@ export const contactApi = {
     return mapDtoToContact(created);
   },
 
+  /** Get contact by id. Returns null if 404. */
+  async getById(contactId: string): Promise<Contact | null> {
+    const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    const data = await handleResponse<ContactDto>(res, 'Failed to load contact');
+    return mapDtoToContact(data);
+  },
+
   /** Get contact by phone (active or inactive) for restore flow. Returns null if 404. */
   async getByPhone(phone: string): Promise<Contact | null> {
     const res = await apiFetch(`/contacts/by-phone?phone=${encodeURIComponent(phone)}`, { method: 'GET' });
@@ -171,6 +181,29 @@ export const contactApi = {
     });
     const data = await handleResponse<ContactDto[]>(res, 'Failed to search contacts');
     return data.map(mapDtoToContact);
+  },
+
+  /** Get all ledgers linked to a contact (Phase 6: Contact Consolidated Ledger View). */
+  async getContactLedgers(contactId: string): Promise<ChartOfAccountDTO[]> {
+    const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}/ledgers`, { method: 'GET' });
+    return handleResponse<ChartOfAccountDTO[]>(res, 'Failed to load contact ledgers');
+  },
+
+  /** Get unified chronological transaction timeline for all ledgers of a contact. */
+  async getContactLedgerTransactions(
+    contactId: string,
+    dateFrom?: string,
+    dateTo?: string
+  ): Promise<VoucherLineDTO[]> {
+    const params = new URLSearchParams();
+    if (dateFrom?.trim()) params.set('dateFrom', dateFrom.trim());
+    if (dateTo?.trim()) params.set('dateTo', dateTo.trim());
+    const qs = params.toString();
+    const url = qs
+      ? `/contacts/${encodeURIComponent(contactId)}/ledger-transactions?${qs}`
+      : `/contacts/${encodeURIComponent(contactId)}/ledger-transactions`;
+    const res = await apiFetch(url, { method: 'GET' });
+    return handleResponse<VoucherLineDTO[]>(res, 'Failed to load contact ledger transactions');
   },
 };
 

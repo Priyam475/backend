@@ -3,12 +3,20 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Search, ChevronRight, Wallet, TrendingDown, PiggyBank, TrendingUp, Building2, BookOpen, Calendar, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import type { COALedger, VoucherHeader, VoucherLine, LedgerTransaction, AccountingClass } from '@/types/accounting';
+import type { COALedger, VoucherLine, LedgerTransaction, AccountingClass, VoucherType } from '@/types/accounting';
 import { chartOfAccountsApi, dtoToCOALedger } from '@/services/api/chartOfAccounts';
+import { voucherLinesApi } from '@/services/api/voucherLines';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 
-// TODO: Vouchers and voucher lines require backend API (e.g. GET /api/vouchers, /api/voucher-lines). Until then, transactions are empty.
+function defaultDateFrom(): string {
+  const d = new Date();
+  return new Date(d.getFullYear(), 0, 1).toISOString().slice(0, 10);
+}
+
+function defaultDateTo(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 const CLASS_THEME: Record<AccountingClass, {
   gradient: string;
@@ -84,8 +92,9 @@ const LedgerViewPage = () => {
   const { ledgerId } = useParams<{ ledgerId: string }>();
   const [ledgers, setLedgers] = useState<COALedger[]>([]);
   const [loading, setLoading] = useState(true);
-  const [vouchers] = useState<VoucherHeader[]>([]);
-  const [voucherLines] = useState<VoucherLine[]>([]);
+  const [voucherLines, setVoucherLines] = useState<VoucherLine[]>([]);
+  const [linesLoading, setLinesLoading] = useState(false);
+  const [dynamicOpening, setDynamicOpening] = useState<number | null>(null);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -117,25 +126,62 @@ const LedgerViewPage = () => {
 
   const ledger = ledgers.find(l => l.ledger_id === ledgerId);
 
-  // Build transaction list with running balance
+  // Fetch voucher lines and dynamic opening when ledger and date range available
+  useEffect(() => {
+    if (!ledgerId || !ledger) return;
+    let cancelled = false;
+    const effectiveFrom = dateFrom.trim() || defaultDateFrom();
+    const effectiveTo = dateTo.trim() || defaultDateTo();
+
+    const load = async () => {
+      setLinesLoading(true);
+      setDynamicOpening(null);
+      try {
+        const [lines, openingResult] = await Promise.all([
+          voucherLinesApi.getByLedgerAndDateRange(ledgerId, effectiveFrom, effectiveTo),
+          dateFrom.trim()
+            ? chartOfAccountsApi.getOpeningBalance(ledgerId, dateFrom)
+            : Promise.resolve({ openingBalance: ledger.opening_balance }),
+        ]);
+        if (!cancelled) {
+          setVoucherLines(lines);
+          setDynamicOpening(dateFrom.trim() ? openingResult.openingBalance : null);
+        }
+      } catch {
+        if (!cancelled) {
+          setVoucherLines([]);
+          setDynamicOpening(null);
+        }
+      } finally {
+        if (!cancelled) setLinesLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [ledgerId, ledger, dateFrom, dateTo]);
+
+  const effectiveOpening = dateFrom.trim() && dynamicOpening !== null ? dynamicOpening : (ledger?.opening_balance ?? 0);
+
+  const isDebitNature = ledger ? (ledger.accounting_class === 'ASSET' || ledger.accounting_class === 'EXPENSE') : true;
+
+  // Build transaction list with running balance (accounting-class aware)
   const transactions = useMemo((): LedgerTransaction[] => {
     if (!ledger) return [];
-    const relatedLines = voucherLines.filter(l => l.ledger_id === ledgerId);
+    const relatedLines = voucherLines
+      .filter(l => l.ledger_id === ledgerId && l.status !== 'REVERSED')
+      .sort((a, b) => (a.voucher_date || '').localeCompare(b.voucher_date || '') || 0);
     const txns: LedgerTransaction[] = [];
-    let runningBalance = ledger.opening_balance;
+    let runningBalance = effectiveOpening;
 
     relatedLines.forEach(line => {
-      const voucher = vouchers.find(v => v.voucher_id === line.voucher_id);
-      if (!voucher || voucher.status === 'REVERSED') return;
-      if (dateFrom && voucher.voucher_date < dateFrom) return;
-      if (dateTo && voucher.voucher_date > dateTo) return;
-
-      runningBalance += line.debit - line.credit;
+      const dateStr = line.voucher_date || '';
+      const delta = isDebitNature ? line.debit - line.credit : line.credit - line.debit;
+      runningBalance += delta;
       txns.push({
-        date: voucher.voucher_date,
-        voucher_number: voucher.voucher_number,
-        voucher_type: voucher.voucher_type,
-        narration: voucher.narration,
+        date: dateStr,
+        voucher_number: line.voucher_number || '',
+        voucher_type: (line.voucher_type || 'JOURNAL') as VoucherType,
+        narration: line.narration || '',
         debit: line.debit,
         credit: line.credit,
         running_balance: runningBalance,
@@ -143,9 +189,9 @@ const LedgerViewPage = () => {
     });
 
     return txns;
-  }, [ledger, voucherLines, vouchers, ledgerId, dateFrom, dateTo]);
+  }, [ledger, voucherLines, ledgerId, effectiveOpening, isDebitNature]);
 
-  const closingBalance = transactions.length > 0 ? transactions[transactions.length - 1].running_balance : (ledger?.opening_balance || 0);
+  const closingBalance = transactions.length > 0 ? transactions[transactions.length - 1].running_balance : effectiveOpening;
 
   // Contact consolidated view
   const contactLedgers = useMemo(() => {
@@ -211,7 +257,7 @@ const LedgerViewPage = () => {
             <div className="flex gap-2 mt-3">
               <div className="flex-1 bg-white/15 backdrop-blur-md rounded-xl p-3 text-center border border-white/20">
                 <p className="text-[9px] text-white/60 uppercase font-semibold tracking-wider">Opening</p>
-                <p className="text-base font-black text-white">₹{ledger.opening_balance.toLocaleString()}</p>
+                <p className="text-base font-black text-white">₹{effectiveOpening.toLocaleString()}</p>
               </div>
               <div className="flex-1 bg-white/15 backdrop-blur-md rounded-xl p-3 text-center border border-white/20">
                 <p className="text-[9px] text-white/60 uppercase font-semibold tracking-wider">Closing</p>
@@ -247,7 +293,7 @@ const LedgerViewPage = () => {
           <div className="grid grid-cols-5 gap-4">
             <div className={cn("glass-card rounded-2xl p-4 border-l-4", `border-l-${ledger.accounting_class === 'ASSET' ? 'emerald' : ledger.accounting_class === 'LIABILITY' ? 'rose' : ledger.accounting_class === 'EQUITY' ? 'violet' : ledger.accounting_class === 'INCOME' ? 'blue' : 'amber'}-500`)}>
               <p className="text-[10px] text-muted-foreground uppercase font-semibold">Opening</p>
-              <p className="text-lg font-black text-foreground">₹{ledger.opening_balance.toLocaleString()}</p>
+              <p className="text-lg font-black text-foreground">₹{effectiveOpening.toLocaleString()}</p>
             </div>
             <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
               <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Debit</p>
@@ -352,10 +398,14 @@ const LedgerViewPage = () => {
             </span>
             <span className="w-20"></span>
             <span className="w-20"></span>
-            <span className="w-24 text-right text-xs font-black text-foreground">₹{ledger.opening_balance.toLocaleString()}</span>
+            <span className="w-24 text-right text-xs font-black text-foreground">₹{effectiveOpening.toLocaleString()}</span>
           </div>
 
-          {transactions.length === 0 ? (
+          {linesLoading ? (
+            <div className="py-12 text-center">
+              <p className="text-sm text-muted-foreground">Loading transactions…</p>
+            </div>
+          ) : transactions.length === 0 ? (
             <div className="py-12 text-center">
               <div className={cn("w-14 h-14 rounded-2xl bg-gradient-to-br mx-auto mb-3 flex items-center justify-center opacity-30", theme.gradient)}>
                 <ThemeIcon className="w-7 h-7 text-white" />
