@@ -8,7 +8,9 @@ interface AuthContextType extends AuthState {
   hasBootstrapped: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithOtp: (mobile: string, otp: string) => Promise<void>;
-  register: (data: any) => Promise<void>;
+  /** Returns { user, trader } so callers can e.g. upload photos post-register. */
+  register: (data: any) => Promise<{ user: User; trader: Trader }>;
+  refreshProfile: () => Promise<void>;
   logout: () => void;
   isLoading: boolean;
   error: string | null;
@@ -22,7 +24,8 @@ const AuthContext = createContext<AuthContextType>({
   hasBootstrapped: false,
   login: async () => {},
   loginWithOtp: async () => {},
-  register: async () => {},
+  register: async () => ({ user: null as any, trader: null as any }),
+  refreshProfile: async () => {},
   logout: () => {},
   isLoading: false,
   error: null,
@@ -120,7 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const register = useCallback(async (data: any) => {
+  const register = useCallback(async (data: any): Promise<{ user: User; trader: Trader }> => {
     setIsLoading(true);
     setError(null);
     try {
@@ -144,11 +147,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: result.user,
         trader: result.trader,
       });
+      return result;
     } catch (e: any) {
       setError(e.message || 'Registration failed');
       throw e;
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
+    try {
+      const profile = await authApi.getProfile();
+      if (profile) {
+        setState({
+          isAuthenticated: true,
+          user: profile.user,
+          trader: profile.trader,
+        });
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -160,7 +179,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearError = useCallback(() => setError(null), []);
 
   return (
-    <AuthContext.Provider value={{ ...state, hasBootstrapped, login, loginWithOtp, register, logout, isLoading, error, clearError }}>
+    <AuthContext.Provider value={{ ...state, hasBootstrapped, login, loginWithOtp, register, refreshProfile, logout, isLoading, error, clearError }}>
       {children}
     </AuthContext.Provider>
   );

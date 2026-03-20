@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- Remove contact_type column from contact table -->
+    <changeSet id="20260318130000-1" author="mercotrace">
+        <dropColumn tableName="contact">
+            <column name="contact_type"/>
+        </dropColumn>
+    </changeSet>
+
+    <!-- Add unique constraint on mark for self-registered contacts (trader_id IS NULL) -->
+    <changeSet id="20260318130000-2" author="mercotrace">
+        <sql>CREATE UNIQUE INDEX ux_contact_mark_self_registered ON contact (mark) WHERE trader_id IS NULL AND mark IS NOT NULL</sql>
+    </changeSet>
+</databaseChangeLog>

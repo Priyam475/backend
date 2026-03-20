@@ -15,6 +15,8 @@ public class TraderRbacUserVM {
     private Boolean activated;
     private String roleInTrader;
     private Set<Long> roleIds;
+    /** When includeRemoved=true, false means this user was soft-deleted (removed) from the trader. */
+    private Boolean mappingActive;
 
     public Long getId() {
         return id;
@@ -78,6 +80,14 @@ public class TraderRbacUserVM {
 
     public void setRoleIds(Set<Long> roleIds) {
         this.roleIds = roleIds;
+    }
+
+    public Boolean getMappingActive() {
+        return mappingActive;
+    }
+
+    public void setMappingActive(Boolean mappingActive) {
+        this.mappingActive = mappingActive;
     }
 }
 

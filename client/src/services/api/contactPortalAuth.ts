@@ -11,8 +11,7 @@ export interface ContactPortalProfile {
   name: string;
   phone: string;
   email?: string;
-  /** Contact type: BUYER, BROKER, AGENT, SELLER. */
-  type?: string;
+  mark?: string;
   can_login?: boolean;
   /** True when this session is a guest (no persisted Contact). */
   is_guest?: boolean;
@@ -23,10 +22,67 @@ type ContactDto = {
   name?: string;
   phone?: string;
   email?: string;
-  type?: string;
+  mark?: string;
   canLogin?: boolean;
   can_login?: boolean;
 };
+
+/** Strip HTTP status codes (e.g. "409 CONFLICT") from error messages — show only user-friendly text. */
+function sanitizeErrorMessage(msg: string): string {
+  return msg
+    .replace(/^\s*\d{3}\s+(?:CONFLICT|Conflict)\s*[:\s"']*/gi, '')
+    .replace(/^\s*\d{3}\s*[:\s"']+/g, '')
+    .replace(/^(?:CONFLICT|Conflict)\s*[:\s"']+/gi, '')
+    .trim()
+    || msg.trim();
+}
+
+/** Return clean user message for known conflict/error patterns (avoids showing 409 CONFLICT etc). */
+function messageForKnownError(detail: string): string | null {
+  const d = detail.toLowerCase();
+  if (d.includes('mark is already in use')) return 'This mark is already in use by another contact.';
+  if (d.includes('contact is already registered with this phone')) return 'A contact is already registered with this phone number.';
+  if (d.includes('contact is already registered with this email')) return 'A contact is already registered with this email address.';
+  if (d.includes('this mobile number is already in use')) return 'This mobile number is already in use.';
+  return null;
+}
+
+/** Parse registration error response to show specific validation messages instead of generic "failed to register". */
+async function parseRegistrationError(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
+      try {
+        const problem: ProblemDetails = JSON.parse(text);
+        const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
+
+        if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
+          return 'This mobile number is already in use.';
+        }
+        if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
+          const known = messageForKnownError(problem.detail);
+          if (known) return known;
+          return sanitizeErrorMessage(problem.detail);
+        }
+        if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
+          const cleaned = sanitizeErrorMessage(problem.title);
+          if (cleaned && cleaned !== 'Conflict') return cleaned;
+        }
+      } catch {
+        // not valid JSON, fall through to use raw text
+      }
+    }
+    if (text && text.length > 0 && text.length < 300) {
+      const known = messageForKnownError(text);
+      if (known) return known;
+      return sanitizeErrorMessage(text);
+    }
+  } catch {
+    // ignore
+  }
+  return 'Registration failed. Please check your details and try again.';
+}
 
 function mapDtoToProfile(dto: ContactDto): ContactPortalProfile {
   const id = dto.id ?? '';
@@ -35,7 +91,7 @@ function mapDtoToProfile(dto: ContactDto): ContactPortalProfile {
     name: dto.name ?? '',
     phone: dto.phone ?? '',
     email: dto.email,
-    type: dto.type,
+    mark: dto.mark,
     can_login: dto.can_login ?? dto.canLogin,
     is_guest: false,
   };
@@ -59,7 +115,7 @@ export const contactPortalAuthApi = {
     password: string;
     email?: string;
     name?: string;
-    type: string;
+    mark: string;
   }): Promise<ContactPortalProfile> {
     const res = await apiFetch('/auth/register-contact', {
       method: 'POST',
@@ -68,35 +124,12 @@ export const contactPortalAuthApi = {
         password: data.password,
         email: data.email,
         name: data.name,
-        type: data.type,
+        mark: data.mark,
       }),
     });
 
     if (!res.ok) {
-      let message = 'Signup failed. Please try again.';
-      try {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
-          const problem: ProblemDetails = await res.json();
-          const errorKey = typeof problem.message === 'string' ? problem.message : undefined;
-
-          if (errorKey === 'error.contactPortal.phone.alreadyUsedByTrader') {
-            // Do not reveal whether this mobile belongs to a trader, staff user, or admin.
-            message = 'This mobile number is already in use.';
-          } else if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
-            message = problem.detail;
-          } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
-            message = problem.title;
-          }
-        } else {
-          const text = await res.text();
-          if (text && text.length < 200) {
-            message = text;
-          }
-        }
-      } catch {
-        // ignore
-      }
+      const message = await parseRegistrationError(res);
       throw new Error(message);
     }
 

@@ -117,7 +117,7 @@ class VoucherHeaderResourceIT {
             .andExpect(status().isCreated())
             .andExpect(header().string("Location", containsString(BASE_URL + "/")))
             .andExpect(jsonPath("$.voucherId").isNotEmpty())
-            .andExpect(jsonPath("$.voucherNumber").value(containsString("KT/JV/")))
+            .andExpect(jsonPath("$.voucherNumber").value(containsString("VP/JV/")))
             .andExpect(jsonPath("$.narration").value("IT test voucher"))
             .andExpect(jsonPath("$.status").value("DRAFT"))
             .andExpect(jsonPath("$.totalDebit").value(100))
@@ -132,7 +132,7 @@ class VoucherHeaderResourceIT {
         VoucherHeader header = new VoucherHeader();
         header.setTraderId(101L);
         header.setVoucherType(VoucherType.RECEIPT);
-        header.setVoucherNumber("KT/RV/001");
+        header.setVoucherNumber("VP/RV/001");
         header.setVoucherDate(java.time.LocalDate.now());
         header.setNarration("IT get test");
         header.setStatus(com.mercotrace.domain.enumeration.VoucherLifecycleStatus.DRAFT);
@@ -147,7 +147,7 @@ class VoucherHeaderResourceIT {
             .perform(get(BASE_URL + "/" + header.getId()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.voucherId").value(header.getId().toString()))
-            .andExpect(jsonPath("$.voucherNumber").value("KT/RV/001"))
+            .andExpect(jsonPath("$.voucherNumber").value("VP/RV/001"))
             .andExpect(jsonPath("$.narration").value("IT get test"))
             .andExpect(jsonPath("$.lines").isArray());
     }

@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Mail, Phone, Lock, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Phone, Lock, User as UserIcon, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useContactAuth } from '@/context/ContactAuthContext';
 
@@ -18,13 +17,15 @@ const ContactPortalSignupPage = () => {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [type, setType] = useState('');
-  const [touched, setTouched] = useState({ phone: false, password: false, email: false, name: false, type: false });
+  const [mark, setMark] = useState('');
+  const [touched, setTouched] = useState({ phone: false, password: false, email: false, name: false, mark: false });
 
   const phoneRegex = /^[6-9]\d{9}$/;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   /** Allows letters and spaces only (no digits, punctuation, or other symbols) */
   const nameRegex = /^[A-Za-z ]+$/;
+  /** Alphanumeric only (letters and numbers, no special symbols) */
+  const markRegex = /^[A-Za-z0-9]+$/;
 
   const phoneError =
     touched.phone && !phone
@@ -46,19 +47,26 @@ const ContactPortalSignupPage = () => {
   const nameError =
     touched.name && name && !nameRegex.test(name) ? 'Only letters and spaces allowed' : '';
 
-  const typeError =
-    touched.type && !type ? 'Contact type is required' : '';
+  const markError =
+    touched.mark && !mark
+      ? 'Mark is required'
+      : touched.mark && mark && !markRegex.test(mark)
+      ? 'Only letters and numbers allowed (no spaces or symbols)'
+      : touched.mark && mark.length > 20
+      ? 'Mark must be at most 20 characters'
+      : '';
 
   const isFormValid =
     phoneRegex.test(phone) &&
     password.length >= 6 &&
     (!email || emailRegex.test(email)) &&
     (!name || nameRegex.test(name)) &&
-    !!type;
+    !!mark.trim() &&
+    mark.trim().length <= 20;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ phone: true, password: true, email: true, name: true, type: true });
+    setTouched({ phone: true, password: true, email: true, name: true, mark: true });
     if (!isFormValid) return;
     try {
       await signup({
@@ -66,7 +74,7 @@ const ContactPortalSignupPage = () => {
         password,
         email: email || undefined,
         name: name || undefined,
-        type,
+        mark: mark.trim(),
       });
       navigate('/contact', { replace: true });
     } catch {
@@ -126,7 +134,7 @@ const ContactPortalSignupPage = () => {
             className="text-center mb-6"
           >
             <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 drop-shadow-lg">
-              Contact (Seller / Buyer / Broker / Agent)
+              Contact Registration
             </h1>
             <p className="text-white/70 text-sm sm:text-base">
               Minimal details now. Add full profile later.
@@ -208,6 +216,35 @@ const ContactPortalSignupPage = () => {
 
             <div>
               <label className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-1 block">
+                Mark *
+              </label>
+              <div className="relative">
+                <Tag className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-800/60" aria-hidden="true" />
+                <Input
+                  type="text"
+                  placeholder="e.g. RJ"
+                  value={mark}
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 20);
+                    setMark(val);
+                    clearError();
+                  }}
+                  onBlur={() => setTouched(p => ({ ...p, mark: true }))}
+                  className="pl-12 h-12 sm:h-14 text-base sm:text-lg rounded-xl bg-white/90 border-0 text-emerald-900 placeholder:text-emerald-400"
+                  maxLength={20}
+                  required
+                  aria-invalid={!!markError}
+                />
+              </div>
+              {markError && (
+                <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
+                  {markError}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-1 block">
                 Email (optional)
               </label>
               <div className="relative">
@@ -254,34 +291,6 @@ const ContactPortalSignupPage = () => {
               {nameError && (
                 <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
                   {nameError}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-1 block">
-                Contact Type *
-              </label>
-              <Select
-                value={type}
-                onValueChange={value => {
-                  setType(value);
-                  clearError();
-                }}
-              >
-                <SelectTrigger className="h-12 sm:h-14 rounded-xl bg-white/90 border-0 text-emerald-900">
-                  <SelectValue placeholder="Select contact type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="BUYER">Buyer</SelectItem>
-                  <SelectItem value="BROKER">Broker</SelectItem>
-                  <SelectItem value="AGENT">Agent</SelectItem>
-                  <SelectItem value="SELLER">Seller</SelectItem>
-                </SelectContent>
-              </Select>
-              {typeError && (
-                <p className="text-xs text-red-200 mt-1 ml-1" role="alert">
-                  {typeError}
                 </p>
               )}
             </div>

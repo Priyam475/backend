@@ -3,7 +3,9 @@ package com.mercotrace.security;
 import com.mercotrace.domain.Authority;
 import com.mercotrace.domain.User;
 import com.mercotrace.repository.UserRepository;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Locale;
 import org.hibernate.validator.internal.constraintvalidators.hv.EmailValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,10 +81,16 @@ public class DomainUserDetailsService implements UserDetailsService {
         }
 
         public static UserWithId fromUser(User user) {
+            Collection<GrantedAuthority> auths = new ArrayList<>();
+            if (user.getAuthorities() != null) {
+                for (Authority a : user.getAuthorities()) {
+                    auths.add(new SimpleGrantedAuthority(a.getName()));
+                }
+            }
             return new UserWithId(
                 user.getLogin(),
                 user.getPassword(),
-                user.getAuthorities().stream().map(Authority::getName).map(SimpleGrantedAuthority::new).toList(),
+                auths,
                 user.getId()
             );
         }

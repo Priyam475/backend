@@ -17,6 +17,7 @@ type TraderDTO = {
   billPrefix?: string;
   createdAt?: string;
   updatedAt?: string;
+  active?: boolean;
 };
 
 function mapDtoToTrader(dto: TraderDTO): Trader {
@@ -36,6 +37,7 @@ function mapDtoToTrader(dto: TraderDTO): Trader {
     shop_photos: [],
     created_at: dto.createdAt ?? new Date().toISOString(),
     updated_at: dto.updatedAt ?? new Date().toISOString(),
+    active: dto.active ?? true,
   };
 }
 
@@ -44,7 +46,7 @@ export const traderApi = {
     const form = new FormData();
     files.forEach(f => form.append('files', f));
 
-    const res = await fetch(`${API_BASE}/traders/${traderId}/photos`, {
+    const res = await apiFetch(`/traders/${traderId}/photos`, {
       method: 'POST',
       body: form,
     });
@@ -72,6 +74,35 @@ export const traderApi = {
     if (!res.ok) throw new Error('Failed to approve trader');
     const dto = (await res.json()) as TraderDTO;
     return mapDtoToTrader(dto);
+  },
+
+  /** Admin: list inactive traders (GET /api/admin/traders/inactive). */
+  async listInactive(params: { page?: number; size?: number } = {}): Promise<Trader[]> {
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(params.page ?? 0));
+    searchParams.set('size', String(params.size ?? 100));
+    const res = await apiFetch(`/admin/traders/inactive?${searchParams.toString()}`, { method: 'GET' });
+    if (!res.ok) throw new Error('Failed to load inactive traders');
+    const data = (await res.json()) as TraderDTO[];
+    return (Array.isArray(data) ? data : []).map(mapDtoToTrader);
+  },
+
+  /** Admin: activate trader (PATCH /api/admin/traders/{id}/activate). Returns 204, no body. */
+  async activate(traderId: string): Promise<void> {
+    const res = await apiFetch(`/admin/traders/${encodeURIComponent(traderId)}/activate`, { method: 'PATCH' });
+    if (!res.ok) throw new Error('Failed to activate trader');
+  },
+
+  /** Admin: deactivate trader (PATCH /api/admin/traders/{id}/deactivate). Returns 204, no body. */
+  async deactivate(traderId: string): Promise<void> {
+    const res = await apiFetch(`/admin/traders/${encodeURIComponent(traderId)}/deactivate`, { method: 'PATCH' });
+    if (!res.ok) throw new Error('Failed to deactivate trader');
+  },
+
+  /** Admin: permanently delete an inactive trader (DELETE /api/admin/traders/{id}/permanent). */
+  async permanentDelete(traderId: string): Promise<void> {
+    const res = await apiFetch(`/admin/traders/${encodeURIComponent(traderId)}/permanent`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to permanently delete trader');
   },
 };
 

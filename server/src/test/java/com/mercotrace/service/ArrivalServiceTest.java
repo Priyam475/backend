@@ -2,6 +2,7 @@ package com.mercotrace.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
@@ -11,6 +12,8 @@ import com.mercotrace.domain.SellerInVehicle;
 import com.mercotrace.domain.Vehicle;
 import com.mercotrace.domain.VehicleWeight;
 import com.mercotrace.domain.enumeration.FreightMethod;
+import com.mercotrace.repository.AuctionEntryRepository;
+import com.mercotrace.repository.AuctionRepository;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.repository.DailySerialRepository;
@@ -21,6 +24,7 @@ import com.mercotrace.repository.SellerInVehicleRepository;
 import com.mercotrace.repository.VehicleRepository;
 import com.mercotrace.repository.VehicleWeightRepository;
 import com.mercotrace.repository.VoucherRepository;
+import com.mercotrace.repository.WeighingSessionRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -67,6 +71,18 @@ class ArrivalServiceTest {
 
     @Mock
     private ContactRepository contactRepository;
+
+    @Mock
+    private AuctionRepository auctionRepository;
+
+    @Mock
+    private AuctionEntryRepository auctionEntryRepository;
+
+    @Mock
+    private WeighingSessionRepository weighingSessionRepository;
+
+    @Mock
+    private ContactService contactService;
 
     @Mock
     private TraderContextService traderContextService;
@@ -126,12 +142,16 @@ class ArrivalServiceTest {
         when(sellerInVehicleRepository.findAllByVehicleIdIn(List.of(10L))).thenReturn(List.of(s1, s2));
 
         Lot l1 = new Lot();
+        l1.setId(100L);
         l1.setSellerVehicleId(1L);
         l1.setBagCount(5);
         Lot l2 = new Lot();
+        l2.setId(101L);
         l2.setSellerVehicleId(2L);
         l2.setBagCount(7);
         when(lotRepository.findAllBySellerVehicleIdIn(List.of(1L, 2L))).thenReturn(List.of(l1, l2));
+        when(auctionRepository.findAllByLotIdIn(anyList())).thenReturn(List.of());
+        when(weighingSessionRepository.findByLotIdIn(anyList())).thenReturn(List.of());
 
         Page<?> result = arrivalService.listArrivals(pageable);
 

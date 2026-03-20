@@ -30,7 +30,21 @@ public interface UserTraderRepository extends JpaRepository<UserTrader, Long> {
     )
     List<UserTrader> findAllWithUserByTraderIdAndPrimaryMappingTrue(@Param("traderId") Long traderId);
 
+    /**
+     * Same as above but only active (non soft-deleted) mappings. Use for listing staff users.
+     */
+    @Query(
+        "select ut from UserTrader ut " +
+        "join fetch ut.user u " +
+        "where ut.trader.id = :traderId and ut.primaryMapping = true and ut.active = true"
+    )
+    List<UserTrader> findAllWithUserByTraderIdAndPrimaryMappingTrueAndActiveTrue(@Param("traderId") Long traderId);
+
     Optional<UserTrader> findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(Long userId, Long traderId);
+
+    Optional<UserTrader> findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(Long userId);
+
+    Optional<UserTrader> findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(Long userId, Long traderId);
 }
 
 

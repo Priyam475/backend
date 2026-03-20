@@ -45,6 +45,14 @@ public class LotSummaryDTO implements Serializable {
     @JsonProperty("sold_bags")
     private Integer soldBags;
 
+    /** Total bags for the whole vehicle (all sellers on same vehicle). For lot identifier: Vehicle QTY. */
+    @JsonProperty("vehicle_total_qty")
+    private Integer vehicleTotalQty;
+
+    /** Total bags for this seller (all lots of that seller). For lot identifier: Seller QTY. */
+    @JsonProperty("seller_total_qty")
+    private Integer sellerTotalQty;
+
     public Long getLotId() {
         return lotId;
     }
@@ -139,6 +147,22 @@ public class LotSummaryDTO implements Serializable {
 
     public void setSoldBags(Integer soldBags) {
         this.soldBags = soldBags;
+    }
+
+    public Integer getVehicleTotalQty() {
+        return vehicleTotalQty;
+    }
+
+    public void setVehicleTotalQty(Integer vehicleTotalQty) {
+        this.vehicleTotalQty = vehicleTotalQty;
+    }
+
+    public Integer getSellerTotalQty() {
+        return sellerTotalQty;
+    }
+
+    public void setSellerTotalQty(Integer sellerTotalQty) {
+        this.sellerTotalQty = sellerTotalQty;
     }
 }
 

@@ -34,6 +34,18 @@ function lotDisplay(bid: BidInfo): string {
   return String(bid.lotNumber);
 }
 
+/**
+ * Lot identifier format: Vehicle QTY / Seller QTY / Lot Name - Lot QTY (e.g. 320/320/110-110).
+ * Aligns with AuctionsPage format for list display and search consistency.
+ */
+export function formatLotIdentifierForBid(bid: BidInfo): string {
+  const vTotal = bid.vehicleTotalQty ?? bid.quantity;
+  const sTotal = bid.sellerVehicleQty ?? bid.quantity;
+  const lotName = (bid.lotName || '').trim() || String(bid.lotNumber);
+  const lotQty = bid.quantity;
+  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+}
+
 function todayStr(): string {
   return new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }

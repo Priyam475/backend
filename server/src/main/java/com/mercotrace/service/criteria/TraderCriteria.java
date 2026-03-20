@@ -78,6 +78,8 @@ public class TraderCriteria implements Serializable, Criteria {
 
     private Boolean distinct;
 
+    private BooleanFilter active;
+
     public TraderCriteria() {}
 
     public TraderCriteria(TraderCriteria other) {
@@ -91,6 +93,7 @@ public class TraderCriteria implements Serializable, Criteria {
         this.createdAt = other.optionalCreatedAt().map(InstantFilter::copy).orElse(null);
         this.updatedAt = other.optionalUpdatedAt().map(InstantFilter::copy).orElse(null);
         this.distinct = other.distinct;
+        this.active = other.optionalActive().map(BooleanFilter::copy).orElse(null);
     }
 
     @Override
@@ -288,6 +291,25 @@ public class TraderCriteria implements Serializable, Criteria {
         this.distinct = distinct;
     }
 
+    public BooleanFilter getActive() {
+        return active;
+    }
+
+    public Optional<BooleanFilter> optionalActive() {
+        return Optional.ofNullable(active);
+    }
+
+    public BooleanFilter active() {
+        if (active == null) {
+            setActive(new BooleanFilter());
+        }
+        return active;
+    }
+
+    public void setActive(BooleanFilter active) {
+        this.active = active;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -307,7 +329,8 @@ public class TraderCriteria implements Serializable, Criteria {
             Objects.equals(billPrefix, that.billPrefix) &&
             Objects.equals(createdAt, that.createdAt) &&
             Objects.equals(updatedAt, that.updatedAt) &&
-            Objects.equals(distinct, that.distinct)
+            Objects.equals(distinct, that.distinct) &&
+            Objects.equals(active, that.active)
         );
     }
 
@@ -323,7 +346,8 @@ public class TraderCriteria implements Serializable, Criteria {
             billPrefix,
             createdAt,
             updatedAt,
-            distinct
+            distinct,
+            active
         );
     }
 
@@ -341,6 +365,7 @@ public class TraderCriteria implements Serializable, Criteria {
             optionalCreatedAt().map(f -> "createdAt=" + f + ", ").orElse("") +
             optionalUpdatedAt().map(f -> "updatedAt=" + f + ", ").orElse("") +
             optionalDistinct().map(f -> "distinct=" + f + ", ").orElse("") +
+            optionalActive().map(f -> "active=" + f + ", ").orElse("") +
         "}";
     }
 }

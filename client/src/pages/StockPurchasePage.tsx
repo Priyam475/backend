@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Box, Search, Plus, Trash2, Save, Package, User, DollarSign, TrendingUp, ShoppingCart
+  ArrowLeft, Box, Search, Plus, Trash2, Save, Package, User, TrendingUp, ShoppingCart
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { contactApi, stockPurchaseApi, commodityApi } from '@/services/api';
 import type { Contact, Commodity } from '@/types/models';
 import type { StockPurchaseDTO } from '@/services/api';
@@ -58,6 +59,8 @@ const StockPurchasePage = () => {
   const [items, setItems] = useState<PurchaseLineItem[]>([{ id: crypto.randomUUID(), commodityId: '', quantity: 0, rate: 0, amount: 0 }]);
   const [charges, setCharges] = useState<PurchaseCharge[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Hide autocomplete after dismiss until user focuses / edits search again */
+  const [vendorResultsDismissed, setVendorResultsDismissed] = useState(false);
 
   const pageSize = 10;
 
@@ -82,9 +85,21 @@ const StockPurchasePage = () => {
   useEffect(() => {
     if (!showForm) return;
     setVendorsLoading(true);
+    /** Participants scope = trader-owned contacts + global (network) contacts for mandi pool — correct for vendors / suppliers. */
     contactApi
-      .list()
-      .then(c => setVendors(c.filter(v => v.type === 'SELLER')))
+      .list({ scope: 'participants' })
+      .then((c) => {
+        const seen = new Set<string>();
+        const unique: Contact[] = [];
+        for (const v of c) {
+          const id = String(v.contact_id ?? '').trim();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          unique.push(v);
+        }
+        unique.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+        setVendors(unique);
+      })
       .catch(() => setVendors([]))
       .finally(() => setVendorsLoading(false));
   }, [showForm]);
@@ -103,11 +118,38 @@ const StockPurchasePage = () => {
     loadPurchases(0);
   }, [search]);
 
+  useEffect(() => {
+    if (showForm) setVendorResultsDismissed(false);
+  }, [showForm]);
+
   const filteredVendors = useMemo(() => {
-    if (!vendorSearch) return vendors;
-    const q = vendorSearch.toLowerCase();
-    return vendors.filter(v => v.name?.toLowerCase().includes(q) || v.phone?.includes(q));
+    const raw = vendorSearch.trim();
+    if (!raw) return [];
+    const q = raw.toLowerCase();
+    return vendors.filter(
+      v =>
+        v.name?.toLowerCase().includes(q) ||
+        v.phone?.includes(raw) ||
+        v.mark?.toLowerCase().includes(q)
+    );
   }, [vendors, vendorSearch]);
+
+  /** Autocomplete: show at most this many matches in the floating panel */
+  const VENDOR_SEARCH_MAX_RESULTS = 25;
+  const vendorSearchMatches = useMemo(
+    () => filteredVendors.slice(0, VENDOR_SEARCH_MAX_RESULTS),
+    [filteredVendors]
+  );
+  const vendorSearchHasMore = filteredVendors.length > VENDOR_SEARCH_MAX_RESULTS;
+
+  const searchQuery = vendorSearch.trim();
+  const showVendorAutocomplete =
+    !vendorsLoading &&
+    !selectedVendor &&
+    searchQuery.length >= 1 &&
+    !vendorResultsDismissed;
+
+  const isNetworkContact = (v: Contact) => !v.trader_id || String(v.trader_id).trim() === '';
 
   const subtotal = useMemo(() => items.reduce((s, i) => s + i.amount, 0), [items]);
   const totalCharges = useMemo(() => charges.reduce((s, c) => s + c.amount, 0), [charges]);
@@ -139,9 +181,10 @@ const StockPurchasePage = () => {
       toast.error('Select a commodity for every line item');
       return;
     }
-    const vendorId = Number(selectedVendor.contact_id);
-    if (!Number.isFinite(vendorId)) {
-      toast.error('Invalid vendor');
+    const rawVendorId = String(selectedVendor.contact_id ?? '').trim();
+    const vendorId = Number(rawVendorId);
+    if (!rawVendorId || !Number.isFinite(vendorId) || vendorId <= 0 || !Number.isInteger(vendorId)) {
+      toast.error('Invalid vendor — select a contact again');
       return;
     }
     if (!can('Stock Purchase', 'Create')) {
@@ -179,6 +222,7 @@ const StockPurchasePage = () => {
   const resetForm = () => {
     setSelectedVendor(null);
     setVendorSearch('');
+    setVendorResultsDismissed(false);
     setItems([{ id: crypto.randomUUID(), commodityId: '', quantity: 0, rate: 0, amount: 0 }]);
     setCharges([]);
   };
@@ -342,8 +386,13 @@ const StockPurchasePage = () => {
 
       {/* Purchase Form Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className={cn("sm:max-w-2xl max-h-[85vh] overflow-y-auto", isDesktop && "glass-card")}>
-          <DialogHeader>
+        <DialogContent
+          className={cn(
+            'sm:max-w-2xl max-h-[90vh] overflow-visible flex flex-col gap-0',
+            isDesktop && 'glass-card'
+          )}
+        >
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center">
                 <Box className="w-4 h-4 text-white" />
@@ -353,35 +402,111 @@ const StockPurchasePage = () => {
             <DialogDescription>Record purchase from vendor with cost allocation</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="min-h-0 max-h-[min(68vh,520px)] overflow-y-auto overflow-x-visible space-y-4 py-2 pr-1 -mr-0.5">
             {/* Vendor Selection */}
             <div>
               <label className="text-xs font-bold text-teal-700 dark:text-teal-400 mb-1.5 block uppercase tracking-wide">Vendor</label>
               {selectedVendor ? (
                 <div className="rounded-xl p-3 flex items-center justify-between bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800/50">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center">
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center shrink-0">
                       <User className="w-4 h-4 text-white" />
                     </div>
-                    <span className="font-bold text-sm">{selectedVendor.name}</span>
-                    <span className="text-xs text-muted-foreground">{selectedVendor.phone}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm">{selectedVendor.name}</span>
+                        {isNetworkContact(selectedVendor) ? (
+                          <span className="text-[10px] font-semibold uppercase rounded-md px-1.5 py-0.5 bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">Network</span>
+                        ) : (
+                          <span className="text-[10px] font-semibold uppercase rounded-md px-1.5 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">Trader</span>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{selectedVendor.phone}{selectedVendor.mark ? ` · ${selectedVendor.mark}` : ''}</span>
+                    </div>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedVendor(null)}>Change</Button>
                 </div>
               ) : (
                 <div>
-                  <Input placeholder="Search vendor by name or phone…" value={vendorSearch} onChange={e => setVendorSearch(e.target.value)} className="h-11" disabled={vendorsLoading} />
+                  <Popover
+                    open={showVendorAutocomplete}
+                    onOpenChange={(open) => {
+                      if (!open) setVendorResultsDismissed(true);
+                    }}
+                  >
+                    <PopoverAnchor asChild>
+                      <div className="relative w-full">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
+                        <Input
+                          placeholder="Type name, phone, or mark to search…"
+                          value={vendorSearch}
+                          onChange={e => {
+                            setVendorSearch(e.target.value);
+                            setVendorResultsDismissed(false);
+                          }}
+                          onFocus={() => setVendorResultsDismissed(false)}
+                          className="h-11 pl-10"
+                          disabled={vendorsLoading}
+                          autoComplete="off"
+                          aria-autocomplete="list"
+                          aria-expanded={showVendorAutocomplete}
+                        />
+                      </div>
+                    </PopoverAnchor>
+                    <PopoverContent
+                      align="start"
+                      side="bottom"
+                      sideOffset={6}
+                      collisionPadding={16}
+                      className="p-0 max-h-56 overflow-y-auto rounded-xl border border-border bg-popover shadow-lg z-[200] w-[var(--radix-popper-anchor-width)] min-w-[min(100vw-2rem,24rem)]"
+                      role="listbox"
+                      onOpenAutoFocus={e => e.preventDefault()}
+                    >
+                      {vendorSearchMatches.length > 0 ? (
+                        <>
+                          {vendorSearchMatches.map(v => (
+                            <button
+                              key={v.contact_id}
+                              type="button"
+                              role="option"
+                              onMouseDown={e => e.preventDefault()}
+                              onClick={() => {
+                                setSelectedVendor(v);
+                                setVendorSearch('');
+                                setVendorResultsDismissed(false);
+                              }}
+                              className="w-full text-left px-3 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm transition-colors border-b border-border/40 last:border-0 flex items-center justify-between gap-2"
+                            >
+                              <span className="min-w-0">
+                                <span className="font-medium">{v.name}</span>
+                                <span className="text-muted-foreground"> · {v.phone}</span>
+                                {v.mark ? <span className="text-muted-foreground"> · {v.mark}</span> : null}
+                              </span>
+                              {isNetworkContact(v) ? (
+                                <span className="shrink-0 text-[10px] font-semibold uppercase rounded-md px-1.5 py-0.5 bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">Network</span>
+                              ) : (
+                                <span className="shrink-0 text-[10px] font-semibold uppercase rounded-md px-1.5 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">Trader</span>
+                              )}
+                            </button>
+                          ))}
+                          {vendorSearchHasMore && (
+                            <p className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border/50 bg-muted/30">
+                              Showing first {VENDOR_SEARCH_MAX_RESULTS} matches — type more to narrow.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="px-3 py-3 text-xs text-muted-foreground">No contacts match. Try another spelling or phone.</p>
+                      )}
+                    </PopoverContent>
+                  </Popover>
                   {vendorsLoading && (
-                    <p className="mt-1.5 text-xs text-muted-foreground">Loading vendors…</p>
+                    <p className="mt-1.5 text-xs text-muted-foreground">Loading contacts (trader + network)…</p>
                   )}
-                  {!vendorsLoading && vendorSearch && (
-                    <div className="mt-1 max-h-32 overflow-y-auto border border-border rounded-xl bg-background">
-                      {filteredVendors.map(v => (
-                        <button key={v.contact_id} onClick={() => { setSelectedVendor(v); setVendorSearch(''); }}
-                          className="w-full text-left px-3 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-900/10 text-sm font-medium transition-colors">{v.name} · {v.phone}</button>
-                      ))}
-                      {filteredVendors.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No vendors found</p>}
-                    </div>
+                  {!vendorsLoading && (
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">
+                      {vendors.length} contact{vendors.length === 1 ? '' : 's'} in directory — type to search, then choose a match from the list.
+                    </p>
                   )}
                 </div>
               )}
@@ -462,7 +587,7 @@ const StockPurchasePage = () => {
             </div>
           </div>
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2 pt-3 mt-1 shrink-0 border-t border-border/60">
             <Button variant="outline" onClick={() => setShowForm(false)} className="flex-1 h-11" disabled={saving}>Cancel</Button>
             <Button onClick={handleSave} className="flex-1 h-11 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white font-bold shadow-lg" disabled={saving}>
               <Save className="w-4 h-4 mr-1.5" /> {saving ? 'Saving…' : 'Save Purchase'}

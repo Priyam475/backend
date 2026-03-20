@@ -2,16 +2,23 @@ package com.mercotrace.web.rest;
 
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.security.AuthoritiesConstants;
+import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.ContactIdentityService;
+import com.mercotrace.service.ContactListScope;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.TraderContextService;
+import com.mercotrace.service.VoucherLineService;
+import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ContactDTO;
+import com.mercotrace.service.dto.VoucherLineDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import java.time.LocalDate;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -48,16 +55,24 @@ public class ContactResource {
 
     private final ContactIdentityService contactIdentityService;
 
+    private final ChartOfAccountService chartOfAccountService;
+
+    private final VoucherLineService voucherLineService;
+
     public ContactResource(
         ContactService contactService,
         ContactRepository contactRepository,
         TraderContextService traderContextService,
-        ContactIdentityService contactIdentityService
+        ContactIdentityService contactIdentityService,
+        ChartOfAccountService chartOfAccountService,
+        VoucherLineService voucherLineService
     ) {
         this.contactService = contactService;
         this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
         this.contactIdentityService = contactIdentityService;
+        this.chartOfAccountService = chartOfAccountService;
+        this.voucherLineService = voucherLineService;
     }
 
     /**
@@ -97,6 +112,30 @@ public class ContactResource {
             );
         }
 
+        // Enforce mark uniqueness: per trader + global (self-registered contacts)
+        String mark = contactDTO.getMark();
+        if (mark != null && !mark.isBlank()) {
+            String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+        }
+
         contactDTO = contactService.save(contactDTO);
         return ResponseEntity.created(new URI("/api/contacts/" + contactDTO.getId()))
             .headers(HeaderUtil.createEntityCreationAlert(applicationName, true, ENTITY_NAME, contactDTO.getId().toString()))
@@ -128,13 +167,10 @@ public class ContactResource {
         }
 
         Long traderId = resolveTraderId();
-        contactService
+        ContactDTO existingDto = contactService
             .findOne(id)
-            .ifPresent(existing -> {
-                if (!Objects.equals(existing.getTraderId(), traderId)) {
-                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
-                }
-            });
+            .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
+        assertTraderMayEditContactRegistry(traderId, existingDto);
 
         contactDTO.setTraderId(traderId);
 
@@ -149,6 +185,30 @@ public class ContactResource {
                     throw new BadRequestAlertException("This phone number is already registered", ENTITY_NAME, "phoneexists");
                 }
             });
+
+        // Enforce mark uniqueness: global + per trader, excluding the current record
+        String mark = contactDTO.getMark();
+        if (mark != null && !mark.isBlank()) {
+            String trimmedMark = mark.trim();
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmedMark, id)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+        }
 
         contactDTO = contactService.update(contactDTO);
         return ResponseEntity.ok()
@@ -182,17 +242,37 @@ public class ContactResource {
         }
 
         Long traderId = resolveTraderId();
-        contactService
+        ContactDTO existingDto = contactService
             .findOne(id)
-            .ifPresent(existing -> {
-                if (!Objects.equals(existing.getTraderId(), traderId)) {
-                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
-                }
-            });
+            .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
+        assertTraderMayEditContactRegistry(traderId, existingDto);
 
         // If phone is being updated, enforce global mobile uniqueness
         if (contactDTO.getPhone() != null) {
             contactIdentityService.assertMobileAvailableForContact(contactDTO.getPhone(), id);
+        }
+
+        // If mark is being updated, enforce uniqueness: per trader AND globally
+        if (contactDTO.getMark() != null && !contactDTO.getMark().isBlank()) {
+            String trimmedMark = contactDTO.getMark().trim();
+            contactRepository
+                .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmedMark, id)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by another contact",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
+            contactRepository
+                .findOneByMarkAndTraderIdIsNull(trimmedMark)
+                .ifPresent(existing -> {
+                    throw new BadRequestAlertException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark.",
+                        ENTITY_NAME,
+                        "markexists"
+                    );
+                });
         }
 
         Optional<ContactDTO> result = contactService.partialUpdate(contactDTO);
@@ -204,18 +284,20 @@ public class ContactResource {
     }
 
     /**
-     * {@code GET  /contacts} : get all the contacts.
+     * {@code GET  /contacts} : contacts for the current trader.
      *
-     * For module 1, this returns all contacts regardless of trader. Later we can scope to current trader.
-     *
-     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of contacts in body.
+     * @param scope {@code registry} (Contacts module: trader-owned + portal participants already used here) or
+     *              {@code participants} (Arrivals/Auctions: trader-owned + all active self-signup contacts).
      */
     @GetMapping("")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\")")
-    public ResponseEntity<List<ContactDTO>> getAllContacts() {
-        LOG.debug("REST request to get all Contacts for current trader");
+    public ResponseEntity<List<ContactDTO>> getAllContacts(
+        @RequestParam(name = "scope", required = false, defaultValue = "registry") String scope
+    ) {
+        LOG.debug("REST request to get Contacts for current trader, scope={}", scope);
         Long traderId = resolveTraderId();
-        List<ContactDTO> list = contactService.findAllByTrader(traderId);
+        ContactListScope listScope = parseContactListScope(scope);
+        List<ContactDTO> list = contactService.listContacts(traderId, listScope);
         return ResponseEntity.ok().body(list);
     }
 
@@ -246,9 +328,7 @@ public class ContactResource {
     public ResponseEntity<ContactDTO> getContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Contact : {}", id);
         Long traderId = resolveTraderId();
-        Optional<ContactDTO> contactDTO = contactService
-            .findOne(id)
-            .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        Optional<ContactDTO> contactDTO = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
         return ResponseUtil.wrapOrNotFound(contactDTO);
     }
 
@@ -274,6 +354,17 @@ public class ContactResource {
         return traderContextService.getCurrentTraderId();
     }
 
+    /** Trader-owned contacts, plus self-registered (traderId null) participants visible in lists and flows. */
+    private boolean isReadableParticipantContact(ContactDTO dto, Long traderId) {
+        if (dto == null || traderId == null) {
+            return false;
+        }
+        if (Objects.equals(dto.getTraderId(), traderId)) {
+            return true;
+        }
+        return dto.getTraderId() == null;
+    }
+
     /**
      * {@code DELETE  /contacts/:id} : delete the "id" contact.
      *
@@ -296,6 +387,52 @@ public class ContactResource {
     }
 
     /**
+     * {@code GET  /contacts/:id/ledgers} : get all ledgers linked to a contact.
+     * Trader-scoped. Validates contact exists and belongs to trader.
+     * Permission: CONTACTS_VIEW or CHART_OF_ACCOUNTS_VIEW.
+     */
+    @GetMapping("/{id}/ledgers")
+    @PreAuthorize(
+        "hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\") or " +
+        "hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")"
+    )
+    public ResponseEntity<List<ChartOfAccountDTO>> getContactLedgers(@PathVariable("id") Long id) {
+        LOG.debug("REST request to get ledgers for contact : {}", id);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
+        if (contact.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        List<ChartOfAccountDTO> ledgers = chartOfAccountService.getLedgersByContactId(id);
+        return ResponseEntity.ok().body(ledgers);
+    }
+
+    /**
+     * {@code GET  /contacts/:id/ledger-transactions} : get unified chronological transaction timeline
+     * for all ledgers of a contact. Optional dateFrom, dateTo. Excludes REVERSED vouchers.
+     * Permission: CONTACTS_VIEW or CHART_OF_ACCOUNTS_VIEW.
+     */
+    @GetMapping("/{id}/ledger-transactions")
+    @PreAuthorize(
+        "hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\") or " +
+        "hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")"
+    )
+    public ResponseEntity<List<VoucherLineDTO>> getContactLedgerTransactions(
+        @PathVariable("id") Long id,
+        @RequestParam(required = false) LocalDate dateFrom,
+        @RequestParam(required = false) LocalDate dateTo
+    ) {
+        LOG.debug("REST request to get ledger transactions for contact : {}, dateFrom={}, dateTo={}", id, dateFrom, dateTo);
+        Long traderId = resolveTraderId();
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
+        if (contact.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        List<VoucherLineDTO> lines = voucherLineService.getLinesByContactIdAndDateRange(id, dateFrom, dateTo);
+        return ResponseEntity.ok().body(lines);
+    }
+
+    /**
      * {@code GET  /contacts/search} : search contacts by mark for a trader.
      *
      * @param traderId the trader id (optional for now).
@@ -308,6 +445,30 @@ public class ContactResource {
         LOG.debug("REST request to search Contacts by mark for current trader. traderId={}, mark={}", traderId, mark);
         List<ContactDTO> list = contactService.searchByMark(traderId, mark);
         return ResponseEntity.ok().body(list);
+    }
+
+    private static ContactListScope parseContactListScope(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return ContactListScope.REGISTRY;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "participants", "participant" -> ContactListScope.PARTICIPANTS;
+            default -> ContactListScope.REGISTRY;
+        };
+    }
+
+    private void assertTraderMayEditContactRegistry(Long traderId, ContactDTO existing) {
+        if (Objects.equals(existing.getTraderId(), traderId)) {
+            return;
+        }
+        if (existing.getTraderId() == null && contactService.isPortalContactLinkedToTrader(traderId, existing.getId())) {
+            throw new BadRequestAlertException(
+                "This participant manages their profile via portal signup. Editing is not available from the trader registry.",
+                ENTITY_NAME,
+                "portalManagedContact"
+            );
+        }
+        throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
     }
 }
 

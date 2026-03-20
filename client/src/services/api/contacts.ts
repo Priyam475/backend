@@ -1,5 +1,7 @@
-import type { Contact, ContactType } from '@/types/models';
+import type { Contact } from '@/types/models';
 import { apiFetch } from './http';
+import type { ChartOfAccountDTO } from './chartOfAccounts';
+import type { VoucherLineDTO } from './voucherLines';
 
 type ContactDto = {
   id?: string | number;
@@ -16,10 +18,11 @@ type ContactDto = {
   opening_balance?: number;
   currentBalance?: number;
   current_balance?: number;
-  type?: ContactType;
   email?: string;
   canLogin?: boolean;
   can_login?: boolean;
+  portalSignupLinked?: boolean;
+  portal_signup_linked?: boolean;
 };
 
 function mapDtoToContact(dto: ContactDto): Contact {
@@ -34,11 +37,11 @@ function mapDtoToContact(dto: ContactDto): Contact {
     mark: dto.mark ?? '',
     address: dto.address ?? '',
     created_at: dto.created_at ?? dto.createdAt ?? new Date().toISOString(),
-    type: dto.type,
     opening_balance: dto.opening_balance ?? dto.openingBalance ?? 0,
     current_balance: dto.current_balance ?? dto.currentBalance ?? 0,
     email: dto.email,
     can_login: dto.can_login ?? dto.canLogin,
+    portal_signup_linked: dto.portal_signup_linked ?? dto.portalSignupLinked,
   };
 }
 
@@ -49,7 +52,6 @@ function mapContactToCreatePayload(data: Partial<Contact>): Record<string, unkno
     mark: data.mark?.trim() ?? '',
     address: data.address?.trim() ?? '',
     traderId: data.trader_id && data.trader_id.length > 0 ? data.trader_id : undefined,
-    type: data.type ?? undefined,
   };
 }
 
@@ -60,7 +62,6 @@ function mapContactToUpdatePayload(id: string, data: Partial<Contact>): Record<s
     phone: data.phone?.trim() ?? '',
     mark: data.mark?.trim() ?? '',
     address: data.address?.trim() ?? '',
-    type: data.type ?? undefined,
   };
 }
 
@@ -106,8 +107,10 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
 }
 
 export const contactApi = {
-  async list(): Promise<Contact[]> {
-    const res = await apiFetch('/contacts', {
+  /** @param scope registry = Contacts module list; participants = arrival/auction picker (trader + all portal signups). */
+  async list(opts?: { scope?: 'registry' | 'participants' }): Promise<Contact[]> {
+    const scope = opts?.scope ?? 'registry';
+    const res = await apiFetch(`/contacts?scope=${encodeURIComponent(scope)}`, {
       method: 'GET',
     });
     const data = await handleResponse<ContactDto[]>(res, 'Failed to load contacts');
@@ -129,6 +132,14 @@ export const contactApi = {
     });
     const created = await handleResponse<ContactDto>(res, 'Failed to register contact');
     return mapDtoToContact(created);
+  },
+
+  /** Get contact by id. Returns null if 404. */
+  async getById(contactId: string): Promise<Contact | null> {
+    const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}`, { method: 'GET' });
+    if (res.status === 404) return null;
+    const data = await handleResponse<ContactDto>(res, 'Failed to load contact');
+    return mapDtoToContact(data);
   },
 
   /** Get contact by phone (active or inactive) for restore flow. Returns null if 404. */
@@ -167,7 +178,7 @@ export const contactApi = {
   async search(mark: string): Promise<Contact[]> {
     const trimmed = mark.trim();
     if (!trimmed) {
-      return this.list();
+      return this.list({ scope: 'participants' });
     }
     const params = new URLSearchParams({ mark: trimmed });
     const res = await apiFetch(`/contacts/search?${params.toString()}`, {
@@ -175,6 +186,29 @@ export const contactApi = {
     });
     const data = await handleResponse<ContactDto[]>(res, 'Failed to search contacts');
     return data.map(mapDtoToContact);
+  },
+
+  /** Get all ledgers linked to a contact (Phase 6: Contact Consolidated Ledger View). */
+  async getContactLedgers(contactId: string): Promise<ChartOfAccountDTO[]> {
+    const res = await apiFetch(`/contacts/${encodeURIComponent(contactId)}/ledgers`, { method: 'GET' });
+    return handleResponse<ChartOfAccountDTO[]>(res, 'Failed to load contact ledgers');
+  },
+
+  /** Get unified chronological transaction timeline for all ledgers of a contact. */
+  async getContactLedgerTransactions(
+    contactId: string,
+    dateFrom?: string,
+    dateTo?: string
+  ): Promise<VoucherLineDTO[]> {
+    const params = new URLSearchParams();
+    if (dateFrom?.trim()) params.set('dateFrom', dateFrom.trim());
+    if (dateTo?.trim()) params.set('dateTo', dateTo.trim());
+    const qs = params.toString();
+    const url = qs
+      ? `/contacts/${encodeURIComponent(contactId)}/ledger-transactions?${qs}`
+      : `/contacts/${encodeURIComponent(contactId)}/ledger-transactions`;
+    const res = await apiFetch(url, { method: 'GET' });
+    return handleResponse<VoucherLineDTO[]>(res, 'Failed to load contact ledger transactions');
   },
 };
 

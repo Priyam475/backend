@@ -48,6 +48,7 @@ public class AuctionService {
     private final SellerInVehicleRepository sellerInVehicleRepository;
     private final VehicleRepository vehicleRepository;
     private final ContactRepository contactRepository;
+    private final ContactService contactService;
     private final CommodityRepository commodityRepository;
     private final TraderContextService traderContextService;
 
@@ -59,6 +60,7 @@ public class AuctionService {
         SellerInVehicleRepository sellerInVehicleRepository,
         VehicleRepository vehicleRepository,
         ContactRepository contactRepository,
+        ContactService contactService,
         CommodityRepository commodityRepository,
         TraderContextService traderContextService
     ) {
@@ -69,8 +71,24 @@ public class AuctionService {
         this.sellerInVehicleRepository = sellerInVehicleRepository;
         this.vehicleRepository = vehicleRepository;
         this.contactRepository = contactRepository;
+        this.contactService = contactService;
         this.commodityRepository = commodityRepository;
         this.traderContextService = traderContextService;
+    }
+
+    /** Contact-linked sellers: use contact name/mark. Free-text sellers (no contact): use SellerInVehicle fields. */
+    private static String resolveAuctionSellerName(Contact c, SellerInVehicle siv) {
+        if (c != null && c.getName() != null && !c.getName().isBlank()) {
+            return c.getName();
+        }
+        return siv != null && siv.getSellerName() != null && !siv.getSellerName().isBlank() ? siv.getSellerName() : null;
+    }
+
+    private static String resolveAuctionSellerMark(Contact c, SellerInVehicle siv) {
+        if (c != null && c.getMark() != null && !c.getMark().isBlank()) {
+            return c.getMark();
+        }
+        return siv != null && siv.getSellerMark() != null && !siv.getSellerMark().isBlank() ? siv.getSellerMark() : null;
     }
 
     /**
@@ -110,6 +128,29 @@ public class AuctionService {
         Map<Long, List<Auction>> lotToAuctions = auctions.stream().collect(Collectors.groupingBy(Auction::getLotId));
         Map<Long, List<AuctionEntry>> auctionToEntries = entries.stream().collect(Collectors.groupingBy(AuctionEntry::getAuctionId));
 
+        // Compute vehicle total qty and seller total qty for lot identifier (Vehicle QTY / Seller QTY / Lot Name-Lot QTY)
+        List<SellerInVehicle> allSivsForVehicles = sellerInVehicleRepository.findAllByVehicleIdIn(vehicleIds);
+        Set<Long> allSivIds = allSivsForVehicles.stream().map(SellerInVehicle::getId).collect(Collectors.toSet());
+        List<Lot> allLotsOnVehicles = allSivIds.isEmpty() ? List.of() : lotRepository.findAllBySellerVehicleIdIn(allSivIds);
+        Map<Long, Integer> vehicleIdToTotal = new HashMap<>();
+        Map<Long, Integer> sellerVehicleIdToTotal = new HashMap<>();
+        for (Lot l : allLotsOnVehicles) {
+            if (l.getSellerVehicleId() != null) {
+                sellerVehicleIdToTotal.merge(l.getSellerVehicleId(), l.getBagCount() != null ? l.getBagCount() : 0, Integer::sum);
+            }
+        }
+        for (Long vid : vehicleIds) {
+            List<Long> sivIdsOfVehicle = allSivsForVehicles.stream()
+                .filter(s -> vid.equals(s.getVehicleId()))
+                .map(SellerInVehicle::getId)
+                .toList();
+            int total = allLotsOnVehicles.stream()
+                .filter(l -> sivIdsOfVehicle.contains(l.getSellerVehicleId()))
+                .mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0)
+                .sum();
+            vehicleIdToTotal.put(vid, total);
+        }
+
         List<LotSummaryDTO> content = new ArrayList<>();
         for (Lot lot : lots) {
             LotSummaryDTO dto = toLotSummaryDTO(
@@ -119,7 +160,9 @@ public class AuctionService {
                 contactMap,
                 commodityMap.get(lot.getCommodityId()),
                 lotToAuctions.getOrDefault(lot.getId(), List.of()),
-                auctionToEntries
+                auctionToEntries,
+                vehicleIdToTotal,
+                sellerVehicleIdToTotal
             );
             if (statusFilter == null || statusFilter.isBlank() || statusFilter.equalsIgnoreCase(dto.getStatus())) {
                 content.add(dto);
@@ -135,7 +178,9 @@ public class AuctionService {
         Map<Long, Contact> contactMap,
         Commodity commodity,
         List<Auction> lotAuctions,
-        Map<Long, List<AuctionEntry>> auctionToEntries
+        Map<Long, List<AuctionEntry>> auctionToEntries,
+        Map<Long, Integer> vehicleIdToTotal,
+        Map<Long, Integer> sellerVehicleIdToTotal
     ) {
         LotSummaryDTO dto = new LotSummaryDTO();
         dto.setLotId(lot.getId());
@@ -149,8 +194,14 @@ public class AuctionService {
             Vehicle v = vehicleMap.get(siv.getVehicleId());
             Contact c = contactMap.get(siv.getContactId());
             dto.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
-            dto.setSellerName(c != null ? c.getName() : null);
-            dto.setSellerMark(c != null ? c.getMark() : null);
+            dto.setSellerName(resolveAuctionSellerName(c, siv));
+            dto.setSellerMark(resolveAuctionSellerMark(c, siv));
+            if (siv.getVehicleId() != null) {
+                dto.setVehicleTotalQty(vehicleIdToTotal.get(siv.getVehicleId()));
+            }
+        }
+        if (lot.getSellerVehicleId() != null) {
+            dto.setSellerTotalQty(sellerVehicleIdToTotal.get(lot.getSellerVehicleId()));
         }
         dto.setCommodityName(commodity != null ? commodity.getCommodityName() : null);
 
@@ -290,6 +341,10 @@ public class AuctionService {
             entry.setCreatedAt(Instant.now());
 
             auctionEntryRepository.save(entry);
+        }
+
+        if (request.getBuyerId() != null) {
+            contactService.ensureTraderUsesPortalContact(traderId, request.getBuyerId());
         }
 
         List<AuctionEntry> refreshed = auctionEntryRepository.findAllByAuctionId(auction.getId());
@@ -494,8 +549,19 @@ public class AuctionService {
                 Vehicle v = siv.getVehicleId() != null ? vehicleRepository.findById(siv.getVehicleId()).orElse(null) : null;
                 Contact c = siv.getContactId() != null ? contactRepository.findById(siv.getContactId()).orElse(null) : null;
                 lotSummary.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
-                lotSummary.setSellerName(c != null ? c.getName() : null);
-                lotSummary.setSellerMark(c != null ? c.getMark() : null);
+                lotSummary.setSellerName(resolveAuctionSellerName(c, siv));
+                lotSummary.setSellerMark(resolveAuctionSellerMark(c, siv));
+                // Vehicle total: sum of all lots on same vehicle. Seller total: sum of all lots for same seller.
+                if (siv.getVehicleId() != null) {
+                    List<SellerInVehicle> sivsOnVehicle = sellerInVehicleRepository.findAllByVehicleId(siv.getVehicleId());
+                    List<Long> sivIds = sivsOnVehicle.stream().map(SellerInVehicle::getId).toList();
+                    List<Lot> lotsOnVehicle = lotRepository.findAllBySellerVehicleIdIn(sivIds);
+                    int vehicleTotal = lotsOnVehicle.stream().mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0).sum();
+                    lotSummary.setVehicleTotalQty(vehicleTotal);
+                }
+                List<Lot> lotsForSeller = lotRepository.findAllBySellerVehicleIdIn(List.of(lot.getSellerVehicleId()));
+                int sellerTotal = lotsForSeller.stream().mapToInt(l -> l.getBagCount() != null ? l.getBagCount() : 0).sum();
+                lotSummary.setSellerTotalQty(sellerTotal);
             }
         }
         if (lot.getCommodityId() != null) {

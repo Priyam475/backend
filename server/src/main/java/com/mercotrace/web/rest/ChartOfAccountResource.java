@@ -7,7 +7,10 @@ import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ChartOfAccountUpdateRequest;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import jakarta.validation.Valid;
+import java.math.BigDecimal;
 import java.net.URI;
+import java.time.LocalDate;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,6 +68,26 @@ public class ChartOfAccountResource {
         try {
             ChartOfAccountDTO dto = chartOfAccountService.getById(id);
             return ResponseEntity.ok(dto);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "notfound");
+        }
+    }
+
+    /**
+     * GET /api/chart-of-accounts/{id}/opening-balance?asOfDate=yyyy-MM-dd
+     * Returns opening balance. If asOfDate is provided, computes dynamically from historical transactions.
+     * If omitted, returns stored opening balance.
+     */
+    @GetMapping("/{id}/opening-balance")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")")
+    public ResponseEntity<Map<String, BigDecimal>> getOpeningBalance(
+        @PathVariable Long id,
+        @RequestParam(required = false) LocalDate asOfDate
+    ) {
+        LOG.debug("REST request to get opening balance for chart of account: {}, asOfDate={}", id, asOfDate);
+        try {
+            BigDecimal balance = chartOfAccountService.getOpeningBalance(id, asOfDate);
+            return ResponseEntity.ok(Map.of("openingBalance", balance));
         } catch (IllegalArgumentException e) {
             throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "notfound");
         }

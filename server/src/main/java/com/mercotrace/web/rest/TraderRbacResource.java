@@ -224,15 +224,20 @@ public class TraderRbacResource {
 
     /**
      * {@code GET /api/trader/rbac/users} : list staff users for the current trader.
+     * @param includeRemoved when true, also includes soft-deleted users (with mappingActive=false) for restore UI.
      */
     @GetMapping("/users")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.RBAC_SETTINGS_VIEW + "\")")
-    public List<TraderRbacUserVM> getTraderUsers() {
+    public List<TraderRbacUserVM> getTraderUsers(
+        @RequestParam(required = false, defaultValue = "false") boolean includeRemoved
+    ) {
         Long traderId = traderContextService.getCurrentTraderId();
-        LOG.debug("REST request to get trader staff users for trader {}", traderId);
+        LOG.debug("REST request to get trader staff users for trader {}, includeRemoved={}", traderId, includeRemoved);
 
-        // Fetch mappings with associated User entities eagerly to avoid LazyInitializationException
-        List<UserTrader> mappings = userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(traderId);
+        // Fetch mappings: active only (default) or all (when includeRemoved)
+        List<UserTrader> mappings = includeRemoved
+            ? userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(traderId)
+            : userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrueAndActiveTrue(traderId);
         if (mappings.isEmpty()) {
             return List.of();
         }
@@ -284,10 +289,45 @@ public class TraderRbacResource {
             vm.setFullName(buildFullName(user.getFirstName(), user.getLastName()));
             vm.setRoleInTrader(mapping.getRoleInTrader());
             vm.setRoleIds(roleIds);
+            vm.setMappingActive(includeRemoved ? mapping.isActive() : true);
             result.add(vm);
         }
 
         return result;
+    }
+
+    /**
+     * {@code GET /api/trader/rbac/users/by-mobile} : get a soft-deleted user by mobile for restore.
+     * Returns the user if one exists with that mobile and an inactive UserTrader mapping for this trader.
+     */
+    @GetMapping("/users/by-mobile")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.RBAC_SETTINGS_VIEW + "\")")
+    public ResponseEntity<TraderRbacUserVM> getRemovedUserByMobile(@RequestParam String mobile) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (mobile == null || mobile.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+        String trimmed = mobile.trim();
+        return userRepository
+            .findOneByMobile(trimmed)
+            .flatMap(user ->
+                userTraderRepository
+                    .findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(user.getId(), traderId)
+                    .filter(m -> !m.isActive())
+                    .filter(m -> m.getRoleInTrader() == null || !"OWNER".equalsIgnoreCase(m.getRoleInTrader()))
+                    .map(m -> {
+                        TraderRbacUserVM vm = new TraderRbacUserVM();
+                        vm.setId(user.getId());
+                        vm.setLogin(user.getLogin());
+                        vm.setEmail(user.getEmail());
+                        vm.setMobile(user.getMobile());
+                        vm.setFullName(buildFullName(user.getFirstName(), user.getLastName()));
+                        vm.setMappingActive(false);
+                        return vm;
+                    })
+            )
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
     }
 
     /**
@@ -321,7 +361,7 @@ public class TraderRbacResource {
 
         String mobile = vm.getMobile() != null ? vm.getMobile().trim() : null;
         if (mobile != null && !mobile.isEmpty()) {
-            assertMobileAvailableForTraderStaff(mobile, null);
+            assertMobileAvailableForTraderStaff(mobile, null, traderId);
         }
 
         // Delegate uniqueness checks and password handling to UserService.registerUser.
@@ -410,8 +450,8 @@ public class TraderRbacResource {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
         UserTrader mapping = userTraderRepository
-            .findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(userId, traderId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "User is not mapped to current trader"));
+            .findFirstByUserIdAndTraderIdAndPrimaryMappingTrueAndActiveTrue(userId, traderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "User is not mapped to current trader or has been removed"));
 
         if (mapping.getRoleInTrader() != null && "OWNER".equalsIgnoreCase(mapping.getRoleInTrader())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader owners cannot be managed via staff RBAC APIs");
@@ -444,7 +484,7 @@ public class TraderRbacResource {
             String trimmed = vm.getMobile().trim();
             String normalizedMobile = trimmed.isBlank() ? null : trimmed;
             if (normalizedMobile != null) {
-                assertMobileAvailableForTraderStaff(normalizedMobile, userId);
+                assertMobileAvailableForTraderStaff(normalizedMobile, userId, traderId);
             }
             user.setMobile(normalizedMobile);
         }
@@ -517,13 +557,14 @@ public class TraderRbacResource {
     }
 
     /**
-     * {@code DELETE /api/trader/rbac/users/:id} : remove staff user mapping and trader RBAC roles.
+     * {@code DELETE /api/trader/rbac/users/:id} : soft-delete staff user (set UserTrader.active = false).
+     * UserRole entries are kept so restore brings back the same roles.
      */
     @DeleteMapping("/users/{id}")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.RBAC_SETTINGS_EDIT + "\")")
     public ResponseEntity<Void> deleteTraderUser(@PathVariable("id") Long userId) {
         Long traderId = traderContextService.getCurrentTraderId();
-        LOG.debug("REST request to delete trader staff user {} for trader {}", userId, traderId);
+        LOG.debug("REST request to soft-delete trader staff user {} for trader {}", userId, traderId);
 
         User user = userRepository
             .findById(userId)
@@ -537,17 +578,13 @@ public class TraderRbacResource {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader owners cannot be deleted via staff RBAC APIs");
         }
 
-        // Remove trader-scoped roles for this user only (do not touch global/admin roles).
-        List<UserRole> existingUserRoles = userRoleRepository.findByUserId(userId);
-        List<UserRole> traderScopedMappings = existingUserRoles
-            .stream()
-            .filter(ur -> ur.getRole() != null && Objects.equals(traderId, ur.getRole().getTraderId()))
-            .collect(Collectors.toList());
-        if (!traderScopedMappings.isEmpty()) {
-            userRoleRepository.deleteAll(traderScopedMappings);
+        if (!mapping.isActive()) {
+            throw new BadRequestAlertException("User has already been removed from this trader", ENTITY_USER, "useralreadyremoved");
         }
 
-        userTraderRepository.delete(mapping);
+        // Soft delete: set active = false. Do NOT delete UserRole so restore can bring back same roles.
+        mapping.setActive(false);
+        userTraderRepository.save(mapping);
 
         // Recompute authorities to drop trader-module authorities for this trader.
         rbacAuthorityService.applyTraderAuthoritiesToUser(userId, traderId);
@@ -555,7 +592,40 @@ public class TraderRbacResource {
         return ResponseEntity.noContent().build();
     }
 
-    private void assertMobileAvailableForTraderStaff(String mobile, Long currentTraderUserId) {
+    /**
+     * {@code PATCH /api/trader/rbac/users/:id/restore} : restore a soft-deleted staff user.
+     */
+    @PatchMapping("/users/{id}/restore")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.RBAC_SETTINGS_EDIT + "\")")
+    public ResponseEntity<Void> restoreTraderUser(@PathVariable("id") Long userId) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        LOG.debug("REST request to restore trader staff user {} for trader {}", userId, traderId);
+
+        User user = userRepository
+            .findById(userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        UserTrader mapping = userTraderRepository
+            .findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(userId, traderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "User is not mapped to current trader"));
+
+        if (mapping.getRoleInTrader() != null && "OWNER".equalsIgnoreCase(mapping.getRoleInTrader())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader owners cannot be managed via staff RBAC APIs");
+        }
+
+        if (mapping.isActive()) {
+            throw new BadRequestAlertException("User is already active in this trader", ENTITY_USER, "useralreadyactive");
+        }
+
+        mapping.setActive(true);
+        userTraderRepository.save(mapping);
+
+        rbacAuthorityService.applyTraderAuthoritiesToUser(userId, traderId);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    private void assertMobileAvailableForTraderStaff(String mobile, Long currentTraderUserId, Long traderId) {
         if (mobile == null || mobile.isBlank()) {
             return;
         }
@@ -563,9 +633,25 @@ public class TraderRbacResource {
         userRepository
             .findOneByMobile(mobile)
             .ifPresent(existing -> {
-                if (currentTraderUserId == null || !existing.getId().equals(currentTraderUserId)) {
-                    throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+                if (currentTraderUserId != null && existing.getId().equals(currentTraderUserId)) {
+                    return; // Same user, updating their own mobile — allow
                 }
+                // Check if this user was soft-deleted from current trader — offer restore instead
+                userTraderRepository
+                    .findFirstByUserIdAndTraderIdAndPrimaryMappingTrue(existing.getId(), traderId)
+                    .filter(m -> !m.isActive())
+                    .ifPresentOrElse(
+                        m -> {
+                            throw new BadRequestAlertException(
+                                "A user with this mobile was previously removed from this organisation. You can restore them instead of creating a new one.",
+                                ENTITY_USER,
+                                "usermobileexistsinactive"
+                            );
+                        },
+                        () -> {
+                            throw new BadRequestAlertException("This mobile number is already in use.", ENTITY_USER, "mobileinuse");
+                        }
+                    );
             });
 
         traderRepository

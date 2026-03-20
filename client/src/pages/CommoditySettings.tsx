@@ -288,6 +288,8 @@ const CommoditySettings = () => {
     if (cfg.min_weight > 0 && cfg.max_weight > 0 && cfg.min_weight > cfg.max_weight) { toast.error(`${commodityName}: Min weight cannot exceed Max weight`); return; }
     if (cfg.commission_percent < 0 || cfg.commission_percent > 100) { toast.error(`${commodityName}: Commission must be between 0% and 100%`); return; }
     if (cfg.user_fee_percent < 0 || cfg.user_fee_percent > 100) { toast.error(`${commodityName}: User fee must be between 0% and 100%`); return; }
+
+    // Validate HSN/SAC code when GST is applicable
     if (item.gstApplicable) {
       const raw = cfg.hsn_code ?? '';
       const digitsOnly = raw.replace(/\D/g, '');
@@ -300,16 +302,33 @@ const CommoditySettings = () => {
         return;
       }
     }
-    const gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
+
+    // Parse GST rate (can be string from raw input or number from loaded config)
+    let gstRateValue: number | undefined;
+    if (typeof cfg.gst_rate === 'string') {
+      const s = cfg.gst_rate.trim();
+      if (s === '') gstRateValue = undefined;
+      else {
+        const n = parseFloat(s);
+        gstRateValue = Number.isNaN(n) ? undefined : n;
+      }
+    } else {
+      gstRateValue = (cfg.gst_rate ?? undefined) as number | undefined;
+    }
+
     if (item.gstApplicable) {
       if (gstRateValue == null || Number.isNaN(gstRateValue)) {
         toast.error(`${commodityName}: GST Rate (%) is required when GST is applicable`); return;
       }
-      if (!Number.isInteger(gstRateValue) || gstRateValue < 0 || gstRateValue > 99) {
-        toast.error(`${commodityName}: GST Rate must be a 2-digit whole number (0–99)`); return;
+      if (gstRateValue < 0 || gstRateValue > 100) {
+        toast.error(`${commodityName}: GST rate must be between 0 and 100. You entered ${cfg.gst_rate}.`); return;
       }
-    } else if (gstRateValue != null && (!Number.isInteger(gstRateValue) || gstRateValue < 0 || gstRateValue > 99)) {
-      toast.error(`${commodityName}: GST Rate must be a 2-digit whole number (0–99) when provided`); return;
+      const decimalPart = String(cfg.gst_rate).split('.')[1];
+      if (decimalPart != null && decimalPart.length > 2) {
+        toast.error(`${commodityName}: GST rate allows max 2 decimal places (e.g. 12.50)`); return;
+      }
+    } else if (gstRateValue != null && (gstRateValue < 0 || gstRateValue > 100)) {
+      toast.error(`${commodityName}: GST Rate must be between 0 and 100 when provided`); return;
     }
 
     const weighingThresholdValue = (cfg.weighing_threshold ?? undefined) as number | undefined;
@@ -659,31 +678,41 @@ const CommoditySettings = () => {
                               </label>
                               <Input
                                 type="text"
-                                value={item.config.hsn_code}
                                 inputMode="numeric"
+                                pattern="[0-9]*"
                                 autoComplete="off"
+                                value={item.config.hsn_code}
                                 onChange={e => {
                                   const next = e.target.value.replace(/\D/g, '').slice(0, 8);
                                   updateConfig(index, { hsn_code: next });
                                 }}
-                                placeholder="e.g., 070310 (HSN) or 99859900 (SAC)"
+                                placeholder="HSN 6 digits or SAC 8 digits (e.g. 070310, 99831412)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
                                 maxLength={8}
                               />
+                              <p className="text-[10px] text-muted-foreground mt-1">HSN: 6 digits (goods). SAC: 8 digits (services).</p>
                             </div>
                             <div>
                               <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
                                 GST Rate (%) <span className="text-red-500">*</span>
                               </label>
                               <Input
-                                type="number"
-                                value={item.config.gst_rate ?? ''}
-                                onChange={e => updateConfig(index, { gst_rate: e.target.value === '' ? undefined as any : Number(e.target.value) } as any)}
-                                placeholder="e.g., 5, 12, 18"
+                                type="text"
+                                inputMode="decimal"
+                                value={(() => {
+                                  const v = item.config.gst_rate;
+                                  if (v === undefined || v === null) return '';
+                                  if (typeof v === 'string') return v;
+                                  return String(v);
+                                })()}
+                                onChange={e => {
+                                  const v = e.target.value;
+                                  if (v === '') { updateConfig(index, { gst_rate: undefined as any }); return; }
+                                  if (!/^\d*\.?\d*$/.test(v)) return;
+                                  updateConfig(index, { gst_rate: v } as any);
+                                }}
+                                placeholder="e.g. 5, 12, 18 (max 2 decimals)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
-                                min={0}
-                                max={99}
-                                step={1}
                               />
                             </div>
                           </div>

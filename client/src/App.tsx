@@ -49,6 +49,7 @@ import BillingPage from "./pages/BillingPage";
 import AccountingPage from "./pages/AccountingPage";
 import VouchersPage from "./pages/VouchersPage";
 import LedgerViewPage from "./pages/LedgerViewPage";
+import ContactLedgerViewPage from "./pages/ContactLedgerViewPage";
 import FinancialReportsPage from "./pages/FinancialReportsPage";
 import SelfSalePage from "./pages/SelfSalePage";
 import StockPurchasePage from "./pages/StockPurchasePage";
@@ -133,6 +134,7 @@ const App = () => (
                   <Route path="/accounting" element={<AccountingPage />} />
                   <Route path="/vouchers" element={<VouchersPage />} />
                   <Route path="/ledger-view/:ledgerId" element={<LedgerViewPage />} />
+                  <Route path="/contact-ledger/:contactId" element={<ContactLedgerViewPage />} />
                   <Route path="/financial-reports" element={<FinancialReportsPage />} />
                   <Route path="/self-sale" element={<SelfSalePage />} />
                   <Route path="/stock-purchase" element={<StockPurchasePage />} />

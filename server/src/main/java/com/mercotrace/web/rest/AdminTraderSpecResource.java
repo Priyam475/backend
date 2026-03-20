@@ -7,6 +7,8 @@ import com.mercotrace.service.TraderQueryService;
 import com.mercotrace.service.TraderService;
 import com.mercotrace.service.criteria.TraderCriteria;
 import com.mercotrace.service.dto.TraderDTO;
+import com.mercotrace.web.rest.errors.BadRequestAlertException;
+import tech.jhipster.service.filter.BooleanFilter;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -42,9 +44,29 @@ public class AdminTraderSpecResource {
         this.traderOwnerAuthorityService = traderOwnerAuthorityService;
     }
 
-    /** Module 1 spec: GET /admin/traders — List all traders with approval status. */
+    /** Module 1 spec: GET /admin/traders — List traders. By default returns active only; use includeInactive=true for all. */
     @GetMapping("")
-    public ResponseEntity<List<TraderDTO>> listTraders(TraderCriteria criteria, Pageable pageable) {
+    public ResponseEntity<List<TraderDTO>> listTraders(
+        TraderCriteria criteria,
+        @RequestParam(name = "includeInactive", defaultValue = "false") boolean includeInactive,
+        Pageable pageable
+    ) {
+        if (!includeInactive && criteria.getActive() == null) {
+            BooleanFilter activeFilter = new BooleanFilter();
+            activeFilter.setEquals(true);
+            criteria.setActive(activeFilter);
+        }
+        Page<TraderDTO> page = traderQueryService.findByCriteria(criteria, pageable);
+        return ResponseEntity.ok().headers(PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page)).body(page.getContent());
+    }
+
+    /** GET /admin/traders/inactive — List inactive traders only. */
+    @GetMapping("/inactive")
+    public ResponseEntity<List<TraderDTO>> listInactiveTraders(Pageable pageable) {
+        TraderCriteria criteria = new TraderCriteria();
+        BooleanFilter inactiveFilter = new BooleanFilter();
+        inactiveFilter.setEquals(false);
+        criteria.setActive(inactiveFilter);
         Page<TraderDTO> page = traderQueryService.findByCriteria(criteria, pageable);
         return ResponseEntity.ok().headers(PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page)).body(page.getContent());
     }
@@ -53,6 +75,31 @@ public class AdminTraderSpecResource {
     @GetMapping("/{id}")
     public ResponseEntity<TraderDTO> getTrader(@PathVariable Long id) {
         return ResponseUtil.wrapOrNotFound(traderService.findOne(id));
+    }
+
+    /** PATCH /admin/traders/{id}/activate — Mark trader as active (allows login). */
+    @PatchMapping("/{id}/activate")
+    public ResponseEntity<Void> activateTrader(@PathVariable Long id) {
+        traderService.setActiveDirect(id, true);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** PATCH /admin/traders/{id}/deactivate — Mark trader as inactive (blocks login for trader and staff). */
+    @PatchMapping("/{id}/deactivate")
+    public ResponseEntity<Void> deactivateTrader(@PathVariable Long id) {
+        traderService.setActiveDirect(id, false);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** DELETE /admin/traders/{id}/permanent — Permanently delete an inactive trader. Only allowed when trader is inactive. */
+    @DeleteMapping("/{id}/permanent")
+    public ResponseEntity<Void> permanentDeleteTrader(@PathVariable Long id) {
+        try {
+            traderService.permanentDelete(id);
+        } catch (IllegalStateException e) {
+            throw new BadRequestAlertException(e.getMessage(), "trader", "traderactive");
+        }
+        return ResponseEntity.noContent().build();
     }
 
     /** Module 1 spec: PATCH /admin/traders/{id}/approve — Approve Trader (enables transactional features). */

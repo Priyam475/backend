@@ -41,6 +41,9 @@ public class UserTrader extends AbstractAuditingEntity<Long> implements Serializ
     @Column(name = "primary_mapping", nullable = false)
     private boolean primaryMapping = true;
 
+    @Column(name = "active", nullable = false)
+    private boolean active = true;
+
     @Override
     public Long getId() {
         return this.id;
@@ -80,6 +83,14 @@ public class UserTrader extends AbstractAuditingEntity<Long> implements Serializ
 
     public void setPrimaryMapping(boolean primaryMapping) {
         this.primaryMapping = primaryMapping;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
     }
 }
 

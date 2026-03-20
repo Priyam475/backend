@@ -295,6 +295,9 @@ public class TraderAuthResource {
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
         }
+        if (trader != null && !Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
+        }
         TraderAuthDTO dto = buildAuthDto(account, trader);
 
         return ResponseEntity.status(jwtResponse.getStatusCode()).headers(jwtResponse.getHeaders()).body(dto);
@@ -317,6 +320,9 @@ public class TraderAuthResource {
         }
         if (trader == null && !isAdminAccount(account)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured");
+        }
+        if (trader != null && !Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
         }
         return buildAuthDto(account, trader);
     }
@@ -341,7 +347,7 @@ public class TraderAuthResource {
         boolean hasTraderByMobile = traderRepository.findOneByMobile(mobile).isPresent();
         boolean hasTraderUserByMobile = userRepository
             .findOneByMobile(mobile)
-            .flatMap(user -> userTraderRepository.findFirstByUserIdAndPrimaryMappingTrue(user.getId()))
+            .flatMap(user -> userTraderRepository.findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(user.getId()))
             .isPresent();
         if (!hasTraderByMobile && !hasTraderUserByMobile) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No trader registered with this mobile");
@@ -384,7 +390,7 @@ public class TraderAuthResource {
             com.mercotrace.domain.User candidate = userOpt.get();
             traderEntity =
                 userTraderRepository
-                    .findFirstByUserIdAndPrimaryMappingTrue(candidate.getId())
+                    .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(candidate.getId())
                     .map(com.mercotrace.domain.UserTrader::getTrader)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trader not configured"));
             user = candidate;
@@ -420,6 +426,10 @@ public class TraderAuthResource {
             .findOne(traderEntity.getId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Trader not configured"));
 
+        if (!Boolean.TRUE.equals(trader.getActive())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Trader account is inactive. Contact support.");
+        }
+
         TraderAuthDTO dto = buildAuthDto(account, trader);
 
         return ResponseEntity.ok().headers(httpHeaders).body(dto);
@@ -431,7 +441,7 @@ public class TraderAuthResource {
         }
 
         return userTraderRepository
-            .findFirstByUserIdAndPrimaryMappingTrue(account.getId())
+            .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(account.getId())
             .filter(mapping -> {
                 String roleInTrader = mapping.getRoleInTrader();
                 return roleInTrader != null && "OWNER".equalsIgnoreCase(roleInTrader.trim());
@@ -539,7 +549,7 @@ public class TraderAuthResource {
             return java.util.Optional.empty();
         }
         return userTraderRepository
-            .findFirstByUserIdAndPrimaryMappingTrue(account.getId())
+            .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(account.getId())
             .flatMap(mapping -> traderService.findOne(mapping.getTrader().getId()));
     }
 
@@ -560,7 +570,7 @@ public class TraderAuthResource {
 
         if (account.getId() != null) {
             return userTraderRepository
-                .findFirstByUserIdAndPrimaryMappingTrue(account.getId())
+                .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(account.getId())
                 .map(mapping -> {
                     String roleInTrader = mapping.getRoleInTrader();
                     if (roleInTrader == null || roleInTrader.isBlank()) {

@@ -77,7 +77,7 @@ class TraderOwnerAuthorityServiceTest {
         mapping.setTrader(trader);
 
         when(userRepository.findOneWithAuthoritiesById(1L)).thenReturn(Optional.of(user));
-        when(userTraderRepository.findFirstByUserIdAndPrimaryMappingTrue(1L)).thenReturn(Optional.of(mapping));
+        when(userTraderRepository.findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(1L)).thenReturn(Optional.of(mapping));
 
         // return at least USER authority plus another module authority so that there are missingNames
         Authority roleUser = new Authority();
@@ -110,7 +110,7 @@ class TraderOwnerAuthorityServiceTest {
         mapping.setTrader(trader);
 
         when(userRepository.findOneWithAuthoritiesById(1L)).thenReturn(Optional.of(user));
-        when(userTraderRepository.findFirstByUserIdAndPrimaryMappingTrue(1L)).thenReturn(Optional.of(mapping));
+        when(userTraderRepository.findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(1L)).thenReturn(Optional.of(mapping));
 
         Authority roleUser = new Authority();
         roleUser.setName(AuthoritiesConstants.USER);

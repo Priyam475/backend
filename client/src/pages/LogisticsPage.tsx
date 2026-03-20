@@ -20,6 +20,7 @@ import {
   generateSalePadPrint,
   generateTenderSlip,
   generateDispatchControl,
+  formatLotIdentifierForBid,
 } from '@/utils/printTemplates';
 import type { BidInfo } from '@/utils/printTemplates';
 
@@ -190,7 +191,8 @@ const LogisticsPage = () => {
       b.sellerName.toLowerCase().includes(q) ||
       b.lotName.toLowerCase().includes(q) ||
       b.vehicleNumber.toLowerCase().includes(q) ||
-      String(b.bidNumber).includes(q)
+      String(b.bidNumber).includes(q) ||
+      formatLotIdentifierForBid(b).toLowerCase().includes(q)
     );
   }, [bids, searchQuery]);
 
@@ -313,7 +315,7 @@ const LogisticsPage = () => {
             </div>
             <div className="relative mb-3">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-              <input aria-label="Search" placeholder="Search lot, buyer, seller…"
+              <input aria-label="Search" placeholder="Search lot, buyer, seller, or 320/320/110-110…"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
             </div>
@@ -346,7 +348,7 @@ const LogisticsPage = () => {
             <div className="flex items-center gap-2">
               <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <input aria-label="Search" placeholder="Search…"
+                <input aria-label="Search" placeholder="Search lot, buyer, seller, or 320/320/110-110…"
                   value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                   className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
               </div>
@@ -426,11 +428,7 @@ const LogisticsPage = () => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-bold text-foreground truncate">
-                      {bid.vehicleTotalQty != null && bid.sellerVehicleQty != null
-                        ? `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`
-                        : bid.lotName !== String(bid.lotNumber)
-                          ? `${bid.lotNumber} / ${bid.lotName}`
-                          : `Lot #${bid.lotNumber}`}
+                      {formatLotIdentifierForBid(bid)}
                     </p>
                     <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-bold">[{bid.buyerMark}]</span>
                   </div>

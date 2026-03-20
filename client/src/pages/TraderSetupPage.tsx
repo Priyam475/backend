@@ -1,13 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft, User, Mail, Phone, Lock } from 'lucide-react';
+import { ArrowLeft, MapPin, Loader2, ChevronDown, Store, FileText, Navigation, Hash, Sun, Moon, Save, Building, Map, AlignLeft, User, Mail, Phone, Lock, ImageIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
-import { categoryApi } from '@/services/api';
+import { categoryApi, traderApi } from '@/services/api';
 import type { BusinessCategory } from '@/types/models';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -17,6 +17,19 @@ const STATES = ['Karnataka'];
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MOBILE_REGEX = /^[6-9]\d{9}$/;
+/** Business name: letters, numbers, spaces, & ' . - , / */
+const BUSINESS_NAME_REGEX = /^[A-Za-z0-9 &'.,\-/]+$/;
+/** Owner name: letters and spaces only (no special characters) */
+const NAME_REGEX = /^[A-Za-z ]+$/;
+/** City: letters, numbers, spaces, hyphen, period */
+const CITY_REGEX = /^[A-Za-z0-9.\- ]+$/;
+/** Address: alphanumeric, spaces, comma, period, #, hyphen, slash */
+const ADDRESS_REGEX = /^[A-Za-z0-9\s,.#\-/]+$/;
+/** Shop number: alphanumeric, hyphen, space */
+const SHOP_NO_REGEX = /^[A-Za-z0-9\- ]+$/;
+/** RMC/APMC code when provided: alphanumeric, hyphen */
+const RMC_APMC_REGEX = /^[A-Za-z0-9\-]+$/;
+const ACCEPTED_IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // Deterministic particles (same pattern as login/register)
 const PARTICLES = Array.from({ length: 10 }, (_, i) => ({
@@ -35,7 +48,6 @@ interface FormData {
   confirmPassword: string;
   address: string;
   city: string;
-  address: string;
   shopNo: string;
   state: string;
   categoryId: string;
@@ -48,9 +60,11 @@ interface FormData {
 const TraderSetupPage = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
-  const { register, isLoading, error, clearError } = useAuth();
+  const { register, refreshProfile, isLoading, error, clearError } = useAuth();
 
   const [categories, setCategories] = useState<BusinessCategory[]>([]);
+  const [companyImage, setCompanyImage] = useState<File | null>(null);
+  const [companyImagePreview, setCompanyImagePreview] = useState<string | null>(null);
 
   const [form, setForm] = useState<FormData>({
     businessName: '',
@@ -91,7 +105,13 @@ const TraderSetupPage = () => {
   const updateField = (field: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }));
     clearError();
-    if (errors[field]) setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
+    const nextForm = { ...form, [field]: value };
+    if (touched[field]) {
+      const err = validateField(field, nextForm);
+      setErrors(prev => err ? { ...prev, [field]: err } : (() => { const n = { ...prev }; delete n[field]; return n; })());
+    } else if (errors[field]) {
+      setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
+    }
   };
 
   const handleBlur = (field: string) => {
@@ -99,30 +119,32 @@ const TraderSetupPage = () => {
     validateField(field);
   };
 
-  const validateField = (field: string): string => {
+  const validateField = (field: string, formSnapshot?: FormData): string => {
+    const f = formSnapshot ?? form;
     let error = '';
     switch (field) {
       case 'businessName':
-        if (!form.businessName.trim()) error = 'Business name is required';
-        else if (form.businessName.trim().length < 3) error = 'Min 3 characters';
+        if (!f.businessName.trim()) error = 'Business name is required';
+        else if (f.businessName.trim().length < 3) error = 'Min 3 characters';
+        else if (!BUSINESS_NAME_REGEX.test(f.businessName.trim())) error = 'Only letters, numbers, spaces and  & \' . - , / allowed';
         break;
       case 'ownerName':
-        if (!form.ownerName.trim()) error = 'Owner name is required';
-        else if (form.ownerName.trim().length < 2) error = 'Min 2 characters';
+        if (!f.ownerName.trim()) error = 'Owner name is required';
+        else if (f.ownerName.trim().length < 2) error = 'Min 2 characters';
+        else if (!NAME_REGEX.test(f.ownerName.trim())) error = 'Only letters and spaces allowed (no special characters)';
         break;
       case 'email':
-        if (!form.email.trim()) error = 'Email is required';
-        else if (!EMAIL_REGEX.test(form.email.trim())) error = 'Enter a valid email';
+        if (!f.email.trim()) error = 'Email is required';
+        else if (!EMAIL_REGEX.test(f.email.trim())) error = 'Enter a valid email';
         break;
       case 'mobile':
-        if (!form.mobile.trim()) error = 'Mobile number is required';
-        else if (!MOBILE_REGEX.test(form.mobile.trim())) error = 'Enter valid 10-digit mobile (starts 6-9)';
+        if (!f.mobile.trim()) error = 'Mobile number is required';
+        else if (!MOBILE_REGEX.test(f.mobile.trim())) error = 'Enter valid 10-digit mobile (starts 6-9)';
         break;
       case 'password':
-        if (!form.password) error = 'Password is required';
-        else if (form.password.length < 6) error = 'Min 6 characters';
-        else if (form.confirmPassword && form.confirmPassword !== form.password) {
-          // keep confirm password error in sync when user edits password after confirming
+        if (!f.password) error = 'Password is required';
+        else if (f.password.length < 6) error = 'Min 6 characters';
+        else if (f.confirmPassword && f.confirmPassword !== f.password) {
           setErrors(prev => ({
             ...prev,
             confirmPassword: 'Passwords do not match',
@@ -130,28 +152,37 @@ const TraderSetupPage = () => {
         }
         break;
       case 'confirmPassword':
-        if (!form.confirmPassword) error = 'Please confirm your password';
-        else if (form.confirmPassword !== form.password) error = 'Passwords do not match';
+        if (!f.confirmPassword) error = 'Please confirm your password';
+        else if (f.confirmPassword !== f.password) error = 'Passwords do not match';
         break;
       case 'address':
-        if (!form.address.trim()) error = 'Address is required';
+        if (!f.address.trim()) error = 'Address is required';
+        else if (f.address.trim().length < 5) error = 'Address too short (min 5 characters)';
+        else if (!ADDRESS_REGEX.test(f.address.trim())) error = 'Only letters, numbers, spaces and , . # - / allowed';
         break;
       case 'city':
-        if (!form.city.trim()) error = 'City / Market is required';
+        if (!f.city.trim()) error = 'City / Market is required';
+        else if (!CITY_REGEX.test(f.city.trim())) error = 'Only letters, numbers, spaces and . - allowed';
         break;
       case 'state':
-        if (!form.state.trim()) error = 'State is required (mandatory for GST)';
+        if (!f.state.trim()) error = 'State is required (mandatory for GST)';
         break;
       case 'categoryName':
-        if (!form.categoryName) error = 'Select a business category';
+        if (!f.categoryName) error = 'Select a business category';
         break;
       case 'gstNumber':
-        if (form.gstNumber && !GSTIN_REGEX.test(form.gstNumber.toUpperCase())) {
+        if (f.gstNumber && !GSTIN_REGEX.test(f.gstNumber.toUpperCase())) {
           error = 'Enter valid 15-char GST (e.g., 22AAAAA0000A1Z5)';
         }
         break;
       case 'shopNo':
-        if (!form.shopNo.trim()) error = 'Shop number is required';
+        if (!f.shopNo.trim()) error = 'Shop number is required';
+        else if (!SHOP_NO_REGEX.test(f.shopNo.trim())) error = 'Only letters, numbers, spaces and - allowed';
+        break;
+      case 'rmcApmcCode':
+        if (f.rmcApmcCode.trim() && !RMC_APMC_REGEX.test(f.rmcApmcCode.trim())) {
+          error = 'Only letters, numbers and - allowed';
+        }
         break;
     }
     setErrors(prev => error ? { ...prev, [field]: error } : (() => { const n = { ...prev }; delete n[field]; return n; })());
@@ -178,6 +209,25 @@ const TraderSetupPage = () => {
     setTouched(fields.reduce((a, f) => ({ ...a, [f]: true }), {}));
     return valid;
   };
+
+  const handleCompanyImageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = '.' + (file.name.split('.').pop() ?? '').toLowerCase();
+    if (!ACCEPTED_IMAGE_EXT.includes(ext)) {
+      toast.error('Please use JPEG, PNG, or WebP');
+      return;
+    }
+    if (companyImagePreview) URL.revokeObjectURL(companyImagePreview);
+    setCompanyImage(file);
+    setCompanyImagePreview(URL.createObjectURL(file));
+  }, [companyImagePreview]);
+
+  const clearCompanyImage = useCallback(() => {
+    if (companyImagePreview) URL.revokeObjectURL(companyImagePreview);
+    setCompanyImage(null);
+    setCompanyImagePreview(null);
+  }, [companyImagePreview]);
 
   const handleUseCurrentLocation = useCallback(async () => {
     if (!navigator.geolocation) { toast.error('Geolocation not supported'); return; }
@@ -206,7 +256,7 @@ const TraderSetupPage = () => {
     }
     setIsSubmitting(true);
     try {
-      await register({
+      const result = await register({
         businessName: form.businessName.trim(),
         ownerName: form.ownerName.trim(),
         email: form.email.trim(),
@@ -219,6 +269,14 @@ const TraderSetupPage = () => {
         gstNumber: form.gstNumber.trim() || undefined,
         rmcApmcCode: form.rmcApmcCode.trim() || undefined,
       });
+      if (companyImage && result?.trader?.trader_id) {
+        try {
+          await traderApi.uploadPhotos(result.trader.trader_id, [companyImage]);
+          await refreshProfile();
+        } catch (upErr) {
+          toast.error('Profile saved but image upload failed. You can add it later.');
+        }
+      }
       toast.success('Trader profile saved successfully!');
       navigate('/home', { replace: true });
     } catch (e: unknown) {
@@ -653,10 +711,38 @@ const TraderSetupPage = () => {
                           placeholder="RMC / APMC Code (optional)"
                           value={form.rmcApmcCode}
                           onChange={e => updateField('rmcApmcCode', e.target.value)}
-                          className={inputClass}
+                          onBlur={() => handleBlur('rmcApmcCode')}
+                          className={cn(
+                            inputClass,
+                            touched.rmcApmcCode && errors.rmcApmcCode && 'ring-2 ring-red-400/50'
+                          )}
                           maxLength={50}
                         />
                       </div>
+                      <FieldError field="rmcApmcCode" />
+                    </div>
+                  </div>
+
+                  {/* Trading Company Image */}
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider pt-3 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5" /> Company Logo (optional)
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <label className="flex-shrink-0 w-24 h-24 rounded-xl bg-white/90 border-2 border-dashed border-blue-300 flex items-center justify-center cursor-pointer overflow-hidden hover:border-blue-500 transition-colors">
+                      <input type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" onChange={handleCompanyImageChange} />
+                      {companyImagePreview ? (
+                        <img src={companyImagePreview} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8 text-blue-400" />
+                      )}
+                    </label>
+                    <div className="flex-1">
+                      <p className="text-sm text-white/80">JPEG, PNG or WebP.</p>
+                      {companyImage && (
+                        <button type="button" onClick={clearCompanyImage} className="mt-1 flex items-center gap-1 text-xs text-red-200 hover:text-red-100">
+                          <X className="w-3.5 h-3.5" /> Remove
+                        </button>
+                      )}
                     </div>
                   </div>
 

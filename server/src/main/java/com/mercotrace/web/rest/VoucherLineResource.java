@@ -12,7 +12,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * REST controller for voucher lines (by date range for Financial Reports).
+ * REST controller for voucher lines (by date range for Financial Reports, by ledger for Ledger View).
  * Base path: /api/voucher-lines.
  */
 @RestController
@@ -28,17 +28,25 @@ public class VoucherLineResource {
     }
 
     /**
-     * GET /api/voucher-lines : get all lines whose voucher date is in [dateFrom, dateTo].
-     * Trader-scoped. For Financial Reports trial balance and commodity P&L.
+     * GET /api/voucher-lines : get lines whose voucher date is in [dateFrom, dateTo].
+     * Optional ledgerId: if provided, returns lines for that ledger only (Ledger View).
+     * If not provided, returns all lines in date range (Financial Reports).
+     * Trader-scoped. Allowed: FINANCIAL_REPORTS_VIEW or CHART_OF_ACCOUNTS_VIEW.
      */
     @GetMapping
-    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.FINANCIAL_REPORTS_VIEW + "\")")
+    @PreAuthorize(
+        "hasAuthority(\"" + AuthoritiesConstants.FINANCIAL_REPORTS_VIEW + "\") or " +
+        "hasAuthority(\"" + AuthoritiesConstants.CHART_OF_ACCOUNTS_VIEW + "\")"
+    )
     public ResponseEntity<List<VoucherLineDTO>> getByDateRange(
         @RequestParam LocalDate dateFrom,
-        @RequestParam LocalDate dateTo
+        @RequestParam LocalDate dateTo,
+        @RequestParam(required = false) Long ledgerId
     ) {
-        LOG.debug("REST request to get voucher lines: dateFrom={}, dateTo={}", dateFrom, dateTo);
-        List<VoucherLineDTO> list = voucherLineService.getLinesByDateRange(dateFrom, dateTo);
+        LOG.debug("REST request to get voucher lines: dateFrom={}, dateTo={}, ledgerId={}", dateFrom, dateTo, ledgerId);
+        List<VoucherLineDTO> list = ledgerId != null
+            ? voucherLineService.getLinesByLedgerAndDateRange(ledgerId, dateFrom, dateTo)
+            : voucherLineService.getLinesByDateRange(dateFrom, dateTo);
         return ResponseEntity.ok().body(list);
     }
 }

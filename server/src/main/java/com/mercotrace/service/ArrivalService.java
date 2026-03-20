@@ -52,6 +52,7 @@ public class ArrivalService {
     private final DailySerialRepository dailySerialRepository;
     private final CommodityRepository commodityRepository;
     private final ContactRepository contactRepository;
+    private final ContactService contactService;
     private final TraderContextService traderContextService;
     private final AuctionRepository auctionRepository;
     private final AuctionEntryRepository auctionEntryRepository;
@@ -68,6 +69,7 @@ public class ArrivalService {
         DailySerialRepository dailySerialRepository,
         CommodityRepository commodityRepository,
         ContactRepository contactRepository,
+        ContactService contactService,
         TraderContextService traderContextService,
         AuctionRepository auctionRepository,
         AuctionEntryRepository auctionEntryRepository,
@@ -83,6 +85,7 @@ public class ArrivalService {
         this.dailySerialRepository = dailySerialRepository;
         this.commodityRepository = commodityRepository;
         this.contactRepository = contactRepository;
+        this.contactService = contactService;
         this.traderContextService = traderContextService;
         this.auctionRepository = auctionRepository;
         this.auctionEntryRepository = auctionEntryRepository;
@@ -96,6 +99,7 @@ public class ArrivalService {
         validateRequest(request);
 
         Long traderId = resolveTraderId();
+        validateSellerMarks(request.getSellers(), traderId, null);
 
         Instant now = Instant.now();
         double netWeight = Math.max(0d, request.getLoadedWeight() - request.getEmptyWeight());
@@ -138,6 +142,7 @@ public class ArrivalService {
                 contactRepository.findById(contactId).orElseThrow(() ->
                     new IllegalArgumentException("Seller contact not found: " + contactId)
                 );
+                contactService.ensureTraderUsesPortalContact(traderId, contactId);
                 sellerInVehicle.setContactId(contactId);
             } else {
                 if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
@@ -167,6 +172,10 @@ public class ArrivalService {
                 lot.setCreatedAt(now);
                 lots.add(lot);
             }
+        }
+
+        if (brokerContactId != null) {
+            contactService.ensureTraderUsesPortalContact(traderId, brokerContactId);
         }
 
         if (!lots.isEmpty()) {
@@ -459,7 +468,7 @@ public class ArrivalService {
         boolean sellersReplaced = false;
         List<Lot> currentLots = new ArrayList<>();
         if (update.getSellers() != null && !update.getSellers().isEmpty()) {
-            validateUpdateSellers(update.getSellers(), update.getMultiSeller());
+            validateUpdateSellers(update.getSellers(), update.getMultiSeller(), traderId);
             List<SellerInVehicle> existingSellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
             List<Long> existingSellerVehicleIds = existingSellers.stream().map(SellerInVehicle::getId).toList();
             if (!existingSellerVehicleIds.isEmpty()) {
@@ -489,6 +498,7 @@ public class ArrivalService {
                 if (contactId != null) {
                     contactRepository.findById(contactId).orElseThrow(() ->
                         new IllegalArgumentException("Seller contact not found: " + contactId));
+                    contactService.ensureTraderUsesPortalContact(traderId, contactId);
                     siv.setContactId(contactId);
                 } else {
                     if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
@@ -522,6 +532,9 @@ public class ArrivalService {
                     lot.setCreatedAt(now);
                     currentLots.add(lot);
                 }
+            }
+            if (updateBrokerContactId != null) {
+                contactService.ensureTraderUsesPortalContact(traderId, updateBrokerContactId);
             }
             if (!currentLots.isEmpty()) {
                 lotRepository.saveAll(currentLots);
@@ -694,10 +707,48 @@ public class ArrivalService {
         return new PageImpl<>(content, pageable, vehiclePage.getTotalElements());
     }
 
-    private void validateUpdateSellers(List<ArrivalSellerDTO> sellers, Boolean multiSeller) {
+    /**
+     * Validate seller mark uniqueness:
+     * 1. No duplicate marks among sellers in the same vehicle.
+     * 2. For dynamic sellers (contactId null), mark must not already exist for any contact of this trader.
+     */
+    private void validateSellerMarks(List<ArrivalSellerDTO> sellers, Long traderId, Long excludeContactId) {
+        java.util.Set<String> seenMarks = new java.util.HashSet<>();
+        for (ArrivalSellerDTO seller : sellers) {
+            String mark = seller.getSellerMark();
+            if (mark == null || mark.isBlank()) {
+                continue;
+            }
+            String trimmedMark = mark.trim();
+            String markLower = trimmedMark.toLowerCase();
+
+            // 1. No duplicate marks within the same vehicle
+            if (seenMarks.contains(markLower)) {
+                throw new IllegalArgumentException("This mark is already in use by another seller in this vehicle. Marks must be unique.");
+            }
+            seenMarks.add(markLower);
+
+            // 2. For dynamic sellers: mark must not exist in trader's contacts or in global (self-registered) contacts
+            if (seller.getContactId() == null) {
+                Optional<Contact> existingTraderContact = contactRepository.findOneByTraderIdAndMarkIgnoreCase(traderId, trimmedMark);
+                if (existingTraderContact.isPresent() && (excludeContactId == null || !existingTraderContact.get().getId().equals(excludeContactId))) {
+                    throw new IllegalArgumentException(
+                        "This mark is already in use by a contact. Please choose a unique mark or select the seller from Contacts.");
+                }
+                Optional<Contact> existingGlobalContact = contactRepository.findOneByMarkAndTraderIdIsNull(trimmedMark);
+                if (existingGlobalContact.isPresent()) {
+                    throw new IllegalArgumentException(
+                        "This mark is already in use by a registered contact. Please choose a unique mark or select the seller from Contacts.");
+                }
+            }
+        }
+    }
+
+    private void validateUpdateSellers(List<ArrivalSellerDTO> sellers, Boolean multiSeller, Long traderId) {
         if (Boolean.FALSE.equals(multiSeller) && sellers.size() > 1) {
             throw new IllegalArgumentException("Single-seller arrival allows only one seller");
         }
+        validateSellerMarks(sellers, traderId, null);
         for (ArrivalSellerDTO seller : sellers) {
             if (seller.getContactId() == null && seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
                 String phone = seller.getSellerPhone().trim();

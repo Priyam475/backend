@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
-  DollarSign, Percent, FileText, ChevronDown, ChevronUp,
+  Percent, FileText, ChevronDown, ChevronUp,
   History
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -48,6 +48,7 @@ interface BillEntry {
 interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
+  gstRate: number;
   commissionPercent: number;
   userFeePercent: number;
   items: BillLineItem[];
@@ -63,10 +64,11 @@ interface BillLineItem {
   sellerName: string;
   quantity: number;
   weight: number;
-  baseRate: number;
-  brokerage: number;
-  otherCharges: number;
-  newRate: number; // REQ-BIL-002
+  baseRate: number; // B = Auction bid
+  presetApplied: number; // P = Preset
+  brokerage: number; // BRK
+  otherCharges: number; // Other (from preset or manual)
+  newRate: number; // REQ-BIL-002: NR = B + P + BRK + Other
   amount: number;
 }
 
@@ -95,6 +97,31 @@ interface BillData {
 /** True if billId was issued by backend (numeric string). */
 function isBackendBillId(billId: string): boolean {
   return /^\d+$/.test(billId);
+}
+
+/** Normalize bill from API: add presetApplied (derived) and gstRate to items/groups. */
+function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], commodities?: any[]): BillData {
+  const configByCommName = new Map<string, number>();
+  if (fullConfigs && commodities) {
+    commodities.forEach((c: any) => {
+      const cfg = fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id));
+      const name = c.commodity_name ?? c.commodityName;
+      if (name && cfg?.config?.gstRate != null) configByCommName.set(name, cfg.config.gstRate);
+    });
+  }
+  const groups = (b.commodityGroups || []).map((g: any) => ({
+    ...g,
+    gstRate: g.gstRate ?? configByCommName.get(g.commodityName) ?? 0,
+    items: (g.items || []).map((item: any) => {
+      const base = Number(item.baseRate) || 0;
+      const brk = Number(item.brokerage) || 0;
+      const other = Number(item.otherCharges) || 0;
+      const nr = Number(item.newRate) || 0;
+      const preset = Math.max(0, nr - base - brk - other);
+      return { ...item, presetApplied: item.presetApplied ?? preset };
+    }),
+  }));
+  return { ...b, commodityGroups: groups };
 }
 
 // ── Validation ────────────────────────────────────────────
@@ -333,6 +360,7 @@ const BillingPage = () => {
         commodityMap.set(commName, {
           commodityName: commName,
           hsnCode: config?.hsnCode || '',
+          gstRate: config?.gstRate ?? 0,
           commissionPercent: config?.commissionPercent || 0,
           userFeePercent: config?.userFeePercent || 0,
           items: [],
@@ -348,8 +376,9 @@ const BillingPage = () => {
       // REQ-BIL-002: NR = B + P + BRK + Other Charges
       const brokerage = 0; // default, can be edited
       const otherCharges = 0; // default
-      const newRate = entry.rate + entry.presetApplied + brokerage + otherCharges;
-      
+      const presetApplied = entry.presetApplied ?? 0;
+      const newRate = entry.rate + presetApplied + brokerage + otherCharges;
+
       group.items.push({
         bidNumber: entry.bidNumber,
         lotName: entry.lotName,
@@ -357,6 +386,7 @@ const BillingPage = () => {
         quantity: entry.quantity,
         weight: entry.weight,
         baseRate: entry.rate,
+        presetApplied,
         brokerage,
         otherCharges,
         newRate,
@@ -421,8 +451,9 @@ const BillingPage = () => {
     const group = { ...updated.commodityGroups[commIdx] };
     const item = { ...group.items[itemIdx] };
     item[field] = value;
-    // REQ-BIL-002
-    item.newRate = item.baseRate + (bill.commodityGroups[commIdx].items[itemIdx] === item ? item.brokerage : 0) + item.brokerage + item.otherCharges;
+    const preset = (item as { presetApplied?: number }).presetApplied ?? 0;
+    // REQ-BIL-002: NR = B + P + BRK + Other
+    item.newRate = item.baseRate + preset + item.brokerage + item.otherCharges;
     item.amount = item.newRate * item.quantity;
     group.items = [...group.items];
     group.items[itemIdx] = item;
@@ -441,14 +472,15 @@ const BillingPage = () => {
     const updated = { ...bill };
     updated.commodityGroups = updated.commodityGroups.map(group => {
       const items = group.items.map(item => {
+        const preset = item.presetApplied ?? 0;
         const brk = bill.brokerageType === 'PERCENT'
-          ? Math.round(item.baseRate * bill.brokerageValue / 100)
+          ? Math.round((item.baseRate + preset) * bill.brokerageValue / 100)
           : bill.brokerageValue;
         const newItem = {
           ...item,
           brokerage: brk,
           otherCharges: bill.globalOtherCharges,
-          newRate: item.baseRate + brk + bill.globalOtherCharges,
+          newRate: item.baseRate + preset + brk + bill.globalOtherCharges,
           amount: 0,
         };
         newItem.amount = newItem.newRate * newItem.quantity;
@@ -507,7 +539,7 @@ const BillingPage = () => {
       const result = isUpdate
         ? await billingApi.update(bill.billId, payload)
         : await billingApi.create(payload);
-      setBill(result as unknown as BillData);
+      setBill(normalizeBillFromApi(result, fullConfigs, commodities) as BillData);
       toast.success(`Bill ${result.billNumber} saved!`);
       setShowPrint(true);
       loadSavedBills();
@@ -588,7 +620,7 @@ const BillingPage = () => {
             {/* Per-commodity tables — REQ-BIL-004 */}
             {bill.commodityGroups.map((group, gi) => (
               <div key={gi} className="border-b border-dashed border-border pb-2">
-                <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}</p>
+                <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}{(group.gstRate ?? 0) > 0 && ` · GST: ${group.gstRate}%`}</p>
                 {group.items.map((item, ii) => (
                   <div key={ii} className="flex justify-between text-[10px]">
                     <span className="text-foreground">{item.quantity}×{item.weight.toFixed(0)}kg @₹{item.newRate}</span>
@@ -599,6 +631,7 @@ const BillingPage = () => {
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{group.subtotal.toLocaleString()}</span></div>
                   {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span><span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span></div>}
                   {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span><span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span></div>}
+                  {(group.gstRate ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">GST ({group.gstRate}%)</span><span className="text-foreground">₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span></div>}
                 </div>
               </div>
             ))}
@@ -612,14 +645,15 @@ const BillingPage = () => {
               </div>
             )}
 
-            {/* REQ-BIL-010: Tax table */}
+            {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
             <div className="border-b border-dashed border-border pb-2">
               <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
-              {bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0).map((g, i) => (
+              {bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g, i) => (
                 <div key={i} className="text-[10px] space-y-0.5">
                   <span className="text-muted-foreground">{g.commodityName}:</span>
                   {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{g.commissionAmount}</span></div>}
                   {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{g.userFeeAmount}</span></div>}
+                  {(g.gstRate ?? 0) > 0 && <div className="flex justify-between pl-2"><span>GST ({g.gstRate}%)</span><span>₹{Math.round(g.subtotal * (g.gstRate ?? 0) / 100).toLocaleString()}</span></div>}
                 </div>
               ))}
             </div>
@@ -720,7 +754,7 @@ const BillingPage = () => {
                 <p className="text-[11px] font-semibold text-white">{totalItems}</p>
               </div>
               <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <DollarSign className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                <p className="text-base font-bold text-white/90 mb-0.5">₹</p>
                 <p className="text-[9px] text-white/60 uppercase">Total</p>
                 <p className="text-[11px] font-semibold text-white">₹{bill.grandTotal.toLocaleString()}</p>
               </div>
@@ -810,9 +844,12 @@ const BillingPage = () => {
               transition={{ delay: 0.1 + gi * 0.05 }}
               className="glass-card rounded-2xl overflow-hidden">
               <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-1">
                   <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
-                  {group.hsnCode && <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">HSN: {group.hsnCode}</span>}
+                  <div className="flex gap-1.5">
+                    {group.hsnCode && <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">HSN: {group.hsnCode}</span>}
+                    {(group.gstRate ?? 0) > 0 && <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">GST: {group.gstRate}%</span>}
+                  </div>
                 </div>
               </div>
               <div className="p-3 space-y-2">
@@ -825,11 +862,17 @@ const BillingPage = () => {
                       </div>
                       <p className="text-sm font-bold text-foreground">₹{item.amount.toLocaleString()}</p>
                     </div>
-                    <div className="grid grid-cols-4 gap-1 text-[9px]">
+                    <div className={cn("grid gap-1 text-[9px]", (item.presetApplied ?? 0) > 0 ? 'grid-cols-5' : 'grid-cols-4')}>
                       <div className="text-center p-1 rounded bg-muted/20">
                         <p className="text-muted-foreground">Base</p>
                         <p className="font-bold text-foreground">₹{item.baseRate}</p>
                       </div>
+                      {(item.presetApplied ?? 0) > 0 && (
+                        <div className="text-center p-1 rounded bg-amber-100/50 dark:bg-amber-900/20">
+                          <p className="text-muted-foreground">Preset</p>
+                          <p className="font-bold text-amber-700 dark:text-amber-300">₹{item.presetApplied}</p>
+                        </div>
+                      )}
                       <div className={cn("text-center p-1 rounded bg-muted/20", validationErrors[`items.${gi}.${ii}.brokerage`] && "ring-1 ring-destructive/40")}>
                         <p className="text-muted-foreground">BRK</p>
                         <Input type="number" value={item.brokerage || ''}
@@ -871,6 +914,12 @@ const BillingPage = () => {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span>
                       <span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">GST ({group.gstRate}%)</span>
+                      <span className="text-foreground">₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span>
                     </div>
                   )}
                 </div>
@@ -1031,33 +1080,32 @@ const BillingPage = () => {
           ))}
         </div>
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+          <div className="flex items-center gap-3 mb-3">
+            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
             <div className="flex-1">
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <Receipt className="w-5 h-5" /> Billing (Sales Bill)
+              <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                <span className="text-xl font-black">₹</span> Billing (Sales Bill)
               </h1>
-              <p className="text-white/70 text-xs">Buyer invoicing & bill generation</p>
+              <p className="text-white/70 text-xs mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
             </div>
           </div>
 
-          {/* Search mode tabs */}
           <div className="flex gap-2 mb-3">
             <button onClick={() => setBillSearchMode('buyer')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
                 billSearchMode === 'buyer'
-                  ? 'bg-white/25 text-white border border-white/30'
-                  : 'bg-white/10 text-white/60')}>
-              <User className="w-3.5 h-3.5" /> New Bill
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <User className="w-4 h-4" /> New Bill
             </button>
             <button onClick={() => setBillSearchMode('bill')}
-              className={cn("flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all",
+              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
                 billSearchMode === 'bill'
-                  ? 'bg-white/25 text-white border border-white/30'
-                  : 'bg-white/10 text-white/60')}>
-              <FileText className="w-3.5 h-3.5" /> Saved Bills
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/70 hover:text-white')}>
+              <FileText className="w-4 h-4" /> Saved Bills
             </button>
           </div>
 
@@ -1071,32 +1119,30 @@ const BillingPage = () => {
       </div>
       ) : (
       <div className="px-8 py-5">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <Receipt className="w-5 h-5 text-indigo-500" /> Billing (Sales Bill)
-            </h2>
-            <p className="text-sm text-muted-foreground">{buyers.length} buyers · Invoicing & bill generation</p>
+        <div className="mb-4">
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <span className="text-xl font-black text-indigo-500">₹</span> Billing (Sales Bill)
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <div className="flex gap-2">
+            <button onClick={() => setBillSearchMode('buyer')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                billSearchMode === 'buyer' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <User className="w-4 h-4" /> New Bill
+            </button>
+            <button onClick={() => setBillSearchMode('bill')}
+              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
+                billSearchMode === 'bill' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <FileText className="w-4 h-4" /> Saved Bills
+            </button>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex gap-1 bg-muted/30 rounded-xl p-1">
-              <button onClick={() => setBillSearchMode('buyer')}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                  billSearchMode === 'buyer' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
-                New Bill
-              </button>
-              <button onClick={() => setBillSearchMode('bill')}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                  billSearchMode === 'bill' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground')}>
-                Saved Bills
-              </button>
-            </div>
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
-                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
-            </div>
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
           </div>
         </div>
       </div>
@@ -1168,7 +1214,7 @@ const BillingPage = () => {
                 transition={{ delay: i * 0.03 }}
                 onClick={() => {
                   setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [] });
-                  setBill(b);
+                  setBill(normalizeBillFromApi(b, fullConfigs, commodities));
                 }}
                 className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
                 <div className="flex items-center gap-3">

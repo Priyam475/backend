@@ -40,6 +40,8 @@ export interface Trader {
   gst_number?: string;
   rmc_apmc_code?: string;
   shop_photos?: string[];
+  /** When false, trader and staff cannot log in. */
+  active?: boolean;
 }
 
 /** 2.2 Roles */
@@ -175,11 +177,12 @@ export interface Contact {
   address: string;
   created_at: string;
   // App-level fields
-  type?: ContactType;
   opening_balance?: number;
   current_balance?: number;
   email?: string;
   can_login?: boolean;
+  /** True when row is a portal self-signup contact shown in registry after first use with this trader. */
+  portal_signup_linked?: boolean;
 }
 
 /** 4.2 Ledgers (Chart of Accounts) */

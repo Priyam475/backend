@@ -63,6 +63,8 @@ public class TraderDTO implements Serializable {
     @Size(max = 64)
     private String rmcApmcCode;
 
+    private Boolean active = true;
+
     public Long getId() {
         return id;
     }
@@ -205,6 +207,14 @@ public class TraderDTO implements Serializable {
 
     public void setRmcApmcCode(String rmcApmcCode) {
         this.rmcApmcCode = rmcApmcCode;
+    }
+
+    public Boolean getActive() {
+        return active;
+    }
+
+    public void setActive(Boolean active) {
+        this.active = active;
     }
 
     @Override

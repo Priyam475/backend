@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import { API_ORIGIN } from '@/services/api/http';
 
 const menuSections = [
   {
@@ -63,9 +64,18 @@ const ProfilePage = () => {
       <div className={cn("relative z-10 space-y-5", isDesktop ? "px-8 pt-6 max-w-3xl" : "px-4 -mt-20")}>
         <div className="glass-card p-5 rounded-2xl animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center shadow-lg">
-              <User className="w-8 h-8 text-white" />
-            </div>
+            {trader?.shop_photos?.[0] ? (
+              <img
+                src={`${API_ORIGIN}${trader.shop_photos[0].startsWith('/') ? '' : '/'}${trader.shop_photos[0]}`}
+                alt="Company"
+                className="w-16 h-16 rounded-full object-cover shadow-lg"
+                crossOrigin="use-credentials"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center shadow-lg">
+                <User className="w-8 h-8 text-white" />
+              </div>
+            )}
             <div className="flex-1">
               <h3 className="text-xl font-bold text-foreground">{user?.name || 'User'}</h3>
               <p className="text-sm text-muted-foreground">{user?.username || ''}</p>

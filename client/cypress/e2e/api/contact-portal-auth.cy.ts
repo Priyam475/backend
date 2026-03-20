@@ -93,6 +93,7 @@ describe('Contact Portal Auth API', () => {
           password: ctx.password,
           email: ctx.email,
           name: ctx.name,
+          mark: `CY-${Date.now()}`,
         },
       }).then((res) => {
         expect(res.status).to.eq(201);
@@ -124,6 +125,7 @@ describe('Contact Portal Auth API', () => {
         body: {
           phone: randomPhone(),
           password: '12345',
+          mark: 'SHORTPW1',
         },
         failOnStatusCode: false,
       }).then((res) => {
@@ -141,6 +143,7 @@ describe('Contact Portal Auth API', () => {
         body: {
           phone: '1234',
           password: 'password123',
+          mark: 'INVPHONE1',
         },
         failOnStatusCode: false,
       }).then((res) => {
@@ -159,6 +162,7 @@ describe('Contact Portal Auth API', () => {
           phone: ctx.phone,
           password: ctx.password,
           email: ctx.email,
+          mark: `CY-DUP-${Date.now()}`,
         },
         failOnStatusCode: false,
       }).then((res) => {

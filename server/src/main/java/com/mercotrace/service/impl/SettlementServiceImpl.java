@@ -1,6 +1,8 @@
 package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.*;
+import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
+import com.mercotrace.domain.enumeration.VoucherType;
 import com.mercotrace.repository.*;
 import com.mercotrace.service.AuctionService;
 import com.mercotrace.service.SettlementService;
@@ -35,6 +37,8 @@ public class SettlementServiceImpl implements SettlementService {
     private static final DateTimeFormatter PATTI_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int MAX_RESULTS_FOR_SELLERS = 2000;
 
+    private static final String RECEIVABLE_CLASSIFICATION = "RECEIVABLE";
+
     private final TraderContextService traderContextService;
     private final LotRepository lotRepository;
     private final AuctionService auctionService;
@@ -44,6 +48,9 @@ public class SettlementServiceImpl implements SettlementService {
     private final ContactRepository contactRepository;
     private final VehicleRepository vehicleRepository;
     private final CommodityRepository commodityRepository;
+    private final FreightCalculationRepository freightCalculationRepository;
+    private final ChartOfAccountRepository chartOfAccountRepository;
+    private final VoucherLineRepository voucherLineRepository;
 
     public SettlementServiceImpl(
         TraderContextService traderContextService,
@@ -54,7 +61,10 @@ public class SettlementServiceImpl implements SettlementService {
         SellerInVehicleRepository sellerInVehicleRepository,
         ContactRepository contactRepository,
         VehicleRepository vehicleRepository,
-        CommodityRepository commodityRepository
+        CommodityRepository commodityRepository,
+        FreightCalculationRepository freightCalculationRepository,
+        ChartOfAccountRepository chartOfAccountRepository,
+        VoucherLineRepository voucherLineRepository
     ) {
         this.traderContextService = traderContextService;
         this.lotRepository = lotRepository;
@@ -65,6 +75,9 @@ public class SettlementServiceImpl implements SettlementService {
         this.contactRepository = contactRepository;
         this.vehicleRepository = vehicleRepository;
         this.commodityRepository = commodityRepository;
+        this.freightCalculationRepository = freightCalculationRepository;
+        this.chartOfAccountRepository = chartOfAccountRepository;
+        this.voucherLineRepository = voucherLineRepository;
     }
 
     @Override
@@ -280,13 +293,60 @@ public class SettlementServiceImpl implements SettlementService {
     @Override
     @Transactional(readOnly = true)
     public SellerChargesDTO getSellerCharges(String sellerId) {
-        // For now, seller-scoped freight/advance are not derived from vouchers/ARAP;
-        // return zero amounts but keep the contract in place for future enhancement.
         SellerChargesDTO dto = new SellerChargesDTO();
-        dto.setFreight(java.math.BigDecimal.ZERO);
-        dto.setAdvance(java.math.BigDecimal.ZERO);
+        dto.setFreight(BigDecimal.ZERO);
+        dto.setAdvance(BigDecimal.ZERO);
         dto.setFreightAutoPulled(Boolean.FALSE);
         dto.setAdvanceAutoPulled(Boolean.FALSE);
+
+        if (sellerId == null || sellerId.isBlank()) {
+            return dto;
+        }
+        Long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            LOG.debug("Invalid sellerId for getSellerCharges: {}", sellerId);
+            return dto;
+        }
+
+        Optional<SellerInVehicle> sivOpt = sellerInVehicleRepository.findById(sivId);
+        if (sivOpt.isEmpty()) {
+            return dto;
+        }
+
+        SellerInVehicle siv = sivOpt.get();
+        Long vehicleId = siv.getVehicleId();
+        Long traderId = traderContextService.getCurrentTraderId();
+
+        BigDecimal advanceFromFreight = BigDecimal.ZERO;
+        BigDecimal freight = BigDecimal.ZERO;
+
+        Optional<FreightCalculation> fcOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        if (fcOpt.isPresent()) {
+            FreightCalculation fc = fcOpt.get();
+            freight = BigDecimal.valueOf(fc.getTotalAmount() != null ? fc.getTotalAmount() : 0d);
+            advanceFromFreight = BigDecimal.valueOf(fc.getAdvancePaid() != null ? fc.getAdvancePaid() : 0d);
+        }
+
+        BigDecimal ledgerAdvance = BigDecimal.ZERO;
+        Long contactId = siv.getContactId();
+        if (contactId != null && traderId != null) {
+            Optional<ChartOfAccount> ledgerOpt = chartOfAccountRepository
+                .findFirstByTraderIdAndContactIdAndClassification(traderId, contactId, RECEIVABLE_CLASSIFICATION);
+            if (ledgerOpt.isPresent()) {
+                BigDecimal sum = voucherLineRepository.sumCreditByLedgerIdAndVoucherTypeExcludingStatus(
+                    ledgerOpt.get().getId(), VoucherType.ADVANCE, VoucherLifecycleStatus.REVERSED
+                );
+                ledgerAdvance = sum != null ? sum : BigDecimal.ZERO;
+            }
+        }
+
+        BigDecimal totalAdvance = advanceFromFreight.add(ledgerAdvance);
+        dto.setFreight(freight);
+        dto.setAdvance(totalAdvance);
+        dto.setFreightAutoPulled(freight.compareTo(BigDecimal.ZERO) > 0);
+        dto.setAdvanceAutoPulled(totalAdvance.compareTo(BigDecimal.ZERO) > 0);
         return dto;
     }
 

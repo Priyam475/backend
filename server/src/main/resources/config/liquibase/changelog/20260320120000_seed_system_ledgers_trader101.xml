@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Phase 3: Seed system ledgers for existing trader 101 (dev/default).
+        Only runs if trader 101 has no chart_of_account rows.
+        Creates: Cash, Accounts Receivable – Control, Accounts Payable – Control.
+    -->
+    <changeSet id="20260320120000-1" author="mercotrace">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="1">
+                SELECT COUNT(*)::text FROM trader WHERE id = 101
+            </sqlCheck>
+            <sqlCheck expectedResult="0">
+                SELECT COUNT(*)::text FROM chart_of_account WHERE trader_id = 101
+            </sqlCheck>
+        </preConditions>
+        <sql dbms="postgresql">
+            INSERT INTO chart_of_account (id, trader_id, ledger_name, accounting_class, classification, parent_control_id, contact_id, is_system, is_locked, opening_balance, current_balance, created_by, created_date)
+            VALUES
+                (nextval('sequence_generator'), 101, 'Cash', 'ASSET', 'CASH', NULL, NULL, true, false, 0, 0, 'system-bootstrap', current_timestamp),
+                (nextval('sequence_generator'), 101, 'Accounts Receivable – Control', 'ASSET', 'CONTROL', NULL, NULL, true, false, 0, 0, 'system-bootstrap', current_timestamp),
+                (nextval('sequence_generator'), 101, 'Accounts Payable – Control', 'LIABILITY', 'CONTROL', NULL, NULL, true, false, 0, 0, 'system-bootstrap', current_timestamp);
+        </sql>
+    </changeSet>
+</databaseChangeLog>

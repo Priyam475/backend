@@ -45,11 +45,10 @@ public class ContactDTO implements Serializable {
 
     private Boolean canLogin;
 
-    /** Contact type: SELLER (vendor), BUYER, BROKER. Returned in API as "type". */
-    @Size(max = 20)
-    private String type;
-
     private Boolean active;
+
+    /** True when this row is a portal self-signup contact surfaced in the trader registry via first use (not trader-created). */
+    private Boolean portalSignupLinked;
 
     public Long getId() {
         return id;
@@ -139,20 +138,20 @@ public class ContactDTO implements Serializable {
         this.canLogin = canLogin;
     }
 
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
     public Boolean getActive() {
         return active;
     }
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public Boolean getPortalSignupLinked() {
+        return portalSignupLinked;
+    }
+
+    public void setPortalSignupLinked(Boolean portalSignupLinked) {
+        this.portalSignupLinked = portalSignupLinked;
     }
 
     @Override
@@ -190,7 +189,6 @@ public class ContactDTO implements Serializable {
             ", openingBalance=" + getOpeningBalance() +
             ", currentBalance=" + getCurrentBalance() +
             ", canLogin=" + getCanLogin() +
-            ", type='" + getType() + "'" +
             "}";
     }
 }

@@ -72,8 +72,6 @@ public class ContactAuthResource {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContactAuthResource.class);
 
-    private static final Set<String> ALLOWED_CONTACT_TYPES = Set.of("BUYER", "BROKER", "AGENT", "SELLER");
-
     private final ContactRepository contactRepository;
 
     private final ContactMapper contactMapper;
@@ -148,13 +146,16 @@ public class ContactAuthResource {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be at least 6 characters");
         }
 
-        String rawType = vm.getType();
-        if (rawType == null || rawType.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contact type is required");
+        String mark = vm.getMark();
+        if (mark == null || mark.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mark is required");
         }
-        String normalizedType = rawType.trim().toUpperCase();
-        if (!ALLOWED_CONTACT_TYPES.contains(normalizedType)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid contact type");
+        String trimmedMark = mark.trim();
+        if (trimmedMark.length() > 20) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mark must be at most 20 characters");
+        }
+        if (!trimmedMark.matches("^[A-Za-z0-9]+$")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mark must be alphanumeric (letters and numbers only, no spaces or symbols)");
         }
 
         // Ensure this phone number is not already used by any trader, trader staff user, or admin user.
@@ -164,6 +165,13 @@ public class ContactAuthResource {
         contactIdentityService.assertNoLoginConflictForRegistration(phone, email);
 
         Optional<Contact> existingByPhone = contactRepository.findOneByPhone(phone);
+        contactRepository
+            .findOneByMarkAndTraderIdIsNull(trimmedMark)
+            .ifPresent(found -> {
+                if (existingByPhone.isEmpty() || !found.getId().equals(existingByPhone.get().getId())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "This mark is already in use by another contact");
+                }
+            });
         Contact contact = existingByPhone.orElseGet(Contact::new);
         contact.setPhone(phone);
         if (vm.getName() != null && !vm.getName().isBlank()) {
@@ -176,7 +184,7 @@ public class ContactAuthResource {
         }
         contact.setPasswordHash(passwordEncoder.encode(vm.getPassword()));
         contact.setCanLogin(true);
-        contact.setType(normalizedType);
+        contact.setMark(trimmedMark);
         if (contact.getCreatedAt() == null) {
             contact.setCreatedAt(Instant.now());
         }

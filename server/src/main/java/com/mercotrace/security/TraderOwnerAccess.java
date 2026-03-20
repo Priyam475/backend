@@ -27,7 +27,7 @@ public class TraderOwnerAccess {
             return false;
         }
         return userTraderRepository
-            .findFirstByUserIdAndPrimaryMappingTrue(userId.get())
+            .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(userId.get())
             .map(mapping -> {
                 String role = mapping.getRoleInTrader();
                 return role != null && "OWNER".equalsIgnoreCase(role.trim());

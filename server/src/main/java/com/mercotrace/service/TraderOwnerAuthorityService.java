@@ -89,7 +89,7 @@ public class TraderOwnerAuthorityService {
         }
 
         boolean traderApproved = userTraderRepository
-            .findFirstByUserIdAndPrimaryMappingTrue(userId)
+            .findFirstByUserIdAndPrimaryMappingTrueAndActiveTrue(userId)
             .map(ut -> {
                 Trader t = ut.getTrader();
                 return t != null && t.getApprovalStatus() == com.mercotrace.domain.enumeration.ApprovalStatus.APPROVED;

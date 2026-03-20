@@ -10,9 +10,11 @@ frontend/
 # Liquibase local configuration (do not commit real credentials)
 server/src/main/resources/liquibase.properties
 node_modules/
+srs/
 
 # QA / test artifacts (Cypress in client/.gitignore)
 # Newman/Postman report outputs
 docs/test/reports/
 package-lock.json
 package.json
+srs/

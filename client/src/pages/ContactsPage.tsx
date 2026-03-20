@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
-import { ArrowLeft, Plus, Search, Phone, User as UserIcon, Users, BookOpen, AlertCircle, Eye, Pencil, Trash2, X, MapPin } from 'lucide-react';
+import { ArrowLeft, Plus, Search, Phone, User as UserIcon, Users, BookOpen, AlertCircle, Eye, Pencil, Trash2, X, MapPin, Wallet } from 'lucide-react';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -15,11 +15,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { RotateCcw } from 'lucide-react';
 import { usePermissions } from '@/lib/permissions';
 import ForbiddenPage from '@/components/ForbiddenPage';
-
-/** Ledger backend not implemented; no-op. See NOT_IMPLEMENTED.md. */
-function createLedgerForContact(_contact: Contact) {
-  // No backend for ledgers — do not create/write.
-}
 
 type ModalMode = 'add' | 'view' | 'edit' | null;
 
@@ -43,7 +38,7 @@ const ContactsPage = () => {
 
   const loadContacts = () => {
     if (!canView) return;
-    contactApi.list().then(setContacts);
+    contactApi.list({ scope: 'registry' }).then(setContacts);
   };
   useEffect(() => { loadContacts(); }, []);
 
@@ -72,6 +67,10 @@ const ContactsPage = () => {
   };
 
   const openEdit = (c: Contact) => {
+    if (c.portal_signup_linked) {
+      toast.error('This participant manages their profile via portal signup.');
+      return;
+    }
     if (!canEdit) {
       toast.error('You do not have permission to edit contacts.');
       return;
@@ -104,6 +103,14 @@ const ContactsPage = () => {
     } else if (contacts.some(c => c.phone === formData.phone.trim() && (!isEdit || c.contact_id !== selectedContact?.contact_id))) {
       errs.phone = 'This phone number is already registered';
     }
+    // Mark uniqueness per trader (case-insensitive)
+    if (formData.mark.trim()) {
+      const markLower = formData.mark.trim().toLowerCase();
+      const hasDuplicate = contacts.some(
+        c => c.mark && c.mark.toLowerCase() === markLower && (!isEdit || c.contact_id !== selectedContact?.contact_id)
+      );
+      if (hasDuplicate) errs.mark = 'This mark is already in use by another contact';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -122,7 +129,6 @@ const ContactsPage = () => {
         address: formData.address.trim(),
         trader_id: '',
       });
-      createLedgerForContact(created);
       setContacts(prev => [...prev, created]);
       closeModal();
       toast.success(`✅ ${created.name} registered`);
@@ -130,6 +136,10 @@ const ContactsPage = () => {
       if (err instanceof ContactApiError && err.errorKey === 'phoneexistsinactive') {
         setRestorePendingPhone(formData.phone.trim());
         closeModal();
+        return;
+      }
+      if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+        setErrors(prev => ({ ...prev, mark: err.message }));
         return;
       }
       console.error('Add contact error:', err);
@@ -173,8 +183,12 @@ const ContactsPage = () => {
       closeModal();
       toast.success(`✏️ ${updated.name} updated successfully`);
     } catch (err) {
+      if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+        setErrors(prev => ({ ...prev, mark: err.message }));
+        return;
+      }
       console.error('Edit contact error:', err);
-      toast.error('Failed to update contact');
+      toast.error(err instanceof Error ? err.message : 'Failed to update contact');
     }
   };
 
@@ -309,7 +323,13 @@ const ContactsPage = () => {
                     <td className="px-5 py-3.5 text-muted-foreground text-xs max-w-[200px] truncate">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate">{c.address || '—'}</span>
-                        {c.can_login && (
+                        {c.portal_signup_linked && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Joined via portal (added when used)
+                          </span>
+                        )}
+                        {!c.portal_signup_linked && c.can_login && (
                           <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             Portal enabled
@@ -328,10 +348,26 @@ const ContactsPage = () => {
                         <button onClick={() => openView(c)} className="p-2 rounded-lg hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 transition-colors" title="View">
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button onClick={() => openEdit(c)} className="p-2 rounded-lg hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors" title="Edit">
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="p-2 rounded-lg hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors disabled:opacity-40"
+                          title={c.portal_signup_linked ? 'Managed via participant portal' : 'Edit'}
+                          disabled={!!c.portal_signup_linked}
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => setDeleteConfirm(c.contact_id)} className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors" title="Delete">
+                        <button
+                          onClick={() => {
+                            if (c.portal_signup_linked) {
+                              toast.error('Remove is not available for portal participants from this list.');
+                              return;
+                            }
+                            setDeleteConfirm(c.contact_id);
+                          }}
+                          className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors disabled:opacity-40"
+                          title={c.portal_signup_linked ? 'Cannot delete portal participant here' : 'Delete'}
+                          disabled={!!c.portal_signup_linked}
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -366,10 +402,13 @@ const ContactsPage = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-foreground truncate">{c.name}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
                     <Phone className="w-3 h-3 shrink-0" />
                     <span>{c.phone}</span>
                     {c.mark && <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">{c.mark}</span>}
+                    {c.portal_signup_linked && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">Portal</span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -384,11 +423,25 @@ const ContactsPage = () => {
                   <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">View</span>
                 </button>
-                <button onClick={() => openEdit(c)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 hover:shadow-md transition-all active:scale-95">
+                <button
+                  onClick={() => openEdit(c)}
+                  disabled={!!c.portal_signup_linked}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 hover:shadow-md transition-all active:scale-95 disabled:opacity-40"
+                >
                   <Pencil className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Edit</span>
                 </button>
-                <button onClick={() => setDeleteConfirm(c.contact_id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-500/10 to-rose-500/10 border border-red-500/20 hover:shadow-md transition-all active:scale-95">
+                <button
+                  onClick={() => {
+                    if (c.portal_signup_linked) {
+                      toast.error('Remove is not available for portal participants from this list.');
+                      return;
+                    }
+                    setDeleteConfirm(c.contact_id);
+                  }}
+                  disabled={!!c.portal_signup_linked}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-500/10 to-rose-500/10 border border-red-500/20 hover:shadow-md transition-all active:scale-95 disabled:opacity-40"
+                >
                   <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
                   <span className="text-[11px] font-medium text-red-500 dark:text-red-400">Delete</span>
                 </button>
@@ -530,17 +583,46 @@ const ContactsPage = () => {
                         </p>
                       </div>
                     </div>
+                    {selectedContact.portal_signup_linked && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                        This entry is shared from portal signup and was added to your registry when used in an arrival or auction. Profile edits are done by the participant in their portal.
+                      </p>
+                    )}
                   </div>
 
-                  <div className="flex gap-3 pt-2">
-                    <Button onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
-                      className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20">
-                      <Pencil className="w-4 h-4 mr-2" /> Edit
+                  <div className="flex flex-col gap-3 pt-2">
+                    <Button
+                      onClick={() => { const id = selectedContact.contact_id; closeModal(); navigate(`/contact-ledger/${id}`); }}
+                      variant="outline"
+                      className="h-12 rounded-xl border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center gap-2"
+                    >
+                      <Wallet className="w-4 h-4" /> View Ledgers
                     </Button>
-                    <Button onClick={() => { const id = selectedContact.contact_id; closeModal(); setTimeout(() => setDeleteConfirm(id), 150); }}
-                      variant="outline" className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10">
-                      <Trash2 className="w-4 h-4 mr-2" /> Delete
-                    </Button>
+                    <div className="flex gap-3">
+                      <Button
+                        onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
+                        disabled={!!selectedContact.portal_signup_linked}
+                        className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20 disabled:opacity-40"
+                      >
+                        <Pencil className="w-4 h-4 mr-2" /> Edit
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (selectedContact.portal_signup_linked) {
+                            toast.error('Remove is not available for portal participants from this list.');
+                            return;
+                          }
+                          const id = selectedContact.contact_id;
+                          closeModal();
+                          setTimeout(() => setDeleteConfirm(id), 150);
+                        }}
+                        disabled={!!selectedContact.portal_signup_linked}
+                        variant="outline"
+                        className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-40"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}
@@ -576,8 +658,9 @@ const ContactsPage = () => {
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Mark <span className="text-muted-foreground/60 font-normal">(Short Code)</span></label>
                     <Input placeholder="e.g., VT, ML, AB" value={formData.mark}
                       onChange={e => setFormData(p => ({ ...p, mark: e.target.value.toUpperCase().slice(0, 4) }))}
-                      className="h-12 rounded-xl" maxLength={4} />
-                    <p className="text-[10px] text-muted-foreground mt-1">Used for quick auto-complete in transaction screens</p>
+                      className={cn("h-12 rounded-xl", errors.mark && "border-destructive")} maxLength={4} />
+                    {errors.mark && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{errors.mark}</p>}
+                    {!errors.mark && <p className="text-[10px] text-muted-foreground mt-1">Used for quick auto-complete in transaction screens</p>}
                   </div>
 
                   <div>
@@ -604,7 +687,7 @@ const ContactsPage = () => {
                   {modalMode === 'add' && (
                     <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 px-3 py-2 flex items-start gap-2">
                       <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact is stored on the server. Ledger feature is not yet implemented.</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact registered. A receivable ledger is created automatically.</p>
                     </div>
                   )}
 
