@@ -3,6 +3,7 @@ package com.mercotrace.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,6 +23,7 @@ import com.mercotrace.service.dto.VoucherHeaderDTO;
 import com.mercotrace.service.dto.VoucherLineCreateDTO;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,15 +52,20 @@ class VoucherHeaderServiceImplTest {
     @Mock
     private TraderContextService traderContextService;
 
+    @Mock
+    private ChartOfAccountArApControlSyncService arApControlSyncService;
+
     private VoucherHeaderServiceImpl service;
 
     @BeforeEach
     void setUp() {
+        when(arApControlSyncService.syncControlBalancesFromSubledgers(anyLong())).thenReturn(Collections.emptySet());
         service = new VoucherHeaderServiceImpl(
             voucherHeaderRepository,
             voucherLineRepository,
             chartOfAccountRepository,
             traderContextService,
+            arApControlSyncService,
             null
         );
     }

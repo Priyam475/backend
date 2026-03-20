@@ -3,6 +3,7 @@ package com.mercotrace.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +18,7 @@ import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ChartOfAccountUpdateRequest;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,11 +46,22 @@ class ChartOfAccountServiceImplTest {
     @Mock
     private TraderContextService traderContextService;
 
+    @Mock
+    private ChartOfAccountArApControlSyncService arApControlSyncService;
+
     private ChartOfAccountServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new ChartOfAccountServiceImpl(repository, voucherLineRepository, contactRepository, traderContextService);
+        when(arApControlSyncService.syncControlBalancesFromSubledgers(eq(TRADER_ID))).thenReturn(Collections.emptySet());
+        service = new ChartOfAccountServiceImpl(
+            repository,
+            voucherLineRepository,
+            contactRepository,
+            traderContextService,
+            arApControlSyncService,
+            null
+        );
     }
 
     @Test
@@ -106,6 +119,7 @@ class ChartOfAccountServiceImplTest {
         assertThat(result.getAccountingClass()).isEqualTo("ASSET");
         assertThat(result.getClassification()).isEqualTo("RECEIVABLE");
         verify(repository).save(any(ChartOfAccount.class));
+        verify(arApControlSyncService).syncControlBalancesFromSubledgers(TRADER_ID);
     }
 
     @Test

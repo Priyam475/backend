@@ -17,9 +17,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
@@ -64,17 +68,23 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
     private final VoucherLineRepository voucherLineRepository;
     private final ContactRepository contactRepository;
     private final TraderContextService traderContextService;
+    private final ChartOfAccountArApControlSyncService arApControlSyncService;
+    private final CacheManager cacheManager;
 
     public ChartOfAccountServiceImpl(
         ChartOfAccountRepository repository,
         VoucherLineRepository voucherLineRepository,
         ContactRepository contactRepository,
-        TraderContextService traderContextService
+        TraderContextService traderContextService,
+        ChartOfAccountArApControlSyncService arApControlSyncService,
+        @Autowired(required = false) CacheManager cacheManager
     ) {
         this.repository = repository;
         this.voucherLineRepository = voucherLineRepository;
         this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
+        this.arApControlSyncService = arApControlSyncService;
+        this.cacheManager = cacheManager;
     }
 
     @Override
@@ -134,6 +144,8 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
         entity.setCurrentBalance(ob);
         entity = repository.save(entity);
         LOG.debug("Created chart of account: id={}, ledgerName={}", entity.getId(), entity.getLedgerName());
+        Set<Long> controlIds = arApControlSyncService.syncControlBalancesFromSubledgers(traderId);
+        evictCoaCachesForControlSync(controlIds);
         return toDto(entity);
     }
 
@@ -171,6 +183,8 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
         if (request.getCurrentBalance() != null) entity.setCurrentBalance(request.getCurrentBalance());
         if (request.getLocked() != null) entity.setLocked(request.getLocked());
         entity = repository.save(entity);
+        Set<Long> controlIds = arApControlSyncService.syncControlBalancesFromSubledgers(traderId);
+        evictCoaCachesForControlSync(controlIds);
         return toDto(entity);
     }
 
@@ -190,6 +204,8 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
         }
         repository.delete(entity);
         LOG.debug("Deleted chart of account: id={}", id);
+        Set<Long> controlIds = arApControlSyncService.syncControlBalancesFromSubledgers(traderId);
+        evictCoaCachesForControlSync(controlIds);
     }
 
     @Override
@@ -230,6 +246,24 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
             .stream()
             .map(this::toDto)
             .collect(Collectors.toList());
+    }
+
+    private void evictCoaCachesForControlSync(Set<Long> controlLedgerIds) {
+        if (cacheManager == null) {
+            return;
+        }
+        Cache page = cacheManager.getCache(CACHE_COA_PAGE_BY_TRADER);
+        if (page != null) {
+            page.clear();
+        }
+        Cache byId = cacheManager.getCache(CACHE_COA_BY_ID);
+        if (byId != null) {
+            for (Long ledgerId : controlLedgerIds) {
+                if (ledgerId != null) {
+                    byId.evict(ledgerId);
+                }
+            }
+        }
     }
 
     private ChartOfAccountDTO toDto(ChartOfAccount e) {
