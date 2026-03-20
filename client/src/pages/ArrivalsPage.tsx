@@ -23,6 +23,7 @@ import { useDesktopMode } from '@/hooks/use-desktop';
 import useAutofocusWhen from '@/hooks/useAutofocusWhen';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 
 /**
  * ArrivalsPage — SRS Part 2: Inward Logistics (REQ-ARR-001 to REQ-ARR-013)
@@ -135,10 +136,6 @@ const ArrivalsPage = () => {
   const isDesktop = useDesktopMode();
   const { canAccessModule, can } = usePermissions();
   const canView = canAccessModule('Arrivals');
-
-  if (!canView) {
-    return <ForbiddenPage moduleName="Arrivals" />;
-  }
   const [apiArrivals, setApiArrivals] = useState<ArrivalSummary[]>([]);
   const [apiArrivalsLoading, setApiArrivalsLoading] = useState(true);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -178,6 +175,7 @@ const ArrivalsPage = () => {
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const editBaselineSnapshotRef = useRef<string | null>(null);
 
   // Broker: contact search or type any name
   const [brokerDropdown, setBrokerDropdown] = useState(false);
@@ -203,6 +201,125 @@ const ArrivalsPage = () => {
 
   useAutofocusWhen(isStep1PanelOpen && isMultiSeller, vehicleNumberInputRef);
   useAutofocusWhen(isStep1PanelOpen && !isMultiSeller, loadedWeightInputRef);
+
+  const isArrivalPanelOpen = isDesktop ? desktopTab === 'new-arrival' : showAdd;
+
+  const serializeSellersForDirty = useCallback((list: SellerEntry[]) => {
+    return list.map((s) => ({
+      seller_vehicle_id: s.seller_vehicle_id,
+      contact_id: s.contact_id,
+      seller_name: s.seller_name,
+      seller_phone: s.seller_phone,
+      seller_mark: s.seller_mark,
+      lots: s.lots.map((l) => ({
+        lot_id: l.lot_id,
+        lot_name: l.lot_name,
+        quantity: l.quantity,
+        commodity_name: l.commodity_name,
+        broker_tag: l.broker_tag,
+        variant: l.variant,
+      })),
+    }));
+  }, []);
+
+  const isArrivalDirty = useMemo(() => {
+    if (!isArrivalPanelOpen) return false;
+    if (editLoading) return false;
+
+    if (editingVehicleId != null) {
+      if (!editBaselineSnapshotRef.current) return false;
+
+      const currentSnapshot = JSON.stringify({
+        step,
+        isMultiSeller,
+        vehicleNumber,
+        loadedWeight,
+        emptyWeight,
+        deductedWeight,
+        freightMethod,
+        freightRate,
+        noRental,
+        advancePaid,
+        brokerName,
+        brokerContactId,
+        narration,
+        godown,
+        gatepassNumber,
+        origin,
+        sellers: serializeSellersForDirty(sellers),
+      });
+
+      return currentSnapshot !== editBaselineSnapshotRef.current;
+    }
+
+    // New arrival: treat any user-entered progress as dirty,
+    // even if validation fails and "Save" ends up disabled.
+    const hasStep2Data = step > 1 || sellers.length > 0;
+    if (hasStep2Data) return true;
+
+    const hasMeaningfulStep1Data = [
+      vehicleNumber.trim(),
+      loadedWeight.trim(),
+      emptyWeight.trim(),
+      deductedWeight.trim(),
+      freightMethod !== 'BY_WEIGHT' ? 'changedFreightMethod' : '',
+      freightRate.trim(),
+      noRental ? 'noRental' : '',
+      advancePaid.trim(),
+      brokerName.trim(),
+      brokerContactId != null ? 'brokerSelected' : '',
+      narration.trim(),
+      godown.trim(),
+      gatepassNumber.trim(),
+      origin.trim(),
+    ].some(Boolean);
+
+    return hasMeaningfulStep1Data;
+  }, [
+    isArrivalPanelOpen,
+    editLoading,
+    editingVehicleId,
+    step,
+    isMultiSeller,
+    vehicleNumber,
+    loadedWeight,
+    emptyWeight,
+    deductedWeight,
+    freightMethod,
+    freightRate,
+    noRental,
+    advancePaid,
+    brokerName,
+    brokerContactId,
+    narration,
+    godown,
+    gatepassNumber,
+    origin,
+    sellers,
+    serializeSellersForDirty,
+  ]);
+
+  const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
+    when: isArrivalDirty,
+  });
+
+  const tryCloseArrivalPanel = useCallback(
+    async (closeFn: () => void) => {
+      const ok = await confirmIfDirty();
+      if (!ok) return;
+      closeFn();
+    },
+    [confirmIfDirty],
+  );
+
+  const openNewArrivalPanel = useCallback(() => {
+    void (async () => {
+      const ok = await confirmIfDirty();
+      if (!ok) return;
+      resetForm();
+      setDesktopTab('new-arrival');
+    })();
+  }, [confirmIfDirty]);
 
   const refreshBrokerDropdownPos = useCallback(() => {
     if (brokerSearchWrapRef.current) {
@@ -767,6 +884,7 @@ const ArrivalsPage = () => {
     setSellerSearch('');
     setIsMultiSeller(true);
     setEditingVehicleId(null);
+    editBaselineSnapshotRef.current = null;
   };
 
   const loadExpandedDetail = async (vehicleId: number | string) => {
@@ -803,6 +921,7 @@ const ArrivalsPage = () => {
 
   const handleEditArrival = async (a: ArrivalSummary) => {
     setEditingVehicleId(a.vehicleId);
+    editBaselineSnapshotRef.current = null;
     setShowAdd(true);
     setExpandedDetail(null);
     setEditLoading(true);
@@ -841,6 +960,28 @@ const ArrivalsPage = () => {
       }));
       setSellers(mappedSellers);
       setIsMultiSeller(mappedSellers.length > 1);
+
+      // Capture baseline immediately after we populate all edit fields,
+      // so dirty detection works reliably even with invalid data.
+      editBaselineSnapshotRef.current = JSON.stringify({
+        step: 2,
+        isMultiSeller: mappedSellers.length > 1,
+        vehicleNumber: detail?.vehicleNumber ?? '',
+        loadedWeight: detail?.loadedWeight != null ? String(detail.loadedWeight) : '',
+        emptyWeight: detail?.emptyWeight != null ? String(detail.emptyWeight) : '',
+        deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
+        freightMethod: (detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT',
+        freightRate: detail?.freightRate != null ? String(detail.freightRate) : '',
+        noRental: Boolean(detail?.noRental),
+        advancePaid: detail?.advancePaid != null ? String(detail.advancePaid) : '',
+        brokerName: detail?.brokerName ?? '',
+        brokerContactId: detail?.brokerContactId ?? null,
+        narration: detail?.narration ?? '',
+        godown: detail?.godown ?? '',
+        gatepassNumber: detail?.gatepassNumber ?? '',
+        origin: detail?.origin ?? '',
+        sellers: serializeSellersForDirty(mappedSellers),
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load arrival for edit');
       setEditingVehicleId(null);
@@ -900,8 +1041,13 @@ const ArrivalsPage = () => {
     }
   };
 
+  if (!canView) {
+    return <ForbiddenPage moduleName="Arrivals" />;
+  }
+
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <UnsavedChangesDialog />
       {/* Mobile Header */}
       {!isDesktop && (
         <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(2rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-3xl mb-4 relative overflow-hidden">
@@ -940,7 +1086,9 @@ const ArrivalsPage = () => {
           {/* Tab Bar */}
           <div className="flex items-center gap-1 mb-6 border-b border-border/40">
             <button
-              onClick={() => setDesktopTab('summary')}
+              onClick={() => {
+                void tryCloseArrivalPanel(() => setDesktopTab('summary'));
+              }}
               className={cn(
                 "px-5 py-3 text-sm font-semibold transition-all relative",
                 desktopTab === 'summary'
@@ -958,7 +1106,7 @@ const ArrivalsPage = () => {
               )}
             </button>
             <button
-              onClick={() => { setDesktopTab('new-arrival'); resetForm(); }}
+              onClick={openNewArrivalPanel}
               className={cn(
                 "px-5 py-3 text-sm font-semibold transition-all relative",
                 desktopTab === 'new-arrival'
@@ -1004,7 +1152,7 @@ const ArrivalsPage = () => {
                     </div>
                     <h3 className="text-lg font-bold text-foreground mb-1">No Arrivals Yet</h3>
                     <p className="text-sm text-muted-foreground mb-4">Record your first vehicle arrival to start operations</p>
-                    <Button onClick={() => { resetForm(); setDesktopTab('new-arrival'); }} className="bg-gradient-to-r from-blue-500 to-violet-500 text-white rounded-xl shadow-lg">
+                    <Button onClick={openNewArrivalPanel} className="bg-gradient-to-r from-blue-500 to-violet-500 text-white rounded-xl shadow-lg">
                       <Plus className="w-4 h-4 mr-2" /> New Arrival
                     </Button>
                   </div>
@@ -1886,7 +2034,9 @@ const ArrivalsPage = () => {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   className="fixed inset-0 z-40 bg-black/50 backdrop-blur-md hidden md:block lg:hidden"
-                  onClick={() => setShowAdd(false)}
+                    onClick={() => {
+                      void tryCloseArrivalPanel(() => setShowAdd(false));
+                    }}
                 />
                 <motion.div
                   initial={{ opacity: 0, y: 30, scale: 0.97 }}
@@ -1905,7 +2055,13 @@ const ArrivalsPage = () => {
                   <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-4 sticky top-0 z-10">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <button onClick={() => setShowAdd(false)} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                        <button
+                          onClick={() => {
+                            void tryCloseArrivalPanel(() => setShowAdd(false));
+                          }}
+                          aria-label="Go back"
+                          className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"
+                        >
                           <ArrowLeft className="w-5 h-5 text-white" />
                         </button>
                         <div>

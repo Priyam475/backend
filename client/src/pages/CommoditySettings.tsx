@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronUp, ArrowLeft, Save, Package, RotateCcw } from 'lucide-react';
@@ -16,6 +16,7 @@ import { usePermissions } from '@/lib/permissions';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 
 import onionImg from '@/assets/commodities/onion.jpg';
 import potatoImg from '@/assets/commodities/potato.jpg';
@@ -100,6 +101,53 @@ const CommoditySettings = () => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [restorePendingName, setRestorePendingName] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const baselineSnapshotRef = useRef<string | null>(null);
+
+  const serializeItemsForDirty = useCallback((list: LocalCommodityConfig[]) => {
+    return list.map((item) => ({
+      commodity_id: item.commodity.commodity_id,
+      commodity_name: item.commodity.commodity_name,
+      config: item.config,
+      charges: item.charges,
+      deductionRules: item.deductionRules,
+      hamaliSlabs: item.hamaliSlabs,
+      hamaliEnabled: item.hamaliEnabled,
+      billPrefix: item.billPrefix,
+      gstApplicable: item.gstApplicable,
+    }));
+  }, []);
+
+  const createSnapshot = useCallback(() => {
+    return JSON.stringify({
+      items: serializeItemsForDirty(items),
+      showAddForm,
+      newCommodityName,
+    });
+  }, [items, showAddForm, newCommodityName, serializeItemsForDirty]);
+
+  const isDirty = useMemo(() => {
+    if (!canView || loading || baselineSnapshotRef.current == null) return false;
+    return createSnapshot() !== baselineSnapshotRef.current;
+  }, [canView, loading, createSnapshot]);
+
+  const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
+    when: isDirty,
+  });
+
+  const refreshDirtyBaseline = useCallback(() => {
+    baselineSnapshotRef.current = JSON.stringify({
+      items: serializeItemsForDirty(items),
+      showAddForm,
+      newCommodityName,
+    });
+  }, [items, showAddForm, newCommodityName, serializeItemsForDirty]);
+
+  useEffect(() => {
+    if (!canView || loading) return;
+    if (baselineSnapshotRef.current == null) {
+      baselineSnapshotRef.current = createSnapshot();
+    }
+  }, [canView, loading, createSnapshot]);
 
   useEffect(() => {
     const load = async () => {
@@ -118,6 +166,7 @@ const CommoditySettings = () => {
           return fullConfigToLocal(c, { commodityId: Number(c.commodity_id) || 0 });
         });
         setItems(result);
+      baselineSnapshotRef.current = null;
       } catch (err) {
         console.error('Load commodities:', err);
         toast.error('Failed to load commodity settings');
@@ -208,6 +257,7 @@ const CommoditySettings = () => {
       setNewCommodityName('');
       setShowAddForm(false);
       setExpanded(items.length);
+      baselineSnapshotRef.current = null;
       toast.success(`"${name}" added successfully`);
     } catch (err) {
       if (err instanceof CommodityApiError && err.errorKey === 'commoditynameexistsinactive') {
@@ -231,6 +281,7 @@ const CommoditySettings = () => {
       setRestorePendingName(null);
       setNewCommodityName('');
       setRefreshTrigger(prev => prev + 1);
+      baselineSnapshotRef.current = null;
       toast.success(`"${restorePendingName}" restored. You can use it again.`);
     } catch (err) {
       console.error('Restore commodity error:', err);
@@ -253,6 +304,7 @@ const CommoditySettings = () => {
       setItems(prev => prev.filter(it => it.commodity.commodity_id !== commodityId));
       setExpanded(null);
       setDeleteConfirmId(null);
+      baselineSnapshotRef.current = null;
       toast.success(`"${name}" removed`);
     } catch (err) {
       console.error('Delete commodity error:', err);
@@ -409,6 +461,7 @@ const CommoditySettings = () => {
       await commodityApi.saveFullConfig(item.commodity.commodity_id, payload);
       toast.success(`✅ ${commodityName} settings saved successfully!`);
       setExpanded(null); // Close the expanded panel so list shows as normal
+      refreshDirtyBaseline();
     } catch (err) {
       console.error('Save commodity config:', err);
       toast.error('Failed to save settings');
@@ -429,6 +482,7 @@ const CommoditySettings = () => {
 
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <UnsavedChangesDialog />
       {/* Mobile Header */}
       {!isDesktop && (
       <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(2rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-3xl mb-4 relative overflow-hidden">
@@ -443,7 +497,16 @@ const CommoditySettings = () => {
           ))}
         </div>
         <div className="relative z-10 flex items-center gap-3">
-          <button onClick={() => navigate('/home')} className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+          <button
+            onClick={() => {
+              void (async () => {
+                const ok = await confirmIfDirty();
+                if (!ok) return;
+                navigate('/home');
+              })();
+            }}
+            className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"
+          >
             <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <div className="flex-1">
@@ -510,7 +573,18 @@ const CommoditySettings = () => {
               >
                   Add
                 </Button>
-                <Button variant="ghost" onClick={() => { setShowAddForm(false); setNewCommodityName(''); }} className="h-12 px-3 rounded-xl">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    void (async () => {
+                      const ok = await confirmIfDirty();
+                      if (!ok) return;
+                      setShowAddForm(false);
+                      setNewCommodityName('');
+                    })();
+                  }}
+                  className="h-12 px-3 rounded-xl"
+                >
                   Cancel
                 </Button>
               </div>
