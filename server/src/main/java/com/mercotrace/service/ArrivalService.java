@@ -52,6 +52,7 @@ public class ArrivalService {
     private final DailySerialRepository dailySerialRepository;
     private final CommodityRepository commodityRepository;
     private final ContactRepository contactRepository;
+    private final ContactService contactService;
     private final TraderContextService traderContextService;
     private final AuctionRepository auctionRepository;
     private final AuctionEntryRepository auctionEntryRepository;
@@ -68,6 +69,7 @@ public class ArrivalService {
         DailySerialRepository dailySerialRepository,
         CommodityRepository commodityRepository,
         ContactRepository contactRepository,
+        ContactService contactService,
         TraderContextService traderContextService,
         AuctionRepository auctionRepository,
         AuctionEntryRepository auctionEntryRepository,
@@ -83,6 +85,7 @@ public class ArrivalService {
         this.dailySerialRepository = dailySerialRepository;
         this.commodityRepository = commodityRepository;
         this.contactRepository = contactRepository;
+        this.contactService = contactService;
         this.traderContextService = traderContextService;
         this.auctionRepository = auctionRepository;
         this.auctionEntryRepository = auctionEntryRepository;
@@ -139,6 +142,7 @@ public class ArrivalService {
                 contactRepository.findById(contactId).orElseThrow(() ->
                     new IllegalArgumentException("Seller contact not found: " + contactId)
                 );
+                contactService.ensureTraderUsesPortalContact(traderId, contactId);
                 sellerInVehicle.setContactId(contactId);
             } else {
                 if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
@@ -168,6 +172,10 @@ public class ArrivalService {
                 lot.setCreatedAt(now);
                 lots.add(lot);
             }
+        }
+
+        if (brokerContactId != null) {
+            contactService.ensureTraderUsesPortalContact(traderId, brokerContactId);
         }
 
         if (!lots.isEmpty()) {
@@ -490,6 +498,7 @@ public class ArrivalService {
                 if (contactId != null) {
                     contactRepository.findById(contactId).orElseThrow(() ->
                         new IllegalArgumentException("Seller contact not found: " + contactId));
+                    contactService.ensureTraderUsesPortalContact(traderId, contactId);
                     siv.setContactId(contactId);
                 } else {
                     if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
@@ -523,6 +532,9 @@ public class ArrivalService {
                     lot.setCreatedAt(now);
                     currentLots.add(lot);
                 }
+            }
+            if (updateBrokerContactId != null) {
+                contactService.ensureTraderUsesPortalContact(traderId, updateBrokerContactId);
             }
             if (!currentLots.isEmpty()) {
                 lotRepository.saveAll(currentLots);

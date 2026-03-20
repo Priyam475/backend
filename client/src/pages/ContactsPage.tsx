@@ -38,7 +38,7 @@ const ContactsPage = () => {
 
   const loadContacts = () => {
     if (!canView) return;
-    contactApi.list().then(setContacts);
+    contactApi.list({ scope: 'registry' }).then(setContacts);
   };
   useEffect(() => { loadContacts(); }, []);
 
@@ -67,6 +67,10 @@ const ContactsPage = () => {
   };
 
   const openEdit = (c: Contact) => {
+    if (c.portal_signup_linked) {
+      toast.error('This participant manages their profile via portal signup.');
+      return;
+    }
     if (!canEdit) {
       toast.error('You do not have permission to edit contacts.');
       return;
@@ -319,7 +323,13 @@ const ContactsPage = () => {
                     <td className="px-5 py-3.5 text-muted-foreground text-xs max-w-[200px] truncate">
                       <div className="flex flex-col gap-0.5">
                         <span className="truncate">{c.address || '—'}</span>
-                        {c.can_login && (
+                        {c.portal_signup_linked && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Joined via portal (added when used)
+                          </span>
+                        )}
+                        {!c.portal_signup_linked && c.can_login && (
                           <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-300">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             Portal enabled
@@ -338,10 +348,26 @@ const ContactsPage = () => {
                         <button onClick={() => openView(c)} className="p-2 rounded-lg hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 transition-colors" title="View">
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button onClick={() => openEdit(c)} className="p-2 rounded-lg hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors" title="Edit">
+                        <button
+                          onClick={() => openEdit(c)}
+                          className="p-2 rounded-lg hover:bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-colors disabled:opacity-40"
+                          title={c.portal_signup_linked ? 'Managed via participant portal' : 'Edit'}
+                          disabled={!!c.portal_signup_linked}
+                        >
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => setDeleteConfirm(c.contact_id)} className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors" title="Delete">
+                        <button
+                          onClick={() => {
+                            if (c.portal_signup_linked) {
+                              toast.error('Remove is not available for portal participants from this list.');
+                              return;
+                            }
+                            setDeleteConfirm(c.contact_id);
+                          }}
+                          className="p-2 rounded-lg hover:bg-red-500/10 text-red-500 transition-colors disabled:opacity-40"
+                          title={c.portal_signup_linked ? 'Cannot delete portal participant here' : 'Delete'}
+                          disabled={!!c.portal_signup_linked}
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -376,10 +402,13 @@ const ContactsPage = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-foreground truncate">{c.name}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
                     <Phone className="w-3 h-3 shrink-0" />
                     <span>{c.phone}</span>
                     {c.mark && <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">{c.mark}</span>}
+                    {c.portal_signup_linked && (
+                      <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">Portal</span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -394,11 +423,25 @@ const ContactsPage = () => {
                   <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">View</span>
                 </button>
-                <button onClick={() => openEdit(c)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 hover:shadow-md transition-all active:scale-95">
+                <button
+                  onClick={() => openEdit(c)}
+                  disabled={!!c.portal_signup_linked}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/20 hover:shadow-md transition-all active:scale-95 disabled:opacity-40"
+                >
                   <Pencil className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Edit</span>
                 </button>
-                <button onClick={() => setDeleteConfirm(c.contact_id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-500/10 to-rose-500/10 border border-red-500/20 hover:shadow-md transition-all active:scale-95">
+                <button
+                  onClick={() => {
+                    if (c.portal_signup_linked) {
+                      toast.error('Remove is not available for portal participants from this list.');
+                      return;
+                    }
+                    setDeleteConfirm(c.contact_id);
+                  }}
+                  disabled={!!c.portal_signup_linked}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-500/10 to-rose-500/10 border border-red-500/20 hover:shadow-md transition-all active:scale-95 disabled:opacity-40"
+                >
                   <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
                   <span className="text-[11px] font-medium text-red-500 dark:text-red-400">Delete</span>
                 </button>
@@ -540,6 +583,11 @@ const ContactsPage = () => {
                         </p>
                       </div>
                     </div>
+                    {selectedContact.portal_signup_linked && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                        This entry is shared from portal signup and was added to your registry when used in an arrival or auction. Profile edits are done by the participant in their portal.
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-3 pt-2">
@@ -551,12 +599,27 @@ const ContactsPage = () => {
                       <Wallet className="w-4 h-4" /> View Ledgers
                     </Button>
                     <div className="flex gap-3">
-                      <Button onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
-                        className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20">
+                      <Button
+                        onClick={() => { const sc = selectedContact; closeModal(); setTimeout(() => openEdit(sc), 150); }}
+                        disabled={!!selectedContact.portal_signup_linked}
+                        className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/20 disabled:opacity-40"
+                      >
                         <Pencil className="w-4 h-4 mr-2" /> Edit
                       </Button>
-                      <Button onClick={() => { const id = selectedContact.contact_id; closeModal(); setTimeout(() => setDeleteConfirm(id), 150); }}
-                        variant="outline" className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10">
+                      <Button
+                        onClick={() => {
+                          if (selectedContact.portal_signup_linked) {
+                            toast.error('Remove is not available for portal participants from this list.');
+                            return;
+                          }
+                          const id = selectedContact.contact_id;
+                          closeModal();
+                          setTimeout(() => setDeleteConfirm(id), 150);
+                        }}
+                        disabled={!!selectedContact.portal_signup_linked}
+                        variant="outline"
+                        className="flex-1 h-12 rounded-xl border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-40"
+                      >
                         <Trash2 className="w-4 h-4 mr-2" /> Delete
                       </Button>
                     </div>

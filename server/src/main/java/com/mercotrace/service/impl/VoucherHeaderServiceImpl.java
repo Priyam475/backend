@@ -33,7 +33,7 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
 
     private static final Logger LOG = LoggerFactory.getLogger(VoucherHeaderServiceImpl.class);
 
-    private static final String VOUCHER_NUMBER_PREFIX = "KT/";
+    private static final String VOUCHER_NUMBER_PREFIX = "VP/";
 
     private static final java.util.Map<VoucherType, String> TYPE_PREFIX = new java.util.HashMap<>();
     static {

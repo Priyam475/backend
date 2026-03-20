@@ -21,6 +21,8 @@ type ContactDto = {
   email?: string;
   canLogin?: boolean;
   can_login?: boolean;
+  portalSignupLinked?: boolean;
+  portal_signup_linked?: boolean;
 };
 
 function mapDtoToContact(dto: ContactDto): Contact {
@@ -39,6 +41,7 @@ function mapDtoToContact(dto: ContactDto): Contact {
     current_balance: dto.current_balance ?? dto.currentBalance ?? 0,
     email: dto.email,
     can_login: dto.can_login ?? dto.canLogin,
+    portal_signup_linked: dto.portal_signup_linked ?? dto.portalSignupLinked,
   };
 }
 
@@ -104,8 +107,10 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
 }
 
 export const contactApi = {
-  async list(): Promise<Contact[]> {
-    const res = await apiFetch('/contacts', {
+  /** @param scope registry = Contacts module list; participants = arrival/auction picker (trader + all portal signups). */
+  async list(opts?: { scope?: 'registry' | 'participants' }): Promise<Contact[]> {
+    const scope = opts?.scope ?? 'registry';
+    const res = await apiFetch(`/contacts?scope=${encodeURIComponent(scope)}`, {
       method: 'GET',
     });
     const data = await handleResponse<ContactDto[]>(res, 'Failed to load contacts');
@@ -173,7 +178,7 @@ export const contactApi = {
   async search(mark: string): Promise<Contact[]> {
     const trimmed = mark.trim();
     if (!trimmed) {
-      return this.list();
+      return this.list({ scope: 'participants' });
     }
     const params = new URLSearchParams({ mark: trimmed });
     const res = await apiFetch(`/contacts/search?${params.toString()}`, {

@@ -363,7 +363,7 @@ const ArrivalsPage = () => {
   };
 
   useEffect(() => {
-    contactApi.list().then(setContacts);
+    contactApi.list({ scope: 'participants' }).then(setContacts);
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setCommodityConfigs);
   }, []);

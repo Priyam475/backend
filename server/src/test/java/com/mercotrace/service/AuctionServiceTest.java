@@ -72,6 +72,9 @@ class AuctionServiceTest {
     private ContactRepository contactRepository;
 
     @Mock
+    private ContactService contactService;
+
+    @Mock
     private CommodityRepository commodityRepository;
 
     @Mock

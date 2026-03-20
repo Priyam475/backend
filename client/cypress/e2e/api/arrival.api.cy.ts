@@ -110,7 +110,7 @@ describe('Arrival API (Trader Arrivals Aggregate)', () => {
         ? cy
             .request({
               method: 'GET',
-              url: `${apiUrl()}/api/contacts`,
+              url: `${apiUrl()}/api/contacts?scope=participants`,
               headers: authHeaders(token),
               failOnStatusCode: false,
             })

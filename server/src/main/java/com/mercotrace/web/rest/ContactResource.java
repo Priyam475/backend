@@ -4,6 +4,7 @@ import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.security.AuthoritiesConstants;
 import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.ContactIdentityService;
+import com.mercotrace.service.ContactListScope;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.VoucherLineService;
@@ -17,6 +18,7 @@ import java.time.LocalDate;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -165,13 +167,10 @@ public class ContactResource {
         }
 
         Long traderId = resolveTraderId();
-        contactService
+        ContactDTO existingDto = contactService
             .findOne(id)
-            .ifPresent(existing -> {
-                if (!Objects.equals(existing.getTraderId(), traderId)) {
-                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
-                }
-            });
+            .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
+        assertTraderMayEditContactRegistry(traderId, existingDto);
 
         contactDTO.setTraderId(traderId);
 
@@ -243,13 +242,10 @@ public class ContactResource {
         }
 
         Long traderId = resolveTraderId();
-        contactService
+        ContactDTO existingDto = contactService
             .findOne(id)
-            .ifPresent(existing -> {
-                if (!Objects.equals(existing.getTraderId(), traderId)) {
-                    throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
-                }
-            });
+            .orElseThrow(() -> new BadRequestAlertException("Entity not found", ENTITY_NAME, "idnotfound"));
+        assertTraderMayEditContactRegistry(traderId, existingDto);
 
         // If phone is being updated, enforce global mobile uniqueness
         if (contactDTO.getPhone() != null) {
@@ -288,17 +284,20 @@ public class ContactResource {
     }
 
     /**
-     * {@code GET  /contacts} : active contacts for the current trader plus self-registered participants ({@code traderId} null).
-     * Duplicates are omitted when a trader contact already matches the same phone or mark.
+     * {@code GET  /contacts} : contacts for the current trader.
      *
-     * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of contacts in body.
+     * @param scope {@code registry} (Contacts module: trader-owned + portal participants already used here) or
+     *              {@code participants} (Arrivals/Auctions: trader-owned + all active self-signup contacts).
      */
     @GetMapping("")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.CONTACTS_VIEW + "\")")
-    public ResponseEntity<List<ContactDTO>> getAllContacts() {
-        LOG.debug("REST request to get all Contacts for current trader");
+    public ResponseEntity<List<ContactDTO>> getAllContacts(
+        @RequestParam(name = "scope", required = false, defaultValue = "registry") String scope
+    ) {
+        LOG.debug("REST request to get Contacts for current trader, scope={}", scope);
         Long traderId = resolveTraderId();
-        List<ContactDTO> list = contactService.findAllByTrader(traderId);
+        ContactListScope listScope = parseContactListScope(scope);
+        List<ContactDTO> list = contactService.listContacts(traderId, listScope);
         return ResponseEntity.ok().body(list);
     }
 
@@ -446,6 +445,30 @@ public class ContactResource {
         LOG.debug("REST request to search Contacts by mark for current trader. traderId={}, mark={}", traderId, mark);
         List<ContactDTO> list = contactService.searchByMark(traderId, mark);
         return ResponseEntity.ok().body(list);
+    }
+
+    private static ContactListScope parseContactListScope(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return ContactListScope.REGISTRY;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "participants", "participant" -> ContactListScope.PARTICIPANTS;
+            default -> ContactListScope.REGISTRY;
+        };
+    }
+
+    private void assertTraderMayEditContactRegistry(Long traderId, ContactDTO existing) {
+        if (Objects.equals(existing.getTraderId(), traderId)) {
+            return;
+        }
+        if (existing.getTraderId() == null && contactService.isPortalContactLinkedToTrader(traderId, existing.getId())) {
+            throw new BadRequestAlertException(
+                "This participant manages their profile via portal signup. Editing is not available from the trader registry.",
+                ENTITY_NAME,
+                "portalManagedContact"
+            );
+        }
+        throw new BadRequestAlertException("You are not allowed to modify this contact", ENTITY_NAME, "forbidden");
     }
 }
 
