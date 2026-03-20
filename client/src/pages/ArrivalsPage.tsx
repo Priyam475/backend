@@ -291,7 +291,8 @@ const ArrivalsPage = () => {
     const ln = (l.lot_name ?? '').trim();
     if (!ln) return false;
     if (ln.length < 2 || ln.length > 50) return true;
-    return !/^[0-9]+$/.test(ln);
+    // Lot names are stored and submitted as strings; allow alphanumeric plus common separators.
+    return !/^[a-zA-Z0-9][a-zA-Z0-9\s_\-]*$/.test(ln);
   };
   const isLotQuantityInvalid = (l: LotEntry) => {
     const q = l.quantity ?? 0;
@@ -658,8 +659,8 @@ const ArrivalsPage = () => {
           toast.error(`${seller.seller_name} → ${ln}: Lot name must be between 2 and 50 characters`);
           return;
         }
-        if (!/^[0-9]+$/.test(ln)) {
-          toast.error(`Lot name must contain only numbers (digits), not letters: ${lot.lot_name}`);
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9\s_\-]*$/.test(ln)) {
+          toast.error(`Lot name may contain letters/numbers plus spaces, '-' and '_': ${lot.lot_name}`);
           return;
         }
         if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
@@ -1568,11 +1569,11 @@ const ArrivalsPage = () => {
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
                                   <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Lot Name * (2–50, digits) {isLotNameInvalid(lot) && '⚠'}
+                                    Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
                                   </label>
-                                  <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
-                                    className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="numeric" maxLength={50} />
+                                  <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                    className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
                                 </div>
                                 <div>
                                   <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
@@ -2170,11 +2171,11 @@ const ArrivalsPage = () => {
                               <div className="grid grid-cols-3 gap-2">
                                 <div>
                                   <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Lot Name * (2–50, digits) {isLotNameInvalid(lot) && '⚠'}
+                                    Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
                                   </label>
-                                  <Input placeholder="e.g., 1 or 101" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value.replace(/\D/g, '') })}
-                                    className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="numeric" maxLength={50} />
+                                  <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                    className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
                                 </div>
                                 <div>
                                   <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
