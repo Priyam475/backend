@@ -429,6 +429,14 @@ const ArrivalsPage = () => {
     const q = l.quantity ?? 0;
     return q <= 0 || q > 100000 || !Number.isInteger(q);
   };
+  const canAddAnotherLot = (seller: SellerEntry) => {
+    if (seller.lots.length === 0) return true;
+    return seller.lots.every((lot) => {
+      const lotName = (lot.lot_name ?? '').trim();
+      if (!lotName) return false;
+      return !isLotNameInvalid(lot) && !isLotQuantityInvalid(lot);
+    });
+  };
 
   const isFormInvalid = useMemo(() => {
     if (isVehicleNumberInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
@@ -629,6 +637,7 @@ const ArrivalsPage = () => {
   const addLot = (sellerIdx: number) => {
     setSellers(prev => prev.map((s, i) => {
       if (i !== sellerIdx) return s;
+      if (!canAddAnotherLot(s)) return s;
       return {
         ...s,
         lots: [...s.lots, {
@@ -1710,7 +1719,18 @@ const ArrivalsPage = () => {
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!canAddAnotherLot(seller)) return;
+                                addLot(si);
+                              }}
+                              disabled={!canAddAnotherLot(seller)}
+                              className={cn(
+                                "w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm",
+                                !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
+                              )}
+                            >
                               <Plus className="w-3.5 h-3.5 text-white" />
                             </button>
                             <button onClick={() => removeSeller(si)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20">
@@ -1721,6 +1741,11 @@ const ArrivalsPage = () => {
                         <div className="p-3 space-y-2">
                           {seller.lots.length === 0 && (
                             <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
+                          )}
+                          {seller.lots.length > 0 && !canAddAnotherLot(seller) && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-1">
+                              Complete current lot name and bags before adding another lot.
+                            </p>
                           )}
                           {seller.lots.map((lot, li) => {
                             const { vehicleTotal, sellerTotal } = getLotTotals(sellers, si, li);
