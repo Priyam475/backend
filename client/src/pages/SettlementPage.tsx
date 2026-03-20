@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, User, Package, Truck, Hash,
@@ -18,6 +18,7 @@ import { directPrint } from '@/utils/printTemplates';
 import { generateSalesPattiPrintHTML } from '@/utils/printDocumentTemplates';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import useAutofocusWhen from '@/hooks/useAutofocusWhen';
 
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
@@ -153,6 +154,9 @@ const SettlementPage = () => {
   const [showAddVoucher, setShowAddVoucher] = useState(false);
   const [manualVoucherLabel, setManualVoucherLabel] = useState('');
   const [manualVoucherAmount, setManualVoucherAmount] = useState('');
+
+  const manualVoucherLabelInputRef = useRef<HTMLInputElement | null>(null);
+  useAutofocusWhen(showAddVoucher, manualVoucherLabelInputRef);
 
   // Load sellers from backend only (no localStorage or mock data).
   useEffect(() => {
@@ -875,7 +879,10 @@ const SettlementPage = () => {
               {showAddVoucher && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
                   className="mt-2 p-3 rounded-xl bg-primary/5 border border-primary/20 space-y-2 overflow-hidden">
-                  <Input placeholder="Voucher / Charge label (5–30 chars)" value={manualVoucherLabel}
+                  <Input
+                    ref={manualVoucherLabelInputRef}
+                    placeholder="Voucher / Charge label (5–30 chars)"
+                    value={manualVoucherLabel}
                     onChange={e => setManualVoucherLabel(e.target.value.slice(0, VOUCHER_LABEL_MAX))}
                     maxLength={VOUCHER_LABEL_MAX}
                     className={cn("h-8 rounded-lg text-xs",

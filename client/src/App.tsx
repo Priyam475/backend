@@ -18,6 +18,8 @@ import RootClassManager from "@/components/RootClassManager";
 import ScrollToTop from "@/components/ScrollToTop";
 import PortraitLock from "@/components/PortraitLock";
 import TraderLayout from "@/components/TraderLayout";
+import RouteAutofocus from "@/components/RouteAutofocus";
+import ClickToFocusNewFields from "@/components/ClickToFocusNewFields";
 import LoginScreen from "./pages/LoginScreen";
 import ContactPortalLoginPage from "./pages/ContactPortalLoginPage";
 import ContactPortalSignupPage from "./pages/ContactPortalSignupPage";
@@ -99,6 +101,8 @@ const App = () => (
                 <ScrollToTop />
                 <PortraitLock />
                 <RootClassManager />
+                <RouteAutofocus />
+                <ClickToFocusNewFields />
                 <Suspense fallback={<LazyFallback />}>
                   <Routes>
                 {/* Public routes */}

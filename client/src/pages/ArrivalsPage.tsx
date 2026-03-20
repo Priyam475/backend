@@ -20,6 +20,7 @@ import LocationSearchInput from '@/components/LocationSearchInput';
 import type { Vehicle, Contact, FreightMethod } from '@/types/models';
 import { toast } from 'sonner';
 import { useDesktopMode } from '@/hooks/use-desktop';
+import useAutofocusWhen from '@/hooks/useAutofocusWhen';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 
@@ -189,6 +190,19 @@ const ArrivalsPage = () => {
   const [sellerDropdown, setSellerDropdown] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+
+  // Inline autofocus targets for the "New Arrival" panel/sheet.
+  // We keep one ref per target because only one layout branch renders at a time.
+  const vehicleNumberInputRef = useRef<HTMLInputElement | null>(null);
+  const loadedWeightInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isStep1PanelOpen =
+    step === 1 &&
+    !editLoading &&
+    (isDesktop ? desktopTab === 'new-arrival' : showAdd);
+
+  useAutofocusWhen(isStep1PanelOpen && isMultiSeller, vehicleNumberInputRef);
+  useAutofocusWhen(isStep1PanelOpen && !isMultiSeller, loadedWeightInputRef);
 
   const refreshBrokerDropdownPos = useCallback(() => {
     if (brokerSearchWrapRef.current) {
@@ -1335,6 +1349,7 @@ const ArrivalsPage = () => {
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
+                          ref={vehicleNumberInputRef}
                           className={cn("h-11 rounded-xl text-sm font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
                       </div>
                     )}
@@ -1349,6 +1364,7 @@ const ArrivalsPage = () => {
                             Loaded Weight (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100,000' : '⚠ Required')}
                           </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
+                            ref={loadedWeightInputRef}
                             className={cn("h-11 rounded-xl text-sm font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
@@ -1944,6 +1960,7 @@ const ArrivalsPage = () => {
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
+                          ref={vehicleNumberInputRef}
                           className={cn("h-12 rounded-xl text-base font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
                       </div>
                     )}
@@ -1958,6 +1975,7 @@ const ArrivalsPage = () => {
                             Loaded (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100k' : '⚠ Required')}
                           </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
+                            ref={loadedWeightInputRef}
                             className={cn("h-12 rounded-xl text-base font-medium", isLoadedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                         </div>
                         <div>
