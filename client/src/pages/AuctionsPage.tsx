@@ -1949,48 +1949,62 @@ const AuctionsPage = () => {
             </div>
           )}
           <div className="grid grid-cols-2 gap-1.5 mb-1">
-            <Input
-              ref={rateInputRef}
-              type="number"
-              value={rate}
-              onChange={(e) => setRate(e.target.value)}
-              onFocus={(e) => {
-                setActiveNumpadField('rate');
-                if (!mobileKeyboardEnabled) {
-                  e.currentTarget.blur();
-                  hideNativeKeyboard();
-                }
-              }}
-              onBlur={() => setMobileKeyboardEnabled(false)}
-              readOnly={!mobileKeyboardEnabled}
-              inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
-              placeholder="0"
-              className={cn(
-                "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
-                activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
-              )}
-            />
-            <Input
-              ref={qtyInputRef}
-              type="number"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              onFocus={(e) => {
-                setActiveNumpadField('qty');
-                if (!mobileKeyboardEnabled) {
-                  e.currentTarget.blur();
-                  hideNativeKeyboard();
-                }
-              }}
-              onBlur={() => setMobileKeyboardEnabled(false)}
-              readOnly={!mobileKeyboardEnabled}
-              inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
-              placeholder="0"
-              className={cn(
-                "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
-                activeNumpadField === 'qty' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
-              )}
-            />
+            <div className="min-w-0">
+              <label htmlFor="sales-pad-rate-mobile" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block">
+                Rate (₹)
+              </label>
+              <Input
+                id="sales-pad-rate-mobile"
+                ref={rateInputRef}
+                type="number"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                onFocus={(e) => {
+                  setActiveNumpadField('rate');
+                  if (!mobileKeyboardEnabled) {
+                    e.currentTarget.blur();
+                    hideNativeKeyboard();
+                  }
+                }}
+                onBlur={() => setMobileKeyboardEnabled(false)}
+                readOnly={!mobileKeyboardEnabled}
+                inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+                placeholder="0"
+                aria-label="Bid rate in rupees"
+                className={cn(
+                  "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
+                  activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
+                )}
+              />
+            </div>
+            <div className="min-w-0">
+              <label htmlFor="sales-pad-qty-mobile" className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block">
+                Qty (bags)
+              </label>
+              <Input
+                id="sales-pad-qty-mobile"
+                ref={qtyInputRef}
+                type="number"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                onFocus={(e) => {
+                  setActiveNumpadField('qty');
+                  if (!mobileKeyboardEnabled) {
+                    e.currentTarget.blur();
+                    hideNativeKeyboard();
+                  }
+                }}
+                onBlur={() => setMobileKeyboardEnabled(false)}
+                readOnly={!mobileKeyboardEnabled}
+                inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+                placeholder="0"
+                aria-label="Quantity in bags"
+                className={cn(
+                  "h-9 rounded-lg text-center font-bold text-sm bg-muted/20 border-primary/20",
+                  activeNumpadField === 'qty' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
+                )}
+              />
+            </div>
           </div>
           {/* Preset margin: compact row below rate/qty */}
           <div className="flex items-center justify-between gap-2 mb-1 py-0.5">

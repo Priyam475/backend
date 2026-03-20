@@ -73,6 +73,21 @@ public class AuctionService {
         this.traderContextService = traderContextService;
     }
 
+    /** Contact-linked sellers: use contact name/mark. Free-text sellers (no contact): use SellerInVehicle fields. */
+    private static String resolveAuctionSellerName(Contact c, SellerInVehicle siv) {
+        if (c != null && c.getName() != null && !c.getName().isBlank()) {
+            return c.getName();
+        }
+        return siv != null && siv.getSellerName() != null && !siv.getSellerName().isBlank() ? siv.getSellerName() : null;
+    }
+
+    private static String resolveAuctionSellerMark(Contact c, SellerInVehicle siv) {
+        if (c != null && c.getMark() != null && !c.getMark().isBlank()) {
+            return c.getMark();
+        }
+        return siv != null && siv.getSellerMark() != null && !siv.getSellerMark().isBlank() ? siv.getSellerMark() : null;
+    }
+
     /**
      * List lots with auction-derived status and optional search, for Sales Pad lot selector.
      * Scoped to the current trader: lots whose seller_vehicle links to a vehicle with that trader_id.
@@ -176,8 +191,8 @@ public class AuctionService {
             Vehicle v = vehicleMap.get(siv.getVehicleId());
             Contact c = contactMap.get(siv.getContactId());
             dto.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
-            dto.setSellerName(c != null ? c.getName() : null);
-            dto.setSellerMark(c != null ? c.getMark() : null);
+            dto.setSellerName(resolveAuctionSellerName(c, siv));
+            dto.setSellerMark(resolveAuctionSellerMark(c, siv));
             if (siv.getVehicleId() != null) {
                 dto.setVehicleTotalQty(vehicleIdToTotal.get(siv.getVehicleId()));
             }
@@ -527,8 +542,8 @@ public class AuctionService {
                 Vehicle v = siv.getVehicleId() != null ? vehicleRepository.findById(siv.getVehicleId()).orElse(null) : null;
                 Contact c = siv.getContactId() != null ? contactRepository.findById(siv.getContactId()).orElse(null) : null;
                 lotSummary.setVehicleNumber(v != null ? v.getVehicleNumber() : null);
-                lotSummary.setSellerName(c != null ? c.getName() : null);
-                lotSummary.setSellerMark(c != null ? c.getMark() : null);
+                lotSummary.setSellerName(resolveAuctionSellerName(c, siv));
+                lotSummary.setSellerMark(resolveAuctionSellerMark(c, siv));
                 // Vehicle total: sum of all lots on same vehicle. Seller total: sum of all lots for same seller.
                 if (siv.getVehicleId() != null) {
                     List<SellerInVehicle> sivsOnVehicle = sellerInVehicleRepository.findAllByVehicleId(siv.getVehicleId());

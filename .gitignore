@@ -16,3 +16,4 @@ node_modules/
 docs/test/reports/
 package-lock.json
 package.json
+srs/
