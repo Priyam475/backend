@@ -58,7 +58,8 @@ class VoucherHeaderServiceImplTest {
             voucherHeaderRepository,
             voucherLineRepository,
             chartOfAccountRepository,
-            traderContextService
+            traderContextService,
+            null
         );
     }
 

@@ -1,6 +1,7 @@
 package com.mercotrace.repository;
 
 import com.mercotrace.domain.ChartOfAccount;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -51,4 +52,20 @@ public interface ChartOfAccountRepository extends JpaRepository<ChartOfAccount, 
 
     /** Find all ledgers linked to a contact. Used for Contact Consolidated Ledger View (Phase 6). */
     List<ChartOfAccount> findAllByTraderIdAndContactId(Long traderId, Long contactId);
+
+    /**
+     * Sum of current balances for all Receivable subledgers. Used to keep AR Control in sync after voucher post (REQ Part 6 §4.2 reconciliation).
+     */
+    @Query(
+        "SELECT COALESCE(SUM(c.currentBalance), 0) FROM ChartOfAccount c WHERE c.traderId = :traderId AND c.classification = 'RECEIVABLE'"
+    )
+    BigDecimal sumCurrentBalanceReceivableSubledgers(@Param("traderId") Long traderId);
+
+    /**
+     * Sum of current balances for non-system Payable subledgers (excludes AP Control). Matches AccountingPage AP reconciliation.
+     */
+    @Query(
+        "SELECT COALESCE(SUM(c.currentBalance), 0) FROM ChartOfAccount c WHERE c.traderId = :traderId AND c.classification = 'PAYABLE' AND c.system = false"
+    )
+    BigDecimal sumCurrentBalancePayableSubledgers(@Param("traderId") Long traderId);
 }

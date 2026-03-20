@@ -19,9 +19,14 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -51,17 +56,21 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
     private final VoucherLineRepository voucherLineRepository;
     private final ChartOfAccountRepository chartOfAccountRepository;
     private final TraderContextService traderContextService;
+    /** Cleared after voucher post/reverse updates ledgers outside {@link ChartOfAccountServiceImpl} (avoids stale COA list / AR-AP cards). */
+    private final CacheManager cacheManager;
 
     public VoucherHeaderServiceImpl(
         VoucherHeaderRepository voucherHeaderRepository,
         VoucherLineRepository voucherLineRepository,
         ChartOfAccountRepository chartOfAccountRepository,
-        TraderContextService traderContextService
+        TraderContextService traderContextService,
+        @Autowired(required = false) CacheManager cacheManager
     ) {
         this.voucherHeaderRepository = voucherHeaderRepository;
         this.voucherLineRepository = voucherLineRepository;
         this.chartOfAccountRepository = chartOfAccountRepository;
         this.traderContextService = traderContextService;
+        this.cacheManager = cacheManager;
     }
 
     @Override
@@ -162,6 +171,7 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
             throw new IllegalArgumentException("Only DRAFT vouchers can be posted");
         }
         List<VoucherLine> lines = voucherLineRepository.findAllByVoucherHeaderIdOrderById(id);
+        Set<Long> coaTouched = new HashSet<>();
         for (VoucherLine line : lines) {
             ChartOfAccount ledger = chartOfAccountRepository.findOneByTraderIdAndId(traderId, line.getLedgerId())
                 .orElse(null);
@@ -169,11 +179,16 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
                 BigDecimal delta = line.getDebit().subtract(line.getCredit());
                 ledger.setCurrentBalance(ledger.getCurrentBalance().add(delta));
                 chartOfAccountRepository.save(ledger);
+                if (ledger.getId() != null) {
+                    coaTouched.add(ledger.getId());
+                }
             }
         }
         header.setStatus(VoucherLifecycleStatus.POSTED);
         header.setPostedAt(Instant.now());
         voucherHeaderRepository.save(header);
+        coaTouched.addAll(syncArApControlBalancesToSubledgers(traderId));
+        evictCoaCaches(coaTouched);
         LOG.debug("Posted voucher: id={}", id);
         return getById(id);
     }
@@ -187,6 +202,7 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
             throw new IllegalArgumentException("Only POSTED vouchers can be reversed");
         }
         List<VoucherLine> lines = voucherLineRepository.findAllByVoucherHeaderIdOrderById(id);
+        Set<Long> coaTouched = new HashSet<>();
         for (VoucherLine line : lines) {
             ChartOfAccount ledger = chartOfAccountRepository.findOneByTraderIdAndId(traderId, line.getLedgerId())
                 .orElse(null);
@@ -194,13 +210,69 @@ public class VoucherHeaderServiceImpl implements VoucherHeaderService {
                 BigDecimal delta = line.getDebit().subtract(line.getCredit());
                 ledger.setCurrentBalance(ledger.getCurrentBalance().subtract(delta));
                 chartOfAccountRepository.save(ledger);
+                if (ledger.getId() != null) {
+                    coaTouched.add(ledger.getId());
+                }
             }
         }
         header.setStatus(VoucherLifecycleStatus.REVERSED);
         header.setReversedAt(Instant.now());
         voucherHeaderRepository.save(header);
+        coaTouched.addAll(syncArApControlBalancesToSubledgers(traderId));
+        evictCoaCaches(coaTouched);
         LOG.debug("Reversed voucher: id={}", id);
         return getById(id);
+    }
+
+    /**
+     * AR Control / AP Control stored balances are not on voucher lines (posting hits subledgers only). Keep control {@code currentBalance}
+     * equal to the sum of RECEIVABLE / PAYABLE subledgers so Chart of Accounts reconciliation matches SRS Part 6 §4.1.
+     *
+     * @return ids of control ledgers that were updated (for cache eviction)
+     */
+    private Set<Long> syncArApControlBalancesToSubledgers(Long traderId) {
+        Set<Long> updatedControlIds = new HashSet<>();
+        chartOfAccountRepository
+            .findFirstByTraderIdAndClassificationAndLedgerNameContainingIgnoreCase(traderId, "CONTROL", "accounts receivable")
+            .ifPresent(control -> {
+                BigDecimal sum = chartOfAccountRepository.sumCurrentBalanceReceivableSubledgers(traderId);
+                if (sum == null) sum = BigDecimal.ZERO;
+                control.setCurrentBalance(sum);
+                chartOfAccountRepository.save(control);
+                if (control.getId() != null) {
+                    updatedControlIds.add(control.getId());
+                }
+            });
+        chartOfAccountRepository
+            .findFirstByTraderIdAndClassificationAndLedgerNameContainingIgnoreCase(traderId, "CONTROL", "accounts payable")
+            .ifPresent(control -> {
+                BigDecimal sum = chartOfAccountRepository.sumCurrentBalancePayableSubledgers(traderId);
+                if (sum == null) sum = BigDecimal.ZERO;
+                control.setCurrentBalance(sum);
+                chartOfAccountRepository.save(control);
+                if (control.getId() != null) {
+                    updatedControlIds.add(control.getId());
+                }
+            });
+        return updatedControlIds;
+    }
+
+    private void evictCoaCaches(Set<Long> ledgerIds) {
+        if (cacheManager == null) {
+            return;
+        }
+        Cache page = cacheManager.getCache(ChartOfAccountServiceImpl.CACHE_COA_PAGE_BY_TRADER);
+        if (page != null) {
+            page.clear();
+        }
+        Cache byId = cacheManager.getCache(ChartOfAccountServiceImpl.CACHE_COA_BY_ID);
+        if (byId != null) {
+            for (Long ledgerId : ledgerIds) {
+                if (ledgerId != null) {
+                    byId.evict(ledgerId);
+                }
+            }
+        }
     }
 
     private String generateVoucherNumber(Long traderId, VoucherType type) {
