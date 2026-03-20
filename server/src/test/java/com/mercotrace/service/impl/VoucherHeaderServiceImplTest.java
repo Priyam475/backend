@@ -69,7 +69,7 @@ class VoucherHeaderServiceImplTest {
         header.setId(1L);
         header.setTraderId(TRADER_ID);
         header.setVoucherType(VoucherType.JOURNAL);
-        header.setVoucherNumber("KT/JV/001");
+        header.setVoucherNumber("VP/JV/001");
         header.setVoucherDate(LocalDate.now());
         header.setNarration("Test");
         header.setStatus(VoucherLifecycleStatus.DRAFT);
@@ -84,7 +84,7 @@ class VoucherHeaderServiceImplTest {
             PageRequest.of(0, 20), null, null, null, null, null);
 
         assertThat(page.getContent()).hasSize(1);
-        assertThat(page.getContent().get(0).getVoucherNumber()).isEqualTo("KT/JV/001");
+        assertThat(page.getContent().get(0).getVoucherNumber()).isEqualTo("VP/JV/001");
         assertThat(page.getContent().get(0).getStatus()).isEqualTo(VoucherLifecycleStatus.DRAFT);
     }
 
@@ -105,7 +105,7 @@ class VoucherHeaderServiceImplTest {
         header.setId(1L);
         header.setTraderId(TRADER_ID);
         header.setVoucherType(VoucherType.RECEIPT);
-        header.setVoucherNumber("KT/RV/001");
+        header.setVoucherNumber("VP/RV/001");
         header.setVoucherDate(LocalDate.now());
         header.setNarration("Receipt");
         header.setStatus(VoucherLifecycleStatus.POSTED);
@@ -124,7 +124,7 @@ class VoucherHeaderServiceImplTest {
         VoucherHeaderDTO dto = service.getById(1L);
 
         assertThat(dto.getVoucherId()).isEqualTo("1");
-        assertThat(dto.getVoucherNumber()).isEqualTo("KT/RV/001");
+        assertThat(dto.getVoucherNumber()).isEqualTo("VP/RV/001");
         assertThat(dto.getLines()).hasSize(1);
         assertThat(dto.getLines().get(0).getLedgerName()).isEqualTo("Cash");
         assertThat(dto.getLines().get(0).getDebit()).isEqualByComparingTo(BigDecimal.valueOf(5000));
@@ -216,7 +216,7 @@ class VoucherHeaderServiceImplTest {
             h.setId(1L);
             h.setTraderId(TRADER_ID);
             h.setVoucherType(VoucherType.JOURNAL);
-            h.setVoucherNumber("KT/JV/001");
+            h.setVoucherNumber("VP/JV/001");
             h.setVoucherDate(LocalDate.now());
             h.setNarration("Test journal");
             h.setStatus(VoucherLifecycleStatus.DRAFT);
@@ -241,7 +241,7 @@ class VoucherHeaderServiceImplTest {
         VoucherHeaderDTO result = service.create(request);
 
         assertThat(result.getVoucherId()).isEqualTo("1");
-        assertThat(result.getVoucherNumber()).isEqualTo("KT/JV/001");
+        assertThat(result.getVoucherNumber()).isEqualTo("VP/JV/001");
         assertThat(result.getStatus()).isEqualTo(VoucherLifecycleStatus.DRAFT);
         assertThat(result.getLines()).hasSize(2);
         verify(voucherHeaderRepository).save(any(VoucherHeader.class));

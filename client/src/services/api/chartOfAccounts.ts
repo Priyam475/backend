@@ -140,6 +140,22 @@ export const chartOfAccountsApi = {
     return handleResponse<ChartOfAccountDTO>(res, 'Failed to load ledger');
   },
 
+  /**
+   * Get opening balance for a ledger. If asOfDate is provided, returns dynamically computed balance
+   * from historical transactions. Otherwise returns stored opening balance.
+   */
+  async getOpeningBalance(id: string | number, asOfDate?: string): Promise<{ openingBalance: number }> {
+    const params = new URLSearchParams();
+    if (asOfDate != null && asOfDate.trim() !== '') {
+      params.set('asOfDate', asOfDate.trim());
+    }
+    const qs = params.toString();
+    const url = qs ? `${BASE}/${encodeURIComponent(String(id))}/opening-balance?${qs}` : `${BASE}/${encodeURIComponent(String(id))}/opening-balance`;
+    const res = await apiFetch(url, { method: 'GET' });
+    const data = await handleResponse<{ openingBalance: number }>(res, 'Failed to load opening balance');
+    return { openingBalance: Number(data.openingBalance) };
+  },
+
   async create(payload: ChartOfAccountCreateRequest): Promise<ChartOfAccountDTO> {
     const res = await apiFetch(BASE, {
       method: 'POST',

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260320140000-1" author="mercotrace">
+        <createTable tableName="trader_portal_contact_link">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="trader_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="contact_id" type="bigint">
+                <constraints nullable="false"/>
+            </column>
+            <column name="linked_at" type="${datetimeType}">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint
+            baseTableName="trader_portal_contact_link"
+            baseColumnNames="trader_id"
+            constraintName="fk_trader_portal_link_trader"
+            referencedTableName="trader"
+            referencedColumnNames="id"/>
+
+        <addForeignKeyConstraint
+            baseTableName="trader_portal_contact_link"
+            baseColumnNames="contact_id"
+            constraintName="fk_trader_portal_link_contact"
+            referencedTableName="contact"
+            referencedColumnNames="id"/>
+
+        <addUniqueConstraint
+            tableName="trader_portal_contact_link"
+            columnNames="trader_id, contact_id"
+            constraintName="uk_trader_portal_contact"/>
+
+        <createIndex tableName="trader_portal_contact_link" indexName="idx_trader_portal_link_trader">
+            <column name="trader_id"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="20260320140000-2" author="mercotrace" dbms="postgresql">
+        <comment>Backfill links when portal contacts were already used in arrivals or auctions.</comment>
+        <sql>
+            INSERT INTO trader_portal_contact_link (id, trader_id, contact_id, linked_at)
+            SELECT nextval('sequence_generator'), v.trader_id, siv.contact_id, NOW()
+            FROM seller_in_vehicle siv
+            JOIN vehicle v ON v.id = siv.vehicle_id
+            JOIN contact c ON c.id = siv.contact_id
+            WHERE siv.contact_id IS NOT NULL AND c.trader_id IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM trader_portal_contact_link t
+                  WHERE t.trader_id = v.trader_id AND t.contact_id = siv.contact_id
+              );
+
+            INSERT INTO trader_portal_contact_link (id, trader_id, contact_id, linked_at)
+            SELECT nextval('sequence_generator'), v.trader_id, ae.buyer_id, NOW()
+            FROM auction_entry ae
+            JOIN auction a ON a.id = ae.auction_id
+            JOIN lot l ON l.id = a.lot_id
+            JOIN seller_in_vehicle siv ON siv.id = l.seller_vehicle_id
+            JOIN vehicle v ON v.id = siv.vehicle_id
+            JOIN contact c ON c.id = ae.buyer_id
+            WHERE ae.buyer_id IS NOT NULL AND c.trader_id IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM trader_portal_contact_link t
+                  WHERE t.trader_id = v.trader_id AND t.contact_id = ae.buyer_id
+              );
+        </sql>
+    </changeSet>
+</databaseChangeLog>

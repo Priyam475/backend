@@ -47,6 +47,9 @@ public class ContactDTO implements Serializable {
 
     private Boolean active;
 
+    /** True when this row is a portal self-signup contact surfaced in the trader registry via first use (not trader-created). */
+    private Boolean portalSignupLinked;
+
     public Long getId() {
         return id;
     }
@@ -141,6 +144,14 @@ public class ContactDTO implements Serializable {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public Boolean getPortalSignupLinked() {
+        return portalSignupLinked;
+    }
+
+    public void setPortalSignupLinked(Boolean portalSignupLinked) {
+        this.portalSignupLinked = portalSignupLinked;
     }
 
     @Override

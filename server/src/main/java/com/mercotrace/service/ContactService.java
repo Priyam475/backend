@@ -68,12 +68,19 @@ public interface ContactService {
     Optional<ContactDTO> findOneByTraderIdAndPhone(Long traderId, String phone);
 
     /**
-     * Get all contacts for a trader.
+     * Lists contacts for UI lists: registry (Contacts module) or participant pool (Arrivals / Auctions search).
      *
-     * @param traderId the owning trader id.
-     * @return list of contacts.
+     * @param traderId current trader.
+     * @param scope registry vs participants.
      */
-    List<ContactDTO> findAllByTrader(Long traderId);
+    List<ContactDTO> listContacts(Long traderId, ContactListScope scope);
+
+    /**
+     * When a portal (self-signup) contact is used in a trader flow, record the association so it appears in that trader's registry.
+     */
+    void ensureTraderUsesPortalContact(Long traderId, Long contactId);
+
+    boolean isPortalContactLinkedToTrader(Long traderId, Long contactId);
 
     /**
      * Search contacts by mark fragment for a trader.

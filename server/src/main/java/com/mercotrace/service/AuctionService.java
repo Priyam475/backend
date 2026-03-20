@@ -48,6 +48,7 @@ public class AuctionService {
     private final SellerInVehicleRepository sellerInVehicleRepository;
     private final VehicleRepository vehicleRepository;
     private final ContactRepository contactRepository;
+    private final ContactService contactService;
     private final CommodityRepository commodityRepository;
     private final TraderContextService traderContextService;
 
@@ -59,6 +60,7 @@ public class AuctionService {
         SellerInVehicleRepository sellerInVehicleRepository,
         VehicleRepository vehicleRepository,
         ContactRepository contactRepository,
+        ContactService contactService,
         CommodityRepository commodityRepository,
         TraderContextService traderContextService
     ) {
@@ -69,6 +71,7 @@ public class AuctionService {
         this.sellerInVehicleRepository = sellerInVehicleRepository;
         this.vehicleRepository = vehicleRepository;
         this.contactRepository = contactRepository;
+        this.contactService = contactService;
         this.commodityRepository = commodityRepository;
         this.traderContextService = traderContextService;
     }
@@ -338,6 +341,10 @@ public class AuctionService {
             entry.setCreatedAt(Instant.now());
 
             auctionEntryRepository.save(entry);
+        }
+
+        if (request.getBuyerId() != null) {
+            contactService.ensureTraderUsesPortalContact(traderId, request.getBuyerId());
         }
 
         List<AuctionEntry> refreshed = auctionEntryRepository.findAllByAuctionId(auction.getId());

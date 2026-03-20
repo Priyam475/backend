@@ -7,12 +7,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.mercotrace.domain.ChartOfAccount;
+import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.repository.ChartOfAccountRepository;
+import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.VoucherLineRepository;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ChartOfAccountCreateRequest;
 import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ChartOfAccountUpdateRequest;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,13 +36,19 @@ class ChartOfAccountServiceImplTest {
     private ChartOfAccountRepository repository;
 
     @Mock
+    private VoucherLineRepository voucherLineRepository;
+
+    @Mock
+    private ContactRepository contactRepository;
+
+    @Mock
     private TraderContextService traderContextService;
 
     private ChartOfAccountServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new ChartOfAccountServiceImpl(repository, traderContextService);
+        service = new ChartOfAccountServiceImpl(repository, voucherLineRepository, contactRepository, traderContextService);
     }
 
     @Test
@@ -109,5 +119,56 @@ class ChartOfAccountServiceImplTest {
         assertThatThrownBy(() -> service.delete(1L))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("cannot be deleted");
+    }
+
+    @Test
+    void getOpeningBalanceReturnsStoredWhenAsOfDateNull() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        ChartOfAccount entity = new ChartOfAccount();
+        entity.setId(1L);
+        entity.setTraderId(TRADER_ID);
+        entity.setOpeningBalance(new BigDecimal("100.00"));
+        entity.setAccountingClass("ASSET");
+        when(repository.findOneByTraderIdAndId(TRADER_ID, 1L)).thenReturn(Optional.of(entity));
+
+        BigDecimal result = service.getOpeningBalance(1L, null);
+
+        assertThat(result).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    void getOpeningBalanceReturnsStoredPlusSumForAsset() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        ChartOfAccount entity = new ChartOfAccount();
+        entity.setId(1L);
+        entity.setTraderId(TRADER_ID);
+        entity.setOpeningBalance(new BigDecimal("100.00"));
+        entity.setAccountingClass("ASSET");
+        when(repository.findOneByTraderIdAndId(TRADER_ID, 1L)).thenReturn(Optional.of(entity));
+        when(voucherLineRepository.sumDebitMinusCreditByLedgerIdAndVoucherDateBefore(
+            TRADER_ID, 1L, LocalDate.of(2025, 3, 1), VoucherLifecycleStatus.REVERSED
+        )).thenReturn(new BigDecimal("50.00"));
+
+        BigDecimal result = service.getOpeningBalance(1L, LocalDate.of(2025, 3, 1));
+
+        assertThat(result).isEqualByComparingTo("150.00");
+    }
+
+    @Test
+    void getOpeningBalanceReturnsStoredMinusSumForLiability() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        ChartOfAccount entity = new ChartOfAccount();
+        entity.setId(1L);
+        entity.setTraderId(TRADER_ID);
+        entity.setOpeningBalance(new BigDecimal("200.00"));
+        entity.setAccountingClass("LIABILITY");
+        when(repository.findOneByTraderIdAndId(TRADER_ID, 1L)).thenReturn(Optional.of(entity));
+        when(voucherLineRepository.sumDebitMinusCreditByLedgerIdAndVoucherDateBefore(
+            TRADER_ID, 1L, LocalDate.of(2025, 3, 1), VoucherLifecycleStatus.REVERSED
+        )).thenReturn(new BigDecimal("30.00"));
+
+        BigDecimal result = service.getOpeningBalance(1L, LocalDate.of(2025, 3, 1));
+
+        assertThat(result).isEqualByComparingTo("170.00");
     }
 }

@@ -71,6 +71,12 @@ export interface VoucherLine {
   quantity?: number;
   rate?: number;
   lot_id?: string;
+  /** From voucher header when fetched by ledger (Ledger View). */
+  voucher_date?: string;
+  voucher_number?: string;
+  voucher_type?: VoucherType;
+  narration?: string;
+  status?: VoucherLifecycle;
 }
 
 // ── AR/AP Document ─────────────────────────────────────────

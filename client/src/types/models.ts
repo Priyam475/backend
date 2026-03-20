@@ -181,6 +181,8 @@ export interface Contact {
   current_balance?: number;
   email?: string;
   can_login?: boolean;
+  /** True when row is a portal self-signup contact shown in registry after first use with this trader. */
+  portal_signup_linked?: boolean;
 }
 
 /** 4.2 Ledgers (Chart of Accounts) */

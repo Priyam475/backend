@@ -1,20 +1,28 @@
 package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.Contact;
+import com.mercotrace.domain.TraderPortalContactLink;
+import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.TraderPortalContactLinkRepository;
+import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.ContactIdentityService;
+import com.mercotrace.service.ContactListScope;
 import com.mercotrace.service.ContactService;
+import com.mercotrace.service.dto.ChartOfAccountCreateRequest;
 import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.service.mapper.ContactMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,22 +47,36 @@ public class ContactServiceImpl implements ContactService {
 
     private final ContactIdentityService contactIdentityService;
 
+    private final ChartOfAccountService chartOfAccountService;
+
+    private final ChartOfAccountRepository chartOfAccountRepository;
+
+    private final TraderPortalContactLinkRepository traderPortalContactLinkRepository;
+
     public ContactServiceImpl(
         ContactRepository contactRepository,
         ContactMapper contactMapper,
         CacheManager cacheManager,
-        ContactIdentityService contactIdentityService
+        ContactIdentityService contactIdentityService,
+        ChartOfAccountService chartOfAccountService,
+        ChartOfAccountRepository chartOfAccountRepository,
+        TraderPortalContactLinkRepository traderPortalContactLinkRepository
     ) {
         this.contactRepository = contactRepository;
         this.contactMapper = contactMapper;
         this.cacheManager = cacheManager;
         this.contactIdentityService = contactIdentityService;
+        this.chartOfAccountService = chartOfAccountService;
+        this.chartOfAccountRepository = chartOfAccountRepository;
+        this.traderPortalContactLinkRepository = traderPortalContactLinkRepository;
     }
 
     @Override
     @CacheEvict(cacheNames = STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE, key = "#contactDTO.traderId")
     public ContactDTO save(ContactDTO contactDTO) {
         LOG.debug("Request to save Contact : {}", contactDTO);
+
+        boolean isNewContact = contactDTO.getId() == null;
 
         // Default values for new contacts (aligned with frontend mock)
         if (contactDTO.getCreatedAt() == null) {
@@ -75,7 +97,53 @@ public class ContactServiceImpl implements ContactService {
             contact.setActive(true);
         }
         contact = contactRepository.save(contact);
+
+        // REQ-CON-003: Auto-create Receivable ledger for new contacts (not on update/restore)
+        if (isNewContact && contact.getTraderId() != null) {
+            createReceivableLedgerForContact(contact);
+        }
+
         return contactMapper.toDto(contact);
+    }
+
+    /**
+     * Creates a Receivable ledger for a newly registered contact.
+     * Wrapped in try-catch so contact creation is never blocked by ledger creation failures.
+     */
+    private void createReceivableLedgerForContact(Contact contact) {
+        try {
+            Long traderId = contact.getTraderId();
+            String baseName = "Receivable - " + (contact.getName() != null ? contact.getName().trim() : "Contact");
+            String ledgerName = resolveUniqueLedgerName(traderId, baseName, contact.getMark(), contact.getPhone());
+
+            ChartOfAccountCreateRequest request = new ChartOfAccountCreateRequest();
+            request.setLedgerName(ledgerName);
+            request.setClassification("RECEIVABLE");
+            request.setContactId(contact.getId());
+
+            chartOfAccountRepository
+                .findFirstByTraderIdAndClassificationAndLedgerNameContainingIgnoreCase(traderId, "CONTROL", "accounts receivable")
+                .map(ar -> ar.getId())
+                .ifPresent(request::setParentControlId);
+
+            chartOfAccountService.create(request);
+            LOG.debug("Created Receivable ledger for contact id={}, name={}", contact.getId(), contact.getName());
+        } catch (Exception e) {
+            LOG.warn("Failed to create Receivable ledger for contact id={}, name={}: {}",
+                contact.getId(), contact.getName(), e.getMessage());
+        }
+    }
+
+    private String resolveUniqueLedgerName(Long traderId, String baseName, String mark, String phone) {
+        if (chartOfAccountRepository.findOneByTraderIdAndLedgerNameIgnoreCase(traderId, baseName).isEmpty()) {
+            return baseName;
+        }
+        String withMark = baseName + " (" + (mark != null && !mark.isBlank() ? mark : (phone != null ? phone : "dup")) + ")";
+        if (chartOfAccountRepository.findOneByTraderIdAndLedgerNameIgnoreCase(traderId, withMark).isEmpty()) {
+            return withMark;
+        }
+        String withPhone = baseName + " - " + (phone != null ? phone : System.currentTimeMillis());
+        return withPhone;
     }
 
     @Override
@@ -174,21 +242,153 @@ public class ContactServiceImpl implements ContactService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE, key = "#traderId", unless = "#result == null")
-    public List<ContactDTO> findAllByTrader(Long traderId) {
-        LOG.debug("Request to get all Contacts for trader : {}", traderId);
-        return contactRepository
-            .findAllByTraderIdAndActiveTrue(traderId)
+    public List<ContactDTO> listContacts(Long traderId, ContactListScope scope) {
+        LOG.debug("Request to list contacts for trader : {}, scope={}", traderId, scope);
+        if (scope == ContactListScope.PARTICIPANTS) {
+            return listParticipantPool(traderId);
+        }
+        return listRegistry(traderId);
+    }
+
+    @Override
+    @CacheEvict(cacheNames = STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE, key = "#traderId")
+    public void ensureTraderUsesPortalContact(Long traderId, Long contactId) {
+        if (traderId == null || contactId == null) {
+            return;
+        }
+        Contact c = contactRepository
+            .findById(contactId)
+            .orElseThrow(() -> new IllegalArgumentException("Contact not found: " + contactId));
+        if (Boolean.FALSE.equals(c.getActive())) {
+            throw new IllegalArgumentException("Contact is inactive: " + contactId);
+        }
+        if (c.getTraderId() != null) {
+            if (!c.getTraderId().equals(traderId)) {
+                throw new IllegalArgumentException("Contact belongs to another trader");
+            }
+            return;
+        }
+        if (!traderPortalContactLinkRepository.existsByTraderIdAndContactId(traderId, contactId)) {
+            TraderPortalContactLink link = new TraderPortalContactLink();
+            link.setTraderId(traderId);
+            link.setContactId(contactId);
+            link.setLinkedAt(Instant.now());
+            traderPortalContactLinkRepository.save(link);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isPortalContactLinkedToTrader(Long traderId, Long contactId) {
+        if (traderId == null || contactId == null) {
+            return false;
+        }
+        return traderPortalContactLinkRepository.existsByTraderIdAndContactId(traderId, contactId);
+    }
+
+    private List<ContactDTO> listParticipantPool(Long traderId) {
+        List<Contact> traderContacts = contactRepository.findAllByTraderIdAndActiveTrue(traderId);
+        Set<String> phoneKeys = new HashSet<>();
+        Set<String> markKeysLower = new HashSet<>();
+        for (Contact c : traderContacts) {
+            String pk = phoneKey(c.getPhone());
+            if (!pk.isEmpty()) {
+                phoneKeys.add(pk);
+            }
+            if (c.getMark() != null && !c.getMark().isBlank()) {
+                markKeysLower.add(c.getMark().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+
+        List<ContactDTO> out = traderContacts.stream().map(contactMapper::toDto).collect(Collectors.toList());
+        for (Contact global : contactRepository.findAllByTraderIdIsNullAndActiveTrue()) {
+            String pk = phoneKey(global.getPhone());
+            if (!pk.isEmpty() && phoneKeys.contains(pk)) {
+                continue;
+            }
+            if (global.getMark() != null && !global.getMark().isBlank()) {
+                if (markKeysLower.contains(global.getMark().trim().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+            }
+            out.add(contactMapper.toDto(global));
+        }
+        return out;
+    }
+
+    private List<ContactDTO> listRegistry(Long traderId) {
+        List<Contact> traderContacts = contactRepository.findAllByTraderIdAndActiveTrue(traderId);
+        Set<String> phoneKeys = new HashSet<>();
+        Set<String> markKeysLower = new HashSet<>();
+        Set<Long> seenIds = new HashSet<>();
+        for (Contact c : traderContacts) {
+            seenIds.add(c.getId());
+            String pk = phoneKey(c.getPhone());
+            if (!pk.isEmpty()) {
+                phoneKeys.add(pk);
+            }
+            if (c.getMark() != null && !c.getMark().isBlank()) {
+                markKeysLower.add(c.getMark().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+
+        List<ContactDTO> out = traderContacts
             .stream()
             .map(contactMapper::toDto)
+            .peek(d -> d.setPortalSignupLinked(Boolean.FALSE))
             .collect(Collectors.toList());
+
+        for (TraderPortalContactLink link : traderPortalContactLinkRepository.findAllByTraderIdOrderByLinkedAtDesc(traderId)) {
+            Long cid = link.getContactId();
+            if (cid == null || seenIds.contains(cid)) {
+                continue;
+            }
+            Contact global = contactRepository.findById(cid).orElse(null);
+            if (global == null || Boolean.FALSE.equals(global.getActive()) || global.getTraderId() != null) {
+                continue;
+            }
+            String pk = phoneKey(global.getPhone());
+            if (!pk.isEmpty() && phoneKeys.contains(pk)) {
+                continue;
+            }
+            if (global.getMark() != null && !global.getMark().isBlank()) {
+                if (markKeysLower.contains(global.getMark().trim().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+            }
+            ContactDTO dto = contactMapper.toDto(global);
+            dto.setPortalSignupLinked(Boolean.TRUE);
+            out.add(dto);
+            seenIds.add(cid);
+            if (!pk.isEmpty()) {
+                phoneKeys.add(pk);
+            }
+            if (global.getMark() != null && !global.getMark().isBlank()) {
+                markKeysLower.add(global.getMark().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Normalize phone for deduplication: prefer 10-digit Indian mobile when possible.
+     */
+    private static String phoneKey(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return "";
+        }
+        String digits = phone.replaceAll("\\D", "");
+        if (digits.length() == 10 && digits.matches("^[6-9]\\d{9}$")) {
+            return digits;
+        }
+        return digits.isEmpty() ? phone.trim().toLowerCase(Locale.ROOT) : digits;
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ContactDTO> searchByMark(Long traderId, String markFragment) {
         LOG.debug("Request to search Contacts by fragment. traderId={}, fragment={}", traderId, markFragment);
-        List<ContactDTO> all = findAllByTrader(traderId);
+        List<ContactDTO> all = listContacts(traderId, ContactListScope.PARTICIPANTS);
         if (markFragment == null || markFragment.isBlank()) {
             return all;
         }

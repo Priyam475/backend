@@ -3,6 +3,7 @@ package com.mercotrace.service.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Objects;
 
 /** DTO for voucher line (ledger, debit, credit). Aligned with frontend VoucherLine. */
@@ -22,6 +23,13 @@ public class VoucherLineDTO implements Serializable {
     private BigDecimal quantity;
     private BigDecimal rate;
     private String lotId;
+
+    /** Voucher header fields for Ledger View (no extra API call). */
+    private LocalDate voucherDate;
+    private String voucherNumber;
+    private String voucherType;
+    private String narration;
+    private String status;
 
     public String getLineId() { return lineId; }
     public void setLineId(String lineId) { this.lineId = lineId; }
@@ -45,6 +53,16 @@ public class VoucherLineDTO implements Serializable {
     public void setRate(BigDecimal rate) { this.rate = rate; }
     public String getLotId() { return lotId; }
     public void setLotId(String lotId) { this.lotId = lotId; }
+    public LocalDate getVoucherDate() { return voucherDate; }
+    public void setVoucherDate(LocalDate voucherDate) { this.voucherDate = voucherDate; }
+    public String getVoucherNumber() { return voucherNumber; }
+    public void setVoucherNumber(String voucherNumber) { this.voucherNumber = voucherNumber; }
+    public String getVoucherType() { return voucherType; }
+    public void setVoucherType(String voucherType) { this.voucherType = voucherType; }
+    public String getNarration() { return narration; }
+    public void setNarration(String narration) { this.narration = narration; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
     @Override
     public boolean equals(Object o) {

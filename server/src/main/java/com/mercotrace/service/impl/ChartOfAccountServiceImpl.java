@@ -1,15 +1,23 @@
 package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.ChartOfAccount;
+import com.mercotrace.domain.Contact;
+import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.repository.ChartOfAccountRepository;
+import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.VoucherLineRepository;
 import com.mercotrace.service.ChartOfAccountService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.ChartOfAccountCreateRequest;
 import com.mercotrace.service.dto.ChartOfAccountDTO;
 import com.mercotrace.service.dto.ChartOfAccountUpdateRequest;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
@@ -53,10 +61,19 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
     }
 
     private final ChartOfAccountRepository repository;
+    private final VoucherLineRepository voucherLineRepository;
+    private final ContactRepository contactRepository;
     private final TraderContextService traderContextService;
 
-    public ChartOfAccountServiceImpl(ChartOfAccountRepository repository, TraderContextService traderContextService) {
+    public ChartOfAccountServiceImpl(
+        ChartOfAccountRepository repository,
+        VoucherLineRepository voucherLineRepository,
+        ContactRepository contactRepository,
+        TraderContextService traderContextService
+    ) {
         this.repository = repository;
+        this.voucherLineRepository = voucherLineRepository;
+        this.contactRepository = contactRepository;
         this.traderContextService = traderContextService;
     }
 
@@ -173,6 +190,46 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
         }
         repository.delete(entity);
         LOG.debug("Deleted chart of account: id={}", id);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal getOpeningBalance(Long ledgerId, LocalDate asOfDate) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        ChartOfAccount ledger = repository.findOneByTraderIdAndId(traderId, ledgerId)
+            .orElseThrow(() -> new IllegalArgumentException("Chart of account not found: " + ledgerId));
+
+        if (asOfDate == null) {
+            return ledger.getOpeningBalance() != null ? ledger.getOpeningBalance() : BigDecimal.ZERO;
+        }
+
+        BigDecimal storedOpening = ledger.getOpeningBalance() != null ? ledger.getOpeningBalance() : BigDecimal.ZERO;
+        BigDecimal sum = voucherLineRepository.sumDebitMinusCreditByLedgerIdAndVoucherDateBefore(
+            traderId, ledgerId, asOfDate, VoucherLifecycleStatus.REVERSED
+        );
+        if (sum == null) sum = BigDecimal.ZERO;
+
+        String ac = ledger.getAccountingClass();
+        if ("ASSET".equals(ac) || "EXPENSE".equals(ac)) {
+            return storedOpening.add(sum);
+        }
+        return storedOpening.subtract(sum);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ChartOfAccountDTO> getLedgersByContactId(Long contactId) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        Contact contact = contactRepository
+            .findById(contactId)
+            .orElseThrow(() -> new IllegalArgumentException("Contact not found or access denied: " + contactId));
+        if (contact.getTraderId() != null && !Objects.equals(contact.getTraderId(), traderId)) {
+            throw new IllegalArgumentException("Contact not found or access denied: " + contactId);
+        }
+        return repository.findAllByTraderIdAndContactId(traderId, contactId)
+            .stream()
+            .map(this::toDto)
+            .collect(Collectors.toList());
     }
 
     private ChartOfAccountDTO toDto(ChartOfAccount e) {

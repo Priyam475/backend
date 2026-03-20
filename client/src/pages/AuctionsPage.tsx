@@ -291,7 +291,7 @@ const AuctionsPage = () => {
 
   // Load buyers, lots, and preset settings from API
   useEffect(() => {
-    contactApi.list().then(setBuyers);
+    contactApi.list({ scope: 'participants' }).then(setBuyers);
     loadLots();
     presetMarksApi
       .list()
@@ -1414,8 +1414,8 @@ const AuctionsPage = () => {
         {/* Entry Form — buyer select/search + bid entry (desktop only) */}
         {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-2xl p-3 space-y-3">
-          <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[1fr_280px]' : 'grid-cols-1')}>
-            <div className="space-y-2">
+          <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[minmax(0,1fr)_280px]' : 'grid-cols-1')}>
+            <div className="space-y-2 min-w-0">
               {isDesktop ? (
                 <>
                   <InlineScribblePad
@@ -1438,16 +1438,16 @@ const AuctionsPage = () => {
               ) : null}
               {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
               {isDesktop && (
-              <div className="space-y-2">
-                {/* Row 1: Contacts — green. Stays visible even when no match. */}
-                <div>
+              <div className="space-y-2 min-w-0">
+                {/* Row 1: Contacts — green. Constrain to column width (~7 chips visible); scroll for rest. */}
+                <div className="min-w-0 w-full max-w-full">
                   <div
                     ref={contactScrollRef}
                     role="region"
                     aria-label="Contacts"
                     tabIndex={0}
                     {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-                    className="overflow-x-auto overflow-y-hidden flex gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                     style={{
                       scrollbarWidth: 'thin',
                       WebkitOverflowScrolling: 'touch',
@@ -1495,15 +1495,15 @@ const AuctionsPage = () => {
                   </div>
                 </div>
 
-                {/* Row 2: Existing auction marks — grey. Stays visible even when no mark. */}
-                <div>
+                {/* Row 2: Existing auction marks — grey. Same width constraint as contacts. */}
+                <div className="min-w-0 w-full max-w-full">
                   <div
                     ref={markScrollRef}
                     role="region"
                     aria-label="Auction marks"
                     tabIndex={0}
                     {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-                    className="overflow-x-auto overflow-y-hidden flex gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                     style={{
                       scrollbarWidth: 'thin',
                       WebkitOverflowScrolling: 'touch',
