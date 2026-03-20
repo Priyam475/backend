@@ -1,6 +1,7 @@
 package com.mercotrace.service.impl;
 
 import com.mercotrace.domain.ChartOfAccount;
+import com.mercotrace.domain.Contact;
 import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.ContactRepository;
@@ -15,6 +16,7 @@ import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -218,7 +220,10 @@ public class ChartOfAccountServiceImpl implements ChartOfAccountService {
     @Transactional(readOnly = true)
     public List<ChartOfAccountDTO> getLedgersByContactId(Long contactId) {
         Long traderId = traderContextService.getCurrentTraderId();
-        if (contactRepository.findOneByTraderIdAndId(traderId, contactId).isEmpty()) {
+        Contact contact = contactRepository
+            .findById(contactId)
+            .orElseThrow(() -> new IllegalArgumentException("Contact not found or access denied: " + contactId));
+        if (contact.getTraderId() != null && !Objects.equals(contact.getTraderId(), traderId)) {
             throw new IllegalArgumentException("Contact not found or access denied: " + contactId);
         }
         return repository.findAllByTraderIdAndContactId(traderId, contactId)

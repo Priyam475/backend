@@ -288,9 +288,8 @@ public class ContactResource {
     }
 
     /**
-     * {@code GET  /contacts} : get all the contacts.
-     *
-     * For module 1, this returns all contacts regardless of trader. Later we can scope to current trader.
+     * {@code GET  /contacts} : active contacts for the current trader plus self-registered participants ({@code traderId} null).
+     * Duplicates are omitted when a trader contact already matches the same phone or mark.
      *
      * @return the {@link ResponseEntity} with status {@code 200 (OK)} and the list of contacts in body.
      */
@@ -330,9 +329,7 @@ public class ContactResource {
     public ResponseEntity<ContactDTO> getContact(@PathVariable("id") Long id) {
         LOG.debug("REST request to get Contact : {}", id);
         Long traderId = resolveTraderId();
-        Optional<ContactDTO> contactDTO = contactService
-            .findOne(id)
-            .filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        Optional<ContactDTO> contactDTO = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
         return ResponseUtil.wrapOrNotFound(contactDTO);
     }
 
@@ -356,6 +353,17 @@ public class ContactResource {
 
     private Long resolveTraderId() {
         return traderContextService.getCurrentTraderId();
+    }
+
+    /** Trader-owned contacts, plus self-registered (traderId null) participants visible in lists and flows. */
+    private boolean isReadableParticipantContact(ContactDTO dto, Long traderId) {
+        if (dto == null || traderId == null) {
+            return false;
+        }
+        if (Objects.equals(dto.getTraderId(), traderId)) {
+            return true;
+        }
+        return dto.getTraderId() == null;
     }
 
     /**
@@ -392,7 +400,7 @@ public class ContactResource {
     public ResponseEntity<List<ChartOfAccountDTO>> getContactLedgers(@PathVariable("id") Long id) {
         LOG.debug("REST request to get ledgers for contact : {}", id);
         Long traderId = resolveTraderId();
-        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
         if (contact.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
@@ -417,7 +425,7 @@ public class ContactResource {
     ) {
         LOG.debug("REST request to get ledger transactions for contact : {}, dateFrom={}, dateTo={}", id, dateFrom, dateTo);
         Long traderId = resolveTraderId();
-        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> Objects.equals(dto.getTraderId(), traderId));
+        Optional<ContactDTO> contact = contactService.findOne(id).filter(dto -> isReadableParticipantContact(dto, traderId));
         if (contact.isEmpty()) {
             return ResponseEntity.notFound().build();
         }

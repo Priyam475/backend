@@ -1,5 +1,6 @@
 package com.mercotrace.service.impl;
 
+import com.mercotrace.domain.Contact;
 import com.mercotrace.domain.VoucherLine;
 import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.repository.ChartOfAccountRepository;
@@ -11,6 +12,7 @@ import com.mercotrace.service.dto.VoucherLineDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -73,7 +75,10 @@ public class VoucherLineServiceImpl implements VoucherLineService {
     @Transactional(readOnly = true)
     public List<VoucherLineDTO> getLinesByContactIdAndDateRange(Long contactId, LocalDate dateFrom, LocalDate dateTo) {
         Long traderId = traderContextService.getCurrentTraderId();
-        if (contactRepository.findOneByTraderIdAndId(traderId, contactId).isEmpty()) {
+        Contact contact = contactRepository
+            .findById(contactId)
+            .orElseThrow(() -> new BadRequestAlertException("Contact not found or access denied", "contact", "contactNotFound"));
+        if (contact.getTraderId() != null && !Objects.equals(contact.getTraderId(), traderId)) {
             throw new BadRequestAlertException("Contact not found or access denied", "contact", "contactNotFound");
         }
         List<com.mercotrace.domain.ChartOfAccount> ledgers = chartOfAccountRepository.findAllByTraderIdAndContactId(traderId, contactId);

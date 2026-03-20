@@ -19,6 +19,9 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
 
     List<Contact> findAllByTraderIdAndActiveTrue(Long traderId);
 
+    /** Self-registered / portal contacts not owned by a trader (participant pool). */
+    List<Contact> findAllByTraderIdIsNullAndActiveTrue();
+
     List<Contact> findAllByTraderIdAndMarkContainingIgnoreCaseAndActiveTrue(Long traderId, String mark);
 
     List<Contact> findAllByTraderIdAndNameContainingIgnoreCaseAndActiveTrue(Long traderId, String name);

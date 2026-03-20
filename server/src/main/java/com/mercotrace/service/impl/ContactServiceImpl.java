@@ -11,13 +11,15 @@ import com.mercotrace.service.dto.ContactDTO;
 import com.mercotrace.service.mapper.ContactMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -233,14 +235,49 @@ public class ContactServiceImpl implements ContactService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = STOCK_PURCHASE_VENDORS_BY_TRADER_CACHE, key = "#traderId", unless = "#result == null")
     public List<ContactDTO> findAllByTrader(Long traderId) {
         LOG.debug("Request to get all Contacts for trader : {}", traderId);
-        return contactRepository
-            .findAllByTraderIdAndActiveTrue(traderId)
-            .stream()
-            .map(contactMapper::toDto)
-            .collect(Collectors.toList());
+        List<Contact> traderContacts = contactRepository.findAllByTraderIdAndActiveTrue(traderId);
+        Set<String> phoneKeys = new HashSet<>();
+        Set<String> markKeysLower = new HashSet<>();
+        for (Contact c : traderContacts) {
+            String pk = phoneKey(c.getPhone());
+            if (!pk.isEmpty()) {
+                phoneKeys.add(pk);
+            }
+            if (c.getMark() != null && !c.getMark().isBlank()) {
+                markKeysLower.add(c.getMark().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+
+        List<ContactDTO> out = traderContacts.stream().map(contactMapper::toDto).collect(Collectors.toList());
+        for (Contact global : contactRepository.findAllByTraderIdIsNullAndActiveTrue()) {
+            String pk = phoneKey(global.getPhone());
+            if (!pk.isEmpty() && phoneKeys.contains(pk)) {
+                continue;
+            }
+            if (global.getMark() != null && !global.getMark().isBlank()) {
+                if (markKeysLower.contains(global.getMark().trim().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+            }
+            out.add(contactMapper.toDto(global));
+        }
+        return out;
+    }
+
+    /**
+     * Normalize phone for deduplication: prefer 10-digit Indian mobile when possible.
+     */
+    private static String phoneKey(String phone) {
+        if (phone == null || phone.isBlank()) {
+            return "";
+        }
+        String digits = phone.replaceAll("\\D", "");
+        if (digits.length() == 10 && digits.matches("^[6-9]\\d{9}$")) {
+            return digits;
+        }
+        return digits.isEmpty() ? phone.trim().toLowerCase(Locale.ROOT) : digits;
     }
 
     @Override
