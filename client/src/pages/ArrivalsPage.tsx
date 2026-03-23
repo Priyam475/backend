@@ -1695,12 +1695,12 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className={cn("glass-card rounded-2xl p-4", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
+                    <div className={cn("glass-card rounded-2xl p-5", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Search className="w-3.5 h-3.5" /> Add Seller
                         {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
-                        <div className="flex gap-2">
+                        <div className="flex gap-3">
                         <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                           <Input
@@ -1709,10 +1709,10 @@ const ArrivalsPage = () => {
                             onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
                             onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
                             onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                            className="h-11 rounded-xl pl-10 text-sm"
+                            className="h-12 rounded-xl pl-10 text-sm"
                           />
                         </div>
-                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-11 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
+                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-12 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
                           Add by name
                         </Button>
                       </div>
@@ -1731,8 +1731,8 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
+                          <div className="flex items-start gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
@@ -1743,45 +1743,47 @@ const ArrivalsPage = () => {
                                 <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
+                              <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
                                 <div>
-                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
+                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
                                   {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
                                 </div>
                                 <div>
-                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                                   {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                 </div>
                                 <p className="text-[10px] text-muted-foreground/80">{seller.lots.length} lot(s)</p>
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                              className={cn(
-                                "w-7 h-7 rounded-lg flex items-center justify-center",
-                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                              )}
-                            >
-                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!canAddAnotherLot(seller)) return;
-                                addLot(si);
-                              }}
-                              disabled={!canAddAnotherLot(seller)}
-                              className={cn(
-                                "w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm",
-                                !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
-                              )}
-                            >
-                              <Plus className="w-3.5 h-3.5 text-white" />
-                            </button>
+                          <div className="flex flex-col items-end justify-between py-1">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                                className={cn(
+                                  "w-7 h-7 rounded-lg flex items-center justify-center",
+                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                                )}
+                              >
+                                {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!canAddAnotherLot(seller)) return;
+                                  addLot(si);
+                                }}
+                                disabled={!canAddAnotherLot(seller)}
+                                className={cn(
+                                  "w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm",
+                                  !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
+                                )}
+                              >
+                                <Plus className="w-3.5 h-3.5 text-white" />
+                              </button>
+                            </div>
                             <button onClick={() => removeSeller(si)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -2372,12 +2374,12 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className={cn("glass-card rounded-2xl p-4", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
+                    <div className={cn("glass-card rounded-2xl p-5", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
                       <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5" /> Add Seller
                         {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-3">
                         <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                           <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
@@ -2405,8 +2407,8 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
+                          <div className="flex items-start gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
@@ -2417,7 +2419,7 @@ const ArrivalsPage = () => {
                                 <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
+                              <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
                                 <div>
                                   <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
                                   {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
@@ -2430,21 +2432,23 @@ const ArrivalsPage = () => {
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                              className={cn(
-                                "w-7 h-7 rounded-lg flex items-center justify-center",
-                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                              )}
-                            >
-                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                            </button>
-                            <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
-                              <Plus className="w-3.5 h-3.5 text-white" />
-                            </button>
+                          <div className="flex flex-col items-end justify-between py-1">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                                className={cn(
+                                  "w-7 h-7 rounded-lg flex items-center justify-center",
+                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                                )}
+                              >
+                                {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                              </button>
+                              <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
+                                <Plus className="w-3.5 h-3.5 text-white" />
+                              </button>
+                            </div>
                             <button onClick={() => removeSeller(si)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
