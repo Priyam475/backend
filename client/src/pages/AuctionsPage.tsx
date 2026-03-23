@@ -4,7 +4,7 @@ import {
   ArrowLeft, Gavel, Plus, Trash2,
   ShoppingCart, User, Package, Truck, IndianRupee, Banknote, ChevronDown,
   Search, AlertTriangle, Merge, Hash,
-  ChevronLeft, ChevronRight, List, Filter,
+  ChevronLeft, ChevronRight, List, Filter, Printer,
   Pencil, Check, X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +22,7 @@ import type {
   LotSummaryDTO,
   AuctionSessionDTO,
   AuctionEntryDTO,
+  AuctionResultDTO,
   AuctionBidCreateRequest,
   AuctionBidUpdateRequest,
 } from '@/services/api/auction';
@@ -29,6 +30,8 @@ import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import { directPrint } from '@/utils/printTemplates';
+import { generateAuctionCompletionPrintHTML } from '@/utils/printDocumentTemplates';
 
 // ── Types ─────────────────────────────────────────────────
 interface LotInfo {
@@ -260,6 +263,8 @@ const AuctionsPage = () => {
   const [lotsLoading, setLotsLoading] = useState(true);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
+  const [completedAuction, setCompletedAuction] = useState<AuctionResultDTO | null>(null);
   const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
 
   /** ENH-34: inline edit bid row */
@@ -300,6 +305,7 @@ const AuctionsPage = () => {
   const [selectedBuyer, setSelectedBuyer] = useState<Contact | null>(null);
   const [rate, setRate] = useState('');
   const [qty, setQty] = useState('');
+  const autoPrintedAuctionRef = useRef<string | null>(null);
   const isTouchLayout = !isDesktop;
 
   // Skip initial draft restore flag
@@ -1042,7 +1048,9 @@ const AuctionsPage = () => {
       return;
     }
     try {
-      await auctionApi.completeAuction(selectedLot.lot_id);
+      const completed = await auctionApi.completeAuction(selectedLot.lot_id);
+      setCompletedAuction(completed);
+      setShowPrint(true);
       clearDraft();
       setShowLotSelector(true);
       setSelectedLot(null);
@@ -1056,6 +1064,24 @@ const AuctionsPage = () => {
       setCompleteLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!showPrint || !completedAuction) return;
+    const printKey = String(completedAuction.auction_id);
+    if (autoPrintedAuctionRef.current === printKey) return;
+    autoPrintedAuctionRef.current = printKey;
+    directPrint(generateAuctionCompletionPrintHTML({
+      auctionId: completedAuction.auction_id,
+      lotId: completedAuction.lotId,
+      lotName: completedAuction.lotName,
+      sellerName: completedAuction.sellerName,
+      vehicleNumber: completedAuction.vehicleNumber,
+      commodityName: completedAuction.commodityName,
+      completedAt: completedAuction.completedAt,
+      entries: completedAuction.entries,
+    }));
+    toast.success('Auction completion print opened');
+  }, [showPrint, completedAuction]);
 
   const removeEntry = useCallback(async (id: string) => {
     if (!selectedLot) return;
@@ -1363,6 +1389,118 @@ const AuctionsPage = () => {
     // Refetch lots so status (Available / Pending / Partial / Sold) is up to date
     loadLots();
   };
+
+  // ═══ AUCTION PRINT PREVIEW ═══
+  if (showPrint && completedAuction) {
+    const totalQty = completedAuction.entries.reduce((sum, e) => sum + (Number(e.quantity) || 0), 0);
+    const totalAmount = completedAuction.entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const completedAt = completedAuction.completedAt ? new Date(completedAuction.completedAt) : new Date();
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        {!isDesktop ? (
+          <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-[2rem]">
+            <div className="relative z-10 flex items-center gap-3">
+              <button onClick={() => setShowPrint(false)}
+                aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <div>
+                <h1 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Printer className="w-5 h-5" /> Auction Print
+                </h1>
+                <p className="text-white/70 text-xs">Auction #{completedAuction.auction_id}</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="px-8 py-5 flex items-center gap-4">
+            <Button onClick={() => setShowPrint(false)} variant="outline" size="sm" className="rounded-xl h-9">
+              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+            </Button>
+            <div>
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Printer className="w-5 h-5 text-blue-500" /> Auction Print
+              </h2>
+              <p className="text-sm text-muted-foreground">Auction #{completedAuction.auction_id}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="px-4 mt-4">
+          <div className="bg-card border border-border rounded-xl p-4 font-mono text-xs space-y-2 shadow-lg">
+            <div className="text-center border-b border-dashed border-border pb-2">
+              <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
+              <p className="text-muted-foreground">Auction Completion</p>
+              <p className="text-muted-foreground">{completedAt.toLocaleDateString()} {completedAt.toLocaleTimeString()}</p>
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2 space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Auction ID</span><span className="font-bold text-foreground">{completedAuction.auction_id}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Lot</span><span className="font-bold text-foreground">{completedAuction.lotName || completedAuction.lotId}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Seller</span><span className="font-bold text-foreground">{completedAuction.sellerName}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Vehicle</span><span className="font-bold text-foreground">{completedAuction.vehicleNumber || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Commodity</span><span className="font-bold text-foreground">{completedAuction.commodityName || '—'}</span></div>
+            </div>
+
+            <div className="border-b border-dashed border-border pb-2">
+              <p className="font-bold text-foreground mb-1">BIDS ({completedAuction.entries.length})</p>
+              {completedAuction.entries.map((entry, idx) => (
+                <div key={`${entry.bidNumber}-${idx}`} className="flex justify-between text-[10px]">
+                  <span className="text-foreground">#{entry.bidNumber} {entry.buyerMark} · {entry.quantity} @ ₹{entry.rate}</span>
+                  <span className="font-bold text-foreground">₹{entry.amount.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between"><span className="text-muted-foreground">Total Qty</span><span className="font-bold text-foreground">{totalQty} bags</span></div>
+            <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
+              <span className="font-bold text-foreground">TOTAL SALE</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{totalAmount.toLocaleString()}</span>
+            </div>
+            <div className="text-center border-t border-dashed border-border pt-2">
+              <p className="text-muted-foreground">--- END OF AUCTION ---</p>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-4">
+            <Button
+              onClick={() => {
+                directPrint(generateAuctionCompletionPrintHTML({
+                  auctionId: completedAuction.auction_id,
+                  lotId: completedAuction.lotId,
+                  lotName: completedAuction.lotName,
+                  sellerName: completedAuction.sellerName,
+                  vehicleNumber: completedAuction.vehicleNumber,
+                  commodityName: completedAuction.commodityName,
+                  completedAt: completedAuction.completedAt,
+                  entries: completedAuction.entries,
+                }));
+                toast.success('Auction details sent to printer!');
+              }}
+              className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg"
+            >
+              <Printer className="w-5 h-5 mr-2" /> Print Auction
+            </Button>
+            <Button
+              onClick={() => {
+                setShowPrint(false);
+                setCompletedAuction(null);
+                setShowLotSelector(true);
+                setSelectedLot(null);
+                setEntries([]);
+                loadLots();
+              }}
+              variant="outline"
+              className="h-12 rounded-xl px-6"
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+        {!isDesktop && <BottomNav />}
+      </div>
+    );
+  }
 
   // ═══ LOT SELECTOR SCREEN ═══
   if (showLotSelector) {
