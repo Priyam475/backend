@@ -184,6 +184,11 @@ const ArrivalsPage = () => {
   useAutofocusWhen(isStep1PanelOpen && !isMultiSeller, loadedWeightInputRef);
 
   const isArrivalPanelOpen = isDesktop ? desktopTab === 'new-arrival' : showAdd;
+  // Detect the "lots flow" context.
+  // We hide printer + Net/Billable cards whenever the arrival editor/sheet is open,
+  // since the lots-related UI is accessible from there and we can't reliably infer
+  // the exact internal tab/step via `step` alone.
+  const isLotsFlow = isArrivalPanelOpen;
 
   const serializeSellersForDirty = useCallback((list: SellerEntry[]) => {
     return list.map((s) => ({
@@ -1369,18 +1374,6 @@ const ArrivalsPage = () => {
                                         ) : expandedDetail ? (
                                           <div className="grid grid-cols-2 gap-4 text-sm">
                                             <div className="space-y-3">
-                                              {expandedDetail.netWeight != null && (!isArrivalPanelOpen || step === 1) && (
-                                                <div className="grid grid-cols-2 gap-2">
-                                                  <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 p-2 text-center">
-                                                    <p className="text-[10px] text-muted-foreground">Net Weight</p>
-                                                    <p className="font-bold text-foreground">{expandedDetail.netWeight}kg</p>
-                                                  </div>
-                                                  <div className="rounded-lg bg-violet-50 dark:bg-violet-950/20 p-2 text-center">
-                                                    <p className="text-[10px] text-muted-foreground">Billable</p>
-                                                    <p className="font-bold text-foreground">{(expandedDetail.netWeight - (expandedDetail.deductedWeight ?? 0))}kg</p>
-                                                  </div>
-                                                </div>
-                                              )}
                                               <FreightDetailsCard
                                                 freightRate={expandedDetail.freightRate ?? 0}
                                                 netWeight={expandedDetail.netWeight ?? 0}
@@ -1404,7 +1397,7 @@ const ArrivalsPage = () => {
                                                     variant: l.variant,
                                                   })),
                                                 }))}
-                                                hidePrint={isArrivalPanelOpen && step > 1}
+                                                hidePrint
                                                 onRefresh={() => loadExpandedDetail(expandedDetail.vehicleId)}
                                               />
                                               <div className="flex gap-2">
@@ -1610,7 +1603,7 @@ const ArrivalsPage = () => {
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
                           className={cn("h-11 rounded-xl text-sm font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
-                      {step === 1 && (
+                      {step === 1 && !isLotsFlow && (
                         <div className="grid grid-cols-2 gap-2">
                           <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
                             <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">Net Weight (LW − EW)</p>
@@ -2175,18 +2168,6 @@ const ArrivalsPage = () => {
                                 <p className="text-muted-foreground">Loading…</p>
                               ) : expandedDetail ? (
                                 <>
-                                  {(!isArrivalPanelOpen || step === 1) && (
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 p-2 text-center">
-                                        <p className="text-[10px] text-muted-foreground">Net Weight</p>
-                                        <p className="font-bold text-foreground">{expandedDetail.netWeight ?? 0}kg</p>
-                                      </div>
-                                      <div className="rounded-lg bg-violet-50 dark:bg-violet-950/20 p-2 text-center">
-                                        <p className="text-[10px] text-muted-foreground">Billable</p>
-                                        <p className="font-bold text-foreground">{(expandedDetail.netWeight ?? 0) - (expandedDetail.deductedWeight ?? 0)}kg</p>
-                                      </div>
-                                    </div>
-                                  )}
                                   <FreightDetailsCard freightRate={expandedDetail.freightRate ?? 0} netWeight={expandedDetail.netWeight ?? 0} freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'} freightTotal={expandedDetail.freightTotal ?? 0} advancePaid={expandedDetail.advancePaid ?? 0} noRental={expandedDetail.noRental ?? false} />
                                   <SellerInfoCard
                                     sellers={expandedDetail.sellers.map(s => ({
@@ -2201,7 +2182,7 @@ const ArrivalsPage = () => {
                                         variant: l.variant,
                                       })),
                                     }))}
-                                    hidePrint={isArrivalPanelOpen && step > 1}
+                                    hidePrint
                                   />
                                   <div className="flex gap-2 pt-1">
                                     {can('Arrivals', 'Edit') && <button type="button" onClick={() => handleEditArrival(a)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/50 text-xs font-semibold"><Pencil className="w-3.5 h-3.5" /> Edit</button>}
@@ -2345,7 +2326,7 @@ const ArrivalsPage = () => {
                         <Input type="number" placeholder="0" value={deductedWeight} onChange={e => setDeductedWeight(e.target.value)}
                           className={cn("h-12 rounded-xl text-base font-medium", isDeductedWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={10000} step="0.01" />
                       </div>
-                      {step === 1 && (
+                      {step === 1 && !isLotsFlow && (
                         <div className="grid grid-cols-2 gap-2">
                           <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 p-3 text-center border border-blue-200/50 dark:border-blue-800/30">
                             <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">Net Weight (LW − EW)</p>
