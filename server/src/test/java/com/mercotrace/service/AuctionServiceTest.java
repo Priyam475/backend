@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.mercotrace.domain.Auction;
 import com.mercotrace.domain.AuctionEntry;
+import com.mercotrace.domain.Contact;
 import com.mercotrace.domain.Lot;
 import com.mercotrace.domain.SellerInVehicle;
 import com.mercotrace.domain.Vehicle;
@@ -572,6 +574,19 @@ class AuctionServiceTest {
         assertThat(result.getEntries()).hasSize(2);
         assertThat(result.getEntries().get(0).getBidNumber()).isEqualTo(1);
         assertThat(result.getEntries().get(1).getBidNumber()).isEqualTo(2);
+    }
+
+    @Test
+    void listTemporaryBuyerMarksForCurrentCalendarDay_excludesRegisteredMarksAndSorts() {
+        when(auctionEntryRepository.findDistinctScribbleBuyerMarksForTraderCreatedBetween(eq(1L), any(Instant.class), any(Instant.class)))
+            .thenReturn(List.of("zebra", "alpha", "dup"));
+        Contact c = new Contact();
+        c.setMark("Dup");
+        when(contactRepository.findAllByTraderIdAndActiveTrue(1L)).thenReturn(List.of(c));
+
+        List<String> result = auctionService.listTemporaryBuyerMarksForCurrentCalendarDay();
+
+        assertThat(result).containsExactly("alpha", "zebra");
     }
 }
 

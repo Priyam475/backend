@@ -21,6 +21,8 @@ import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.Collection;
 import java.util.stream.Collectors;
@@ -40,6 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuctionService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AuctionService.class);
+
+    /** Calendar day for temporary-buyer expiry (scribble marks); aligns with primary market timezone. */
+    private static final ZoneId BUSINESS_CALENDAR_ZONE = ZoneId.of("Asia/Kolkata");
 
     private final AuctionRepository auctionRepository;
     private final AuctionEntryRepository auctionEntryRepository;
@@ -229,6 +234,38 @@ public class AuctionService {
     }
 
     /**
+     * Distinct temporary (scribble) buyer marks for the current trader for the current calendar day only.
+     * Excludes marks that match an active registered contact's mark so the strip does not duplicate Row 1.
+     */
+    @Transactional(readOnly = true)
+    public List<String> listTemporaryBuyerMarksForCurrentCalendarDay() {
+        Long traderId = resolveTraderId();
+        LocalDate today = LocalDate.now(BUSINESS_CALENDAR_ZONE);
+        Instant start = today.atStartOfDay(BUSINESS_CALENDAR_ZONE).toInstant();
+        Instant end = today.plusDays(1).atStartOfDay(BUSINESS_CALENDAR_ZONE).toInstant();
+
+        List<String> raw = auctionEntryRepository.findDistinctScribbleBuyerMarksForTraderCreatedBetween(traderId, start, end);
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> registeredMarksLower = contactRepository
+            .findAllByTraderIdAndActiveTrue(traderId)
+            .stream()
+            .map(Contact::getMark)
+            .filter(m -> m != null && !m.isBlank())
+            .map(m -> m.trim().toLowerCase(Locale.ROOT))
+            .collect(Collectors.toSet());
+
+        return raw
+            .stream()
+            .filter(m -> m != null && !m.isBlank())
+            .filter(m -> !registeredMarksLower.contains(m.trim().toLowerCase(Locale.ROOT)))
+            .sorted(String.CASE_INSENSITIVE_ORDER)
+            .toList();
+    }
+
+    /**
      * Get or start an auction session for a lot.
      */
     public AuctionSessionDTO getOrStartSession(Long lotId) {
@@ -243,9 +280,9 @@ public class AuctionService {
             .orElseGet(() -> {
                 Auction a = new Auction();
                 a.setLotId(lotId);
+                a.setTraderId(traderId);
                 a.setAuctionDatetime(Instant.now());
                 a.setCreatedAt(Instant.now());
-                // trader context can be integrated later; for now use null / default
                 return auctionRepository.save(a);
             });
 
@@ -268,6 +305,7 @@ public class AuctionService {
             .orElseGet(() -> {
                 Auction a = new Auction();
                 a.setLotId(lotId);
+                a.setTraderId(traderId);
                 a.setAuctionDatetime(Instant.now());
                 a.setCreatedAt(Instant.now());
                 return auctionRepository.save(a);

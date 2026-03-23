@@ -185,6 +185,8 @@ const AuctionsPage = () => {
     return <ForbiddenPage moduleName="Auctions" />;
   }
   const [buyers, setBuyers] = useState<Contact[]>([]);
+  /** Distinct scribble marks for current trader calendar day (from API); not tied to current lot only. */
+  const [temporaryBuyerMarks, setTemporaryBuyerMarks] = useState<string[]>([]);
   const [entries, setEntries] = useState<SaleEntry[]>([]);
   const [showPresetMargin, setShowPresetMargin] = useState(false);
   const [showScribble, setShowScribble] = useState(false);
@@ -289,25 +291,6 @@ const AuctionsPage = () => {
     };
   }, []);
 
-  // Load buyers, lots, and preset settings from API
-  useEffect(() => {
-    contactApi.list({ scope: 'participants' }).then(setBuyers);
-    loadLots();
-    presetMarksApi
-      .list()
-      .then((list) => {
-        if (list && list.length > 0) {
-          setPresetOptions(
-            list.map((p) => ({
-              label: p.predefined_mark ?? String(p.extra_amount),
-              value: Number(p.extra_amount),
-            }))
-          );
-        }
-      })
-      .catch(() => { /* keep default presets */ });
-  }, []);
-
   const loadLots = useCallback(async (opts?: { q?: string; status?: string }) => {
     setLotsLoading(true);
     try {
@@ -328,6 +311,35 @@ const AuctionsPage = () => {
       setLotsLoading(false);
     }
   }, []);
+
+  const loadTemporaryBuyerMarks = useCallback(async () => {
+    try {
+      const marks = await auctionApi.listTemporaryBuyerMarksToday();
+      setTemporaryBuyerMarks(Array.isArray(marks) ? marks : []);
+    } catch {
+      setTemporaryBuyerMarks([]);
+    }
+  }, []);
+
+  // Load buyers, lots, and preset settings from API
+  useEffect(() => {
+    contactApi.list({ scope: 'participants' }).then(setBuyers);
+    loadTemporaryBuyerMarks();
+    loadLots();
+    presetMarksApi
+      .list()
+      .then((list) => {
+        if (list && list.length > 0) {
+          setPresetOptions(
+            list.map((p) => ({
+              label: p.predefined_mark ?? String(p.extra_amount),
+              value: Number(p.extra_amount),
+            }))
+          );
+        }
+      })
+      .catch(() => { /* keep default presets */ });
+  }, [loadTemporaryBuyerMarks, loadLots]);
 
   // ── Restore draft after lots are loaded from API ─────────
   useEffect(() => {
@@ -350,11 +362,12 @@ const AuctionsPage = () => {
       .getOrStartSession(lot.lot_id)
       .then((session: AuctionSessionDTO) => {
         setEntries(session.entries.map(sessionEntryToSaleEntry));
+        void loadTemporaryBuyerMarks();
       })
       .catch(() => { /* entries stay empty from draft if API fails */ })
       .finally(() => setSessionLoading(false));
     toast.info('Draft restored from previous session');
-  }, [availableLots]);
+  }, [availableLots, loadTemporaryBuyerMarks]);
 
   // ── Auto-save draft on state change ─────────────────────
   useEffect(() => {
@@ -433,13 +446,13 @@ const AuctionsPage = () => {
     );
   }, [buyers, scribbleMark]);
 
-  // Row 2: Distinct buyer marks from existing auction (current session) — filter by scribble pad search
-  const existingAuctionMarks = useMemo(() => {
-    const marks = Array.from(new Set(entries.map(e => e.buyerMark).filter(Boolean))) as string[];
+  // Row 2: Temporary (scribble) marks for today — server-scoped; filter by search box
+  const filteredTemporaryMarks = useMemo(() => {
     const q = (scribbleMark || '').trim().toLowerCase();
-    if (!q) return marks;
-    return marks.filter(m => m.toLowerCase().includes(q));
-  }, [entries, scribbleMark]);
+    const list = temporaryBuyerMarks;
+    if (!q) return list;
+    return list.filter(m => m.toLowerCase().includes(q));
+  }, [temporaryBuyerMarks, scribbleMark]);
 
   const totalSold = useMemo(() => entries.reduce((s, e) => s + e.quantity, 0), [entries]);
   const remaining = selectedLot ? selectedLot.bag_count - totalSold : 0;
@@ -538,6 +551,7 @@ const AuctionsPage = () => {
     try {
       const session = await auctionApi.addBid(selectedLot.lot_id, body);
       setEntries(session.entries.map(sessionEntryToSaleEntry));
+      void loadTemporaryBuyerMarks();
       hapticNotification(NotificationType.Success);
       // Align with client_origin: update selectedLot/availableLots from session.lot so remaining bags and progress bar stay correct (e.g. after quantity increase).
       if (session.lot) {
@@ -579,7 +593,7 @@ const AuctionsPage = () => {
         toast.error(err instanceof Error ? err.message : 'Failed to add bid');
       }
     }
-  }, [selectedLot, addBidRetryAllowIncrease]);
+  }, [selectedLot, addBidRetryAllowIncrease, loadTemporaryBuyerMarks]);
 
   const confirmQtyIncrease = async () => {
     if (!qtyIncreaseDialog || !selectedLot) return;
@@ -609,6 +623,7 @@ const AuctionsPage = () => {
           token_advance: existingEntry.tokenAdvance ?? 0,
         });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
+        void loadTemporaryBuyerMarks();
         if (session.lot) {
           const lotId = selectedLot.lot_id;
           setSelectedLot(prev =>
@@ -870,6 +885,7 @@ const AuctionsPage = () => {
       setShowLotSelector(true);
       setSelectedLot(null);
       setEntries([]);
+      void loadTemporaryBuyerMarks();
       loadLots();
       toast.success(remaining > 0 ? 'Auction saved (partial). Navigate to Logistics or Weighing.' : 'Auction saved! Navigate to Logistics or Weighing.');
     } catch (e) {
@@ -888,10 +904,11 @@ const AuctionsPage = () => {
     try {
       const session = await auctionApi.deleteBid(selectedLot.lot_id, Number(id));
       setEntries(session.entries.map(sessionEntryToSaleEntry));
+      void loadTemporaryBuyerMarks();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to remove bid');
     }
-  }, [selectedLot]);
+  }, [selectedLot, loadTemporaryBuyerMarks]);
 
   const setTokenAdvanceAmount = useCallback(async (id: string, amount: number) => {
     if (!selectedLot) return;
@@ -936,10 +953,11 @@ const AuctionsPage = () => {
           commodity_name: info.commodity_name || lot.commodity_name || '',
         });
         setEntries(session.entries.map(sessionEntryToSaleEntry));
+        void loadTemporaryBuyerMarks();
       })
       .catch(() => toast.error('Failed to load session'))
       .finally(() => setSessionLoading(false));
-  }, []);
+  }, [loadTemporaryBuyerMarks]);
 
   const goBackToSelector = () => {
     // Don't clear entries — they're auto-saved
@@ -1417,7 +1435,10 @@ const AuctionsPage = () => {
           <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[minmax(0,1fr)_280px]' : 'grid-cols-1')}>
             <div className="space-y-2 min-w-0">
               {isDesktop ? (
-                <>
+                <div className="space-y-2 min-w-0">
+                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Scribble pad
+                  </p>
                   <InlineScribblePad
                     onMarkDetected={(mark) => { setScribbleMark(mark); setSelectedBuyer(null); }}
                     canvasHeight={280}
@@ -1432,22 +1453,25 @@ const AuctionsPage = () => {
                       setSelectedBuyer(null);
                     }}
                     placeholder="Or type mark / name to search…"
-                    className="h-10 rounded-xl text-sm font-medium bg-muted/20 border-violet-400/20"
+                    className="h-11 rounded-xl text-sm sm:text-base font-medium bg-muted/20 border-violet-400/20"
                   />
-                </>
+                </div>
               ) : null}
               {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
               {isDesktop && (
-              <div className="space-y-2 min-w-0">
-                {/* Row 1: Contacts — green. Constrain to column width (~7 chips visible); scroll for rest. */}
-                <div className="min-w-0 w-full max-w-full">
+              <div className="space-y-3 min-w-0">
+                {/* Row 1: Registered buyers — contacts — green. */}
+                <div className="min-w-0 w-full max-w-full space-y-1.5">
+                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Registered buyers
+                  </p>
                   <div
                     ref={contactScrollRef}
                     role="region"
-                    aria-label="Contacts"
+                    aria-label="Registered buyers"
                     tabIndex={0}
                     {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                     style={{
                       scrollbarWidth: 'thin',
                       WebkitOverflowScrolling: 'touch',
@@ -1471,47 +1495,50 @@ const AuctionsPage = () => {
                             setScribblePadResetTrigger((t) => t + 1);
                           }}
                           className={cn(
-                            'flex-shrink-0 pl-2 pr-3 py-2 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-2',
+                            'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-2 min-h-[44px]',
                             selectedBuyer?.contact_id === b.contact_id
                               ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
                               : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                           )}
                         >
                           <span className={cn(
-                            'w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+                            'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
                             selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
                           )}>
                             {b.mark || b.name.charAt(0)}
                           </span>
-                          <span className="text-xs font-semibold truncate max-w-[90px]">{b.name}</span>
-                          {b.mark && <span className="text-[10px] opacity-90 flex-shrink-0">({b.mark})</span>}
+                          <span className="text-sm sm:text-base font-semibold truncate max-w-[100px] sm:max-w-[120px]">{b.name}</span>
+                          {b.mark && <span className="text-xs opacity-90 flex-shrink-0">({b.mark})</span>}
                         </button>
                       ))
                     ) : (
-                      <div className="flex-shrink-0 px-4 py-2 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                      <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
                         No matching contact
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Row 2: Existing auction marks — grey. Same width constraint as contacts. */}
-                <div className="min-w-0 w-full max-w-full">
+                {/* Row 2: Temporary buyers (scribble / quick-add), today — violet accent. */}
+                <div className="min-w-0 w-full max-w-full space-y-1.5">
+                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Temporary buyers · today
+                  </p>
                   <div
                     ref={markScrollRef}
                     role="region"
-                    aria-label="Auction marks"
+                    aria-label="Temporary buyers"
                     tabIndex={0}
                     {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2 py-1 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                     style={{
                       scrollbarWidth: 'thin',
                       WebkitOverflowScrolling: 'touch',
                       overscrollBehaviorX: 'contain',
                     }}
                   >
-                    {existingAuctionMarks.length > 0 ? (
-                      existingAuctionMarks.slice(0, 50).map((mark) => {
+                    {filteredTemporaryMarks.length > 0 ? (
+                      filteredTemporaryMarks.slice(0, 50).map((mark) => {
                         const isSelected = !selectedBuyer && scribbleMark === mark;
                         return (
                           <button
@@ -1529,25 +1556,25 @@ const AuctionsPage = () => {
                               setScribblePadResetTrigger((t) => t + 1);
                             }}
                             className={cn(
-                              'flex-shrink-0 pl-2 pr-3 py-2 rounded-xl text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-2',
+                              'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-violet-500 flex items-center gap-2 min-h-[44px]',
                               isSelected
                                 ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
                                 : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                             )}
                           >
                             <span className={cn(
-                              'w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0',
-                              isSelected ? 'bg-white/20' : 'bg-gray-400/20 text-gray-600 dark:text-gray-400'
+                              'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
+                              isSelected ? 'bg-white/20' : 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
                             )}>
                               {mark}
                             </span>
-                            <span className="text-xs font-semibold">{mark}</span>
+                            <span className="text-sm sm:text-base font-semibold truncate max-w-[100px]">{mark}</span>
                           </button>
                         );
                       })
                     ) : (
-                      <div className="flex-shrink-0 px-4 py-2 rounded-xl border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-xs font-medium">
-                        No mark in this session
+                      <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-sm font-medium">
+                        No temporary marks yet today
                       </div>
                     )}
                   </div>
@@ -1819,97 +1846,107 @@ const AuctionsPage = () => {
 
       {/* Mobile/Tablet Dock: compact layout, preset below rate/qty. */}
       {!isDesktop && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <div className="space-y-1 mb-1">
-            <div
-              ref={contactScrollRef}
-              role="region"
-              aria-label="Contacts"
-              tabIndex={0}
-              {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-              className="overflow-x-auto overflow-y-hidden flex gap-1 py-0.5 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
-              style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
-            >
-              {filteredContacts.length > 0 ? (
-                filteredContacts.slice(0, 50).map((b) => (
-                  <button
-                    key={b.contact_id}
-                    type="button"
-                    onClick={(e) => {
-                      if (didDragContactRef.current) { e.preventDefault(); return; }
-                      hapticSelection();
-                      hideNativeKeyboard();
-                      setSelectedBuyer(b);
-                      setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
-                      setScribblePadResetTrigger((t) => t + 1);
-                    }}
-                    className={cn(
-                      'flex-shrink-0 pl-1.5 pr-2 py-1 rounded-lg text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1',
-                      selectedBuyer?.contact_id === b.contact_id
-                        ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
-                        : 'bg-muted/40 border-border/50 hover:bg-muted/60'
-                    )}
-                  >
-                    <span className={cn(
-                      'w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold flex-shrink-0',
-                      selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
-                    )}>
-                      {b.mark || b.name.charAt(0)}
-                    </span>
-                    <span className="text-[10px] font-semibold truncate max-w-[70px]">{b.name}</span>
-                    {b.mark && <span className="text-[8px] opacity-90 flex-shrink-0">({b.mark})</span>}
-                  </button>
-                ))
-              ) : (
-                <div className="flex-shrink-0 px-2 py-1 rounded-lg border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-[9px] font-medium">
-                  No matching contact
-                </div>
-              )}
-            </div>
-            <div
-              ref={markScrollRef}
-              role="region"
-              aria-label="Auction marks"
-              tabIndex={0}
-              {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-              className="overflow-x-auto overflow-y-hidden flex gap-1 py-0.5 -mx-1 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
-              style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
-            >
-              {existingAuctionMarks.length > 0 ? (
-                existingAuctionMarks.slice(0, 50).map((mark) => {
-                  const isSelected = !selectedBuyer && scribbleMark === mark;
-                  return (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="space-y-2 mb-1.5">
+            <div>
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
+                Registered buyers
+              </p>
+              <div
+                ref={contactScrollRef}
+                role="region"
+                aria-label="Registered buyers"
+                tabIndex={0}
+                {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
+                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
+              >
+                {filteredContacts.length > 0 ? (
+                  filteredContacts.slice(0, 50).map((b) => (
                     <button
-                      key={mark}
+                      key={b.contact_id}
                       type="button"
                       onClick={(e) => {
-                        if (didDragMarkRef.current) { e.preventDefault(); return; }
+                        if (didDragContactRef.current) { e.preventDefault(); return; }
                         hapticSelection();
                         hideNativeKeyboard();
-                        setSelectedBuyer(null);
-                        setScribbleMark(mark);
+                        setSelectedBuyer(b);
+                        setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
                         setScribblePadResetTrigger((t) => t + 1);
                       }}
                       className={cn(
-                        'flex-shrink-0 pl-1.5 pr-2 py-1 rounded-lg text-left transition-all border border-l-4 border-l-gray-400 dark:border-l-gray-500 flex items-center gap-1',
-                        isSelected ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary' : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                        'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-lg text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1.5 min-h-[40px]',
+                        selectedBuyer?.contact_id === b.contact_id
+                          ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                          : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                       )}
                     >
                       <span className={cn(
-                        'w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold flex-shrink-0',
-                        isSelected ? 'bg-white/20' : 'bg-gray-400/20 text-gray-600 dark:text-gray-400'
+                        'w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+                        selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
                       )}>
-                        {mark}
+                        {b.mark || b.name.charAt(0)}
                       </span>
-                      <span className="text-[10px] font-semibold">{mark}</span>
+                      <span className="text-xs font-semibold truncate max-w-[78px] sm:max-w-[90px]">{b.name}</span>
+                      {b.mark && <span className="text-[10px] opacity-90 flex-shrink-0">({b.mark})</span>}
                     </button>
-                  );
-                })
-              ) : (
-                <div className="flex-shrink-0 px-2 py-1 rounded-lg border border-l-4 border-l-gray-400 dark:border-l-gray-500 border-dashed bg-gray-400/5 text-gray-600 dark:text-gray-400 text-[9px] font-medium">
-                  No mark in this session
-                </div>
-              )}
+                  ))
+                ) : (
+                  <div className="flex-shrink-0 px-3 py-2 rounded-lg border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                    No matching contact
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
+                Temporary buyers · today
+              </p>
+              <div
+                ref={markScrollRef}
+                role="region"
+                aria-label="Temporary buyers"
+                tabIndex={0}
+                {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
+                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
+              >
+                {filteredTemporaryMarks.length > 0 ? (
+                  filteredTemporaryMarks.slice(0, 50).map((mark) => {
+                    const isSelected = !selectedBuyer && scribbleMark === mark;
+                    return (
+                      <button
+                        key={mark}
+                        type="button"
+                        onClick={(e) => {
+                          if (didDragMarkRef.current) { e.preventDefault(); return; }
+                          hapticSelection();
+                          hideNativeKeyboard();
+                          setSelectedBuyer(null);
+                          setScribbleMark(mark);
+                          setScribblePadResetTrigger((t) => t + 1);
+                        }}
+                        className={cn(
+                          'flex-shrink-0 pl-2 pr-2.5 py-1.5 rounded-lg text-left transition-all border border-l-4 border-l-violet-500 flex items-center gap-1.5 min-h-[40px]',
+                          isSelected ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary' : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                        )}
+                      >
+                        <span className={cn(
+                          'w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+                          isSelected ? 'bg-white/20' : 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
+                        )}>
+                          {mark}
+                        </span>
+                        <span className="text-xs font-semibold truncate max-w-[72px]">{mark}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="flex-shrink-0 px-3 py-2 rounded-lg border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-xs font-medium">
+                    No temporary marks yet today
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           {/* Mobile: selected buyer/mark chip with clear — match desktop UX */}
@@ -2042,18 +2079,23 @@ const AuctionsPage = () => {
             </div>
           )}
           <div className="grid grid-cols-[1.4fr_1fr] gap-1.5 items-stretch">
-            <div className="rounded-xl border border-violet-400/20 bg-card/80 p-1 h-full min-h-[15rem]">
-              <InlineScribblePad
-                onMarkDetected={(mark) => {
-                  setScribbleMark(mark);
-                  setSelectedBuyer(null);
-                }}
-                canvasHeight={240}
-                resetTrigger={scribblePadResetTrigger}
-                showStatus={false}
-                fillAvailableHeight
-                className="h-full"
-              />
+            <div className="rounded-xl border border-violet-400/20 bg-card/80 p-1.5 h-full min-h-[15rem] flex flex-col gap-1">
+              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground px-0.5 shrink-0">
+                Scribble pad
+              </p>
+              <div className="flex-1 min-h-0">
+                <InlineScribblePad
+                  onMarkDetected={(mark) => {
+                    setScribbleMark(mark);
+                    setSelectedBuyer(null);
+                  }}
+                  canvasHeight={240}
+                  resetTrigger={scribblePadResetTrigger}
+                  showStatus={false}
+                  fillAvailableHeight
+                  className="h-full"
+                />
+              </div>
             </div>
             <div className="rounded-xl border border-primary/20 bg-card/80 p-1.5 space-y-1.5">
               <div className="grid grid-cols-3 gap-1">

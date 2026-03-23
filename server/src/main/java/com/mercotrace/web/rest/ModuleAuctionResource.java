@@ -77,6 +77,19 @@ public class ModuleAuctionResource {
     }
 
     /**
+     * {@code GET  /module-auctions/temporary-buyer-marks/today} : distinct scribble marks for the current trader
+     * for the current calendar day (Asia/Kolkata); excludes marks that match registered contacts.
+     */
+    @Operation(summary = "Temporary buyer marks (today)", description = "Scribble marks from today's bids, trader-scoped")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "OK") })
+    @GetMapping("/temporary-buyer-marks/today")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.AUCTIONS_VIEW + "\")")
+    public ResponseEntity<List<String>> listTemporaryBuyerMarksToday() {
+        LOG.debug("REST request to list temporary buyer marks for today");
+        return ResponseEntity.ok(auctionService.listTemporaryBuyerMarksForCurrentCalendarDay());
+    }
+
+    /**
      * {@code GET  /module-auctions/lots/:lotId/session} : get or start an auction session for a lot.
      */
     @Operation(summary = "Get or start session", description = "Returns current auction session for the lot or creates one")

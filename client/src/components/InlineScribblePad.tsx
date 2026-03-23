@@ -222,39 +222,39 @@ const InlineScribblePad = ({
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
-        <p className="absolute bottom-1.5 left-2.5 text-[10px] text-muted-foreground/40 italic pointer-events-none select-none flex items-center gap-1">
-          <PenLine className="w-3 h-3" /> Write buyer mark
+        <p className="absolute bottom-2 left-2.5 text-xs sm:text-sm text-muted-foreground/50 italic pointer-events-none select-none flex items-center gap-1.5">
+          <PenLine className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" /> Write buyer mark
         </p>
       </div>
 
       {/* Status + Candidates */}
       {showStatus && (
-      <div className="mt-2 flex items-center gap-2 flex-wrap min-h-[28px]">
+      <div className="mt-2.5 flex items-center gap-2 flex-wrap min-h-[32px]">
         {recognizing ? (
           <div className="flex items-center gap-1.5 text-violet-500">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            <span className="text-[10px] font-medium">{recognizeStatus || 'Reading...'}</span>
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span className="text-xs sm:text-sm font-medium">{recognizeStatus || 'Reading...'}</span>
           </div>
         ) : selectedMark ? (
           <div className="flex items-center gap-1.5">
-            <div className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-xs font-bold shadow-sm">
+            <div className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold shadow-sm">
               {selectedMark}
             </div>
-            <span className="text-[10px] text-muted-foreground">{recognizeStatus}</span>
+            <span className="text-xs text-muted-foreground">{recognizeStatus}</span>
           </div>
         ) : recognizeStatus ? (
-          <span className="text-[10px] text-muted-foreground">{recognizeStatus}</span>
+          <span className="text-xs sm:text-sm text-muted-foreground">{recognizeStatus}</span>
         ) : null}
 
         <AnimatePresence>
           {candidates.length > 1 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1 ml-auto">
-              <Sparkles className="w-3 h-3 text-muted-foreground/50" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 ml-auto flex-wrap">
+              <Sparkles className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
               {candidates.filter(c => c !== selectedMark).map(c => (
                 <button
                   key={c}
                   onClick={() => selectCandidate(c)}
-                  className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/50 text-foreground hover:bg-muted transition-colors"
+                  className="px-2.5 py-1 rounded-md text-xs sm:text-sm font-bold bg-muted/50 text-foreground hover:bg-muted transition-colors"
                 >
                   {c.slice(0, 5)}
                 </button>

@@ -140,6 +140,13 @@ async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<
 }
 
 export const auctionApi = {
+  /** Distinct scribble (temporary) buyer marks for the trader for the current calendar day (server). */
+  async listTemporaryBuyerMarksToday(): Promise<string[]> {
+    const res = await apiFetch(`${BASE}/temporary-buyer-marks/today`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load temporary buyer marks');
+    return res.json();
+  },
+
   async listLots(params: ListLotsParams = {}): Promise<LotSummaryDTO[]> {
     const searchParams = new URLSearchParams();
     if (params.page != null) searchParams.set('page', String(params.page));
