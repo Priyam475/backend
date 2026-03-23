@@ -608,21 +608,24 @@ const ArrivalsPage = () => {
     setSellerDropdown(false);
   };
 
-  /** Add a seller by name/phone only (no contact). */
+  /** Add a seller by name/phone only (no contact). Prefills name from the search box. */
   const addSellerByName = () => {
     if (!isMultiSeller && sellers.length >= 1) {
       toast.error('Single-seller arrival allows only one seller');
       return;
     }
+    const nameFromSearch = sellerSearch.trim();
     const newSeller: SellerEntry = {
       seller_vehicle_id: crypto.randomUUID(),
       contact_id: '',
-      seller_name: '',
+      seller_name: nameFromSearch,
       seller_phone: '',
       seller_mark: '',
       lots: [],
     };
     setSellers(prev => [...prev, newSeller]);
+    setSellerSearch('');
+    setSellerDropdown(false);
   };
 
   const updateSeller = (sellerIdx: number, updates: Partial<Pick<SellerEntry, 'seller_name' | 'seller_phone' | 'seller_mark'>>) => {
