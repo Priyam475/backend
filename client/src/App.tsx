@@ -1,8 +1,10 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import {
   createBrowserRouter,
   createRoutesFromElements,
@@ -96,6 +98,26 @@ const LazyFallback = () => (
 );
 
 function AppShell() {
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android") {
+      return;
+    }
+
+    const listenerPromise = CapacitorApp.addListener("backButton", ({ canGoBack }) => {
+      if (canGoBack) {
+        window.history.back();
+        return;
+      }
+
+      // No in-app history left: exit app on Android.
+      CapacitorApp.exitApp();
+    });
+
+    return () => {
+      void listenerPromise.then((listener) => listener.remove());
+    };
+  }, []);
+
   return (
     <>
       <ScrollToTop />
