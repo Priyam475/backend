@@ -4,7 +4,8 @@ import {
   ArrowLeft, Gavel, Plus, Trash2,
   ShoppingCart, User, Package, Truck, IndianRupee, Banknote, ChevronDown,
   Search, AlertTriangle, Merge, Hash,
-  ChevronLeft, ChevronRight, List, Filter
+  ChevronLeft, ChevronRight, List, Filter,
+  Pencil, Check, X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -22,6 +23,7 @@ import type {
   AuctionSessionDTO,
   AuctionEntryDTO,
   AuctionBidCreateRequest,
+  AuctionBidUpdateRequest,
 } from '@/services/api/auction';
 import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
@@ -66,6 +68,8 @@ interface SaleEntry {
   presetType: PresetType;
   sellerRate: number;
   buyerRate: number;
+  /** From API `last_modified_ms` — sent back on PATCH for concurrency */
+  lastModifiedMs?: number | null;
 }
 
 const DEFAULT_PRESETS = [
@@ -194,6 +198,7 @@ function sessionEntryToSaleEntry(e: AuctionEntryDTO): SaleEntry {
     // API keeps base bid and preset separate; UI shows seller line as bid + preset
     sellerRate: Number(e.bid_rate) + Number(e.preset_margin ?? 0),
     buyerRate: Number(e.buyer_rate ?? e.bid_rate),
+    lastModifiedMs: e.last_modified_ms ?? null,
   };
 }
 
@@ -256,6 +261,40 @@ const AuctionsPage = () => {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
   const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+
+  /** ENH-34: inline edit bid row */
+  const [editingBidId, setEditingBidId] = useState<string | null>(null);
+  const [editBidDraft, setEditBidDraft] = useState<{
+    rate: string;
+    qty: string;
+    preset: number;
+    presetType: PresetType;
+    extraRate: string;
+    token: string;
+    lastModifiedMs: number | null;
+  } | null>(null);
+  const [editBidRetryAllowIncrease, setEditBidRetryAllowIncrease] = useState(false);
+  const [editBidQtyDialog, setEditBidQtyDialog] = useState<{
+    currentTotal: number; lotTotal: number; attemptedQty: number;
+    pendingBody: AuctionBidUpdateRequest;
+    bidNumericId: number;
+  } | null>(null);
+
+  type EditBidFormSnapshot = {
+    selectedBuyer: Contact | null;
+    scribbleMark: string;
+    rate: string;
+    qty: string;
+    showPresetMargin: boolean;
+    preset: number;
+    presetType: PresetType;
+    activeNumpadField: 'rate' | 'qty';
+    mobileKeyboardEnabled: boolean;
+    lastScribbleSegment: string;
+    nextParenIsOpen: boolean;
+  };
+
+  const editBidFormSnapshotRef = useRef<EditBidFormSnapshot | null>(null);
 
   // New entry form
   const [selectedBuyer, setSelectedBuyer] = useState<Contact | null>(null);
@@ -481,6 +520,7 @@ const AuctionsPage = () => {
   }, [temporaryBuyerMarks, scribbleMark]);
 
   const handleScribbleSegmentDetected = useCallback((segment: string, meta?: MarkDetectionMeta) => {
+    if (editingBidId) return;
     const up = segment.toUpperCase().slice(0, MAX_MARK_LEN);
     setScribbleMark((prev) => {
       if (meta?.replaceLastSegment && lastScribbleSegmentRef.current) {
@@ -496,30 +536,76 @@ const AuctionsPage = () => {
     setSelectedBuyer(null);
     // Do not bump scribblePadResetTrigger here: InlineScribblePad append mode clears ink internally;
     // incrementing would run the reset effect and wipe candidate chips before the user can tap one.
-  }, []);
+  }, [editingBidId]);
 
   useEffect(() => {
     if (scribbleMark === '') nextParenIsOpenRef.current = true;
   }, [scribbleMark]);
 
   const appendMarkParenFromNumpad = useCallback(() => {
+    if (editingBidId) return;
     const ch = nextParenIsOpenRef.current ? '(' : ')';
     nextParenIsOpenRef.current = !nextParenIsOpenRef.current;
     lastScribbleSegmentRef.current = '';
     setScribbleMark((prev) => (prev + ch).slice(0, MAX_MARK_LEN));
     setSelectedBuyer(null);
     hapticSelection();
-  }, []);
+  }, [editingBidId]);
 
   const handleMarkBackspace = useCallback(() => {
+    if (editingBidId) return;
     lastScribbleSegmentRef.current = '';
     setScribbleMark((prev) => prev.slice(0, -1));
     hapticSelection();
-  }, []);
+  }, [editingBidId]);
 
   const totalSold = useMemo(() => entries.reduce((s, e) => s + e.quantity, 0), [entries]);
   const remaining = selectedLot ? selectedLot.bag_count - totalSold : 0;
   const highestBid = useMemo(() => Math.max(0, ...entries.map(e => e.rate)), [entries]);
+
+  const editingEntry = useMemo(() => {
+    if (!editingBidId) return null;
+    return entries.find(e => e.id === editingBidId) ?? null;
+  }, [editingBidId, entries]);
+
+  const applyAuctionSession = useCallback((session: AuctionSessionDTO) => {
+    setEntries(session.entries.map(sessionEntryToSaleEntry));
+    const lotId = selectedLot?.lot_id;
+    if (session.lot && lotId) {
+      setSelectedLot(prev =>
+        prev && prev.lot_id === lotId
+          ? {
+              ...prev,
+              bag_count: session.lot!.bag_count ?? prev.bag_count,
+              original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
+              was_modified: session.lot!.was_modified ?? prev.was_modified,
+            }
+          : prev
+      );
+      setAvailableLots(prev =>
+        prev.map(l =>
+          l.lot_id === lotId && session.lot
+            ? {
+                ...l,
+                bag_count: session.lot!.bag_count ?? l.bag_count,
+                original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
+                was_modified: session.lot!.was_modified ?? l.was_modified,
+              }
+            : l
+        )
+      );
+    }
+  }, [selectedLot?.lot_id]);
+
+  const refetchAuctionSession = useCallback(async () => {
+    if (!selectedLot) return;
+    try {
+      const session = await auctionApi.getOrStartSession(selectedLot.lot_id);
+      applyAuctionSession(session);
+    } catch {
+      toast.error('Failed to refresh session');
+    }
+  }, [selectedLot, applyAuctionSession]);
 
   // ── Lot navigation (prev/next) ─────────────────────────
   const currentLotIndex = useMemo(() => {
@@ -765,6 +851,7 @@ const AuctionsPage = () => {
   };
 
   const handleScribbleConfirm = (initials: string, quantity: number) => {
+    if (editingBidId) return;
     const currentRate = parseInt(rate) || highestBid || 0;
     if (currentRate <= 0) return;
     const effectivePreset = showPresetMargin ? preset : 0;
@@ -870,8 +957,13 @@ const AuctionsPage = () => {
   };
 
   const updateActiveNumpadField = (next: string) => {
-    if (activeNumpadField === 'rate') setRate(next);
-    else if (activeNumpadField === 'qty') setQty(next);
+    if (activeNumpadField === 'rate') {
+      setRate(next);
+      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: next } : d));
+    } else if (activeNumpadField === 'qty') {
+      setQty(next);
+      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, qty: next } : d));
+    }
   };
 
   const getCurrentNumpadValue = () => {
@@ -967,6 +1059,10 @@ const AuctionsPage = () => {
 
   const removeEntry = useCallback(async (id: string) => {
     if (!selectedLot) return;
+    if (editingBidId) {
+      toast.info('Finish or cancel bid edit first.');
+      return;
+    }
     if (!can('Auctions / Sales', 'Delete')) {
       toast.error('You do not have permission to delete auction bids.');
       return;
@@ -978,34 +1074,266 @@ const AuctionsPage = () => {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to remove bid');
     }
-  }, [selectedLot, loadTemporaryBuyerMarks]);
+  }, [selectedLot, loadTemporaryBuyerMarks, editingBidId, can]);
 
   const setTokenAdvanceAmount = useCallback(async (id: string, amount: number) => {
     if (!selectedLot) return;
+    if (editingBidId === id) {
+      toast.info('Save or cancel the bid edit first.');
+      return;
+    }
     if (!can('Auctions / Sales', 'Edit')) {
       toast.error('You do not have permission to edit auction bids.');
       return;
     }
     try {
       const session = await auctionApi.updateBid(selectedLot.lot_id, Number(id), { token_advance: amount });
-      setEntries(session.entries.map(sessionEntryToSaleEntry));
+      applyAuctionSession(session);
       setShowTokenInput(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update token advance');
     }
-  }, [selectedLot]);
+  }, [selectedLot, editingBidId, can, applyAuctionSession]);
+
+  const cancelEditBid = useCallback(() => {
+    const snap = editBidFormSnapshotRef.current;
+
+    setEditingBidId(null);
+    setEditBidDraft(null);
+    setEditBidRetryAllowIncrease(false);
+    setEditBidQtyDialog(null);
+    setShowTokenInput(null);
+
+    editBidFormSnapshotRef.current = null;
+
+    if (snap) {
+      setSelectedBuyer(snap.selectedBuyer);
+      setScribbleMark(snap.scribbleMark);
+      setRate(snap.rate);
+      setQty(snap.qty);
+      setShowPresetMargin(snap.showPresetMargin);
+      setPreset(snap.preset);
+      setPresetType(snap.presetType);
+      setActiveNumpadField(snap.activeNumpadField);
+      setMobileKeyboardEnabled(snap.mobileKeyboardEnabled);
+      lastScribbleSegmentRef.current = snap.lastScribbleSegment;
+      nextParenIsOpenRef.current = snap.nextParenIsOpen;
+    }
+  }, []);
+
+  const startEditBid = useCallback((entry: SaleEntry) => {
+    if (!can('Auctions / Sales', 'Edit')) {
+      toast.error('You do not have permission to edit auction bids.');
+      return;
+    }
+
+    // Snapshot current Sales Pad state so Cancel restores it.
+    editBidFormSnapshotRef.current = {
+      selectedBuyer,
+      scribbleMark,
+      rate,
+      qty,
+      showPresetMargin,
+      preset,
+      presetType,
+      activeNumpadField,
+      mobileKeyboardEnabled,
+      lastScribbleSegment: lastScribbleSegmentRef.current,
+      nextParenIsOpen: nextParenIsOpenRef.current,
+    };
+
+    setShowTokenInput(null);
+    setEditBidQtyDialog(null);
+    setEditingBidId(entry.id);
+    setEditBidRetryAllowIncrease(false);
+    setEditBidDraft({
+      rate: String(Math.trunc(entry.rate)),
+      qty: String(entry.quantity),
+      preset: entry.presetApplied,
+      presetType: entry.presetType,
+      extraRate: String(entry.extraRate ?? 0),
+      token: String(Math.trunc(entry.tokenAdvance ?? 0)),
+      lastModifiedMs: entry.lastModifiedMs ?? null,
+    });
+
+    // Prefill Sales Pad controls from the bid being edited.
+    setRate(String(Math.trunc(entry.rate)));
+    setQty(String(entry.quantity));
+    setPreset(entry.presetApplied);
+    setPresetType(entry.presetType);
+    setShowPresetMargin(entry.presetApplied !== 0);
+
+    // Buyer display: match contact id when possible; otherwise use scribble mark.
+    const matchedBuyer = entry.buyerContactId
+      ? buyers.find(b => String(b.contact_id) === entry.buyerContactId) ?? null
+      : null;
+    if (matchedBuyer) {
+      setSelectedBuyer(matchedBuyer);
+      setScribbleMark(entry.buyerMark ?? '');
+    } else {
+      setSelectedBuyer(null);
+      setScribbleMark(entry.buyerMark ?? '');
+    }
+  }, [
+    can,
+    selectedBuyer,
+    scribbleMark,
+    rate,
+    qty,
+    showPresetMargin,
+    preset,
+    presetType,
+    activeNumpadField,
+    mobileKeyboardEnabled,
+    buyers,
+  ]);
+
+  const saveEditBid = useCallback(async (entry: SaleEntry) => {
+    if (!selectedLot || !editBidDraft) return;
+    if (!can('Auctions / Sales', 'Edit')) {
+      toast.error('You do not have permission to edit auction bids.');
+      return;
+    }
+    const rateN = parseInt(editBidDraft.rate, 10);
+    const qtyN = parseInt(editBidDraft.qty, 10);
+    if (!Number.isFinite(rateN) || rateN < 1 || !Number.isFinite(qtyN) || qtyN < 1) {
+      toast.error('Enter valid rate and quantity (at least 1).');
+      return;
+    }
+    const extra = Number(editBidDraft.extraRate);
+    const token = Number(editBidDraft.token);
+    if (!Number.isFinite(extra) || !Number.isFinite(token)) {
+      toast.error('Enter valid numeric values.');
+      return;
+    }
+    const others = entries.filter(e => e.id !== entry.id).reduce((s, e) => s + e.quantity, 0);
+    const newTotalSold = others + qtyN;
+    const lotCap = selectedLot.bag_count;
+    const body: AuctionBidUpdateRequest = {
+      rate: rateN,
+      quantity: qtyN,
+      extra_rate: extra,
+      preset_applied: editBidDraft.preset,
+      preset_type: editBidDraft.preset < 0 ? 'LOSS' : 'PROFIT',
+      token_advance: token,
+      expected_last_modified_ms: editBidDraft.lastModifiedMs ?? undefined,
+      allow_lot_increase: editBidRetryAllowIncrease,
+    };
+    if (newTotalSold > lotCap && !editBidRetryAllowIncrease) {
+      setEditBidQtyDialog({
+        currentTotal: others,
+        lotTotal: lotCap,
+        attemptedQty: qtyN,
+        pendingBody: body,
+        bidNumericId: Number(entry.id),
+      });
+      return;
+    }
+    try {
+      const session = await auctionApi.updateBid(selectedLot.lot_id, Number(entry.id), body);
+      applyAuctionSession(session);
+      // After successful update, clear entry inputs so next action starts fresh.
+      setSelectedBuyer(null);
+      lastScribbleSegmentRef.current = '';
+      setScribbleMark('');
+      setRate('');
+      setQty('');
+      setEditingBidId(null);
+      setEditBidDraft(null);
+      setEditBidRetryAllowIncrease(false);
+      editBidFormSnapshotRef.current = null;
+      void loadTemporaryBuyerMarks();
+      hapticNotification(NotificationType.Success);
+    } catch (err: unknown) {
+      const e = err as { isStaleBid?: boolean; isConflict?: boolean };
+      if (e.isStaleBid) {
+        toast.error(err instanceof Error ? err.message : 'Bid was updated elsewhere');
+        await refetchAuctionSession();
+        cancelEditBid();
+        return;
+      }
+      if (e.isConflict) {
+        setEditBidRetryAllowIncrease(true);
+        toast.error('Quantity exceeds lot. Tap Save again to allow lot increase.');
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to update bid');
+    }
+  }, [
+    selectedLot,
+    editBidDraft,
+    entries,
+    editBidRetryAllowIncrease,
+    can,
+    loadTemporaryBuyerMarks,
+    applyAuctionSession,
+    refetchAuctionSession,
+    cancelEditBid,
+  ]);
+
+  const confirmEditBidQtyIncrease = useCallback(async () => {
+    if (!editBidQtyDialog || !selectedLot) return;
+    const { pendingBody, bidNumericId } = editBidQtyDialog;
+    setEditBidQtyDialog(null);
+    try {
+      const session = await auctionApi.updateBid(selectedLot.lot_id, bidNumericId, { ...pendingBody, allow_lot_increase: true });
+      applyAuctionSession(session);
+      // Keep behavior same as normal update: clear entry inputs afterwards.
+      setSelectedBuyer(null);
+      lastScribbleSegmentRef.current = '';
+      setScribbleMark('');
+      setRate('');
+      setQty('');
+      setEditingBidId(null);
+      setEditBidDraft(null);
+      setEditBidRetryAllowIncrease(false);
+      editBidFormSnapshotRef.current = null;
+      void loadTemporaryBuyerMarks();
+      toast.success('Bid updated with lot increase allowed.');
+      hapticNotification(NotificationType.Success);
+    } catch (err: unknown) {
+      const e = err as { isStaleBid?: boolean; isConflict?: boolean };
+      if (e.isStaleBid) {
+        toast.error(err instanceof Error ? err.message : 'Bid was updated elsewhere');
+        await refetchAuctionSession();
+        cancelEditBid();
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to update bid');
+    }
+  }, [editBidQtyDialog, selectedLot, applyAuctionSession, loadTemporaryBuyerMarks, refetchAuctionSession, cancelEditBid]);
 
   const applyPreset = (value: number) => {
     const next = preset === value ? 0 : value;
     setPreset(next);
     if (next !== 0) setPresetType(value >= 0 ? 'PROFIT' : 'LOSS');
+
+    // Sync edit draft so "Update Bid" uses latest preset changes.
+    if (editingBidId) {
+      setEditBidDraft((d) => (d ? { ...d, preset: next, presetType: next < 0 ? 'LOSS' : 'PROFIT' } : d));
+    }
   };
+
+  const handleShowPresetMarginChange = useCallback((checked: boolean) => {
+    setShowPresetMargin(checked);
+    if (!editingBidId) return;
+    setEditBidDraft((d) => {
+      if (!d) return d;
+      const nextPreset = checked ? preset : 0;
+      return { ...d, preset: nextPreset, presetType: nextPreset < 0 ? 'LOSS' : 'PROFIT' };
+    });
+  }, [editingBidId, preset]);
 
   const selectLot = useCallback((lot: LotInfo) => {
     setSelectedLot(lot);
     setShowLotSelector(false);
     setShowLotList(false);
     setEntries([]);
+    setEditingBidId(null);
+    setEditBidDraft(null);
+    editBidFormSnapshotRef.current = null;
+    setEditBidRetryAllowIncrease(false);
+    setEditBidQtyDialog(null);
     setRate('');
     setQty('');
     setLotNumberSearch('');
@@ -1454,7 +1782,7 @@ const AuctionsPage = () => {
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground">Show</span>
-              <Switch checked={showPresetMargin} onCheckedChange={setShowPresetMargin} aria-label="Show preset margin" />
+              <Switch checked={showPresetMargin} onCheckedChange={handleShowPresetMarginChange} aria-label="Show preset margin" />
             </div>
           </div>
 
@@ -1518,7 +1846,9 @@ const AuctionsPage = () => {
                   <Input
                     type="text"
                     value={scribbleMark}
+                    readOnly={!!editingBidId}
                     onChange={(e) => {
+                      if (editingBidId) return;
                       lastScribbleSegmentRef.current = '';
                       const v = e.target.value.toUpperCase().slice(0, MAX_MARK_LEN);
                       setScribbleMark(v);
@@ -1555,6 +1885,7 @@ const AuctionsPage = () => {
                         <button
                           key={b.contact_id}
                           type="button"
+                          disabled={!!editingBidId}
                           onClick={(e) => {
                             if (didDragContactRef.current) {
                               e.preventDefault();
@@ -1617,6 +1948,7 @@ const AuctionsPage = () => {
                           <button
                             key={mark}
                             type="button"
+                            disabled={!!editingBidId}
                             onClick={(e) => {
                               if (didDragMarkRef.current) {
                                 e.preventDefault();
@@ -1663,7 +1995,12 @@ const AuctionsPage = () => {
                       <span className="px-2.5 py-1 rounded-lg bg-primary/15 text-primary text-sm font-bold border border-primary/30">
                         {selectedBuyer.name} {selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}
                       </span>
-                      <button type="button" onClick={() => { setSelectedBuyer(null); lastScribbleSegmentRef.current = ''; setScribbleMark(''); }} className="text-muted-foreground hover:text-foreground p-0.5">
+                      <button
+                        type="button"
+                        disabled={!!editingBidId}
+                        onClick={() => { setSelectedBuyer(null); lastScribbleSegmentRef.current = ''; setScribbleMark(''); }}
+                        className="text-muted-foreground hover:text-foreground p-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </>
@@ -1674,7 +2011,7 @@ const AuctionsPage = () => {
                       <button
                         type="button"
                         onClick={handleMarkBackspace}
-                        disabled={!scribbleMark}
+                        disabled={!!editingBidId || !scribbleMark}
                         className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-muted/70 text-foreground hover:bg-muted disabled:opacity-40 border border-border/60"
                         aria-label="Delete last character of mark"
                       >
@@ -1682,8 +2019,9 @@ const AuctionsPage = () => {
                       </button>
                       <button
                         type="button"
+                        disabled={!!editingBidId}
                         onClick={() => { lastScribbleSegmentRef.current = ''; setScribbleMark(''); setScribblePadResetTrigger((t) => t + 1); }}
-                        className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                        className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40 disabled:cursor-not-allowed"
                         aria-label="Clear mark"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1702,7 +2040,11 @@ const AuctionsPage = () => {
                     ref={rateInputRef}
                     type="number"
                     value={rate}
-                    onChange={(e) => setRate(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setRate(v);
+                      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
+                    }}
                     onFocus={(e) => {
                       setActiveNumpadField('rate');
                       if (isTouchLayout && !mobileKeyboardEnabled) {
@@ -1725,7 +2067,11 @@ const AuctionsPage = () => {
                     ref={qtyInputRef}
                     type="number"
                     value={qty}
-                    onChange={(e) => setQty(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setQty(v);
+                      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, qty: v } : d));
+                    }}
                     onFocus={(e) => {
                       setActiveNumpadField('qty');
                       if (isTouchLayout && !mobileKeyboardEnabled) {
@@ -1745,17 +2091,38 @@ const AuctionsPage = () => {
               </div>
               {isDesktop && (
                 <div className="flex gap-2">
-                  <Button
-                    onClick={handleUnifiedAdd}
-                    disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                    className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
-                  >
-                    <Plus className="w-4 h-4 mr-1" /> Add Bid
-                  </Button>
-                  <Button onClick={handleSelfSale} disabled={remaining <= 0}
-                    variant="outline" className="h-11 rounded-xl px-4 border-amber-400/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
-                    Self Sale
-                  </Button>
+                  {editingBidId && editBidDraft ? (
+                    <>
+                      <Button
+                        onClick={() => { if (editingEntry) void saveEditBid(editingEntry); }}
+                        disabled={!editingEntry || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                        className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
+                      >
+                        <Pencil className="w-4 h-4 mr-1" /> Update Bid
+                      </Button>
+                      <Button
+                        onClick={cancelEditBid}
+                        variant="outline"
+                        className="h-11 rounded-xl px-4 border-border/50 text-foreground hover:bg-muted/40"
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={handleUnifiedAdd}
+                        disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                        className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
+                      >
+                        <Plus className="w-4 h-4 mr-1" /> Add Bid
+                      </Button>
+                      <Button onClick={handleSelfSale} disabled={remaining <= 0}
+                        variant="outline" className="h-11 rounded-xl px-4 border-amber-400/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
+                        Self Sale
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1806,7 +2173,8 @@ const AuctionsPage = () => {
                           className={cn(
                             "border-b border-border/30 hover:bg-muted/20 transition-colors",
                             entry.isSelfSale && "border-l-4 border-l-amber-500",
-                            entry.isScribble && "border-l-4 border-l-violet-500"
+                            entry.isScribble && "border-l-4 border-l-violet-500",
+                            editingBidId === entry.id && "bg-primary/5 ring-1 ring-inset ring-primary/35"
                           )}
                         >
                           <td className={cn("px-3 py-2", isDesktop ? "" : "px-2 py-1.5")}>
@@ -1825,6 +2193,9 @@ const AuctionsPage = () => {
                               </span>
                               {entry.isScribble && <span className="px-1 py-0.5 rounded bg-violet-500/15 text-violet-500 text-[8px] font-bold">SCRIBBLE</span>}
                               {entry.isSelfSale && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[8px] font-bold">SELF</span>}
+                              {editingBidId === entry.id && (
+                                <span className="px-1 py-0.5 rounded bg-primary/20 text-primary text-[8px] font-bold">EDITING</span>
+                              )}
                             </div>
                           </td>
                           <td className={cn("font-semibold text-foreground align-top", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
@@ -1853,9 +2224,11 @@ const AuctionsPage = () => {
                           <td className={cn("text-right", isDesktop ? "px-3 py-2" : "px-2 py-1.5")}>
                             <div className="flex items-center justify-end gap-0.5">
                               <button
+                                type="button"
+                                disabled={!!editingBidId}
                                 onClick={() => setShowTokenInput(showTokenInput === entry.id ? null : entry.id)}
                                 className={cn(
-                                  "p-1 rounded-md transition-colors",
+                                  "p-1 rounded-md transition-colors disabled:opacity-40",
                                   entry.tokenAdvance > 0 ? "bg-success/15 text-success" : "bg-muted/50 text-muted-foreground hover:text-foreground"
                                 )}
                                 title="Token advance"
@@ -1863,17 +2236,30 @@ const AuctionsPage = () => {
                                 <Banknote className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
                               </button>
                               <button
+                                type="button"
+                                disabled={!!editingBidId}
                                 onClick={() => removeEntry(entry.id)}
-                                className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                                className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40"
                                 title="Delete bid"
                               >
                                 <Trash2 className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
                               </button>
+                              {can('Auctions / Sales', 'Edit') && (
+                                <button
+                                  type="button"
+                                  disabled={!!editingBidId}
+                                  onClick={() => startEditBid(entry)}
+                                  className="p-1 rounded-md bg-muted/60 text-foreground hover:bg-muted disabled:opacity-40"
+                                  title="Edit bid"
+                                >
+                                  <Pencil className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </motion.tr>
                         <AnimatePresence>
-                          {showTokenInput === entry.id && (
+                          {showTokenInput === entry.id && !editingBidId && (
                             <motion.tr
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
@@ -1977,6 +2363,7 @@ const AuctionsPage = () => {
                     <button
                       key={b.contact_id}
                       type="button"
+                      disabled={!!editingBidId}
                       onClick={(e) => {
                         if (didDragContactRef.current) { e.preventDefault(); return; }
                         hapticSelection();
@@ -2030,6 +2417,7 @@ const AuctionsPage = () => {
                       <button
                         key={mark}
                         type="button"
+                        disabled={!!editingBidId}
                         onClick={(e) => {
                           if (didDragMarkRef.current) { e.preventDefault(); return; }
                           hapticSelection();
@@ -2073,8 +2461,9 @@ const AuctionsPage = () => {
                   </span>
                   <button
                     type="button"
+                    disabled={!!editingBidId}
                     onClick={() => { setSelectedBuyer(null); lastScribbleSegmentRef.current = ''; setScribbleMark(''); setScribblePadResetTrigger(t => t + 1); }}
-                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="Clear selection"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -2089,7 +2478,7 @@ const AuctionsPage = () => {
                   <button
                     type="button"
                     onClick={handleMarkBackspace}
-                    disabled={!scribbleMark}
+                    disabled={!!editingBidId || !scribbleMark}
                     className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-muted/70 text-foreground border border-border/60 disabled:opacity-40"
                     aria-label="Delete last character of mark"
                   >
@@ -2097,8 +2486,9 @@ const AuctionsPage = () => {
                   </button>
                   <button
                     type="button"
+                    disabled={!!editingBidId}
                     onClick={() => { lastScribbleSegmentRef.current = ''; setScribbleMark(''); setScribblePadResetTrigger(t => t + 1); }}
-                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="Clear mark"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -2117,7 +2507,9 @@ const AuctionsPage = () => {
                 type="text"
                 autoComplete="off"
                 value={scribbleMark}
+                readOnly={!!editingBidId}
                 onChange={(e) => {
+                  if (editingBidId) return;
                   lastScribbleSegmentRef.current = '';
                   const v = e.target.value.toUpperCase().slice(0, MAX_MARK_LEN);
                   setScribbleMark(v);
@@ -2137,7 +2529,11 @@ const AuctionsPage = () => {
                 ref={rateInputRef}
                 type="number"
                 value={rate}
-                onChange={(e) => setRate(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRate(v);
+                  if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
+                }}
                 onFocus={(e) => {
                   setActiveNumpadField('rate');
                   if (!mobileKeyboardEnabled) {
@@ -2165,7 +2561,11 @@ const AuctionsPage = () => {
                 ref={qtyInputRef}
                 type="number"
                 value={qty}
-                onChange={(e) => setQty(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setQty(v);
+                  if (editingBidId) setEditBidDraft((d) => (d ? { ...d, qty: v } : d));
+                }}
                 onFocus={(e) => {
                   setActiveNumpadField('qty');
                   if (!mobileKeyboardEnabled) {
@@ -2190,7 +2590,7 @@ const AuctionsPage = () => {
             <span className="text-[9px] font-semibold text-muted-foreground uppercase">Preset</span>
             <div className="flex items-center gap-1.5">
               <span className="text-[9px] text-muted-foreground">Show</span>
-              <Switch checked={showPresetMargin} onCheckedChange={setShowPresetMargin} aria-label="Show preset margin" className="scale-75 origin-right" />
+              <Switch checked={showPresetMargin} onCheckedChange={handleShowPresetMarginChange} aria-label="Show preset margin" className="scale-75 origin-right" />
             </div>
           </div>
           {showPresetMargin && (
@@ -2254,6 +2654,7 @@ const AuctionsPage = () => {
                 <button
                   type="button"
                   onClick={appendMarkParenFromNumpad}
+                  disabled={!!editingBidId}
                   className="h-8 rounded-lg bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/35 text-[11px] font-bold"
                   title="Add ( or ) to mark"
                   aria-label="Add opening or closing parenthesis to mark"
@@ -2263,7 +2664,7 @@ const AuctionsPage = () => {
                 <button
                   type="button"
                   onClick={handleMarkBackspace}
-                  disabled={!scribbleMark}
+                  disabled={!!editingBidId || !scribbleMark}
                   className="h-8 rounded-lg bg-muted/60 hover:bg-muted text-[10px] font-semibold text-foreground disabled:opacity-40"
                   aria-label="Delete last character of mark"
                 >
@@ -2303,22 +2704,44 @@ const AuctionsPage = () => {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-1">
-                <button
-                  type="button"
-                  onClick={handleSelfSale}
-                  disabled={remaining <= 0}
-                  className="h-8 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold disabled:opacity-50"
-                >
-                  Self Sale
-                </button>
-                <button
-                  type="button"
-                  onClick={handleUnifiedAdd}
-                  disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                  className="h-8 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold disabled:opacity-50"
-                >
-                  + Add Bid
-                </button>
+                  {editingBidId && editBidDraft ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => { if (editingEntry) void saveEditBid(editingEntry); }}
+                      disabled={!editingEntry || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                      className="h-8 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      Update Bid
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditBid}
+                      className="h-8 rounded-lg bg-muted/60 text-foreground border border-border/50 text-[10px] font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSelfSale}
+                      disabled={remaining <= 0}
+                      className="h-8 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold disabled:opacity-50"
+                    >
+                      Self Sale
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUnifiedAdd}
+                      disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                      className="h-8 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-bold disabled:opacity-50"
+                    >
+                      + Add Bid
+                    </button>
+                  </>
+                )}
               </div>
               <button
                 type="button"
@@ -2390,6 +2813,35 @@ const AuctionsPage = () => {
                 <Button onClick={confirmQtyIncrease}
                   className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white">
                   Increase & Add
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editBidQtyDialog && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm px-6"
+            onClick={() => setEditBidQtyDialog(null)}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-sm bg-card rounded-2xl p-5 shadow-2xl border border-border/50" onClick={e => e.stopPropagation()}>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500/20 to-violet-500/20 border border-blue-500/20 flex items-center justify-center mx-auto mb-3">
+                <Pencil className="w-7 h-7 text-primary" />
+              </div>
+              <h3 className="text-lg font-bold text-center text-foreground mb-1">Increase Lot Quantity?</h3>
+              <p className="text-sm text-center text-muted-foreground mb-4">
+                Lot has <strong>{editBidQtyDialog.lotTotal}</strong> bags.
+                Other bids use <strong>{editBidQtyDialog.currentTotal}</strong> bags.
+                This bid at <strong>{editBidQtyDialog.attemptedQty}</strong> bags would bring the total sold to{' '}
+                <strong>{editBidQtyDialog.currentTotal + editBidQtyDialog.attemptedQty}</strong> bags.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setEditBidQtyDialog(null)} variant="outline" className="flex-1 h-12 rounded-xl">Cancel</Button>
+                <Button onClick={() => { void confirmEditBidQtyIncrease(); }}
+                  className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white">
+                  Allow & Update
                 </Button>
               </div>
             </motion.div>

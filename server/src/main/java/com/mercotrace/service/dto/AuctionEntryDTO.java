@@ -68,6 +68,10 @@ public class AuctionEntryDTO implements Serializable {
     @JsonProperty("created_at")
     private Instant createdAt;
 
+    /** Epoch millis of last modification — for optimistic concurrency on bid PATCH. */
+    @JsonProperty("last_modified_ms")
+    private Long lastModifiedMs;
+
     public Long getId() {
         return id;
     }
@@ -210,6 +214,14 @@ public class AuctionEntryDTO implements Serializable {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Long getLastModifiedMs() {
+        return lastModifiedMs;
+    }
+
+    public void setLastModifiedMs(Long lastModifiedMs) {
+        this.lastModifiedMs = lastModifiedMs;
     }
 }
 

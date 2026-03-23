@@ -404,6 +404,46 @@ public class AuctionService {
             .findById(entry.getAuctionId())
             .orElseThrow(() -> new EntityNotFoundException("Auction not found for bid: " + bidId));
 
+        if (!Objects.equals(auction.getLotId(), lotId)) {
+            throw new EntityNotFoundException("Bid not found: " + bidId);
+        }
+
+        if (request.getExpectedLastModifiedMs() != null && entry.getLastModifiedDate() != null) {
+            if (entry.getLastModifiedDate().toEpochMilli() != request.getExpectedLastModifiedMs()) {
+                throw new StaleBidEditException("This bid was changed elsewhere. Refresh and try again.");
+            }
+        }
+
+        if (request.getRate() != null && request.getRate().compareTo(BigDecimal.ONE) < 0) {
+            throw new IllegalArgumentException("Rate must be at least 1");
+        }
+        if (request.getQuantity() != null && request.getQuantity() < 1) {
+            throw new IllegalArgumentException("Quantity must be at least 1");
+        }
+
+        List<AuctionEntry> existingEntries = auctionEntryRepository.findAllByAuctionId(auction.getId());
+        int currentSold = existingEntries.stream().mapToInt(e -> e.getQuantity() != null ? e.getQuantity() : 0).sum();
+        int entryQty = entry.getQuantity() != null ? entry.getQuantity() : 0;
+        int newQty = request.getQuantity() != null ? request.getQuantity() : entryQty;
+        int otherSold = currentSold - entryQty;
+        int newTotal = otherSold + newQty;
+        int lotTotal = lot.getBagCount() != null ? lot.getBagCount() : 0;
+
+        if (newTotal > lotTotal && !request.isAllowLotIncrease()) {
+            throw new AuctionConflictException("Updating this bid exceeds lot quantity", "quantity", otherSold, lotTotal, newQty, newTotal);
+        }
+        if (newTotal > lotTotal && request.isAllowLotIncrease()) {
+            lot.setBagCount(newTotal);
+            lotRepository.save(lot);
+        }
+
+        if (request.getRate() != null) {
+            entry.setBidRate(request.getRate());
+        }
+        if (request.getQuantity() != null) {
+            entry.setQuantity(newQty);
+        }
+
         if (request.getTokenAdvance() != null) {
             entry.setTokenAdvance(request.getTokenAdvance());
         }
@@ -417,9 +457,11 @@ public class AuctionService {
             entry.setPresetType(request.getPresetType());
         }
 
-        entry.setSellerRate(entry.getBidRate());
-        entry.setBuyerRate(entry.getBidRate().add(entry.getExtraRate() != null ? entry.getExtraRate() : BigDecimal.ZERO));
-        entry.setAmount(entry.getBuyerRate().multiply(BigDecimal.valueOf(entry.getQuantity())));
+        BigDecimal bidRate = entry.getBidRate();
+        BigDecimal extra = entry.getExtraRate() != null ? entry.getExtraRate() : BigDecimal.ZERO;
+        entry.setSellerRate(bidRate);
+        entry.setBuyerRate(bidRate.add(extra));
+        entry.setAmount(entry.getBuyerRate().multiply(BigDecimal.valueOf(entry.getQuantity() != null ? entry.getQuantity() : 0)));
         entry.setLastModifiedDate(Instant.now());
 
         auctionEntryRepository.save(entry);
@@ -699,6 +741,13 @@ public class AuctionService {
 
     private Long resolveTraderId() {
         return traderContextService.getCurrentTraderId();
+    }
+
+    public static class StaleBidEditException extends RuntimeException {
+
+        public StaleBidEditException(String message) {
+            super(message);
+        }
     }
 
     public static class AuctionConflictException extends RuntimeException {
