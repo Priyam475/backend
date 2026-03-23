@@ -100,36 +100,10 @@ const VARIANT_OPTIONS = [
 ];
 
 /**
- * Bag totals for a lot header.
- * - vehicleTotal: total bags for the whole vehicle (all sellers, all lots).
- * - sellerTotal: total bags for this seller (all lots of that seller).
- *
- * This means every lot row for a seller shows the **same** pair:
- *   - single seller: always X / X
- *   - multi seller: vehicle total constant, seller total constant per seller
+ * Bag totals for lot headers are constant per render:
+ * - vehicleTotal: total bags for the whole vehicle (all sellers, all lots)
+ * - sellerTotal: total bags for this seller (all lots of that seller)
  */
-function getLotTotals(sellers: SellerEntry[], sellerIdx: number, lotIdx: number): { vehicleTotal: number; sellerTotal: number } {
-  if (!Array.isArray(sellers) || sellers.length === 0) {
-    return { vehicleTotal: 0, sellerTotal: 0 };
-  }
-
-  const vehicleTotal = sellers.reduce(
-    (sum, s) => sum + s.lots.reduce((inner, lot) => inner + (lot.quantity || 0), 0),
-    0,
-  );
-
-  const seller = sellers[sellerIdx];
-  if (!seller) {
-    return { vehicleTotal, sellerTotal: 0 };
-  }
-
-  const sellerTotal = seller.lots.reduce(
-    (sum, lot) => sum + (lot.quantity || 0),
-    0,
-  );
-
-  return { vehicleTotal, sellerTotal };
-}
 
 const ArrivalsPage = () => {
   const navigate = useNavigate();
@@ -184,6 +158,9 @@ const ArrivalsPage = () => {
 
   // Step 2: Sellers & Lots
   const [sellers, setSellers] = useState<SellerEntry[]>([]);
+  const [sellerExpanded, setSellerExpanded] = useState<Record<string, boolean>>({});
+  const lotsScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const pendingLotsScrollToEndSellerIdRef = useRef<string | null>(null);
   const [sellerSearch, setSellerSearch] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
@@ -193,6 +170,10 @@ const ArrivalsPage = () => {
   // We keep one ref per target because only one layout branch renders at a time.
   const vehicleNumberInputRef = useRef<HTMLInputElement | null>(null);
   const loadedWeightInputRef = useRef<HTMLInputElement | null>(null);
+
+  const setLotsScrollRef = useCallback((sellerId: string) => (el: HTMLDivElement | null) => {
+    lotsScrollRefs.current[sellerId] = el;
+  }, []);
 
   const isStep1PanelOpen =
     step === 1 &&
@@ -543,6 +524,21 @@ const ArrivalsPage = () => {
     return Math.max(0, lw - ew);
   }, [loadedWeight, emptyWeight]);
 
+  // REQ-ARR-010: Efficient bag totals (avoid O(n^2) recalcs per lot row).
+  const vehicleTotalBags = useMemo(() => {
+    return sellers.reduce(
+      (sum, s) => sum + s.lots.reduce((inner, lot) => inner + (lot.quantity || 0), 0),
+      0
+    );
+  }, [sellers]);
+
+  const sellerTotalBagsById = useMemo(() => {
+    return sellers.reduce<Record<string, number>>((acc, s) => {
+      acc[s.seller_vehicle_id] = s.lots.reduce((sum, lot) => sum + (lot.quantity || 0), 0);
+      return acc;
+    }, {});
+  }, [sellers]);
+
   const finalBillableWeight = useMemo(() => {
     const dw = parseFloat(deductedWeight) || 0;
     return Math.max(0, netWeight - dw);
@@ -604,6 +600,7 @@ const ArrivalsPage = () => {
       lots: [],
     };
     setSellers(prev => [...prev, newSeller]);
+    setSellerExpanded(prev => ({ ...prev, [newSeller.seller_vehicle_id]: true }));
     setSellerSearch('');
     setSellerDropdown(false);
   };
@@ -624,6 +621,7 @@ const ArrivalsPage = () => {
       lots: [],
     };
     setSellers(prev => [...prev, newSeller]);
+    setSellerExpanded(prev => ({ ...prev, [newSeller.seller_vehicle_id]: true }));
     setSellerSearch('');
     setSellerDropdown(false);
   };
@@ -633,11 +631,26 @@ const ArrivalsPage = () => {
   };
 
   const removeSeller = (idx: number) => {
+    const sellerToRemove = sellers[idx];
     setSellers(prev => prev.filter((_, i) => i !== idx));
+    if (sellerToRemove?.seller_vehicle_id) {
+      setSellerExpanded(prev => {
+        const next = { ...prev };
+        delete next[sellerToRemove.seller_vehicle_id];
+        return next;
+      });
+    }
   };
 
   // REQ-ARR-005: Lot Identification
   const addLot = (sellerIdx: number) => {
+    const seller = sellers[sellerIdx];
+    if (!seller) return;
+    if (!canAddAnotherLot(seller)) return;
+
+    pendingLotsScrollToEndSellerIdRef.current = seller.seller_vehicle_id;
+    setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: true }));
+
     setSellers(prev => prev.map((s, i) => {
       if (i !== sellerIdx) return s;
       if (!canAddAnotherLot(s)) return s;
@@ -654,6 +667,16 @@ const ArrivalsPage = () => {
       };
     }));
   };
+
+  // Scroll the seller's lots panel to the newly added lot (internal scroll only).
+  useEffect(() => {
+    const sellerId = pendingLotsScrollToEndSellerIdRef.current;
+    if (!sellerId) return;
+    const el = lotsScrollRefs.current[sellerId];
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    pendingLotsScrollToEndSellerIdRef.current = null;
+  }, [sellers, sellerExpanded]);
 
   const updateLot = (sellerIdx: number, lotIdx: number, updates: Partial<LotEntry>) => {
     setSellers(prev => prev.map((s, i) => {
@@ -893,6 +916,7 @@ const ArrivalsPage = () => {
     setGatepassNumber('');
     setOrigin('');
     setSellers([]);
+    setSellerExpanded({});
     setSellerSearch('');
     setIsMultiSeller(true);
     setEditingVehicleId(null);
@@ -971,6 +995,12 @@ const ArrivalsPage = () => {
         })),
       }));
       setSellers(mappedSellers);
+      setSellerExpanded(
+        mappedSellers.reduce<Record<string, boolean>>((acc, s) => {
+          acc[s.seller_vehicle_id] = true; // default expanded in edit flow too
+          return acc;
+        }, {})
+      );
       setIsMultiSeller(mappedSellers.length > 1);
 
       // Capture baseline immediately after we populate all edit fields,
@@ -1695,7 +1725,10 @@ const ArrivalsPage = () => {
                       </div>
                     )}
 
-                    {sellers.map((seller, si) => (
+                    {sellers.map((seller, si) => {
+                      const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
+                      const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
+                      return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
                         <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
@@ -1707,6 +1740,7 @@ const ArrivalsPage = () => {
                               <div className="min-w-0">
                                 <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
                                 <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                                <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
                               </div>
                             ) : (
                               <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
@@ -1718,10 +1752,22 @@ const ArrivalsPage = () => {
                                   <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-9 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                                   {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                 </div>
+                                <p className="text-[10px] text-muted-foreground/80">{seller.lots.length} lot(s)</p>
                               </div>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "w-7 h-7 rounded-lg flex items-center justify-center",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -1741,71 +1787,88 @@ const ArrivalsPage = () => {
                             </button>
                           </div>
                         </div>
-                        <div className="p-3 space-y-2">
-                          {seller.lots.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
+                        <AnimatePresence initial={false}>
+                          {expanded && (
+                            <motion.div
+                              key={`${seller.seller_vehicle_id}-lots`}
+                              initial={{ opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              className="border-t border-border/30"
+                            >
+                              {/* Fixed-height lots panel so only lots scroll internally */}
+                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="h-[280px] overflow-y-auto p-3 space-y-2 overscroll-contain">
+                                {seller.lots.length === 0 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
+                                )}
+                                {seller.lots.length > 0 && !canAddAnotherLot(seller) && (
+                                  <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-1">
+                                    Complete current lot name and bags before adding another lot.
+                                  </p>
+                                )}
+                                {seller.lots.map((lot, li) => {
+                                  const vehicleTotal = vehicleTotalBags;
+                                  return (
+                                    <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">
+                                          Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
+                                        </p>
+                                        <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-2">
+                                        <div>
+                                          <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                            Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
+                                          </label>
+                                          <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                            onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                            className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
+                                        </div>
+                                        <div>
+                                          <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                            Bags * (1–100,000) {isLotQuantityInvalid(lot) && '⚠'}
+                                          </label>
+                                          <Input type="number" placeholder="0" value={lot.quantity || ''}
+                                            onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
+                                            className={cn("h-9 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
+                                        </div>
+                                        <div>
+                                          <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
+                                          <select value={lot.commodity_name}
+                                            onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
+                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                            {commodities.map((c: any) => (
+                                              <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
+                                            ))}
+                                            {commodities.length === 0 && <option value="">No commodities</option>}
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
+                                        <Input placeholder="e.g., AB" value={lot.broker_tag}
+                                          onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
+                                          className="h-9 rounded-lg text-sm" maxLength={4} />
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
+                                        <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                          {VARIANT_OPTIONS.map(opt => (
+                                            <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
                           )}
-                          {seller.lots.length > 0 && !canAddAnotherLot(seller) && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-1">
-                              Complete current lot name and bags before adding another lot.
-                            </p>
-                          )}
-                          {seller.lots.map((lot, li) => {
-                            const { vehicleTotal, sellerTotal } = getLotTotals(sellers, si, li);
-                            return (
-                            <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
-                                <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
-                              </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div>
-                                  <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
-                                  </label>
-                                  <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                    className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
-                                </div>
-                                <div>
-                                  <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Bags * (1–100,000) {isLotQuantityInvalid(lot) && '⚠'}
-                                  </label>
-                                  <Input type="number" placeholder="0" value={lot.quantity || ''}
-                                    onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className={cn("h-9 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
-                                </div>
-                                <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
-                                  <select value={lot.commodity_name}
-                                    onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                    className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                    {commodities.map((c: any) => (
-                                      <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
-                                    ))}
-                                    {commodities.length === 0 && <option value="">No commodities</option>}
-                                  </select>
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
-                                <Input placeholder="e.g., AB" value={lot.broker_tag}
-                                  onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
-                                  className="h-9 rounded-lg text-sm" maxLength={4} />
-                              </div>
-                              <div>
-                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
-                                <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                  {VARIANT_OPTIONS.map(opt => (
-                                    <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          ); })}
-                        </div>
+                        </AnimatePresence>
                       </motion.div>
-                    ))}
+                    ); })}
 
                     {/* Submit */}
                     <Button onClick={handleSubmitArrival}
@@ -2323,7 +2386,10 @@ const ArrivalsPage = () => {
                       </div>
                     )}
 
-                    {sellers.map((seller, si) => (
+                    {sellers.map((seller, si) => {
+                      const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
+                      const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
+                      return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
                         <div className="p-4 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
@@ -2335,6 +2401,7 @@ const ArrivalsPage = () => {
                               <div className="min-w-0">
                                 <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
                                 <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                                <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
                               </div>
                             ) : (
                               <div className="grid grid-cols-1 gap-1.5 min-w-0 flex-1">
@@ -2346,10 +2413,22 @@ const ArrivalsPage = () => {
                                   <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                                   {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                 </div>
+                                <p className="text-[10px] text-muted-foreground/80">{seller.lots.length} lot(s)</p>
                               </div>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "w-7 h-7 rounded-lg flex items-center justify-center",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                            </button>
                             <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
                               <Plus className="w-3.5 h-3.5 text-white" />
                             </button>
@@ -2358,66 +2437,80 @@ const ArrivalsPage = () => {
                             </button>
                           </div>
                         </div>
-                        <div className="p-3 space-y-2">
-                          {seller.lots.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
+                        <AnimatePresence initial={false}>
+                          {expanded && (
+                            <motion.div
+                              key={`${seller.seller_vehicle_id}-lots-mobile`}
+                              initial={{ opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              className="border-t border-border/30"
+                            >
+                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="h-[240px] overflow-y-auto p-3 space-y-2 overscroll-contain">
+                                {seller.lots.length === 0 && (
+                                  <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
+                                )}
+                                {seller.lots.map((lot, li) => {
+                                  const vehicleTotal = vehicleTotalBags;
+                                  return (
+                                    <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
+                                        <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+                                      </div>
+                                      <div className="grid grid-cols-3 gap-2">
+                                        <div>
+                                          <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                            Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
+                                          </label>
+                                          <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                            onChange={e => updateLot(si, li, { lot_name: e.target.value })}
+                                            className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
+                                        </div>
+                                        <div>
+                                          <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                            Bags * (1–100k) {isLotQuantityInvalid(lot) && '⚠'}
+                                          </label>
+                                          <Input type="number" placeholder="0" value={lot.quantity || ''}
+                                            onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
+                                            className={cn("h-10 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
+                                        </div>
+                                        <div>
+                                          <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
+                                          <select value={lot.commodity_name}
+                                            onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
+                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                            {commodities.map((c: any) => (
+                                              <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
+                                            ))}
+                                            {commodities.length === 0 && <option value="">No commodities</option>}
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
+                                        <Input placeholder="e.g., AB" value={lot.broker_tag}
+                                          onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
+                                          className="h-10 rounded-lg text-sm" maxLength={4} />
+                                      </div>
+                                      <div>
+                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
+                                        <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                          {VARIANT_OPTIONS.map(opt => (
+                                            <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
                           )}
-                          {seller.lots.map((lot, li) => {
-                            const { vehicleTotal, sellerTotal } = getLotTotals(sellers, si, li);
-                            return (
-                            <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
-                                <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
-                              </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div>
-                                  <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
-                                  </label>
-                                  <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
-                                    onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                    className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
-                                </div>
-                                <div>
-                                  <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                    Bags * (1–100k) {isLotQuantityInvalid(lot) && '⚠'}
-                                  </label>
-                                  <Input type="number" placeholder="0" value={lot.quantity || ''}
-                                    onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                    className={cn("h-10 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
-                                </div>
-                                <div>
-                                  <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
-                                  <select value={lot.commodity_name}
-                                    onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                    className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                    {commodities.map((c: any) => (
-                                      <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
-                                    ))}
-                                    {commodities.length === 0 && <option value="">No commodities</option>}
-                                  </select>
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
-                                <Input placeholder="e.g., AB" value={lot.broker_tag}
-                                  onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
-                                  className="h-10 rounded-lg text-sm" maxLength={4} />
-                              </div>
-                              <div>
-                                <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
-                                <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                  {VARIANT_OPTIONS.map(opt => (
-                                    <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                          ); })}
-                        </div>
+                        </AnimatePresence>
                       </motion.div>
-                    ))}
+                    );})}
 
                     </> )}
                     {/* ── Sticky Submit Button ── */}
