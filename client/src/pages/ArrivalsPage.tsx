@@ -1834,14 +1834,14 @@ const ArrivalsPage = () => {
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end justify-between py-1">
-                            <div className="flex items-center gap-2">
+                          <div className="flex flex-col items-end justify-center gap-2 pl-2">
+                            <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
                                 aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
                                 className={cn(
-                                  "w-7 h-7 rounded-lg flex items-center justify-center",
+                                  "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                                   expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
                                 )}
                               >
@@ -1855,14 +1855,14 @@ const ArrivalsPage = () => {
                                 }}
                                 disabled={!canAddAnotherLot(seller)}
                                 className={cn(
-                                  "w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm",
+                                  "w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-opacity",
                                   !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
                                 )}
                               >
                                 <Plus className="w-3.5 h-3.5 text-white" />
                               </button>
                             </div>
-                            <button onClick={() => removeSeller(si)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20">
+                            <button onClick={() => removeSeller(si)} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -1892,11 +1892,16 @@ const ArrivalsPage = () => {
                                   const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                                      <div className="flex items-center justify-between">
+                                      <div className="flex items-center justify-between gap-2">
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase">
                                           Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
                                         </p>
-                                        <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        <button
+                                          onClick={() => removeLot(si, li)}
+                                          className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
                                       <div className="grid grid-cols-4 gap-2 items-end">
                                         <div>
@@ -2550,24 +2555,24 @@ const ArrivalsPage = () => {
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end justify-between py-1">
-                            <div className="flex items-center gap-2">
+                          <div className="flex flex-col items-end justify-center gap-2 pl-2">
+                            <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
                                 aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
                                 className={cn(
-                                  "w-7 h-7 rounded-lg flex items-center justify-center",
+                                  "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                                   expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
                                 )}
                               >
                                 {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                               </button>
-                              <button onClick={() => addLot(si)} className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm">
+                              <button onClick={() => addLot(si)} className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-colors">
                                 <Plus className="w-3.5 h-3.5 text-white" />
                               </button>
                             </div>
-                            <button onClick={() => removeSeller(si)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20">
+                            <button onClick={() => removeSeller(si)} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -2591,9 +2596,14 @@ const ArrivalsPage = () => {
                                   const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                                      <div className="flex items-center justify-between">
+                                      <div className="flex items-center justify-between gap-2">
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
-                                        <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        <button
+                                          onClick={() => removeLot(si, li)}
+                                          className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
                                       </div>
                                       <div className="grid grid-cols-4 gap-2 items-end">
                                         <div>
