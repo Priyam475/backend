@@ -410,11 +410,40 @@ const ArrivalsPage = () => {
     const q = l.quantity ?? 0;
     return q <= 0 || q > 100000 || !Number.isInteger(q);
   };
+
+  const lotNameCountsBySellerId = useMemo(() => {
+    return sellers.reduce<Record<string, Record<string, number>>>((acc, seller) => {
+      const inner: Record<string, number> = {};
+      for (const lot of seller.lots) {
+        const key = (lot.lot_name ?? '').trim().toLowerCase();
+        if (!key) continue;
+        inner[key] = (inner[key] ?? 0) + 1;
+      }
+      acc[seller.seller_vehicle_id] = inner;
+      return acc;
+    }, {});
+  }, [sellers]);
+
+  const getLotNameDuplicateError = (sellerIdx: number, lotIdx: number): string | null => {
+    const seller = sellers[sellerIdx];
+    const lot = seller?.lots[lotIdx];
+    const ln = (lot?.lot_name ?? '').trim();
+    if (!ln) return null;
+    const counts = lotNameCountsBySellerId[seller?.seller_vehicle_id ?? ''] ?? {};
+    return (counts[ln.toLowerCase()] ?? 0) > 1 ? 'Lot Name already exists for this seller' : null;
+  };
+
+  const isLotNameDuplicateInvalid = (sellerIdx: number, lotIdx: number) =>
+    getLotNameDuplicateError(sellerIdx, lotIdx) != null;
+
   const canAddAnotherLot = (seller: SellerEntry) => {
     if (seller.lots.length === 0) return true;
+    const counts = lotNameCountsBySellerId[seller.seller_vehicle_id] ?? {};
     return seller.lots.every((lot) => {
       const lotName = (lot.lot_name ?? '').trim();
       if (!lotName) return false;
+      const key = lotName.toLowerCase();
+      if ((counts[key] ?? 0) > 1) return false;
       return !isLotNameInvalid(lot) && !isLotQuantityInvalid(lot);
     });
   };
@@ -425,12 +454,13 @@ const ArrivalsPage = () => {
     for (let i = 0; i < sellers.length; i++) {
       const s = sellers[i];
       if (isSellerNameInvalid(s) || isSellerMarkInvalid(s, i)) return true;
-      for (const l of s.lots) {
-        if (isLotNameInvalid(l) || isLotQuantityInvalid(l)) return true;
+      for (let li = 0; li < s.lots.length; li++) {
+        const l = s.lots[li];
+        if (isLotNameInvalid(l) || isLotQuantityInvalid(l) || isLotNameDuplicateInvalid(i, li)) return true;
       }
     }
     return false;
-  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers, contacts]);
+  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers, contacts, lotNameCountsBySellerId, isLotNameDuplicateInvalid, isSellerMarkInvalid]);
 
   // Summary stats for four cards (mobile-first, same as raghav-style UI)
   const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
@@ -815,6 +845,7 @@ const ArrivalsPage = () => {
         toast.error(`${seller.seller_name || 'Seller'}: At least one lot is required`);
         return;
       }
+      const seenLotNames = new Set<string>();
       for (const lot of seller.lots) {
         const ln = lot.lot_name?.trim() ?? '';
         if (!ln) {
@@ -829,6 +860,12 @@ const ArrivalsPage = () => {
           toast.error(`Lot name may contain letters/numbers plus spaces, '-' and '_': ${lot.lot_name}`);
           return;
         }
+        const lnLower = ln.toLowerCase();
+        if (seenLotNames.has(lnLower)) {
+          toast.error(`${seller.seller_name} → ${ln}: Lot Name already exists for this seller`);
+          return;
+        }
+        seenLotNames.add(lnLower);
         if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
           toast.error(`${seller.seller_name} → ${ln}: Quantity must be a positive integer between 1 and 100,000`);
           return;
@@ -1856,6 +1893,7 @@ const ArrivalsPage = () => {
                                 )}
                                 {seller.lots.map((lot, li) => {
                                   const vehicleTotal = vehicleTotalBags;
+                                  const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                                       <div className="flex items-center justify-between">
@@ -1873,11 +1911,12 @@ const ArrivalsPage = () => {
                                             onChange={e => updateLot(si, li, { lot_name: e.target.value })}
                                             className={cn(
                                               "h-9 w-full rounded-lg text-sm",
-                                              isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                              (isLotNameInvalid(lot) || lotDuplicateError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                             )}
                                             inputMode="text"
                                             maxLength={50}
                                           />
+                                          {lotDuplicateError && <p className="text-[9px] text-red-500 mt-0.5">{lotDuplicateError}</p>}
                                         </div>
                                         <div>
                                           <Input
@@ -2560,6 +2599,7 @@ const ArrivalsPage = () => {
                                 )}
                                 {seller.lots.map((lot, li) => {
                                   const vehicleTotal = vehicleTotalBags;
+                                  const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                                       <div className="flex items-center justify-between">
@@ -2575,11 +2615,12 @@ const ArrivalsPage = () => {
                                             onChange={e => updateLot(si, li, { lot_name: e.target.value })}
                                             className={cn(
                                               "h-10 w-full rounded-lg text-sm",
-                                              isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                              (isLotNameInvalid(lot) || lotDuplicateError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                             )}
                                             inputMode="text"
                                             maxLength={50}
                                           />
+                                          {lotDuplicateError && <p className="text-[9px] text-red-500 mt-0.5">{lotDuplicateError}</p>}
                                         </div>
                                         <div>
                                           <Input
