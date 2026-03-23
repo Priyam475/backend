@@ -1700,8 +1700,8 @@ const ArrivalsPage = () => {
                         <Search className="w-3.5 h-3.5" /> Add Seller
                         {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
-                      <div className="flex gap-2">
-                        <div ref={sellerSearchWrapRef} className="relative flex-1">
+                        <div className="flex gap-2">
+                        <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                           <Input
                             placeholder="Search by name, phone, or mark…"
@@ -1817,48 +1817,61 @@ const ArrivalsPage = () => {
                                         </p>
                                         <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                                       </div>
-                                      <div className="grid grid-cols-3 gap-2">
+                                      <div className="grid grid-cols-4 gap-2 items-end">
                                         <div>
-                                          <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                            Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
-                                          </label>
-                                          <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                          <Input
+                                            aria-label="Lot Name"
+                                            placeholder="Lot Name"
+                                            value={lot.lot_name}
                                             onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                            className={cn("h-9 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
+                                            className={cn(
+                                              "h-9 w-full rounded-lg text-sm",
+                                              isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                            )}
+                                            inputMode="text"
+                                            maxLength={50}
+                                          />
                                         </div>
                                         <div>
-                                          <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                            Bags * (1–100,000) {isLotQuantityInvalid(lot) && '⚠'}
-                                          </label>
-                                          <Input type="number" placeholder="0" value={lot.quantity || ''}
+                                          <Input
+                                            aria-label="Bags Quantity"
+                                            type="number"
+                                            placeholder="Bags"
+                                            value={lot.quantity || ''}
                                             onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                            className={cn("h-9 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
+                                            className={cn(
+                                              "h-9 w-full rounded-lg text-sm",
+                                              isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                            )}
+                                            min={1}
+                                            max={100000}
+                                          />
                                         </div>
                                         <div>
-                                          <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
-                                          <select value={lot.commodity_name}
+                                          <select
+                                            aria-label="Commodity"
+                                            value={lot.commodity_name}
                                             onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                          >
                                             {commodities.map((c: any) => (
                                               <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
                                             ))}
                                             {commodities.length === 0 && <option value="">No commodities</option>}
                                           </select>
                                         </div>
-                                      </div>
-                                      <div>
-                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
-                                        <Input placeholder="e.g., AB" value={lot.broker_tag}
-                                          onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
-                                          className="h-9 rounded-lg text-sm" maxLength={4} />
-                                      </div>
-                                      <div>
-                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
-                                        <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                          {VARIANT_OPTIONS.map(opt => (
-                                            <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                          ))}
-                                        </select>
+                                        <div>
+                                          <select
+                                            aria-label="Variant"
+                                            value={lot.variant ?? ''}
+                                            onChange={e => updateLot(si, li, { variant: e.target.value })}
+                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                          >
+                                            {VARIANT_OPTIONS.map(opt => (
+                                              <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                          </select>
+                                        </div>
                                       </div>
                                     </div>
                                   );
@@ -2365,7 +2378,7 @@ const ArrivalsPage = () => {
                         {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
                       </label>
                       <div className="flex gap-2">
-                        <div ref={sellerSearchWrapRef} className="relative flex-1">
+                        <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                           <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
                             onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
@@ -2459,48 +2472,61 @@ const ArrivalsPage = () => {
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
                                         <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                                       </div>
-                                      <div className="grid grid-cols-3 gap-2">
+                                      <div className="grid grid-cols-4 gap-2 items-end">
                                         <div>
-                                          <label className={cn("text-[9px] mb-0.5 block", isLotNameInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                            Lot Name * (2–50, letters/numbers, spaces, -/_) {isLotNameInvalid(lot) && '⚠'}
-                                          </label>
-                                          <Input placeholder="e.g., LOT-1 or A101" value={lot.lot_name}
+                                          <Input
+                                            aria-label="Lot Name"
+                                            placeholder="Lot Name"
+                                            value={lot.lot_name}
                                             onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                            className={cn("h-10 rounded-lg text-sm", isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} inputMode="text" maxLength={50} />
+                                            className={cn(
+                                              "h-10 w-full rounded-lg text-sm",
+                                              isLotNameInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                            )}
+                                            inputMode="text"
+                                            maxLength={50}
+                                          />
                                         </div>
                                         <div>
-                                          <label className={cn("text-[9px] mb-0.5 block", isLotQuantityInvalid(lot) ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                            Bags * (1–100k) {isLotQuantityInvalid(lot) && '⚠'}
-                                          </label>
-                                          <Input type="number" placeholder="0" value={lot.quantity || ''}
+                                          <Input
+                                            aria-label="Bags Quantity"
+                                            type="number"
+                                            placeholder="Bags"
+                                            value={lot.quantity || ''}
                                             onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                            className={cn("h-10 rounded-lg text-sm", isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={1} max={100000} />
+                                            className={cn(
+                                              "h-10 w-full rounded-lg text-sm",
+                                              isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                            )}
+                                            min={1}
+                                            max={100000}
+                                          />
                                         </div>
                                         <div>
-                                          <label className="text-[9px] text-muted-foreground mb-0.5 block">Commodity</label>
-                                          <select value={lot.commodity_name}
+                                          <select
+                                            aria-label="Commodity"
+                                            value={lot.commodity_name}
                                             onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
+                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                          >
                                             {commodities.map((c: any) => (
                                               <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
                                             ))}
                                             {commodities.length === 0 && <option value="">No commodities</option>}
                                           </select>
                                         </div>
-                                      </div>
-                                      <div>
-                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Broker Tag (Optional)</label>
-                                        <Input placeholder="e.g., AB" value={lot.broker_tag}
-                                          onChange={e => updateLot(si, li, { broker_tag: e.target.value.toUpperCase() })}
-                                          className="h-10 rounded-lg text-sm" maxLength={4} />
-                                      </div>
-                                      <div>
-                                        <label className="text-[9px] text-muted-foreground mb-0.5 block">Variant (optional)</label>
-                                        <select value={lot.variant ?? ''} onChange={e => updateLot(si, li, { variant: e.target.value })} className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2">
-                                          {VARIANT_OPTIONS.map(opt => (
-                                            <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                          ))}
-                                        </select>
+                                        <div>
+                                          <select
+                                            aria-label="Variant"
+                                            value={lot.variant ?? ''}
+                                            onChange={e => updateLot(si, li, { variant: e.target.value })}
+                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                          >
+                                            {VARIANT_OPTIONS.map(opt => (
+                                              <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                          </select>
+                                        </div>
                                       </div>
                                     </div>
                                   );
