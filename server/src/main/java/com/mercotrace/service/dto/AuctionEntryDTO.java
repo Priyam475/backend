@@ -34,6 +34,7 @@ public class AuctionEntryDTO implements Serializable {
     @JsonProperty("preset_type")
     private AuctionPresetType presetType;
 
+    /** Base auction bid (same as bid_rate); not merged with preset — use bid_rate + preset_margin for effective seller rate. */
     @JsonProperty("seller_rate")
     private BigDecimal sellerRate;
 

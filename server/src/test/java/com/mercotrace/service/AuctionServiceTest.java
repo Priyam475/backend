@@ -325,8 +325,8 @@ class AuctionServiceTest {
         assertThat(saved.getPresetMargin()).isEqualByComparingTo("10");
         assertThat(saved.getPresetType()).isEqualTo(AuctionPresetType.PROFIT);
 
-        // sellerRate = bidRate - preset for PROFIT
-        assertThat(saved.getSellerRate()).isEqualByComparingTo("110");
+        // seller_rate column stores base bid only; preset is in preset_margin
+        assertThat(saved.getSellerRate()).isEqualByComparingTo("120");
         // buyerRate = bidRate + extra
         assertThat(saved.getBuyerRate()).isEqualByComparingTo("122");
         // amount = buyerRate * quantity
@@ -463,8 +463,8 @@ class AuctionServiceTest {
         assertThat(entry.getPresetMargin()).isEqualByComparingTo("5");
         assertThat(entry.getPresetType()).isEqualTo(AuctionPresetType.LOSS);
 
-        // sellerRate = bidRate + preset for LOSS
-        assertThat(entry.getSellerRate()).isEqualByComparingTo("105");
+        // seller_rate stores base bid; preset kept in preset_margin
+        assertThat(entry.getSellerRate()).isEqualByComparingTo("100");
         // buyerRate = bidRate + extra
         assertThat(entry.getBuyerRate()).isEqualByComparingTo("102");
         assertThat(entry.getAmount()).isEqualByComparingTo("510");

@@ -366,8 +366,9 @@ public class AuctionService {
             entry.setPresetMargin(preset);
             entry.setPresetType(type);
 
-            BigDecimal sellerRate = calcSellerRate(rate, preset, type);
-            entry.setSellerRate(sellerRate);
+            // seller_rate stores the base auction bid only; preset_margin is stored separately
+            // (Billing, PrintHub, Settlement compute effective seller rate = bid_rate + preset_margin when needed).
+            entry.setSellerRate(rate);
             entry.setBuyerRate(rate.add(extra));
 
             entry.setQuantity(request.getQuantity());
@@ -416,8 +417,7 @@ public class AuctionService {
             entry.setPresetType(request.getPresetType());
         }
 
-        BigDecimal sellerRate = calcSellerRate(entry.getBidRate(), entry.getPresetMargin(), entry.getPresetType());
-        entry.setSellerRate(sellerRate);
+        entry.setSellerRate(entry.getBidRate());
         entry.setBuyerRate(entry.getBidRate().add(entry.getExtraRate() != null ? entry.getExtraRate() : BigDecimal.ZERO));
         entry.setAmount(entry.getBuyerRate().multiply(BigDecimal.valueOf(entry.getQuantity())));
         entry.setLastModifiedDate(Instant.now());
@@ -699,16 +699,6 @@ public class AuctionService {
 
     private Long resolveTraderId() {
         return traderContextService.getCurrentTraderId();
-    }
-
-    private BigDecimal calcSellerRate(BigDecimal bidRate, BigDecimal preset, AuctionPresetType type) {
-        if (bidRate == null || preset == null) {
-            return bidRate != null ? bidRate : BigDecimal.ZERO;
-        }
-        if (preset.compareTo(BigDecimal.ZERO) == 0) {
-            return bidRate;
-        }
-        return type == AuctionPresetType.PROFIT ? bidRate.subtract(preset) : bidRate.add(preset);
     }
 
     public static class AuctionConflictException extends RuntimeException {
