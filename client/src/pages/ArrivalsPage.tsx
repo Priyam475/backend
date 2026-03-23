@@ -1736,25 +1736,70 @@ const ArrivalsPage = () => {
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            {seller.contact_id !== '' ? (
-                              <div className="min-w-0">
-                                <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
-                                <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
-                                <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
-                                <div>
-                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
-                                  {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              {seller.contact_id !== '' ? (
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-[12px] text-foreground truncate">
+                                    {seller.seller_name}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    {seller.seller_mark ? (
+                                      <span className="text-[10px] text-muted-foreground truncate whitespace-nowrap">
+                                        ({seller.seller_mark})
+                                      </span>
+                                    ) : null}
+                                    {/* Reserved space for seller serial/identifier (next bug) */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
+                                    {/* Reserved right-side slot for future serial/id value */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">—</span>
+                                  </div>
                                 </div>
-                                <div>
-                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
-                                  {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                              ) : (
+                                <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
+                                  <div>
+                                    <Input
+                                      placeholder="Seller name * (2–100)"
+                                      value={seller.seller_name}
+                                      onChange={e => updateSeller(si, { seller_name: e.target.value })}
+                                      className={cn(
+                                        "h-9 rounded-lg text-xs",
+                                        isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={100}
+                                    />
+                                    {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                                  </div>
+                                  <div>
+                                    <Input
+                                      placeholder="Mark / alias (optional, 2–50)"
+                                      value={seller.seller_mark}
+                                      onChange={e => updateSeller(si, { seller_mark: e.target.value })}
+                                      className={cn(
+                                        "h-9 rounded-lg text-xs",
+                                        isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={50}
+                                    />
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                  </div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
+                                    {/* Reserved space for future seller serial/identifier (next bug) */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                  </div>
                                 </div>
-                                <p className="text-[10px] text-muted-foreground/80">{seller.lots.length} lot(s)</p>
+                              )}
+                              {/* Prominent total bags beside seller details */}
+                              <div className="shrink-0 self-center">
+                                <div className="px-3 py-1.5 rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                                  <span className="text-xl leading-none">{sellerTotal}</span>
+                                </div>
                               </div>
-                            )}
+                            </div>
                           </div>
                           <div className="flex flex-col items-end justify-between py-1">
                             <div className="flex items-center gap-2">
@@ -2412,25 +2457,70 @@ const ArrivalsPage = () => {
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            {seller.contact_id !== '' ? (
-                              <div className="min-w-0">
-                                <p className="font-semibold text-sm text-foreground truncate">{seller.seller_name}</p>
-                                <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
-                                <p className="text-[10px] text-muted-foreground/80 mt-0.5">{seller.lots.length} lot(s)</p>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
-                                <div>
-                                  <Input placeholder="Seller name * (2–100)" value={seller.seller_name} onChange={e => updateSeller(si, { seller_name: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={100} />
-                                  {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              {seller.contact_id !== '' ? (
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-[12px] text-foreground truncate">
+                                    {seller.seller_name}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    {seller.seller_mark ? (
+                                      <span className="text-[10px] text-muted-foreground truncate whitespace-nowrap">
+                                        ({seller.seller_mark})
+                                      </span>
+                                    ) : null}
+                                    {/* Reserved space for seller serial/identifier (next bug) */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
+                                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
+                                    {/* Reserved right-side slot for future serial/id value */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">—</span>
+                                  </div>
                                 </div>
-                                <div>
-                                  <Input placeholder="Mark / alias (optional, 2–50)" value={seller.seller_mark} onChange={e => updateSeller(si, { seller_mark: e.target.value })} className={cn("h-10 rounded-lg text-sm", isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
-                                  {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                              ) : (
+                                <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
+                                  <div>
+                                    <Input
+                                      placeholder="Seller name * (2–100)"
+                                      value={seller.seller_name}
+                                      onChange={e => updateSeller(si, { seller_name: e.target.value })}
+                                      className={cn(
+                                        "h-9 rounded-lg text-xs",
+                                        isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={100}
+                                    />
+                                    {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
+                                  </div>
+                                  <div>
+                                    <Input
+                                      placeholder="Mark / alias (optional, 2–50)"
+                                      value={seller.seller_mark}
+                                      onChange={e => updateSeller(si, { seller_mark: e.target.value })}
+                                      className={cn(
+                                        "h-9 rounded-lg text-xs",
+                                        isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={50}
+                                    />
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                  </div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
+                                    {/* Reserved space for future seller serial/identifier (next bug) */}
+                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                  </div>
                                 </div>
-                                <p className="text-[10px] text-muted-foreground/80">{seller.lots.length} lot(s)</p>
+                              )}
+                              {/* Prominent total bags beside seller details */}
+                              <div className="shrink-0 self-center">
+                                <div className="px-3 py-1.5 rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                                  <span className="text-xl leading-none">{sellerTotal}</span>
+                                </div>
                               </div>
-                            )}
+                            </div>
                           </div>
                           <div className="flex flex-col items-end justify-between py-1">
                             <div className="flex items-center gap-2">
