@@ -201,6 +201,10 @@ function selfSaleUnitToLotInfo(dto: AuctionSelfSaleUnitDTO): LotInfo {
   };
 }
 
+function getLotRenderKey(lot: LotInfo): string {
+  return lot.selfSaleUnitId ? `self-sale-${lot.selfSaleUnitId}` : `lot-${lot.lot_id}`;
+}
+
 /** Display signed preset margin in grid (+10, −20) or em dash when zero. */
 function formatPresetMarginCell(margin: number): string {
   const m = Number(margin);
@@ -1873,7 +1877,7 @@ const AuctionsPage = () => {
                 </div>
                 <div className="divide-y divide-border/20">
                   {lots.map(lot => (
-                    <LotRow key={lot.lot_id} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+                    <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
                   ))}
                 </div>
               </div>
@@ -1901,7 +1905,7 @@ const AuctionsPage = () => {
                   </div>
                   <div className="divide-y divide-border/20">
                     {lots.map(lot => (
-                      <LotRow key={lot.lot_id} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+                      <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
                     ))}
                   </div>
                 </div>
@@ -1909,7 +1913,7 @@ const AuctionsPage = () => {
             })()
           ) : (
             filteredLots.map(lot => (
-              <LotRow key={lot.lot_id} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+              <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
             ))
           )}
         </div>
@@ -2133,7 +2137,7 @@ const AuctionsPage = () => {
                     ? selectedLot?.selfSaleUnitId === lot.selfSaleUnitId
                     : selectedLot?.lot_id === lot.lot_id;
                   return (
-                    <button key={lot.lot_id} onClick={() => selectLot(lot)}
+                    <button key={getLotRenderKey(lot)} onClick={() => selectLot(lot)}
                       className={cn("w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs transition-all",
                         isActive ? 'bg-primary/15 ring-1 ring-primary/30' : 'hover:bg-muted/50')}>
                       <span className={cn("w-2 h-2 rounded-full flex-shrink-0", cfg.dot)} />
@@ -2549,7 +2553,7 @@ const AuctionsPage = () => {
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Mark / Buyer</th>
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Rate</th>
                       {showPresetMargin && (
-                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Extra</th>
+                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>preset_type</th>
                       )}
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Qty</th>
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Action</th>
@@ -2591,7 +2595,12 @@ const AuctionsPage = () => {
                             </div>
                           </td>
                           <td className={cn("font-semibold text-foreground align-top", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
-                            <div>₹{showPresetMargin ? entry.sellerRate : entry.rate}</div>
+                            <div>₹{entry.rate}</div>
+                              {showPresetMargin && (
+                                <div className="text-[10px] font-medium text-muted-foreground">
+                                  Total ₹{entry.sellerRate}
+                                </div>
+                              )}
                           </td>
                           {showPresetMargin && (
                             <td

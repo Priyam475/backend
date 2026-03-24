@@ -132,16 +132,7 @@ public class AuctionService {
         Map<Long, Commodity> commodityMap = commodityRepository.findAllById(commodityIds).stream()
             .collect(Collectors.toMap(Commodity::getId, c -> c));
 
-        List<Auction> auctions = auctionRepository.findAllByLotIdIn(lotIds);
-        Set<Long> selfSaleReauctionAuctionIds = auctionSelfSaleUnitRepository
-            .findByLotIdIn(lotIds)
-            .stream()
-            .map(AuctionSelfSaleUnit::getLastReauctionAuctionId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-        if (!selfSaleReauctionAuctionIds.isEmpty()) {
-            auctions = auctions.stream().filter(a -> !selfSaleReauctionAuctionIds.contains(a.getId())).toList();
-        }
+        List<Auction> auctions = auctionRepository.findAllByLotIdInAndSelfSaleUnitIdIsNull(lotIds);
         Set<Long> auctionIds = auctions.stream().map(Auction::getId).collect(Collectors.toSet());
         List<AuctionEntry> entries = auctionIds.isEmpty() ? List.of() : auctionEntryRepository.findAllByAuctionIdIn(auctionIds);
 
@@ -296,6 +287,10 @@ public class AuctionService {
         Auction auction = findLatestNormalAuctionForLot(lotId).orElseGet(() -> createAuctionSession(lotId, traderId));
 
         List<AuctionEntry> entries = auctionEntryRepository.findAllByAuctionId(auction.getId());
+
+        if (auction.getCompletedAt() != null && !auctionSelfSaleUnitRepository.findBySourceAuctionId(auction.getId()).isEmpty()) {
+            return buildEffectiveLotSessionDTO(auction, lot, entries);
+        }
 
         return buildSessionDTO(auction, lot, entries);
     }
@@ -695,7 +690,7 @@ public class AuctionService {
             return Page.empty(pageable);
         }
         java.util.List<Long> lotIds = traderLots.getContent().stream().map(Lot::getId).toList();
-        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(lotIds, pageable);
+        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdInAndSelfSaleUnitIdIsNull(lotIds, pageable);
         return buildResultsPage(page, pageable);
     }
 
@@ -718,7 +713,7 @@ public class AuctionService {
         if (filteredLotIds.isEmpty()) {
             return Page.empty(pageable);
         }
-        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdIn(filteredLotIds, pageable);
+        Page<Auction> page = auctionRepository.findByCompletedAtIsNotNullAndLotIdInAndSelfSaleUnitIdIsNull(filteredLotIds, pageable);
         return buildResultsPage(page, pageable);
     }
 
@@ -736,7 +731,7 @@ public class AuctionService {
             .map(a -> {
                 Lot lot = lots.stream().filter(l -> l.getId().equals(a.getLotId())).findFirst().orElse(null);
                 List<AuctionEntry> aEntries = entries.stream().filter(e -> e.getAuctionId().equals(a.getId())).toList();
-                return buildResultDTO(a, lot, aEntries);
+                return buildEffectiveLotResultDTO(a, lot, aEntries);
             })
             .collect(Collectors.toList());
 
@@ -756,7 +751,7 @@ public class AuctionService {
             return Optional.empty();
         }
         List<AuctionEntry> entries = auctionEntryRepository.findAllByAuctionId(auction.getId());
-        return Optional.of(buildResultDTO(auction, lot, entries));
+        return Optional.of(buildEffectiveLotResultDTO(auction, lot, entries));
     }
 
     @Transactional(readOnly = true)
@@ -779,13 +774,23 @@ public class AuctionService {
     }
 
     private AuctionSessionDTO buildSessionDTO(Auction auction, Lot lot, List<AuctionEntry> entries) {
-        return buildSessionDTO(auction, lot, entries, lot.getBagCount(), lot.getBagCount());
+        return buildSessionDTOFromDtos(auction, lot, auctionEntryMapper.toDto(entries), lot.getBagCount(), lot.getBagCount());
     }
 
     private AuctionSessionDTO buildSessionDTO(
         Auction auction,
         Lot lot,
         List<AuctionEntry> entries,
+        Integer bagCountOverride,
+        Integer originalBagCountOverride
+    ) {
+        return buildSessionDTOFromDtos(auction, lot, auctionEntryMapper.toDto(entries), bagCountOverride, originalBagCountOverride);
+    }
+
+    private AuctionSessionDTO buildSessionDTOFromDtos(
+        Auction auction,
+        Lot lot,
+        List<AuctionEntryDTO> entryDtos,
         Integer bagCountOverride,
         Integer originalBagCountOverride
     ) {
@@ -827,19 +832,19 @@ public class AuctionService {
             lotSummary.setCommodityName(commodity != null ? commodity.getCommodityName() : null);
         }
 
-        int totalSold = entries.stream().mapToInt(e -> e.getQuantity() != null ? e.getQuantity() : 0).sum();
+        int totalSold = entryDtos.stream().mapToInt(e -> e.getQuantity() != null ? e.getQuantity() : 0).sum();
         int bagCount = bagCountOverride != null ? bagCountOverride : (lot.getBagCount() != null ? lot.getBagCount() : 0);
         int remaining = Math.max(0, bagCount - totalSold);
-        int highestRate = entries
+        int highestRate = entryDtos
             .stream()
-            .map(AuctionEntry::getBidRate)
+            .map(AuctionEntryDTO::getBidRate)
             .filter(r -> r != null)
             .map(r -> r.intValue())
             .max(Integer::compareTo)
             .orElse(0);
 
         String status;
-        if (entries.isEmpty()) {
+        if (entryDtos.isEmpty()) {
             status = "AVAILABLE";
         } else if (remaining == 0) {
             status = "SOLD";
@@ -848,13 +853,91 @@ public class AuctionService {
         }
 
         dto.setLot(lotSummary);
-        dto.setEntries(auctionEntryMapper.toDto(entries));
+        dto.setEntries(entryDtos);
         dto.setTotalSoldBags(totalSold);
         dto.setRemainingBags(remaining);
         dto.setHighestBidRate(highestRate);
         dto.setStatus(status);
 
         return dto;
+    }
+
+    private AuctionSessionDTO buildEffectiveLotSessionDTO(Auction auction, Lot lot, List<AuctionEntry> baseEntries) {
+        List<AuctionSelfSaleUnit> units = auctionSelfSaleUnitRepository.findBySourceAuctionId(auction.getId());
+        if (units.isEmpty()) {
+            return buildSessionDTO(auction, lot, baseEntries);
+        }
+
+        Map<Long, AuctionSelfSaleUnit> unitBySourceEntryId = units
+            .stream()
+            .filter(u -> u.getSourceAuctionEntryId() != null)
+            .collect(Collectors.toMap(AuctionSelfSaleUnit::getSourceAuctionEntryId, u -> u, (a, b) -> a));
+
+        List<AuctionEntryDTO> displayEntries = new ArrayList<>();
+        for (AuctionEntry entry : baseEntries.stream().sorted(Comparator.comparingInt(AuctionEntry::getBidNumber)).toList()) {
+            if (!Boolean.TRUE.equals(entry.getIsSelfSale())) {
+                displayEntries.add(auctionEntryMapper.toDto(entry));
+                continue;
+            }
+
+            AuctionSelfSaleUnit unit = entry.getId() != null ? unitBySourceEntryId.get(entry.getId()) : null;
+            if (unit == null) {
+                displayEntries.add(auctionEntryMapper.toDto(entry));
+                continue;
+            }
+
+            List<Auction> completedReAuctions = auctionRepository
+                .findAllBySelfSaleUnitIdOrderByAuctionDatetimeAsc(unit.getId())
+                .stream()
+                .filter(a -> a.getCompletedAt() != null)
+                .toList();
+
+            if (completedReAuctions.isEmpty()) {
+                displayEntries.add(auctionEntryMapper.toDto(entry));
+                continue;
+            }
+
+            List<Long> reAuctionIds = completedReAuctions.stream().map(Auction::getId).toList();
+            Map<Long, List<AuctionEntry>> reAuctionEntries = auctionEntryRepository.findAllByAuctionIdIn(reAuctionIds)
+                .stream()
+                .collect(Collectors.groupingBy(AuctionEntry::getAuctionId));
+
+            for (Auction reAuction : completedReAuctions) {
+                displayEntries.addAll(
+                    reAuctionEntries
+                        .getOrDefault(reAuction.getId(), List.of())
+                        .stream()
+                        .sorted(Comparator.comparingInt(AuctionEntry::getBidNumber))
+                        .map(auctionEntryMapper::toDto)
+                        .toList()
+                );
+            }
+
+            if (unit.getRemainingQty() != null && unit.getRemainingQty() > 0) {
+                AuctionEntryDTO remainingSelfSale = new AuctionEntryDTO();
+                remainingSelfSale.setId(entry.getId());
+                remainingSelfSale.setAuctionId(auction.getId());
+                remainingSelfSale.setBuyerId(entry.getBuyerId());
+                remainingSelfSale.setBidNumber(entry.getBidNumber());
+                remainingSelfSale.setBidRate(unit.getRate());
+                remainingSelfSale.setPresetMargin(entry.getPresetMargin());
+                remainingSelfSale.setPresetType(entry.getPresetType());
+                remainingSelfSale.setSellerRate(unit.getRate());
+                remainingSelfSale.setBuyerRate(unit.getRate());
+                remainingSelfSale.setQuantity(unit.getRemainingQty());
+                remainingSelfSale.setAmount(unit.getRate().multiply(BigDecimal.valueOf(unit.getRemainingQty())));
+                remainingSelfSale.setIsSelfSale(Boolean.TRUE);
+                remainingSelfSale.setIsScribble(Boolean.FALSE);
+                remainingSelfSale.setTokenAdvance(BigDecimal.ZERO);
+                remainingSelfSale.setExtraRate(BigDecimal.ZERO);
+                remainingSelfSale.setBuyerName(entry.getBuyerName());
+                remainingSelfSale.setBuyerMark(entry.getBuyerMark());
+                remainingSelfSale.setCreatedAt(unit.getCreatedAt());
+                displayEntries.add(remainingSelfSale);
+            }
+        }
+
+        return buildSessionDTOFromDtos(auction, lot, displayEntries, lot.getBagCount(), lot.getBagCount());
     }
 
     private Auction createAuctionSession(Long lotId, Long traderId) {
@@ -867,18 +950,7 @@ public class AuctionService {
     }
 
     private Optional<Auction> findLatestNormalAuctionForLot(Long lotId) {
-        Set<Long> selfSaleReauctionAuctionIds = auctionSelfSaleUnitRepository
-            .findByLotId(lotId)
-            .stream()
-            .map(AuctionSelfSaleUnit::getLastReauctionAuctionId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-
-        return auctionRepository
-            .findAllByLotIdIn(List.of(lotId))
-            .stream()
-            .filter(a -> !selfSaleReauctionAuctionIds.contains(a.getId()))
-            .max(Comparator.comparing(Auction::getAuctionDatetime, Comparator.nullsLast(Comparator.naturalOrder())));
+        return auctionRepository.findFirstByLotIdAndSelfSaleUnitIdIsNullOrderByAuctionDatetimeDesc(lotId);
     }
 
     private AuctionSelfSaleContextDTO buildSelfSaleContext(AuctionSelfSaleUnit unit, Lot lot) {
@@ -956,6 +1028,10 @@ public class AuctionService {
         Auction auction = auctionRepository
             .findById(unit.getLastReauctionAuctionId())
             .orElseThrow(() -> new EntityNotFoundException("Auction not found for self-sale unit: " + unit.getId()));
+        if (auction.getSelfSaleUnitId() == null) {
+            auction.setSelfSaleUnitId(unit.getId());
+            auctionRepository.save(auction);
+        }
         if (auction.getCompletedAt() != null) {
             throw new EntityNotFoundException("No active self-sale auction exists for unit: " + unit.getId());
         }
@@ -966,13 +1042,94 @@ public class AuctionService {
         if (unit.getLastReauctionAuctionId() != null) {
             Optional<Auction> existing = auctionRepository.findById(unit.getLastReauctionAuctionId());
             if (existing.isPresent() && existing.get().getCompletedAt() == null) {
+                if (existing.get().getSelfSaleUnitId() == null) {
+                    existing.get().setSelfSaleUnitId(unit.getId());
+                    auctionRepository.save(existing.get());
+                }
                 return existing.get();
             }
         }
         Auction auction = createAuctionSession(unit.getLotId(), traderId);
+        auction.setSelfSaleUnitId(unit.getId());
+        auction = auctionRepository.save(auction);
         unit.setLastReauctionAuctionId(auction.getId());
         auctionSelfSaleUnitRepository.save(unit);
         return auction;
+    }
+
+    private AuctionResultDTO buildEffectiveLotResultDTO(Auction auction, Lot lot, List<AuctionEntry> baseEntries) {
+        List<AuctionSelfSaleUnit> units = auctionSelfSaleUnitRepository.findBySourceAuctionId(auction.getId());
+        if (units.isEmpty()) {
+            return buildResultDTO(auction, lot, baseEntries);
+        }
+
+        Map<Long, AuctionSelfSaleUnit> unitBySourceEntryId = units
+            .stream()
+            .filter(u -> u.getSourceAuctionEntryId() != null)
+            .collect(Collectors.toMap(AuctionSelfSaleUnit::getSourceAuctionEntryId, u -> u, (a, b) -> a));
+
+        AuctionResultDTO dto = buildResultDTO(auction, lot, List.of(), null);
+        List<AuctionResultEntryDTO> resultEntries = new ArrayList<>();
+        Instant effectiveCompletedAt = auction.getCompletedAt();
+
+        for (AuctionEntry entry : baseEntries.stream().sorted(Comparator.comparingInt(AuctionEntry::getBidNumber)).toList()) {
+            if (!Boolean.TRUE.equals(entry.getIsSelfSale())) {
+                resultEntries.add(toResultEntryDTO(entry));
+                continue;
+            }
+
+            AuctionSelfSaleUnit unit = entry.getId() != null ? unitBySourceEntryId.get(entry.getId()) : null;
+            if (unit == null) {
+                resultEntries.add(toResultEntryDTO(entry));
+                continue;
+            }
+
+            List<Auction> reAuctions = auctionRepository.findAllBySelfSaleUnitIdOrderByAuctionDatetimeAsc(unit.getId());
+            List<Auction> completedReAuctions = reAuctions.stream().filter(a -> a.getCompletedAt() != null).toList();
+            if (completedReAuctions.isEmpty()) {
+                resultEntries.add(toResultEntryDTO(entry));
+                continue;
+            }
+
+            List<Long> reAuctionIds = completedReAuctions.stream().map(Auction::getId).toList();
+            Map<Long, List<AuctionEntry>> reAuctionEntries = auctionEntryRepository.findAllByAuctionIdIn(reAuctionIds)
+                .stream()
+                .collect(Collectors.groupingBy(AuctionEntry::getAuctionId));
+
+            for (Auction reAuction : completedReAuctions) {
+                if (effectiveCompletedAt == null || (reAuction.getCompletedAt() != null && reAuction.getCompletedAt().isAfter(effectiveCompletedAt))) {
+                    effectiveCompletedAt = reAuction.getCompletedAt();
+                }
+                resultEntries.addAll(
+                    reAuctionEntries
+                        .getOrDefault(reAuction.getId(), List.of())
+                        .stream()
+                        .sorted(Comparator.comparingInt(AuctionEntry::getBidNumber))
+                        .map(this::toResultEntryDTO)
+                        .toList()
+                );
+            }
+
+            if (unit.getRemainingQty() != null && unit.getRemainingQty() > 0) {
+                AuctionResultEntryDTO remainingSelfSale = new AuctionResultEntryDTO();
+                remainingSelfSale.setBidNumber(entry.getBidNumber());
+                remainingSelfSale.setBuyerId(entry.getBuyerId());
+                remainingSelfSale.setBuyerMark(entry.getBuyerMark());
+                remainingSelfSale.setBuyerName(entry.getBuyerName());
+                remainingSelfSale.setRate(unit.getRate());
+                remainingSelfSale.setQuantity(unit.getRemainingQty());
+                remainingSelfSale.setAmount(unit.getRate().multiply(BigDecimal.valueOf(unit.getRemainingQty())));
+                remainingSelfSale.setIsSelfSale(Boolean.TRUE);
+                remainingSelfSale.setIsScribble(Boolean.FALSE);
+                remainingSelfSale.setPresetApplied(entry.getPresetMargin());
+                remainingSelfSale.setPresetType(entry.getPresetType());
+                resultEntries.add(remainingSelfSale);
+            }
+        }
+
+        dto.setCompletedAt(effectiveCompletedAt);
+        dto.setEntries(resultEntries);
+        return dto;
     }
 
     private void createOrMergeAuctionEntry(

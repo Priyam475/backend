@@ -124,7 +124,6 @@ public class CacheConfiguration {
             createCache(cm, ChartOfAccountServiceImpl.CACHE_COA_BY_ID, jcacheConfiguration);
             createCache(cm, ChartOfAccountServiceImpl.CACHE_COA_PAGE_BY_TRADER, jcacheConfiguration);
             // Auction module (Sales Pad)
-            createCache(cm, com.mercotrace.domain.Auction.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.AuctionEntry.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.PresetMarkSetting.class.getName(), jcacheConfiguration);
             // Weighing: entity L2 cache + by-bid lookup (TTL from Redis config)
