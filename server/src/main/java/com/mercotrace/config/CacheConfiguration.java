@@ -136,6 +136,7 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.WriterPadWeightEntry.class.getName(), jcacheConfiguration);
             // Self-Sale module
             createCache(cm, com.mercotrace.domain.SelfSaleClosure.class.getName(), jcacheConfiguration);
+            createCache(cm, com.mercotrace.domain.AuctionSelfSaleUnit.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.StockPurchase.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.StockPurchaseItem.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.StockPurchaseCharge.class.getName(), jcacheConfiguration);

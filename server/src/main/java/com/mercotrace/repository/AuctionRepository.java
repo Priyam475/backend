@@ -18,6 +18,8 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
 
     Optional<Auction> findFirstByLotIdOrderByAuctionDatetimeDesc(Long lotId);
 
+    Optional<Auction> findFirstByLotIdAndCompletedAtIsNotNullOrderByAuctionDatetimeDesc(Long lotId);
+
     Page<Auction> findAllByTraderIdAndAuctionDatetimeBetween(Long traderId, Instant from, Instant to, Pageable pageable);
 
     Page<Auction> findAllByAuctionDatetimeBetween(Instant from, Instant to, Pageable pageable);
