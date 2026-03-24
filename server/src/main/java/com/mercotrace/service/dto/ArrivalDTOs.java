@@ -20,6 +20,9 @@ public final class ArrivalDTOs {
         @NotBlank
         private String lotName;
 
+        /** Preserved on edit/reopen; generated server-side when absent. */
+        private Integer lotSerialNumber;
+
         @Min(1)
         private int bagCount;
 
@@ -37,6 +40,14 @@ public final class ArrivalDTOs {
 
         public void setLotName(String lotName) {
             this.lotName = lotName;
+        }
+
+        public Integer getLotSerialNumber() {
+            return lotSerialNumber;
+        }
+
+        public void setLotSerialNumber(Integer lotSerialNumber) {
+            this.lotSerialNumber = lotSerialNumber;
         }
 
         public int getBagCount() {
@@ -594,6 +605,7 @@ public final class ArrivalDTOs {
     public static class ArrivalLotFullDTO implements Serializable {
         private Long id;
         private String lotName;
+        private Integer lotSerialNumber;
         private String commodityName;
         private int bagCount;
         private String brokerTag;
@@ -603,6 +615,8 @@ public final class ArrivalDTOs {
         public void setId(Long id) { this.id = id; }
         public String getLotName() { return lotName; }
         public void setLotName(String lotName) { this.lotName = lotName; }
+        public Integer getLotSerialNumber() { return lotSerialNumber; }
+        public void setLotSerialNumber(Integer lotSerialNumber) { this.lotSerialNumber = lotSerialNumber; }
         public String getCommodityName() { return commodityName; }
         public void setCommodityName(String commodityName) { this.commodityName = commodityName; }
         public int getBagCount() { return bagCount; }

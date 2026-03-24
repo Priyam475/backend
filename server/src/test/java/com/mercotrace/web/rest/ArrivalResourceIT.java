@@ -186,6 +186,11 @@ class ArrivalResourceIT {
     @Transactional
     void getArrivalByIdReturnsSellerSerialAndPatchPreservesIt() throws Exception {
         ArrivalRequestDTO request = buildBasicRequest(false);
+        ArrivalLotDTO secondLot = new ArrivalLotDTO();
+        secondLot.setLotName("LOT-2");
+        secondLot.setBagCount(12);
+        secondLot.setCommodityName(commodity.getCommodityName());
+        request.getSellers().get(0).setLots(List.of(request.getSellers().get(0).getLots().get(0), secondLot));
 
         String responseBody = restArrivalMockMvc
             .perform(post(ENTITY_API_URL).contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsBytes(request)))
@@ -202,6 +207,9 @@ class ArrivalResourceIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.sellers", hasSize(1)))
             .andExpect(jsonPath("$.sellers[0].sellerSerialNumber").value(1))
+            .andExpect(jsonPath("$.sellers[0].lots", hasSize(2)))
+            .andExpect(jsonPath("$.sellers[0].lots[0].lotSerialNumber").value(1))
+            .andExpect(jsonPath("$.sellers[0].lots[1].lotSerialNumber").value(2))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -226,8 +234,15 @@ class ArrivalResourceIT {
                     "lots", List.of(
                         Map.of(
                             "lotName", lot.get("lotName"),
+                            "lotSerialNumber", lot.get("lotSerialNumber"),
                             "bagCount", lot.get("bagCount"),
                             "commodityName", lot.get("commodityName")
+                        ),
+                        Map.of(
+                            "lotName", lots.get(1).get("lotName"),
+                            "lotSerialNumber", lots.get(1).get("lotSerialNumber"),
+                            "bagCount", lots.get(1).get("bagCount"),
+                            "commodityName", lots.get(1).get("commodityName")
                         )
                     )
                 )
@@ -241,7 +256,9 @@ class ArrivalResourceIT {
         restArrivalMockMvc
             .perform(get(ENTITY_API_URL + "/" + created.getVehicleId()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.sellers[0].sellerSerialNumber").value(1));
+            .andExpect(jsonPath("$.sellers[0].sellerSerialNumber").value(1))
+            .andExpect(jsonPath("$.sellers[0].lots[0].lotSerialNumber").value(1))
+            .andExpect(jsonPath("$.sellers[0].lots[1].lotSerialNumber").value(2));
     }
 
     private ArrivalRequestDTO buildBasicRequest(boolean multiSeller) {

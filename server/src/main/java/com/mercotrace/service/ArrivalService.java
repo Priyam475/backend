@@ -162,6 +162,7 @@ public class ArrivalService {
             sellerLinks.add(sellerInVehicle);
 
             sellerSerial = nextSellerSerial(sellerSerial);
+            int lotSerial = 0;
             for (ArrivalLotDTO lotDTO : sellerDTO.getLots()) {
                 Lot lot = new Lot();
                 lot.setSellerVehicleId(sellerInVehicle.getId());
@@ -171,6 +172,8 @@ public class ArrivalService {
                 if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                 if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                 lot.setSellerSerialNo(sellerSerial);
+                lotSerial = nextLotSerial(lotSerial);
+                lot.setLotSerialNo(lotSerial);
                 lot.setCreatedAt(now);
                 lots.add(lot);
             }
@@ -418,6 +421,7 @@ public class ArrivalService {
                 ArrivalLotFullDTO lf = new ArrivalLotFullDTO();
                 lf.setId(lot.getId());
                 lf.setLotName(lot.getLotName());
+                lf.setLotSerialNumber(lot.getLotSerialNo());
                 lf.setCommodityName(commodityNameById.getOrDefault(lot.getCommodityId(), ""));
                 lf.setBagCount(lot.getBagCount() != null ? lot.getBagCount() : 0);
                 lf.setBrokerTag(lot.getBrokerTag());
@@ -545,6 +549,8 @@ public class ArrivalService {
                     sellerSerial = requestedSerial;
                     usedSellerSerials.add(requestedSerial);
                 }
+                Set<Integer> usedLotSerials = new HashSet<>();
+                int lotSerial = 0;
                 for (ArrivalLotDTO lotDTO : sellerDTO.getLots()) {
                     Lot lot = new Lot();
                     lot.setSellerVehicleId(siv.getId());
@@ -554,6 +560,18 @@ public class ArrivalService {
                     if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                     if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                     lot.setSellerSerialNo(requestedSerial);
+                    Integer requestedLotSerial = normalizeLotSerialNumber(lotDTO.getLotSerialNumber());
+                    if (requestedLotSerial != null) {
+                        if (!usedLotSerials.add(requestedLotSerial)) {
+                            throw new IllegalArgumentException("Duplicate lot serial number for seller: " + requestedLotSerial);
+                        }
+                        lotSerial = Math.max(lotSerial, requestedLotSerial);
+                    } else {
+                        requestedLotSerial = nextAvailableLotSerial(lotSerial, usedLotSerials);
+                        lotSerial = requestedLotSerial;
+                        usedLotSerials.add(requestedLotSerial);
+                    }
+                    lot.setLotSerialNo(requestedLotSerial);
                     lot.setCreatedAt(now);
                     currentLots.add(lot);
                 }
@@ -865,6 +883,10 @@ public class ArrivalService {
         return currentSerial >= 9999 ? 1 : currentSerial + 1;
     }
 
+    private int nextLotSerial(int currentSerial) {
+        return currentSerial >= 9999 ? 1 : currentSerial + 1;
+    }
+
     private int nextAvailableSellerSerial(int currentSerial, Set<Integer> reservedSerials) {
         int candidate = currentSerial;
         for (int attempt = 0; attempt < 9999; attempt++) {
@@ -876,6 +898,17 @@ public class ArrivalService {
         throw new IllegalArgumentException("No seller serial numbers available for this arrival context");
     }
 
+    private int nextAvailableLotSerial(int currentSerial, Set<Integer> reservedSerials) {
+        int candidate = currentSerial;
+        for (int attempt = 0; attempt < 9999; attempt++) {
+            candidate = nextLotSerial(candidate);
+            if (!reservedSerials.contains(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalArgumentException("No lot serial numbers available for this seller context");
+    }
+
     private Integer normalizeSellerSerialNumber(Integer sellerSerialNumber) {
         if (sellerSerialNumber == null) {
             return null;
@@ -884,6 +917,16 @@ public class ArrivalService {
             throw new IllegalArgumentException("Seller serial number must be between 1 and 9999");
         }
         return sellerSerialNumber;
+    }
+
+    private Integer normalizeLotSerialNumber(Integer lotSerialNumber) {
+        if (lotSerialNumber == null) {
+            return null;
+        }
+        if (lotSerialNumber < 1 || lotSerialNumber > 9999) {
+            throw new IllegalArgumentException("Lot serial number must be between 1 and 9999");
+        }
+        return lotSerialNumber;
     }
 
     private Long resolveCommodityId(Long traderId, String commodityName) {

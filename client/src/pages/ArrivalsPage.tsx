@@ -43,6 +43,7 @@ import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 interface LotEntry {
   lot_id: string;
   lot_name: string;
+  lot_serial_number?: number | null;
   quantity: number; // bag count
   commodity_name: string;
   broker_tag: string;
@@ -197,6 +198,7 @@ const ArrivalsPage = () => {
       lots: s.lots.map((l) => ({
         lot_id: l.lot_id,
         lot_name: l.lot_name,
+        lot_serial_number: l.lot_serial_number ?? null,
         quantity: l.quantity,
         commodity_name: l.commodity_name,
         broker_tag: l.broker_tag,
@@ -207,7 +209,24 @@ const ArrivalsPage = () => {
 
   const formatSellerSerialNumber = useCallback((sellerSerialNumber?: number | null) => {
     if (sellerSerialNumber == null || sellerSerialNumber < 1) return null;
-    return String(sellerSerialNumber).padStart(3, '0');
+    return String(sellerSerialNumber);
+  }, []);
+
+  const getNextLotSerialNumber = useCallback((seller: SellerEntry) => {
+    const existingLotSerials = new Set(
+      seller.lots
+        .map((lot) => lot.lot_serial_number)
+        .filter((lotSerialNumber): lotSerialNumber is number => lotSerialNumber != null && lotSerialNumber >= 1)
+    );
+
+    let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
+    for (let attempt = 0; attempt < 9999; attempt += 1) {
+      candidate = candidate >= 9999 ? 1 : candidate + 1;
+      if (!existingLotSerials.has(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
   }, []);
 
   const isArrivalDirty = useMemo(() => {
@@ -693,11 +712,14 @@ const ArrivalsPage = () => {
     setSellers(prev => prev.map((s, i) => {
       if (i !== sellerIdx) return s;
       if (!canAddAnotherLot(s)) return s;
+      const nextLotSerialNumber = getNextLotSerialNumber(s);
+      if (nextLotSerialNumber == null) return s;
       return {
         ...s,
         lots: [...s.lots, {
           lot_id: crypto.randomUUID(),
           lot_name: '',
+          lot_serial_number: nextLotSerialNumber,
           quantity: 0,
           commodity_name: commodities[0]?.commodity_name || '',
           broker_tag: '',
@@ -924,6 +946,7 @@ const ArrivalsPage = () => {
             seller_mark: s.seller_mark || undefined,
             lots: s.lots.map(l => ({
               lot_name: l.lot_name,
+              lot_serial_number: l.lot_serial_number ?? undefined,
               quantity: l.quantity,
               commodity_name: l.commodity_name,
               broker_tag: l.broker_tag || undefined,
@@ -1035,6 +1058,7 @@ const ArrivalsPage = () => {
         lots: (s?.lots ?? []).map((l, lotIdx) => ({
           lot_id: l?.id != null ? String(l.id) : `lot-${idx}-${lotIdx}`,
           lot_name: l?.lotName ?? '',
+          lot_serial_number: l?.lotSerialNumber ?? null,
           quantity: l?.bagCount ?? 0,
           commodity_name: l?.commodityName ?? '',
           broker_tag: l?.brokerTag ?? '',
@@ -1112,6 +1136,7 @@ const ArrivalsPage = () => {
             seller_mark: s.seller_mark || undefined,
             lots: s.lots.map(l => ({
               lot_name: l.lot_name,
+              lot_serial_number: l.lot_serial_number ?? undefined,
               quantity: l.quantity,
               commodity_name: l.commodity_name,
               broker_tag: l.broker_tag || undefined,
@@ -1802,7 +1827,7 @@ const ArrivalsPage = () => {
                                     ) : null}
                                     {sellerSerialLabel ? (
                                       <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        Serial #{sellerSerialLabel}
+                                        SL. NO {sellerSerialLabel}
                                       </span>
                                     ) : null}
                                   </div>
@@ -1843,7 +1868,7 @@ const ArrivalsPage = () => {
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
                                     {sellerSerialLabel ? (
                                       <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        Serial #{sellerSerialLabel}
+                                        SL. NO {sellerSerialLabel}
                                       </span>
                                     ) : null}
                                   </div>
@@ -1913,11 +1938,12 @@ const ArrivalsPage = () => {
                                 {seller.lots.map((lot, li) => {
                                   const vehicleTotal = vehicleTotalBags;
                                   const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
+                                  const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                                       <div className="flex items-center justify-between">
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase">
-                                          Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
+                                          {lotSerialLabel ? `SL. NO ${lotSerialLabel}` : 'Lot'} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
                                         </p>
                                         <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                                       </div>
@@ -2535,7 +2561,7 @@ const ArrivalsPage = () => {
                                     ) : null}
                                     {sellerSerialLabel ? (
                                       <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        Serial #{sellerSerialLabel}
+                                        SL. NO {sellerSerialLabel}
                                       </span>
                                     ) : null}
                                   </div>
@@ -2576,7 +2602,7 @@ const ArrivalsPage = () => {
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
                                     {sellerSerialLabel ? (
                                       <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        Serial #{sellerSerialLabel}
+                                        SL. NO {sellerSerialLabel}
                                       </span>
                                     ) : null}
                                   </div>
@@ -2629,10 +2655,11 @@ const ArrivalsPage = () => {
                                 {seller.lots.map((lot, li) => {
                                   const vehicleTotal = vehicleTotalBags;
                                   const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
+                                  const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : null;
                                   return (
                                     <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
                                       <div className="flex items-center justify-between">
-                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">{lotSerialLabel ? `SL. NO ${lotSerialLabel}` : 'Lot'} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
                                         <button onClick={() => removeLot(si, li)} className="text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
                                       </div>
                                       <div className="grid grid-cols-4 gap-2 items-end">

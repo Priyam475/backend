@@ -3,6 +3,7 @@ import type { FreightMethod } from '@/types/models';
 
 export interface ArrivalLotPayload {
   lot_name: string;
+  lot_serial_number?: number;
   quantity: number;
   commodity_name: string;
   broker_tag?: string;
@@ -114,6 +115,7 @@ export interface ArrivalFullDetail {
 export interface ArrivalLotFullDetail {
   id: number;
   lotName: string;
+  lotSerialNumber?: number | null;
   commodityName: string;
   bagCount: number;
   brokerTag?: string | null;
@@ -227,6 +229,7 @@ export const arrivalsApi = {
         sellerMark: s.seller_mark,
         lots: s.lots.map(l => ({
           lotName: l.lot_name,
+          lotSerialNumber: l.lot_serial_number,
           bagCount: l.quantity,
           commodityName: l.commodity_name,
           brokerTag: l.broker_tag,
@@ -275,6 +278,7 @@ export const arrivalsApi = {
         sellerMark: s.seller_mark,
         lots: s.lots.map(l => ({
           lotName: l.lot_name,
+          lotSerialNumber: l.lot_serial_number,
           bagCount: l.quantity,
           commodityName: l.commodity_name,
           brokerTag: l.broker_tag,
