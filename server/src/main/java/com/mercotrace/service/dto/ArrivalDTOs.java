@@ -77,6 +77,9 @@ public final class ArrivalDTOs {
         /** When null, seller is free-text (name/phone from DTO only). */
         private Long contactId;
 
+        /** Preserved on edit/reopen; ignored during create allocation when absent. */
+        private Integer sellerSerialNumber;
+
         private String sellerName;
 
         private String sellerPhone;
@@ -96,6 +99,14 @@ public final class ArrivalDTOs {
 
         public String getSellerName() {
             return sellerName;
+        }
+
+        public Integer getSellerSerialNumber() {
+            return sellerSerialNumber;
+        }
+
+        public void setSellerSerialNumber(Integer sellerSerialNumber) {
+            this.sellerSerialNumber = sellerSerialNumber;
         }
 
         public void setSellerName(String sellerName) {
@@ -605,6 +616,7 @@ public final class ArrivalDTOs {
     /** Seller with full lots for arrival expand (includes contactId/sellerPhone for edit form prefill). */
     public static class ArrivalSellerFullDTO implements Serializable {
         private Long contactId;
+        private Integer sellerSerialNumber;
         private String sellerName;
         private String sellerPhone;
         private String sellerMark;
@@ -612,6 +624,8 @@ public final class ArrivalDTOs {
 
         public Long getContactId() { return contactId; }
         public void setContactId(Long contactId) { this.contactId = contactId; }
+        public Integer getSellerSerialNumber() { return sellerSerialNumber; }
+        public void setSellerSerialNumber(Integer sellerSerialNumber) { this.sellerSerialNumber = sellerSerialNumber; }
         public String getSellerName() { return sellerName; }
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
         public String getSellerPhone() { return sellerPhone; }

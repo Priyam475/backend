@@ -52,6 +52,7 @@ interface LotEntry {
 interface SellerEntry {
   seller_vehicle_id: string;
   contact_id: string;
+  seller_serial_number?: number | null;
   seller_name: string;
   seller_phone: string;
   seller_mark: string;
@@ -189,6 +190,7 @@ const ArrivalsPage = () => {
     return list.map((s) => ({
       seller_vehicle_id: s.seller_vehicle_id,
       contact_id: s.contact_id,
+      seller_serial_number: s.seller_serial_number ?? null,
       seller_name: s.seller_name,
       seller_phone: s.seller_phone,
       seller_mark: s.seller_mark,
@@ -201,6 +203,11 @@ const ArrivalsPage = () => {
         variant: l.variant,
       })),
     }));
+  }, []);
+
+  const formatSellerSerialNumber = useCallback((sellerSerialNumber?: number | null) => {
+    if (sellerSerialNumber == null || sellerSerialNumber < 1) return null;
+    return String(sellerSerialNumber).padStart(3, '0');
   }, []);
 
   const isArrivalDirty = useMemo(() => {
@@ -624,6 +631,7 @@ const ArrivalsPage = () => {
     const newSeller: SellerEntry = {
       seller_vehicle_id: crypto.randomUUID(),
       contact_id: contact.contact_id,
+      seller_serial_number: null,
       seller_name: contact.name,
       seller_phone: contact.phone,
       seller_mark: contact.mark || '',
@@ -645,6 +653,7 @@ const ArrivalsPage = () => {
     const newSeller: SellerEntry = {
       seller_vehicle_id: crypto.randomUUID(),
       contact_id: '',
+      seller_serial_number: null,
       seller_name: nameFromSearch,
       seller_phone: '',
       seller_mark: '',
@@ -1019,6 +1028,7 @@ const ArrivalsPage = () => {
       const mappedSellers: SellerEntry[] = (detail?.sellers ?? []).map((s, idx) => ({
         seller_vehicle_id: `edit-${s?.contactId ?? idx}-${idx}`,
         contact_id: String(s?.contactId ?? ''),
+        seller_serial_number: s?.sellerSerialNumber ?? null,
         seller_name: s?.sellerName ?? '',
         seller_phone: s?.sellerPhone ?? '',
         seller_mark: s?.sellerMark ?? '',
@@ -1096,6 +1106,7 @@ const ArrivalsPage = () => {
           const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
           return {
             contact_id: hasContactId ? Number(s.contact_id) : null,
+            seller_serial_number: s.seller_serial_number ?? undefined,
             seller_name: s.seller_name,
             seller_phone: s.seller_phone,
             seller_mark: s.seller_mark || undefined,
@@ -1768,6 +1779,7 @@ const ArrivalsPage = () => {
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
+                      const sellerSerialLabel = formatSellerSerialNumber(seller.seller_serial_number);
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
@@ -1788,14 +1800,15 @@ const ArrivalsPage = () => {
                                         ({seller.seller_mark})
                                       </span>
                                     ) : null}
-                                    {/* Reserved space for seller serial/identifier (next bug) */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                    {sellerSerialLabel ? (
+                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                        Serial #{sellerSerialLabel}
+                                      </span>
+                                    ) : null}
                                   </div>
                                   <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
                                   <div className="flex items-center justify-between gap-2 mt-0.5">
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {/* Reserved right-side slot for future serial/id value */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">—</span>
                                   </div>
                                 </div>
                               ) : (
@@ -1828,8 +1841,11 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {/* Reserved space for future seller serial/identifier (next bug) */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                    {sellerSerialLabel ? (
+                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                        Serial #{sellerSerialLabel}
+                                      </span>
+                                    ) : null}
                                   </div>
                                 </div>
                               )}
@@ -2496,6 +2512,7 @@ const ArrivalsPage = () => {
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
+                      const sellerSerialLabel = formatSellerSerialNumber(seller.seller_serial_number);
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-hidden">
@@ -2516,14 +2533,15 @@ const ArrivalsPage = () => {
                                         ({seller.seller_mark})
                                       </span>
                                     ) : null}
-                                    {/* Reserved space for seller serial/identifier (next bug) */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                    {sellerSerialLabel ? (
+                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                        Serial #{sellerSerialLabel}
+                                      </span>
+                                    ) : null}
                                   </div>
                                   <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
                                   <div className="flex items-center justify-between gap-2 mt-0.5">
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {/* Reserved right-side slot for future serial/id value */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">—</span>
                                   </div>
                                 </div>
                               ) : (
@@ -2556,8 +2574,11 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="flex items-center justify-between gap-2">
                                     <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {/* Reserved space for future seller serial/identifier (next bug) */}
-                                    <span className="text-[10px] text-transparent whitespace-nowrap">#ID</span>
+                                    {sellerSerialLabel ? (
+                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                        Serial #{sellerSerialLabel}
+                                      </span>
+                                    ) : null}
                                   </div>
                                 </div>
                               )}
