@@ -145,7 +145,9 @@ const ArrivalsPage = () => {
   const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
-  const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<ArrivalStatus | 'COMPLETED'>('COMPLETED');
+  const [partialArrivals, setPartialArrivals] = useState<ArrivalSummary[]>([]);
+  const [partialArrivalsLoading, setPartialArrivalsLoading] = useState(false);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
@@ -285,8 +287,84 @@ const ArrivalsPage = () => {
     serializeSellersForDirty,
   ]);
 
+  const buildPartialPayload = useCallback((): ArrivalCreatePayload => ({
+    vehicle_number: isMultiSeller ? vehicleNumber.trim().toUpperCase() || undefined : undefined,
+    is_multi_seller: isMultiSeller,
+    loaded_weight: parseFloat(loadedWeight) || 0,
+    empty_weight: parseFloat(emptyWeight) || 0,
+    deducted_weight: parseFloat(deductedWeight) || 0,
+    freight_method: freightMethod,
+    freight_rate: parseFloat(freightRate) || 0,
+    no_rental: noRental,
+    advance_paid: parseFloat(advancePaid) || 0,
+    broker_name: brokerName || undefined,
+    broker_contact_id: brokerContactId ?? undefined,
+    narration: narration || undefined,
+    godown: godown || undefined,
+    gatepass_number: gatepassNumber || undefined,
+    origin: origin || undefined,
+    partially_completed: true,
+    sellers: sellers.map(s => {
+      const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
+      return {
+        contact_id: hasContactId ? Number(s.contact_id) : null,
+        seller_name: s.seller_name,
+        seller_phone: s.seller_phone,
+        seller_mark: s.seller_mark || undefined,
+        lots: s.lots.map(l => ({
+          lot_name: l.lot_name,
+          quantity: l.quantity,
+          commodity_name: l.commodity_name,
+          broker_tag: l.broker_tag || undefined,
+          variant: l.variant || undefined,
+        })),
+      };
+    }),
+  }), [isMultiSeller, vehicleNumber, loadedWeight, emptyWeight, deductedWeight, freightMethod, freightRate, noRental, advancePaid, brokerName, brokerContactId, narration, godown, gatepassNumber, origin, sellers]);
+
+  const handlePartialSave = useCallback(async (): Promise<boolean> => {
+    try {
+      if (editingVehicleId != null) {
+        const payload = buildPartialPayload();
+        await arrivalsApi.update(editingVehicleId, {
+          vehicle_number: payload.vehicle_number,
+          godown: payload.godown,
+          gatepass_number: payload.gatepass_number,
+          origin: payload.origin,
+          broker_name: payload.broker_name,
+          broker_contact_id: payload.broker_contact_id,
+          narration: payload.narration,
+          loaded_weight: payload.loaded_weight,
+          empty_weight: payload.empty_weight,
+          deducted_weight: payload.deducted_weight,
+          freight_method: payload.freight_method,
+          freight_rate: payload.freight_rate,
+          no_rental: payload.no_rental,
+          advance_paid: payload.advance_paid,
+          multi_seller: payload.is_multi_seller,
+          partially_completed: true,
+          sellers: payload.sellers,
+        });
+      } else {
+        await arrivalsApi.create(buildPartialPayload());
+      }
+      await loadArrivalsFromApi();
+      resetForm();
+      toast.success('Partial arrival saved');
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save partial data');
+      return false;
+    }
+  }, [editingVehicleId, buildPartialPayload]);
+
   const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
     when: isArrivalDirty,
+    title: 'Save your progress?',
+    description: 'You have unsaved changes. Would you like to save your progress before leaving?',
+    continueLabel: 'Save',
+    stayLabel: 'Cancel',
+    onBeforeContinue: handlePartialSave,
   });
 
   const tryCloseArrivalPanel = useCallback(
@@ -323,16 +401,16 @@ const ArrivalsPage = () => {
 
   // ── Validation (raghav branch: field-level checks; no UI wiring — validation only) ──────────────────
   const isLoadedWeightInvalid = useMemo(() => {
-    if (!loadedWeight || !loadedWeight.trim()) return true;
+    if (!loadedWeight || !loadedWeight.trim()) return false;
     const lw = parseFloat(loadedWeight);
     if (Number.isNaN(lw)) return true;
     return lw < 0 || lw > 100000;
   }, [loadedWeight]);
 
   const isEmptyWeightInvalid = useMemo(() => {
+    if (!emptyWeight || !emptyWeight.trim()) return false;
     const lw = parseFloat(loadedWeight) || 0;
     const ew = parseFloat(emptyWeight) || 0;
-    if (!emptyWeight || !emptyWeight.trim()) return true;
     if (Number.isNaN(parseFloat(emptyWeight))) return true;
     if (ew < 0 || ew > 100000) return true;
     return ew > lw;
@@ -347,7 +425,8 @@ const ArrivalsPage = () => {
   const isVehicleNumberInvalid = useMemo(() => {
     if (!isMultiSeller) return false;
     const v = vehicleNumber.trim();
-    return v.length === 0 || v.length < 2 || v.length > 12;
+    if (!v) return false;
+    return v.length < 2 || v.length > 12;
   }, [isMultiSeller, vehicleNumber]);
 
   const isGodownInvalid = useMemo(() => {
@@ -373,7 +452,7 @@ const ArrivalsPage = () => {
 
   const isFreightRateInvalid = useMemo(() => {
     if (noRental) return false;
-    if (!freightRate || !freightRate.trim()) return true;
+    if (!freightRate || !freightRate.trim()) return false;
     const fr = parseFloat(freightRate);
     if (Number.isNaN(fr)) return true;
     return fr < 0 || fr > 100000;
@@ -413,7 +492,8 @@ const ArrivalsPage = () => {
   };
   const isLotQuantityInvalid = (l: LotEntry) => {
     const q = l.quantity ?? 0;
-    return q <= 0 || q > 100000 || !Number.isInteger(q);
+    if (q === 0) return false;
+    return q < 0 || q > 100000 || !Number.isInteger(q);
   };
 
   const lotNameCountsBySellerId = useMemo(() => {
@@ -475,7 +555,8 @@ const ArrivalsPage = () => {
   const totalNetWeightTons = useMemo(() => (totalNetWeightKg > 0 ? totalNetWeightKg / 1000 : 0), [totalNetWeightKg]);
 
   const filteredArrivals = useMemo(() => {
-    let result = apiArrivals;
+    const source = statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivals : apiArrivals;
+    let result = source;
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       result = result.filter(a => {
@@ -485,28 +566,35 @@ const ArrivalsPage = () => {
         return false;
       });
     }
-    if (statusFilter !== 'ALL') {
+    if (statusFilter !== 'COMPLETED' && statusFilter !== 'PARTIALLY_COMPLETED') {
       result = result.filter(a => getArrivalStatus(a) === statusFilter);
     }
     return result;
-  }, [apiArrivals, searchQuery, statusFilter, arrivalDetails]);
+  }, [apiArrivals, partialArrivals, searchQuery, statusFilter, arrivalDetails]);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<ArrivalStatus | 'ALL', number> = { ALL: apiArrivals.length, PENDING: 0, WEIGHED: 0, AUCTIONED: 0, SETTLED: 0 };
+    const counts: Record<ArrivalStatus | 'COMPLETED', number> = {
+      COMPLETED: apiArrivals.length,
+      PENDING: 0, WEIGHED: 0, AUCTIONED: 0, SETTLED: 0, PARTIALLY_COMPLETED: partialArrivals.length,
+    };
     apiArrivals.forEach(a => {
       const s = getArrivalStatus(a);
-      counts[s]++;
+      counts[s] = (counts[s] ?? 0) + 1;
     });
     return counts;
-  }, [apiArrivals]);
+  }, [apiArrivals, partialArrivals]);
 
-  const statusLabel = (s: ArrivalStatus) => s.charAt(0) + s.slice(1).toLowerCase();
+  const statusLabel = (s: ArrivalStatus | string): string => {
+    if (s === 'PARTIALLY_COMPLETED') return 'Partially Completed';
+    return s.charAt(0) + s.slice(1).toLowerCase();
+  };
 
   const loadArrivalsFromApi = async () => {
     setApiArrivalsLoading(true);
+    setPartialArrivalsLoading(true);
     try {
-      const statusParam = statusFilter !== 'ALL' ? statusFilter : undefined;
-      const list = await arrivalsApi.list(0, 100, statusParam);
+      const statusParam = (statusFilter !== 'COMPLETED' && statusFilter !== 'PARTIALLY_COMPLETED') ? statusFilter : undefined;
+      const list = await arrivalsApi.list(0, 100, statusParam, false);
       setApiArrivals(list);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load arrivals';
@@ -515,6 +603,7 @@ const ArrivalsPage = () => {
     } finally {
       setApiArrivalsLoading(false);
     }
+    arrivalsApi.list(0, 100, undefined, true).then(setPartialArrivals).catch(() => setPartialArrivals([])).finally(() => setPartialArrivalsLoading(false));
     arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
   };
 
@@ -749,10 +838,10 @@ const ArrivalsPage = () => {
   };
 
   const handleSubmitArrival = async () => {
-    // ── Validation (raghav branch: same checks at submit; no UI change) ──────────────────
+    // ── Conditional format/range validation (only when values are present) ──
     const vNum = vehicleNumber.trim();
-    if (isMultiSeller && (vNum.length === 0 || vNum.length < 2 || vNum.length > 12)) {
-      toast.error(vNum.length === 0 ? 'Vehicle number is required for multi-seller arrivals' : 'Vehicle number must be between 2 and 12 characters');
+    if (isMultiSeller && vNum && (vNum.length < 2 || vNum.length > 12)) {
+      toast.error('Vehicle number must be between 2 and 12 characters');
       return;
     }
     const gdwn = godown.trim();
@@ -770,29 +859,33 @@ const ArrivalsPage = () => {
       toast.error('Broker name must be between 2 and 100 characters (alphabets and spaces)');
       return;
     }
-    const lw = parseFloat(loadedWeight);
-    if (Number.isNaN(lw) || lw < 0 || lw > 100000) {
-      toast.error('Loaded weight is required and must be between 0 and 100,000 kg');
-      return;
+    if (loadedWeight?.trim()) {
+      const lw = parseFloat(loadedWeight);
+      if (Number.isNaN(lw) || lw < 0 || lw > 100000) {
+        toast.error('Loaded weight must be between 0 and 100,000 kg');
+        return;
+      }
     }
-    const ew = parseFloat(emptyWeight);
-    if (Number.isNaN(ew) || ew < 0 || ew > 100000) {
-      toast.error('Empty weight is required and must be between 0 and 100,000 kg');
-      return;
-    }
-    if (ew > lw) {
-      toast.error('Empty weight must be less than or equal to loaded weight');
-      return;
+    if (emptyWeight?.trim()) {
+      const ew = parseFloat(emptyWeight);
+      if (Number.isNaN(ew) || ew < 0 || ew > 100000) {
+        toast.error('Empty weight must be between 0 and 100,000 kg');
+        return;
+      }
+      if (loadedWeight?.trim() && ew > (parseFloat(loadedWeight) || 0)) {
+        toast.error('Empty weight must be less than or equal to loaded weight');
+        return;
+      }
     }
     const dw = parseFloat(deductedWeight) || 0;
     if (deductedWeight?.trim() && (dw < 0 || dw > 10000)) {
       toast.error('Deducted weight must be between 0 and 10,000 kg');
       return;
     }
-    if (!noRental) {
+    if (!noRental && freightRate?.trim()) {
       const fr = parseFloat(freightRate);
       if (Number.isNaN(fr) || fr < 0 || fr > 100000) {
-        toast.error('Freight rate is required (when not "No rental") and must be between 0 and 100,000');
+        toast.error('Freight rate must be between 0 and 100,000');
         return;
       }
     }
@@ -802,10 +895,6 @@ const ArrivalsPage = () => {
       return;
     }
 
-    if (sellers.length === 0) {
-      toast.error('At least one seller is required');
-      return;
-    }
     if (!isMultiSeller && sellers.length > 1) {
       toast.error('Single-seller arrival allows only one seller');
       return;
@@ -813,11 +902,7 @@ const ArrivalsPage = () => {
     for (const seller of sellers) {
       const hasContactId = seller.contact_id !== '' && !Number.isNaN(Number(seller.contact_id));
       const sName = (seller.seller_name ?? '').trim();
-      if (!hasContactId && !sName) {
-        toast.error('Each seller must either be selected from Contacts or have a name entered');
-        return;
-      }
-      if (!hasContactId && (sName.length < 2 || sName.length > 100)) {
+      if (!hasContactId && sName && (sName.length < 2 || sName.length > 100)) {
         toast.error(`Seller name must be between 2 and 100 characters${sName ? `: "${sName.slice(0, 20)}…"` : ''}`);
         return;
       }
@@ -827,7 +912,6 @@ const ArrivalsPage = () => {
         return;
       }
     }
-    // Mark uniqueness: no duplicates within vehicle, dynamic seller mark must not exist in contacts
     const seenMarks = new Set<string>();
     for (let i = 0; i < sellers.length; i++) {
       const seller = sellers[i];
@@ -846,17 +930,10 @@ const ArrivalsPage = () => {
       }
     }
     for (const seller of sellers) {
-      if (seller.lots.length === 0) {
-        toast.error(`${seller.seller_name || 'Seller'}: At least one lot is required`);
-        return;
-      }
       const seenLotNames = new Set<string>();
       for (const lot of seller.lots) {
         const ln = lot.lot_name?.trim() ?? '';
-        if (!ln) {
-          toast.error(`${seller.seller_name}: Lot name is required`);
-          return;
-        }
+        if (!ln) continue;
         if (ln.length < 2 || ln.length > 50) {
           toast.error(`${seller.seller_name} → ${ln}: Lot name must be between 2 and 50 characters`);
           return;
@@ -871,14 +948,13 @@ const ArrivalsPage = () => {
           return;
         }
         seenLotNames.add(lnLower);
-        if (lot.quantity <= 0 || lot.quantity > 100000 || !Number.isInteger(lot.quantity)) {
-          toast.error(`${seller.seller_name} → ${ln}: Quantity must be a positive integer between 1 and 100,000`);
+        if (lot.quantity < 0 || lot.quantity > 100000) {
+          toast.error(`${seller.seller_name} → ${ln}: Quantity must be between 0 and 100,000`);
           return;
         }
       }
     }
 
-    // REQ-ARR-013: Outlier warnings
     const warnings = validateWeightOutliers();
     if (warnings.length > 0) {
       warnings.forEach(w => toast.warning(w));
@@ -911,6 +987,7 @@ const ArrivalsPage = () => {
         godown: godown || undefined,
         gatepass_number: gatepassNumber || undefined,
         origin: origin || undefined,
+        partially_completed: false,
         sellers: sellers.map(s => {
           const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
           return {
@@ -1097,6 +1174,7 @@ const ArrivalsPage = () => {
         freight_rate: freightRate ? parseFloat(freightRate) : undefined,
         no_rental: noRental,
         advance_paid: advancePaid ? parseFloat(advancePaid) : undefined,
+        partially_completed: false,
         sellers: sellers.length > 0 ? sellers.map(s => {
           const hasContactId = s.contact_id !== '' && !Number.isNaN(Number(s.contact_id));
           return {
@@ -1216,14 +1294,14 @@ const ArrivalsPage = () => {
                   <div className="glass-card p-12 rounded-2xl text-center">
                     <p className="text-muted-foreground">Loading arrivals…</p>
                   </div>
-                ) : apiArrivals.length === 0 ? (
-                  statusFilter !== 'ALL' ? (
+                ) : apiArrivals.length === 0 && statusFilter !== 'PARTIALLY_COMPLETED' ? (
+                  statusFilter !== 'COMPLETED' ? (
                     <div className="glass-card p-12 rounded-2xl text-center">
                       <Filter className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
                       <h3 className="text-lg font-bold text-foreground mb-1">No {statusLabel(statusFilter)} arrivals</h3>
                       <p className="text-sm text-muted-foreground mb-4">No arrivals match the &quot;{statusLabel(statusFilter)}&quot; filter. Show all to see the full list.</p>
-                      <Button onClick={() => setStatusFilter('ALL')} variant="outline" className="rounded-xl">
-                        Show all arrivals
+                      <Button onClick={() => setStatusFilter('COMPLETED')} variant="outline" className="rounded-xl">
+                        Show completed arrivals
                       </Button>
                     </div>
                   ) : (
@@ -1300,13 +1378,13 @@ const ArrivalsPage = () => {
                         <button type="button" onClick={() => setSummaryMode('lots')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
                       </div>
                     </div>
-                    {/* Status filter — only when Arrivals, blue active (raghav) */}
                     {summaryMode === 'arrivals' && (
                       <div className="flex items-center gap-2 mb-4 text-[11px]">
-                        <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                        <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
                         {ALL_STATUSES.map(s => (
                           <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
                         ))}
+                        <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
                       </div>
                     )}
                     {summaryMode === 'arrivals' && (
@@ -1541,7 +1619,7 @@ const ArrivalsPage = () => {
                     Single Seller
                   </button>
                   <p className="ml-3 text-xs text-muted-foreground">
-                    {isMultiSeller ? 'Vehicle info required (e.g., Bangalore APMC)' : 'Vehicle info not required (e.g., Gadag, Byadagi APMC)'}
+                    {isMultiSeller ? 'Multi-seller vehicle arrival (e.g., Bangalore APMC)' : 'Single seller arrival (e.g., Gadag, Byadagi APMC)'}
                   </p>
                 </div>
 
@@ -1566,7 +1644,7 @@ const ArrivalsPage = () => {
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
                         <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? <span className="font-normal text-red-500">2–12 characters</span> : <span className="font-normal text-red-500">Required</span>)}
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12 characters</span>}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
@@ -1582,7 +1660,7 @@ const ArrivalsPage = () => {
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Loaded Weight (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100,000' : '⚠ Required')}
+                            Loaded Weight (kg) {isLoadedWeightInvalid && '⚠ 0–100,000'}
                           </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
                             ref={loadedWeightInputRef}
@@ -1590,7 +1668,7 @@ const ArrivalsPage = () => {
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty Weight (kg) * {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100,000') : '⚠ Required')}
+                            Empty Weight (kg) {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100,000') : '')}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
                             className={cn("h-11 rounded-xl text-sm font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
@@ -1682,7 +1760,7 @@ const ArrivalsPage = () => {
                           <div className="grid grid-cols-2 gap-3 mb-3">
                             <div>
                               <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                                Rate * {isFreightRateInvalid && (freightRate?.trim() ? '⚠ 0–100,000' : '⚠ Required')}
+                                Rate {isFreightRateInvalid && '⚠ 0–100,000'}
                               </label>
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
                                 className={cn("h-11 rounded-xl text-sm font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
@@ -1795,7 +1873,7 @@ const ArrivalsPage = () => {
                                 <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
                                   <div>
                                     <Input
-                                      placeholder="Seller name * (2–100)"
+                                      placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
                                       onChange={e => updateSeller(si, { seller_name: e.target.value })}
                                       className={cn(
@@ -1972,7 +2050,7 @@ const ArrivalsPage = () => {
 
                     {/* Submit */}
                     <Button onClick={handleSubmitArrival}
-                      disabled={(!editingVehicleId && sellers.length === 0) || isFormInvalid}
+                      disabled={isFormInvalid}
                       className="w-full h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
                       <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
                     </Button>
@@ -2048,29 +2126,29 @@ const ArrivalsPage = () => {
               <button type="button" onClick={() => setSummaryMode('sellers')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'sellers' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Sellers ({totalSellers})</button>
               <button type="button" onClick={() => setSummaryMode('lots')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
             </div>
-            {/* Status filter — only when Arrivals, blue active (raghav) */}
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
-                <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
                 {ALL_STATUSES.map(s => (
                   <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
                 ))}
+                <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
               </div>
             )}
           </div>
           <div className="px-4 space-y-2.5">
-            {apiArrivalsLoading ? (
+            {(statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivalsLoading : apiArrivalsLoading) ? (
               <div className="glass-card p-8 rounded-2xl text-center">
                 <p className="text-muted-foreground">Loading arrivals…</p>
               </div>
-            ) : apiArrivals.length === 0 ? (
-              statusFilter !== 'ALL' ? (
+            ) : filteredArrivals.length === 0 ? (
+              statusFilter !== 'COMPLETED' ? (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-8 rounded-2xl text-center">
                   <Filter className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
                   <h3 className="text-lg font-bold text-foreground mb-1">No {statusLabel(statusFilter)} arrivals</h3>
-                  <p className="text-sm text-muted-foreground mb-4">No arrivals match this filter. Tap below to show all.</p>
-                  <Button onClick={() => setStatusFilter('ALL')} variant="outline" className="rounded-xl">
-                    Show all arrivals
+                  <p className="text-sm text-muted-foreground mb-4">No arrivals match this filter. Tap below to show completed.</p>
+                  <Button onClick={() => setStatusFilter('COMPLETED')} variant="outline" className="rounded-xl">
+                    Show completed arrivals
                   </Button>
                 </motion.div>
               ) : (
@@ -2287,14 +2365,14 @@ const ArrivalsPage = () => {
                         </button>
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-2">
-                        {isMultiSeller ? 'Vehicle info required (e.g., Bangalore APMC)' : 'Vehicle info not required (e.g., Gadag, Byadagi APMC)'}
+                        {isMultiSeller ? 'Multi-seller vehicle arrival (e.g., Bangalore APMC)' : 'Single seller arrival (e.g., Gadag, Byadagi APMC)'}
                       </p>
                     </div>
 
                     {isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
                         <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number * {isVehicleNumberInvalid && (vehicleNumber.trim() ? <span className="font-normal text-red-500">2–12</span> : <span className="font-normal text-red-500">Required</span>)}
+                          <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12</span>}
                         </label>
                         <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
                           onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
@@ -2310,7 +2388,7 @@ const ArrivalsPage = () => {
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isLoadedWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Loaded (kg) * {isLoadedWeightInvalid && (loadedWeight?.trim() ? '⚠ 0–100k' : '⚠ Required')}
+                            Loaded (kg) {isLoadedWeightInvalid && '⚠ 0–100k'}
                           </label>
                           <Input type="number" placeholder="0" value={loadedWeight} onChange={e => setLoadedWeight(e.target.value)}
                             ref={loadedWeightInputRef}
@@ -2318,7 +2396,7 @@ const ArrivalsPage = () => {
                         </div>
                         <div>
                           <label className={cn("text-[10px] mb-1 block", isEmptyWeightInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                            Empty (kg) * {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100k') : '⚠ Required')}
+                            Empty (kg) {isEmptyWeightInvalid && (emptyWeight?.trim() ? (parseFloat(emptyWeight) > (parseFloat(loadedWeight) || 0) ? '⚠ ≤ Loaded' : '⚠ 0–100k') : '')}
                           </label>
                           <Input type="number" placeholder="0" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)}
                             className={cn("h-12 rounded-xl text-base font-medium", isEmptyWeightInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
@@ -2409,7 +2487,7 @@ const ArrivalsPage = () => {
                         <>
                           <div className="mb-3">
                             <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                              Rate * {isFreightRateInvalid && (freightRate?.trim() ? '⚠ 0–100k' : '⚠ Required')}
+                              Rate {isFreightRateInvalid && '⚠ 0–100k'}
                             </label>
                             <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
                               className={cn("h-12 rounded-xl text-base font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
@@ -2516,7 +2594,7 @@ const ArrivalsPage = () => {
                                 <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
                                   <div>
                                     <Input
-                                      placeholder="Seller name * (2–100)"
+                                      placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
                                       onChange={e => updateSeller(si, { seller_name: e.target.value })}
                                       className={cn(
@@ -2681,9 +2759,9 @@ const ArrivalsPage = () => {
                   <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-4 py-3 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
                       <Button onClick={handleSubmitArrival}
-                        disabled={(!editingVehicleId && sellers.length === 0) || isFormInvalid}
+                        disabled={isFormInvalid}
                         className="w-full h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
-                        <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})`}
+                        <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})` : 'Submit Arrival')}
                       </Button>
                     </div>
                   </div>

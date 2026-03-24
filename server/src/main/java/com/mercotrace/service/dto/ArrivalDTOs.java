@@ -1,9 +1,7 @@
 package com.mercotrace.service.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.mercotrace.domain.enumeration.FreightMethod;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
@@ -17,13 +15,10 @@ public final class ArrivalDTOs {
 
     public static class ArrivalLotDTO implements Serializable {
 
-        @NotBlank
         private String lotName;
 
-        @Min(1)
         private int bagCount;
 
-        @NotBlank
         private String commodityName;
 
         private String brokerTag;
@@ -83,7 +78,6 @@ public final class ArrivalDTOs {
 
         private String sellerMark;
 
-        @NotNull
         private List<ArrivalLotDTO> lots;
 
         public Long getContactId() {
@@ -133,24 +127,18 @@ public final class ArrivalDTOs {
 
         private boolean multiSeller;
 
-        @NotNull
         private Double loadedWeight;
 
-        @NotNull
         private Double emptyWeight;
 
-        @NotNull
         private Double deductedWeight;
 
-        @NotNull
         private FreightMethod freightMethod;
 
-        @NotNull
         private Double freightRate;
 
         private boolean noRental;
 
-        @NotNull
         private Double advancePaid;
 
         private String brokerName;
@@ -166,8 +154,9 @@ public final class ArrivalDTOs {
 
         private String origin;
 
-        @NotNull
         private List<ArrivalSellerDTO> sellers;
+
+        private boolean partiallyCompleted;
 
         public String getVehicleNumber() {
             return vehicleNumber;
@@ -296,6 +285,14 @@ public final class ArrivalDTOs {
         public void setSellers(List<ArrivalSellerDTO> sellers) {
             this.sellers = sellers;
         }
+
+        public boolean isPartiallyCompleted() {
+            return partiallyCompleted;
+        }
+
+        public void setPartiallyCompleted(boolean partiallyCompleted) {
+            this.partiallyCompleted = partiallyCompleted;
+        }
     }
 
     public static class ArrivalSummaryDTO implements Serializable {
@@ -320,6 +317,8 @@ public final class ArrivalDTOs {
         private int bidsCount;
         /** Number of lots that have a weighing session. */
         private int weighedCount;
+
+        private boolean partiallyCompleted;
 
         public Long getVehicleId() {
             return vehicleId;
@@ -447,6 +446,14 @@ public final class ArrivalDTOs {
 
         public void setWeighedCount(int weighedCount) {
             this.weighedCount = weighedCount;
+        }
+
+        public boolean isPartiallyCompleted() {
+            return partiallyCompleted;
+        }
+
+        public void setPartiallyCompleted(boolean partiallyCompleted) {
+            this.partiallyCompleted = partiallyCompleted;
         }
     }
 
@@ -642,6 +649,7 @@ public final class ArrivalDTOs {
         private Double freightTotal;
         private Boolean noRental;
         private Double advancePaid;
+        private boolean partiallyCompleted;
         private List<ArrivalSellerFullDTO> sellers;
 
         public Long getVehicleId() { return vehicleId; }
@@ -681,6 +689,8 @@ public final class ArrivalDTOs {
         public Double getAdvancePaid() { return advancePaid; }
         public void setAdvancePaid(Double advancePaid) { this.advancePaid = advancePaid; }
         public List<ArrivalSellerFullDTO> getSellers() { return sellers; }
+        public boolean isPartiallyCompleted() { return partiallyCompleted; }
+        public void setPartiallyCompleted(boolean partiallyCompleted) { this.partiallyCompleted = partiallyCompleted; }
         public void setSellers(List<ArrivalSellerFullDTO> sellers) { this.sellers = sellers; }
     }
 
@@ -701,8 +711,12 @@ public final class ArrivalDTOs {
         private Boolean noRental;
         private Double advancePaid;
         private Boolean multiSeller;
+        @JsonAlias("partially_completed")
+        private Boolean partiallyCompleted;
         private List<ArrivalSellerDTO> sellers;
 
+        public Boolean getPartiallyCompleted() { return partiallyCompleted; }
+        public void setPartiallyCompleted(Boolean partiallyCompleted) { this.partiallyCompleted = partiallyCompleted; }
         public String getVehicleNumber() { return vehicleNumber; }
         public void setVehicleNumber(String vehicleNumber) { this.vehicleNumber = vehicleNumber; }
         public String getGodown() { return godown; }

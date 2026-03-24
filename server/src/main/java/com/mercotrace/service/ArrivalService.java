@@ -15,7 +15,6 @@ import com.mercotrace.service.dto.ArrivalDTOs.ArrivalFullDetailDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalSellerFullDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalLotFullDTO;
 import com.mercotrace.service.dto.ArrivalDTOs.ArrivalUpdateDTO;
-import jakarta.validation.Valid;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -95,16 +94,31 @@ public class ArrivalService {
 
     /**
      * Create a new arrival with vehicle, weight, sellers, lots, and freight side effects.
+     * When request.isPartiallyCompleted() is true, mandatory validations and financial
+     * side-effects (vouchers, freight distribution) are skipped so the user can save
+     * an incomplete form without friction.
      */
-    public ArrivalSummaryDTO createArrival(@Valid ArrivalRequestDTO request) {
-        validateRequest(request);
+    public ArrivalSummaryDTO createArrival(ArrivalRequestDTO request) {
+        boolean isPartial = request.isPartiallyCompleted();
+
+        if (!isPartial) {
+            validateCompletedArrival(request);
+            validateRequest(request);
+        }
 
         Long traderId = resolveTraderId();
-        validateSellerMarks(request.getSellers(), traderId, null);
+
+        List<ArrivalSellerDTO> requestSellers = request.getSellers() != null ? request.getSellers() : List.of();
+        if (!requestSellers.isEmpty()) {
+            validateSellerMarks(requestSellers, traderId, null);
+        }
 
         Instant now = Instant.now();
-        double netWeight = Math.max(0d, request.getLoadedWeight() - request.getEmptyWeight());
-        double finalBillableWeight = Math.max(0d, netWeight - request.getDeductedWeight());
+        double loadedWt = request.getLoadedWeight() != null ? request.getLoadedWeight() : 0d;
+        double emptyWt = request.getEmptyWeight() != null ? request.getEmptyWeight() : 0d;
+        double deductedWt = request.getDeductedWeight() != null ? request.getDeductedWeight() : 0d;
+        double netWeight = Math.max(0d, loadedWt - emptyWt);
+        double finalBillableWeight = Math.max(0d, netWeight - deductedWt);
 
         Vehicle vehicle = new Vehicle();
         String vehicleNumber = normalizeVehicleNumber(request);
@@ -112,6 +126,7 @@ public class ArrivalService {
         vehicle.setVehicleNumber(vehicleNumber);
         vehicle.setArrivalDatetime(now);
         vehicle.setCreatedAt(now);
+        vehicle.setPartiallyCompleted(isPartial);
         if (request.getGodown() != null) vehicle.setGodown(request.getGodown());
         if (request.getGatepassNumber() != null) vehicle.setGatepassNumber(request.getGatepassNumber());
         if (request.getOrigin() != null) vehicle.setOrigin(request.getOrigin());
@@ -121,9 +136,9 @@ public class ArrivalService {
 
         VehicleWeight weight = new VehicleWeight();
         weight.setVehicleId(vehicle.getId());
-        weight.setLoadedWeight(request.getLoadedWeight());
-        weight.setEmptyWeight(request.getEmptyWeight());
-        weight.setDeductedWeight(request.getDeductedWeight());
+        weight.setLoadedWeight(loadedWt);
+        weight.setEmptyWeight(emptyWt);
+        weight.setDeductedWeight(deductedWt);
         weight.setNetWeight(netWeight);
         weight.setRecordedAt(now);
         vehicleWeightRepository.save(weight);
@@ -135,7 +150,7 @@ public class ArrivalService {
         List<Lot> lots = new ArrayList<>();
 
         Long brokerContactId = request.getBrokerContactId();
-        for (ArrivalSellerDTO sellerDTO : request.getSellers()) {
+        for (ArrivalSellerDTO sellerDTO : requestSellers) {
             SellerInVehicle sellerInVehicle = new SellerInVehicle();
             sellerInVehicle.setVehicleId(vehicle.getId());
             Long contactId = sellerDTO.getContactId();
@@ -146,11 +161,8 @@ public class ArrivalService {
                 contactService.ensureTraderUsesPortalContact(traderId, contactId);
                 sellerInVehicle.setContactId(contactId);
             } else {
-                if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
-                    throw new IllegalArgumentException("Free-text seller must have a name");
-                }
                 sellerInVehicle.setContactId(null);
-                sellerInVehicle.setSellerName(sellerDTO.getSellerName().trim());
+                sellerInVehicle.setSellerName(sellerDTO.getSellerName() != null ? sellerDTO.getSellerName().trim() : null);
                 sellerInVehicle.setSellerPhone(sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null);
                 sellerInVehicle.setSellerMark(sellerDTO.getSellerMark() != null ? sellerDTO.getSellerMark().trim() : null);
             }
@@ -161,12 +173,21 @@ public class ArrivalService {
             sellerLinks.add(sellerInVehicle);
 
             sellerSerial++;
-            for (ArrivalLotDTO lotDTO : sellerDTO.getLots()) {
+            List<ArrivalLotDTO> sellerLots = sellerDTO.getLots() != null ? sellerDTO.getLots() : List.of();
+            for (ArrivalLotDTO lotDTO : sellerLots) {
+                // DB constraints require commodity_id + lot_name; skip incomplete lot rows.
+                String lotName = lotDTO.getLotName();
+                String commodityName = lotDTO.getCommodityName();
+                boolean hasLotName = lotName != null && !lotName.isBlank();
+                boolean hasCommodityName = commodityName != null && !commodityName.isBlank();
+                if (!hasLotName || !hasCommodityName) continue;
+
                 Lot lot = new Lot();
                 lot.setSellerVehicleId(sellerInVehicle.getId());
-                lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
-                lot.setLotName(lotDTO.getLotName().trim());
-                lot.setBagCount(lotDTO.getBagCount());
+                lot.setCommodityId(resolveCommodityId(traderId, commodityName.trim()));
+                lot.setLotName(lotName.trim());
+                Integer bagCount = lotDTO.getBagCount();
+                lot.setBagCount(bagCount != null ? bagCount : 0);
                 if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                 if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                 lot.setSellerSerialNo(sellerSerial);
@@ -189,28 +210,31 @@ public class ArrivalService {
         }
         dailySerialRepository.save(dailySerial);
 
-        double freightTotal = computeFreightTotal(request.getFreightMethod(), request.getFreightRate(), finalBillableWeight, lots, request.isNoRental());
+        FreightMethod fm = request.getFreightMethod() != null ? request.getFreightMethod() : FreightMethod.BY_WEIGHT;
+        double freightRate = request.getFreightRate() != null ? request.getFreightRate() : 0d;
+        double advancePaid = request.getAdvancePaid() != null ? request.getAdvancePaid() : 0d;
+        double freightTotal = computeFreightTotal(fm, freightRate, finalBillableWeight, lots, request.isNoRental());
 
         FreightCalculation freight = new FreightCalculation();
         freight.setVehicleId(vehicle.getId());
-        freight.setMethod(request.getFreightMethod());
-        freight.setRate(request.getFreightRate());
+        freight.setMethod(fm);
+        freight.setRate(freightRate);
         freight.setTotalAmount(freightTotal);
         freight.setNoRental(request.isNoRental());
-        freight.setAdvancePaid(request.getAdvancePaid());
+        freight.setAdvancePaid(advancePaid);
         freight.setCreatedAt(now);
         freight = freightCalculationRepository.save(freight);
 
-        if (!request.isNoRental() && freightTotal > 0d) {
-            createVoucher(traderId, "FREIGHT", vehicle.getId(), freightTotal, now);
-        }
-
-        if (request.getAdvancePaid() != null && request.getAdvancePaid() > 0d) {
-            createVoucher(traderId, "ADVANCE", vehicle.getId(), request.getAdvancePaid(), now);
-        }
-
-        if (request.getFreightMethod() == FreightMethod.DIVIDE_BY_WEIGHT && !lots.isEmpty() && freightTotal > 0d) {
-            distributeFreight(freight, lots, freightTotal);
+        if (!isPartial) {
+            if (!request.isNoRental() && freightTotal > 0d) {
+                createVoucher(traderId, "FREIGHT", vehicle.getId(), freightTotal, now);
+            }
+            if (advancePaid > 0d) {
+                createVoucher(traderId, "ADVANCE", vehicle.getId(), advancePaid, now);
+            }
+            if (fm == FreightMethod.DIVIDE_BY_WEIGHT && !lots.isEmpty() && freightTotal > 0d) {
+                distributeFreight(freight, lots, freightTotal);
+            }
         }
 
         ArrivalSummaryDTO summary = new ArrivalSummaryDTO();
@@ -221,8 +245,9 @@ public class ArrivalService {
         summary.setNetWeight(netWeight);
         summary.setFinalBillableWeight(finalBillableWeight);
         summary.setFreightTotal(freightTotal);
-        summary.setFreightMethod(request.getFreightMethod());
+        summary.setFreightMethod(fm);
         summary.setArrivalDatetime(vehicle.getArrivalDatetime());
+        summary.setPartiallyCompleted(isPartial);
         return summary;
     }
 
@@ -237,14 +262,21 @@ public class ArrivalService {
 
     @Transactional(readOnly = true)
     public Page<ArrivalSummaryDTO> listArrivals(Pageable pageable) {
-        return listArrivals(pageable, null);
+        return listArrivals(pageable, null, null);
     }
 
     @Transactional(readOnly = true)
     public Page<ArrivalSummaryDTO> listArrivals(Pageable pageable, String statusFilter) {
+        return listArrivals(pageable, statusFilter, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ArrivalSummaryDTO> listArrivals(Pageable pageable, String statusFilter, Boolean partiallyCompleted) {
         Long traderId = resolveTraderId();
 
-        Page<Vehicle> vehiclePage = vehicleRepository.findAllByTraderIdOrderByArrivalDatetimeDesc(traderId, pageable);
+        boolean wantPartial = Boolean.TRUE.equals(partiallyCompleted);
+        Page<Vehicle> vehiclePage = vehicleRepository
+            .findAllByTraderIdAndPartiallyCompletedOrderByArrivalDatetimeDesc(traderId, wantPartial, pageable);
         List<Vehicle> vehicles = vehiclePage.getContent();
 
         if (vehicles.isEmpty()) {
@@ -322,6 +354,7 @@ public class ArrivalService {
             dto.setTotalBags(totalBags);
             dto.setBidsCount(bidsCount);
             dto.setWeighedCount(weighedCount);
+            dto.setPartiallyCompleted(Boolean.TRUE.equals(v.getPartiallyCompleted()));
             return dto;
         }).toList();
 
@@ -419,12 +452,15 @@ public class ArrivalService {
             sellerFull.setLots(lotFullList);
             sellerFullList.add(sellerFull);
         }
+        dto.setPartiallyCompleted(Boolean.TRUE.equals(vehicle.getPartiallyCompleted()));
         dto.setSellers(sellerFullList);
         return dto;
     }
 
     /**
      * Update arrival: vehicle metadata, weights, and/or freight. All fields optional. Trader-scoped.
+     * When partiallyCompleted transitions from true → false, full validation and financial
+     * side-effects are applied (promotion to completed record).
      */
     @Transactional
     public ArrivalSummaryDTO updateArrival(Long vehicleId, ArrivalUpdateDTO update) {
@@ -433,6 +469,13 @@ public class ArrivalService {
             .orElseThrow(() -> new IllegalArgumentException("Arrival not found: " + vehicleId));
         if (!vehicle.getTraderId().equals(traderId)) {
             throw new IllegalArgumentException("Arrival not found: " + vehicleId);
+        }
+
+        boolean wasPartial = Boolean.TRUE.equals(vehicle.getPartiallyCompleted());
+        boolean promotingToComplete = wasPartial && Boolean.FALSE.equals(update.getPartiallyCompleted());
+
+        if (update.getPartiallyCompleted() != null) {
+            vehicle.setPartiallyCompleted(update.getPartiallyCompleted());
         }
 
         if (update.getVehicleNumber() != null && !update.getVehicleNumber().isBlank()) {
@@ -445,6 +488,17 @@ public class ArrivalService {
         if (update.getNarration() != null) vehicle.setNarration(update.getNarration().trim());
         vehicle = vehicleRepository.save(vehicle);
         final Vehicle vehicleRef = vehicle;
+
+        if (promotingToComplete) {
+            List<ArrivalSellerDTO> promoteSellers = update.getSellers();
+            if (promoteSellers == null || promoteSellers.isEmpty()) {
+                throw new IllegalArgumentException("At least one seller is required");
+            }
+            boolean multiForValidate = update.getMultiSeller() != null
+                ? Boolean.TRUE.equals(update.getMultiSeller())
+                : promoteSellers.size() > 1;
+            validateCompletedArrivalPayload(promoteSellers, multiForValidate, vehicle.getVehicleNumber());
+        }
 
         if (update.getLoadedWeight() != null || update.getEmptyWeight() != null || update.getDeductedWeight() != null) {
             VehicleWeight weight = vehicleWeightRepository.findOneByVehicleId(vehicleId).orElseGet(() -> {
@@ -466,10 +520,14 @@ public class ArrivalService {
             vehicleWeightRepository.save(weight);
         }
 
+        boolean isStillPartial = Boolean.TRUE.equals(vehicle.getPartiallyCompleted());
+
         boolean sellersReplaced = false;
         List<Lot> currentLots = new ArrayList<>();
         if (update.getSellers() != null && !update.getSellers().isEmpty()) {
-            validateUpdateSellers(update.getSellers(), update.getMultiSeller(), traderId);
+            if (!isStillPartial) {
+                validateUpdateSellers(update.getSellers(), update.getMultiSeller(), traderId);
+            }
             List<SellerInVehicle> existingSellers = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
             List<Long> existingSellerVehicleIds = existingSellers.stream().map(SellerInVehicle::getId).toList();
             if (!existingSellerVehicleIds.isEmpty()) {
@@ -502,17 +560,14 @@ public class ArrivalService {
                     contactService.ensureTraderUsesPortalContact(traderId, contactId);
                     siv.setContactId(contactId);
                 } else {
-                    if (sellerDTO.getSellerName() == null || sellerDTO.getSellerName().isBlank()) {
-                        throw new IllegalArgumentException("Free-text seller must have a name");
-                    }
                     String phone = sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null;
-                    if (phone != null && !phone.isEmpty()) {
+                    if (!isStillPartial && phone != null && !phone.isEmpty()) {
                         if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
                             throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
                         }
                     }
                     siv.setContactId(null);
-                    siv.setSellerName(sellerDTO.getSellerName().trim());
+                    siv.setSellerName(sellerDTO.getSellerName() != null ? sellerDTO.getSellerName().trim() : null);
                     siv.setSellerPhone(phone);
                     siv.setSellerMark(sellerDTO.getSellerMark() != null ? sellerDTO.getSellerMark().trim() : null);
                 }
@@ -521,12 +576,21 @@ public class ArrivalService {
                 }
                 siv = sellerInVehicleRepository.save(siv);
                 sellerSerial++;
-                for (ArrivalLotDTO lotDTO : sellerDTO.getLots()) {
+                List<ArrivalLotDTO> sellerLots = sellerDTO.getLots() != null ? sellerDTO.getLots() : List.of();
+                for (ArrivalLotDTO lotDTO : sellerLots) {
+                    // DB constraints require commodity_id + lot_name; skip incomplete lot rows.
+                    String lotName = lotDTO.getLotName();
+                    String commodityName = lotDTO.getCommodityName();
+                    boolean hasLotName = lotName != null && !lotName.isBlank();
+                    boolean hasCommodityName = commodityName != null && !commodityName.isBlank();
+                    if (!hasLotName || !hasCommodityName) continue;
+
                     Lot lot = new Lot();
                     lot.setSellerVehicleId(siv.getId());
-                    lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
-                    lot.setLotName(lotDTO.getLotName().trim());
-                    lot.setBagCount(lotDTO.getBagCount());
+                    lot.setCommodityId(resolveCommodityId(traderId, commodityName.trim()));
+                    lot.setLotName(lotName.trim());
+                    Integer bagCount = lotDTO.getBagCount();
+                    lot.setBagCount(bagCount != null ? bagCount : 0);
                     if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                     if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                     lot.setSellerSerialNo(sellerSerial);
@@ -561,8 +625,8 @@ public class ArrivalService {
                 : lotRepository.findAllBySellerVehicleIdIn(
                     sellerInVehicleRepository.findAllByVehicleId(vehicleId).stream().map(SellerInVehicle::getId).toList());
             double freightTotal = computeFreightTotal(
-                freight.getMethod(),
-                freight.getRate(),
+                freight.getMethod() != null ? freight.getMethod() : FreightMethod.BY_WEIGHT,
+                freight.getRate() != null ? freight.getRate() : 0d,
                 finalBillable,
                 lotsForFreight,
                 Boolean.TRUE.equals(freight.getNoRental())
@@ -570,19 +634,21 @@ public class ArrivalService {
             freight.setTotalAmount(freightTotal);
             freight = freightCalculationRepository.save(freight);
 
-            voucherRepository.deleteByReferenceTypeAndReferenceId("FREIGHT", vehicleId);
-            voucherRepository.deleteByReferenceTypeAndReferenceId("ADVANCE", vehicleId);
-            Instant now = Instant.now();
-            if (!Boolean.TRUE.equals(freight.getNoRental()) && freightTotal > 0d) {
-                createVoucher(traderId, "FREIGHT", vehicleId, freightTotal, now);
-            }
-            if (freight.getAdvancePaid() != null && freight.getAdvancePaid() > 0d) {
-                createVoucher(traderId, "ADVANCE", vehicleId, freight.getAdvancePaid(), now);
-            }
+            if (!isStillPartial) {
+                voucherRepository.deleteByReferenceTypeAndReferenceId("FREIGHT", vehicleId);
+                voucherRepository.deleteByReferenceTypeAndReferenceId("ADVANCE", vehicleId);
+                Instant now2 = Instant.now();
+                if (!Boolean.TRUE.equals(freight.getNoRental()) && freightTotal > 0d) {
+                    createVoucher(traderId, "FREIGHT", vehicleId, freightTotal, now2);
+                }
+                if (freight.getAdvancePaid() != null && freight.getAdvancePaid() > 0d) {
+                    createVoucher(traderId, "ADVANCE", vehicleId, freight.getAdvancePaid(), now2);
+                }
 
-            if (freight.getMethod() == FreightMethod.DIVIDE_BY_WEIGHT && !lotsForFreight.isEmpty() && freightTotal > 0d) {
-                freightDistributionRepository.deleteByFreightId(freight.getId());
-                distributeFreight(freight, lotsForFreight, freightTotal);
+                if (freight.getMethod() == FreightMethod.DIVIDE_BY_WEIGHT && !lotsForFreight.isEmpty() && freightTotal > 0d) {
+                    freightDistributionRepository.deleteByFreightId(freight.getId());
+                    distributeFreight(freight, lotsForFreight, freightTotal);
+                }
             }
         }
 
@@ -649,6 +715,7 @@ public class ArrivalService {
         dto.setGodown(v.getGodown());
         dto.setGatepassNumber(v.getGatepassNumber());
         dto.setOrigin(v.getOrigin());
+        dto.setPartiallyCompleted(Boolean.TRUE.equals(v.getPartiallyCompleted()));
         return dto;
     }
 
@@ -770,42 +837,78 @@ public class ArrivalService {
         validateUniqueLotNamesWithinSeller(sellers);
     }
 
-    private void validateRequest(ArrivalRequestDTO request) {
-        if (request.getSellers() == null || request.getSellers().isEmpty()) {
+    /**
+     * Rules for a fully completed arrival (not a draft). Drafts skip this via {@code partiallyCompleted == true}
+     * or {@code POST /api/arrivals/partial}.
+     */
+    private void validateCompletedArrival(ArrivalRequestDTO request) {
+        List<ArrivalSellerDTO> sellers = request.getSellers() != null ? request.getSellers() : List.of();
+        validateCompletedArrivalPayload(sellers, request.isMultiSeller(), request.getVehicleNumber());
+    }
+
+    private void validateCompletedArrivalPayload(List<ArrivalSellerDTO> sellers, boolean multiSeller, String vehicleNumber) {
+        if (sellers.isEmpty()) {
             throw new IllegalArgumentException("At least one seller is required");
         }
-        if (!request.isMultiSeller() && request.getSellers().size() > 1) {
-            throw new IllegalArgumentException("Single-seller arrival allows only one seller");
-        }
-        for (ArrivalSellerDTO seller : request.getSellers()) {
-            if (seller.getContactId() == null) {
-                if (seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
-                    String phone = seller.getSellerPhone().trim();
-                    if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
-                        throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
-                    }
-                }
-            }
-            if (seller.getLots() == null || seller.getLots().isEmpty()) {
-                throw new IllegalArgumentException("Each seller must have at least one lot");
-            }
-            for (ArrivalLotDTO lot : seller.getLots()) {
-                if (lot.getLotName() == null || lot.getLotName().isBlank()) {
-                    throw new IllegalArgumentException("Lot name is required");
-                }
-                if (!lot.getLotName().trim().matches("^[a-zA-Z0-9][a-zA-Z0-9\\s_\\-]*$")) {
-                    throw new IllegalArgumentException("Lot name must be alphanumeric (spaces), and may include '-' and '_' : " + lot.getLotName());
-                }
-                if (lot.getBagCount() <= 0) {
-                    throw new IllegalArgumentException("Lot bag count must be greater than 0");
-                }
-            }
-        }
-        validateUniqueLotNamesWithinSeller(request.getSellers());
-        if (request.isMultiSeller()) {
-            if (request.getVehicleNumber() == null || request.getVehicleNumber().isBlank()) {
+        if (multiSeller) {
+            if (vehicleNumber == null || vehicleNumber.isBlank()) {
                 throw new IllegalArgumentException("Vehicle number is required for multi-seller arrivals");
             }
+            String vn = vehicleNumber.trim();
+            if (vn.length() < 2 || vn.length() > 12) {
+                throw new IllegalArgumentException("Vehicle number must be between 2 and 12 characters");
+            }
+        }
+        for (ArrivalSellerDTO seller : sellers) {
+            if (seller.getContactId() == null) {
+                if (seller.getSellerName() == null || seller.getSellerName().isBlank()) {
+                    throw new IllegalArgumentException("Free-text seller must have a name");
+                }
+            }
+            List<ArrivalLotDTO> lots = seller.getLots() != null ? seller.getLots() : List.of();
+            boolean hasCompleteLot = false;
+            for (ArrivalLotDTO lot : lots) {
+                if (lot.getLotName() != null
+                    && !lot.getLotName().isBlank()
+                    && lot.getCommodityName() != null
+                    && !lot.getCommodityName().isBlank()
+                    && lot.getBagCount() > 0) {
+                    hasCompleteLot = true;
+                    break;
+                }
+            }
+            if (!hasCompleteLot) {
+                throw new IllegalArgumentException("Each seller must have at least one lot with name, commodity, and quantity");
+            }
+        }
+    }
+
+    /**
+     * Validate a completed arrival request. Only format/range checks when values are
+     * present; no fields are required so users can save with minimal data.
+     */
+    private void validateRequest(ArrivalRequestDTO request) {
+        List<ArrivalSellerDTO> sellers = request.getSellers() != null ? request.getSellers() : List.of();
+        if (!request.isMultiSeller() && sellers.size() > 1) {
+            throw new IllegalArgumentException("Single-seller arrival allows only one seller");
+        }
+        for (ArrivalSellerDTO seller : sellers) {
+            if (seller.getContactId() == null && seller.getSellerPhone() != null && !seller.getSellerPhone().isBlank()) {
+                String phone = seller.getSellerPhone().trim();
+                if (!phone.matches("[0-9]+") || phone.length() < 6 || phone.length() > 20) {
+                    throw new IllegalArgumentException("Free-text seller phone must be digits only (6–20 digits)");
+                }
+            }
+            List<ArrivalLotDTO> lots = seller.getLots() != null ? seller.getLots() : List.of();
+            for (ArrivalLotDTO lot : lots) {
+                if (lot.getLotName() != null && !lot.getLotName().isBlank()
+                    && !lot.getLotName().trim().matches("^[a-zA-Z0-9][a-zA-Z0-9\\s_\\-]*$")) {
+                    throw new IllegalArgumentException("Lot name must be alphanumeric (spaces), and may include '-' and '_' : " + lot.getLotName());
+                }
+            }
+        }
+        if (!sellers.isEmpty()) {
+            validateUniqueLotNamesWithinSeller(sellers);
         }
     }
 
@@ -914,7 +1017,9 @@ public class ArrivalService {
             }
             return provided.trim().toUpperCase();
         }
-        return request.getVehicleNumber() != null ? request.getVehicleNumber().trim().toUpperCase() : "";
+        String vn = request.getVehicleNumber();
+        if (vn == null || vn.isBlank()) return null;
+        return vn.trim().toUpperCase();
     }
 }
 
