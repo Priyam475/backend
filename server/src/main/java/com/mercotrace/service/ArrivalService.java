@@ -42,6 +42,12 @@ public class ArrivalService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ArrivalService.class);
 
+    /** JSON omitted {@code multiSeller} → multi mode (matches UI default); explicit false → single. */
+    private static boolean effectiveRequestMultiSeller(ArrivalRequestDTO request) {
+        Boolean m = request.getMultiSeller();
+        return m == null || Boolean.TRUE.equals(m);
+    }
+
     private final VehicleRepository vehicleRepository;
     private final VehicleWeightRepository vehicleWeightRepository;
     private final SellerInVehicleRepository sellerInVehicleRepository;
@@ -127,7 +133,7 @@ public class ArrivalService {
         vehicle.setArrivalDatetime(now);
         vehicle.setCreatedAt(now);
         vehicle.setPartiallyCompleted(isPartial);
-        vehicle.setMultiSeller(request.isMultiSeller());
+        vehicle.setMultiSeller(effectiveRequestMultiSeller(request));
         if (request.getGodown() != null) vehicle.setGodown(request.getGodown());
         if (request.getGatepassNumber() != null) vehicle.setGatepassNumber(request.getGatepassNumber());
         if (request.getOrigin() != null) vehicle.setOrigin(request.getOrigin());
@@ -454,7 +460,7 @@ public class ArrivalService {
             sellerFullList.add(sellerFull);
         }
         dto.setPartiallyCompleted(Boolean.TRUE.equals(vehicle.getPartiallyCompleted()));
-        dto.setMultiSeller(Boolean.TRUE.equals(vehicle.getMultiSeller()));
+        dto.setMultiSeller(!Boolean.FALSE.equals(vehicle.getMultiSeller()));
         dto.setSellers(sellerFullList);
         return dto;
     }
@@ -848,7 +854,7 @@ public class ArrivalService {
      */
     private void validateCompletedArrival(ArrivalRequestDTO request) {
         List<ArrivalSellerDTO> sellers = request.getSellers() != null ? request.getSellers() : List.of();
-        validateCompletedArrivalPayload(sellers, request.isMultiSeller(), request.getVehicleNumber());
+        validateCompletedArrivalPayload(sellers, effectiveRequestMultiSeller(request), request.getVehicleNumber());
     }
 
     private void validateCompletedArrivalPayload(List<ArrivalSellerDTO> sellers, boolean multiSeller, String vehicleNumber) {
@@ -894,7 +900,7 @@ public class ArrivalService {
      */
     private void validateRequest(ArrivalRequestDTO request) {
         List<ArrivalSellerDTO> sellers = request.getSellers() != null ? request.getSellers() : List.of();
-        if (!request.isMultiSeller() && sellers.size() > 1) {
+        if (!effectiveRequestMultiSeller(request) && sellers.size() > 1) {
             throw new IllegalArgumentException("Single-seller arrival allows only one seller");
         }
         for (ArrivalSellerDTO seller : sellers) {
@@ -1015,7 +1021,7 @@ public class ArrivalService {
     }
 
     private String normalizeVehicleNumber(ArrivalRequestDTO request) {
-        if (!request.isMultiSeller()) {
+        if (!effectiveRequestMultiSeller(request)) {
             String provided = request.getVehicleNumber();
             if (provided == null || provided.isBlank()) {
                 return "SINGLE-SELLER";

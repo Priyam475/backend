@@ -100,6 +100,29 @@ const VARIANT_OPTIONS = [
   { value: 'Large', label: 'Large' },
 ];
 
+function sameArrivalVehicleId(
+  a: string | number | undefined | null,
+  b: string | number | undefined | null,
+): boolean {
+  if (a == null || b == null) return false;
+  return String(a) === String(b);
+}
+
+/**
+ * Restore multi-seller vs single on edit. When API says single but the row is an early multi draft
+ * (real vehicle #, no sellers yet, mis-persisted flag), prefer multi.
+ */
+function resolveMultiSellerForEdit(detail: ArrivalFullDetail, mappedSellersCount: number): boolean {
+  const multiFromApi = detail.multiSeller;
+  if (typeof multiFromApi === 'boolean') {
+    if (multiFromApi) return true;
+    const vn = (detail.vehicleNumber ?? '').trim().toUpperCase();
+    if (mappedSellersCount === 0 && vn.length > 0 && vn !== 'SINGLE-SELLER') return true;
+    return false;
+  }
+  return mappedSellersCount > 1;
+}
+
 const ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS =
   'px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold shrink-0';
 
@@ -113,7 +136,7 @@ function ArrivalSummaryVehicleSellerQty({
   const qty = totalBags ?? 0;
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-      <span className={ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS}>{vehicleNumber}</span>
+      <span className={ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS}>{vehicleNumber?.trim() ? vehicleNumber : '—'}</span>
       <span className="text-muted-foreground text-xs shrink-0" aria-hidden>
         |
       </span>
@@ -1080,7 +1103,7 @@ const ArrivalsPage = () => {
   };
 
   const loadExpandedDetail = async (vehicleId: number | string) => {
-    if (expandedDetail?.vehicleId === vehicleId) {
+    if (sameArrivalVehicleId(expandedDetail?.vehicleId, vehicleId)) {
       setExpandedDetail(null);
       return;
     }
@@ -1157,9 +1180,7 @@ const ArrivalsPage = () => {
           return acc;
         }, {})
       );
-      const multiFromApi = detail?.multiSeller;
-      const resolvedMulti =
-        typeof multiFromApi === 'boolean' ? multiFromApi : mappedSellers.length > 1;
+      const resolvedMulti = resolveMultiSellerForEdit(detail, mappedSellers.length);
       setIsMultiSeller(resolvedMulti);
 
       // Capture baseline immediately after we populate all edit fields,
@@ -1448,7 +1469,7 @@ const ArrivalsPage = () => {
                         <tbody>
                           {filteredArrivals.map((a, i) => {
                               const status = getArrivalStatus(a);
-                              const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
+                              const isExpanded = sameArrivalVehicleId(expandedDetail?.vehicleId, a.vehicleId);
                               return (
                                 <Fragment key={a.vehicleId + '-' + i}>
                                   <motion.tr
@@ -2263,7 +2284,7 @@ const ArrivalsPage = () => {
               }
               return filteredArrivals.map((a, i) => {
                 const status = getArrivalStatus(a);
-                const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
+                const isExpanded = sameArrivalVehicleId(expandedDetail?.vehicleId, a.vehicleId);
                 return (
                   <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
                     <div className="glass-card rounded-2xl overflow-x-auto overflow-y-visible max-w-full">
@@ -2314,8 +2335,30 @@ const ArrivalsPage = () => {
                                     hidePrint
                                   />
                                   <div className="flex gap-2 pt-1">
-                                    {can('Arrivals', 'Edit') && <button type="button" onClick={() => handleEditArrival(a)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/50 text-xs font-semibold"><Pencil className="w-3.5 h-3.5" /> Edit</button>}
-                                    {can('Arrivals', 'Delete') && <button type="button" onClick={() => setPendingDelete({ kind: 'arrival', vehicleId: a.vehicleId, label: a.vehicleNumber })} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-50 dark:bg-red-950/20 text-xs font-semibold text-red-600"><Trash2 className="w-3.5 h-3.5" /> Delete</button>}
+                                    {can('Arrivals', 'Edit') && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditArrival({ vehicleId: expandedDetail.vehicleId })}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/50 text-xs font-semibold"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" /> Edit
+                                      </button>
+                                    )}
+                                    {can('Arrivals', 'Delete') && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setPendingDelete({
+                                            kind: 'arrival',
+                                            vehicleId: expandedDetail.vehicleId,
+                                            label: expandedDetail.vehicleNumber ?? a.vehicleNumber,
+                                          })
+                                        }
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-50 dark:bg-red-950/20 text-xs font-semibold text-red-600"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                                      </button>
+                                    )}
                                   </div>
                                 </>
                               ) : null}

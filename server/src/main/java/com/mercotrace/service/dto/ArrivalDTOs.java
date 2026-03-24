@@ -125,7 +125,8 @@ public final class ArrivalDTOs {
 
         private String vehicleNumber;
 
-        private boolean multiSeller;
+        /** Null when omitted in JSON — treated as multi-seller in service (matches UI default). */
+        private Boolean multiSeller;
 
         private Double loadedWeight;
 
@@ -166,11 +167,11 @@ public final class ArrivalDTOs {
             this.vehicleNumber = vehicleNumber;
         }
 
-        public boolean isMultiSeller() {
+        public Boolean getMultiSeller() {
             return multiSeller;
         }
 
-        public void setMultiSeller(boolean multiSeller) {
+        public void setMultiSeller(Boolean multiSeller) {
             this.multiSeller = multiSeller;
         }
 
