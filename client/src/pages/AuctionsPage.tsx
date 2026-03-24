@@ -280,6 +280,8 @@ const AuctionsPage = () => {
   const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [dockHeight, setDockHeight] = useState(0);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -674,6 +676,24 @@ const AuctionsPage = () => {
     pendingMarkCaretPosRef.current = null;
     forceMarkFocusRef.current = false;
   }, [scribbleMark]);
+
+  // Keep grid bottom-padding exactly equal to the dock's rendered height to prevent scroll gap
+  useEffect(() => {
+    if (isDesktop) { setDockHeight(0); return; }
+    let observer: ResizeObserver | null = null;
+    // rAF ensures the fixed dock element has been painted before we read its height
+    const raf = requestAnimationFrame(() => {
+      const el = dockRef.current;
+      if (!el) return;
+      setDockHeight(el.offsetHeight);
+      observer = new ResizeObserver(() => setDockHeight(el.offsetHeight));
+      observer.observe(el);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+    };
+  }, [isDesktop]);
 
   const handleMarkBackspace = useCallback(() => {
     if (editingBidId) return;
@@ -1693,7 +1713,7 @@ const AuctionsPage = () => {
   // ═══ LOT SELECTOR SCREEN ═══
   if (showLotSelector) {
     return (
-      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <div className="bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6">
         {/* Mobile Header */}
         {!isDesktop && (
           <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
@@ -1925,8 +1945,8 @@ const AuctionsPage = () => {
   // ═══ SALES PAD (AUCTION) SCREEN ═══
   return (
     <div className={cn(
-      "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
-      isDesktop ? "pb-28" : "pb-[42rem]"
+      "bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
+      isDesktop ? "pb-28" : ""
     )}>
       {/* Mobile Header */}
       {!isDesktop && (
@@ -2152,7 +2172,7 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <div className={cn("px-4 mt-4 flex flex-col gap-3", !isDesktop && "pb-24")}>
+      <div className="px-4 mt-4 flex flex-col gap-3" style={!isDesktop && dockHeight > 0 ? { paddingBottom: dockHeight } : !isDesktop ? { paddingBottom: 96 } : undefined}>
         {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Toggle to show/hide. */}
         {isDesktop && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
@@ -2739,7 +2759,7 @@ const AuctionsPage = () => {
 
       {/* Mobile/Tablet Dock: compact layout, preset below rate/qty. */}
       {!isDesktop && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div ref={dockRef} className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className="space-y-2 mb-1.5">
             <div>
               <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
