@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -63,6 +65,9 @@ public class ArrivalService {
     private final AuctionRepository auctionRepository;
     private final AuctionEntryRepository auctionEntryRepository;
     private final WeighingSessionRepository weighingSessionRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public ArrivalService(
         VehicleRepository vehicleRepository,
@@ -671,6 +676,7 @@ public class ArrivalService {
      */
     @Transactional
     public void deleteArrival(Long vehicleId) {
+        evictSecondLevelCacheForArrivalDeletion(vehicleId);
         Long traderId = resolveTraderId();
         Vehicle vehicle = vehicleRepository.findById(vehicleId)
             .orElseThrow(() -> new IllegalArgumentException("Arrival not found: " + vehicleId));
@@ -701,6 +707,91 @@ public class ArrivalService {
         sellerInVehicleRepository.deleteByVehicleId(vehicleId);
         vehicleWeightRepository.deleteByVehicleId(vehicleId);
         vehicleRepository.delete(vehicle);
+    }
+
+    /**
+     * Drop Hibernate second-level (Redis/JCache) entries for this arrival graph before DELETE.
+     * Stale serialized entries after entity/schema changes — or Redisson decode edge cases — can surface as
+     * {@code Index N out of bounds for length N} while loading or updating the cache during delete.
+     */
+    private void evictSecondLevelCacheForArrivalDeletion(Long vehicleId) {
+        try {
+            jakarta.persistence.Cache slc = entityManager.getEntityManagerFactory().getCache();
+            if (slc == null) {
+                return;
+            }
+            tryEvictSecondLevel(slc, Vehicle.class, vehicleId);
+
+            for (Long id : nativeLongIds("SELECT id FROM vehicle_weight WHERE vehicle_id = ?1", vehicleId)) {
+                tryEvictSecondLevel(slc, VehicleWeight.class, id);
+            }
+            for (Long id : nativeLongIds("SELECT id FROM freight_calculation WHERE vehicle_id = ?1", vehicleId)) {
+                tryEvictSecondLevel(slc, FreightCalculation.class, id);
+            }
+            for (Long id :
+                nativeLongIds(
+                    "SELECT fd.id FROM freight_distribution fd INNER JOIN freight_calculation fc ON fd.freight_id = fc.id WHERE fc.vehicle_id = ?1",
+                    vehicleId
+                )) {
+                tryEvictSecondLevel(slc, FreightDistribution.class, id);
+            }
+            for (Long id :
+                nativeLongIds(
+                    "SELECT id FROM voucher WHERE reference_id = ?1 AND reference_type IN ('FREIGHT','ADVANCE','COOLIE')",
+                    vehicleId
+                )) {
+                tryEvictSecondLevel(slc, Voucher.class, id);
+            }
+
+            List<Long> sivIds = nativeLongIds("SELECT id FROM seller_in_vehicle WHERE vehicle_id = ?1", vehicleId);
+            for (Long id : sivIds) {
+                tryEvictSecondLevel(slc, SellerInVehicle.class, id);
+            }
+            if (sivIds.isEmpty()) {
+                return;
+            }
+            List<Long> lotIds = new ArrayList<>();
+            for (Long sivId : sivIds) {
+                lotIds.addAll(nativeLongIds("SELECT id FROM lot WHERE seller_vehicle_id = ?1", sivId));
+            }
+            for (Long id : lotIds) {
+                tryEvictSecondLevel(slc, Lot.class, id);
+            }
+            if (lotIds.isEmpty()) {
+                return;
+            }
+            List<Long> auctionIds = new ArrayList<>();
+            for (Long lotId : lotIds) {
+                auctionIds.addAll(nativeLongIds("SELECT id FROM auction WHERE lot_id = ?1", lotId));
+            }
+            for (Long id : auctionIds) {
+                tryEvictSecondLevel(slc, Auction.class, id);
+            }
+            if (auctionIds.isEmpty()) {
+                return;
+            }
+            for (Long auctionId : auctionIds) {
+                for (Long id : nativeLongIds("SELECT id FROM auction_entry WHERE auction_id = ?1", auctionId)) {
+                    tryEvictSecondLevel(slc, AuctionEntry.class, id);
+                }
+            }
+        } catch (RuntimeException ex) {
+            LOG.warn("Second-level cache eviction before arrival delete failed for vehicle {}: {}", vehicleId, ex.toString());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Long> nativeLongIds(String sql, Object param) {
+        List<?> rows = entityManager.createNativeQuery(sql).setParameter(1, param).getResultList();
+        return rows.stream().map(r -> ((Number) r).longValue()).toList();
+    }
+
+    private static void tryEvictSecondLevel(jakarta.persistence.Cache slc, Class<?> type, Long id) {
+        try {
+            slc.evict(type, id);
+        } catch (RuntimeException ex) {
+            LOG.debug("Second-level cache evict {}#{} skipped: {}", type.getSimpleName(), id, ex.getMessage());
+        }
     }
 
     private ArrivalSummaryDTO toSummary(Vehicle v) {
