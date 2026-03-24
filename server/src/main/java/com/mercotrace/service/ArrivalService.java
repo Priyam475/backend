@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -164,7 +165,7 @@ public class ArrivalService {
                 Lot lot = new Lot();
                 lot.setSellerVehicleId(sellerInVehicle.getId());
                 lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
-                lot.setLotName(lotDTO.getLotName());
+                lot.setLotName(lotDTO.getLotName().trim());
                 lot.setBagCount(lotDTO.getBagCount());
                 if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                 if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
@@ -524,7 +525,7 @@ public class ArrivalService {
                     Lot lot = new Lot();
                     lot.setSellerVehicleId(siv.getId());
                     lot.setCommodityId(resolveCommodityId(traderId, lotDTO.getCommodityName()));
-                    lot.setLotName(lotDTO.getLotName());
+                    lot.setLotName(lotDTO.getLotName().trim());
                     lot.setBagCount(lotDTO.getBagCount());
                     if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                     if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
@@ -766,6 +767,7 @@ public class ArrivalService {
                 }
             }
         }
+        validateUniqueLotNamesWithinSeller(sellers);
     }
 
     private void validateRequest(ArrivalRequestDTO request) {
@@ -799,9 +801,29 @@ public class ArrivalService {
                 }
             }
         }
+        validateUniqueLotNamesWithinSeller(request.getSellers());
         if (request.isMultiSeller()) {
             if (request.getVehicleNumber() == null || request.getVehicleNumber().isBlank()) {
                 throw new IllegalArgumentException("Vehicle number is required for multi-seller arrivals");
+            }
+        }
+    }
+
+    private void validateUniqueLotNamesWithinSeller(List<ArrivalSellerDTO> sellers) {
+        for (ArrivalSellerDTO seller : sellers) {
+            if (seller.getLots() == null || seller.getLots().isEmpty()) {
+                continue;
+            }
+            Set<String> normalizedLotNames = new HashSet<>();
+            for (ArrivalLotDTO lot : seller.getLots()) {
+                String lotName = lot.getLotName();
+                if (lotName == null || lotName.isBlank()) {
+                    continue;
+                }
+                String normalized = lotName.trim().toLowerCase();
+                if (!normalizedLotNames.add(normalized)) {
+                    throw new IllegalArgumentException("Lot Name already exists for this seller");
+                }
             }
         }
     }
