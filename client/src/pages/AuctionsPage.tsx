@@ -2545,8 +2545,25 @@ const AuctionsPage = () => {
               <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
             </div>
           ) : (
-            <div className="glass-card rounded-2xl overflow-visible h-auto min-h-0">
-              <div className="overflow-x-auto overflow-y-visible h-auto min-h-0 pb-4">
+            <div
+              className={cn(
+                'glass-card rounded-2xl h-auto min-h-0',
+                entries.length > 5 ? 'overflow-hidden' : 'overflow-visible'
+              )}
+            >
+              <div
+                className={cn(
+                  'overflow-x-auto h-auto min-h-0 pb-4',
+                  entries.length > 5
+                    ? 'max-h-[min(42vh,17rem)] overflow-y-auto overscroll-y-contain sm:max-h-[min(48vh,19rem)] md:max-h-[min(52vh,21rem)] touch-pan-y'
+                    : 'overflow-y-visible'
+                )}
+                style={
+                  entries.length > 5
+                    ? { scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch' as const }
+                    : undefined
+                }
+              >
                 <table className={cn("w-full text-left border-collapse", showPresetMargin ? "min-w-[380px]" : "min-w-[320px]")}>
                   <thead>
                     <tr className="border-b border-border/50 bg-muted/30 sticky top-0 z-10">
