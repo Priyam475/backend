@@ -2553,7 +2553,7 @@ const AuctionsPage = () => {
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Mark / Buyer</th>
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Rate</th>
                       {showPresetMargin && (
-                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>preset_type</th>
+                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Preset</th>
                       )}
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Qty</th>
                       <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Action</th>
@@ -2885,38 +2885,6 @@ const AuctionsPage = () => {
             </div>
           )}
           <div className="flex gap-1.5 mb-1 min-w-0">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="sales-pad-rate-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
-                Rate ₹
-              </label>
-              <Input
-                id="sales-pad-rate-mobile"
-                ref={rateInputRef}
-                type="number"
-                value={rate}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setRate(v);
-                  if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
-                }}
-                onFocus={(e) => {
-                  setActiveNumpadField('rate');
-                  if (!mobileKeyboardEnabled) {
-                    e.currentTarget.blur();
-                    hideNativeKeyboard();
-                  }
-                }}
-                onBlur={() => setMobileKeyboardEnabled(false)}
-                readOnly={!mobileKeyboardEnabled}
-                inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
-                placeholder="0"
-                aria-label="Bid rate in rupees"
-                className={cn(
-                  "h-9 rounded-lg text-center font-bold text-[11px] sm:text-sm bg-muted/20 border-primary/20 min-w-0",
-                  activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
-                )}
-              />
-            </div>
             <div className="min-w-0 flex-[1.15]">
               <label htmlFor="sales-pad-mark-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
                 Mark
@@ -2954,6 +2922,38 @@ const AuctionsPage = () => {
                 placeholder="Search…"
                 aria-label="Search mark or name"
                 className="h-9 rounded-lg text-[11px] sm:text-xs font-medium bg-muted/20 border-violet-400/20 px-2 min-w-0"
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <label htmlFor="sales-pad-rate-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
+                Rate ₹
+              </label>
+              <Input
+                id="sales-pad-rate-mobile"
+                ref={rateInputRef}
+                type="number"
+                value={rate}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRate(v);
+                  if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
+                }}
+                onFocus={(e) => {
+                  setActiveNumpadField('rate');
+                  if (!mobileKeyboardEnabled) {
+                    e.currentTarget.blur();
+                    hideNativeKeyboard();
+                  }
+                }}
+                onBlur={() => setMobileKeyboardEnabled(false)}
+                readOnly={!mobileKeyboardEnabled}
+                inputMode={!mobileKeyboardEnabled ? 'none' : 'numeric'}
+                placeholder="0"
+                aria-label="Bid rate in rupees"
+                className={cn(
+                  "h-9 rounded-lg text-center font-bold text-[11px] sm:text-sm bg-muted/20 border-primary/20 min-w-0",
+                  activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
+                )}
               />
             </div>
             <div className="min-w-0 flex-1">
