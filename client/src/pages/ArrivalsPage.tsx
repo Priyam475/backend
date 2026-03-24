@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Fragment, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
-  ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, Trash2,
+  ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, ChevronRight, Trash2,
   AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter, Share2, MapPin
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -159,6 +159,165 @@ function ArrivalSummaryVehicleSellerQty({
  * - vehicleTotal: total bags for the whole vehicle (all sellers, all lots)
  * - sellerTotal: total bags for this seller (all lots of that seller)
  */
+
+const LOTS_SCROLL_EPS = 2;
+
+type RegisterLotsScrollEl = (sellerId: string) => (el: HTMLDivElement | null) => void;
+
+/**
+ * Internal lots scroller: overlay scrollbars (especially on touch) stay hidden until gesture,
+ * and wide lot grids overflow horizontally — edge gradients + chevrons when content extends past the view.
+ */
+function LotsScrollPanel({
+  sellerId,
+  registerScrollEl,
+  showEdgeHints,
+  className,
+  children,
+}: {
+  sellerId: string;
+  registerScrollEl: RegisterLotsScrollEl;
+  showEdgeHints: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const [hintBottom, setHintBottom] = useState(false);
+  const [hintRight, setHintRight] = useState(false);
+
+  const mergedRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      outerRef.current = el;
+      registerScrollEl(sellerId)(el);
+    },
+    [registerScrollEl, sellerId],
+  );
+
+  const updateHints = useCallback(() => {
+    const el = outerRef.current;
+    if (!el || !showEdgeHints) {
+      setHintBottom(false);
+      setHintRight(false);
+      return;
+    }
+    const vOverflow = el.scrollHeight > el.clientHeight + LOTS_SCROLL_EPS;
+    const hOverflow = el.scrollWidth > el.clientWidth + LOTS_SCROLL_EPS;
+    const notAtBottom = el.scrollTop < el.scrollHeight - el.clientHeight - LOTS_SCROLL_EPS;
+    const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - LOTS_SCROLL_EPS;
+    setHintBottom(vOverflow && notAtBottom);
+    setHintRight(hOverflow && notAtRight);
+  }, [showEdgeHints]);
+
+  useLayoutEffect(() => {
+    updateHints();
+  }, [updateHints]);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    const inner = measureRef.current;
+    if (!outer || !inner) return;
+    updateHints();
+    if (!showEdgeHints) return;
+    const ro = new ResizeObserver(() => updateHints());
+    ro.observe(inner);
+    outer.addEventListener('scroll', updateHints, { passive: true });
+    return () => {
+      ro.disconnect();
+      outer.removeEventListener('scroll', updateHints);
+    };
+  }, [updateHints, showEdgeHints, sellerId]);
+
+  return (
+    <div className="relative">
+      <div
+        ref={mergedRef}
+        className={cn('lots-scroll-panel', className)}
+        style={
+          showEdgeHints
+            ? { scrollbarWidth: 'thin', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch' }
+            : { scrollbarWidth: 'thin', scrollbarGutter: 'stable' }
+        }
+        onScroll={showEdgeHints ? updateHints : undefined}
+      >
+        <div ref={measureRef} className="space-y-2">
+          {children}
+        </div>
+      </div>
+      {showEdgeHints && hintBottom && (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex h-11 items-end justify-center bg-gradient-to-t from-background from-40% via-background/75 to-transparent pb-1.5"
+          aria-hidden
+        >
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+      {showEdgeHints && hintRight && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-10 items-center justify-end bg-gradient-to-l from-background from-35% via-background/75 to-transparent pr-1"
+          aria-hidden
+        >
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Per-lot 4-column row: horizontal scroll lives here (not the outer lots panel), so we surface a visible bar + edge hint. */
+function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [hintRight, setHintRight] = useState(false);
+
+  const update = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const hOverflow = el.scrollWidth > el.clientWidth + LOTS_SCROLL_EPS;
+    const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - LOTS_SCROLL_EPS;
+    setHintRight(hOverflow && notAtRight);
+  }, []);
+
+  useLayoutEffect(() => {
+    update();
+  }, [update]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    const inner = contentRef.current;
+    if (!el || !inner) return;
+    update();
+    const ro = new ResizeObserver(() => update());
+    ro.observe(inner);
+    ro.observe(el);
+    el.addEventListener('scroll', update, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('scroll', update);
+    };
+  }, [update]);
+
+  return (
+    <div className="relative -mx-1 px-1">
+      <div
+        ref={scrollRef}
+        className="lot-fields-x-scroll overflow-x-scroll overflow-y-visible overscroll-x-contain"
+        style={{ scrollbarWidth: 'thin' }}
+        onScroll={update}
+      >
+        <div ref={contentRef}>{children}</div>
+      </div>
+      {hintRight && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5"
+          aria-hidden
+        >
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const ArrivalsPage = () => {
   const navigate = useNavigate();
@@ -2020,7 +2179,12 @@ const ArrivalsPage = () => {
                               className="border-t border-border/30"
                             >
                               {/* Scrollable lots panel: min/max height scales with viewport so zoom doesn’t crush content */}
-                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto p-3 space-y-2 overscroll-contain">
+                              <LotsScrollPanel
+                                sellerId={seller.seller_vehicle_id}
+                                registerScrollEl={setLotsScrollRef}
+                                showEdgeHints
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
+                              >
                                 {seller.lots.length === 0 && (
                                   <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
                                 )}
@@ -2045,7 +2209,7 @@ const ArrivalsPage = () => {
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="overflow-x-auto -mx-1 px-1">
+                                      <LotFieldsHorizontalScroll>
                                         <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
                                         <div>
                                           <Input
@@ -2103,11 +2267,11 @@ const ArrivalsPage = () => {
                                           </select>
                                         </div>
                                         </div>
-                                      </div>
+                                      </LotFieldsHorizontalScroll>
                                     </div>
                                   );
                                 })}
-                              </div>
+                              </LotsScrollPanel>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -2754,7 +2918,12 @@ const ArrivalsPage = () => {
                               transition={{ duration: 0.15 }}
                               className="border-t border-border/30"
                             >
-                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto p-3 space-y-2 overscroll-contain">
+                              <LotsScrollPanel
+                                sellerId={seller.seller_vehicle_id}
+                                registerScrollEl={setLotsScrollRef}
+                                showEdgeHints
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
+                              >
                                 {seller.lots.length === 0 && (
                                   <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
                                 )}
@@ -2772,7 +2941,7 @@ const ArrivalsPage = () => {
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="overflow-x-auto -mx-1 px-1">
+                                      <LotFieldsHorizontalScroll>
                                         <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
                                         <div>
                                           <Input
@@ -2830,11 +2999,11 @@ const ArrivalsPage = () => {
                                           </select>
                                         </div>
                                         </div>
-                                      </div>
+                                      </LotFieldsHorizontalScroll>
                                     </div>
                                   );
                                 })}
-                              </div>
+                              </LotsScrollPanel>
                             </motion.div>
                           )}
                         </AnimatePresence>
