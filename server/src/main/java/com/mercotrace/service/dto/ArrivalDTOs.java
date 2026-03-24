@@ -2,6 +2,7 @@ package com.mercotrace.service.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.mercotrace.domain.enumeration.FreightMethod;
+import jakarta.validation.constraints.Min;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
