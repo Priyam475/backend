@@ -1419,8 +1419,8 @@ const ArrivalsPage = () => {
                       </div>
                     )}
                     {summaryMode === 'arrivals' && (
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                      <table className="w-full text-sm">
+                    <div className="glass-card rounded-2xl overflow-x-auto max-w-full">
+                      <table className="w-full min-w-[56rem] text-sm">
                         <thead>
                           <tr className="border-b border-border/40 bg-muted/30">
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle | Seller | Qty</th>
@@ -1482,7 +1482,8 @@ const ArrivalsPage = () => {
                                         {expandedDetailLoading ? (
                                           <p className="text-sm text-muted-foreground">Loading…</p>
                                         ) : expandedDetail ? (
-                                          <div className="grid grid-cols-2 gap-4 text-sm">
+                                          <div className="overflow-x-auto -mx-1 px-1">
+                                          <div className="grid grid-cols-2 gap-4 text-sm min-w-[36rem]">
                                             <div className="space-y-3">
                                               <FreightDetailsCard
                                                 freightRate={expandedDetail.freightRate ?? 0}
@@ -1519,6 +1520,7 @@ const ArrivalsPage = () => {
                                                 )}
                                               </div>
                                             </div>
+                                          </div>
                                           </div>
                                         ) : null}
                                       </td>
@@ -1873,8 +1875,8 @@ const ArrivalsPage = () => {
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
+                        className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
+                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-start gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
@@ -1987,8 +1989,8 @@ const ArrivalsPage = () => {
                               transition={{ duration: 0.15 }}
                               className="border-t border-border/30"
                             >
-                              {/* Fixed-height lots panel so only lots scroll internally */}
-                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="h-[280px] overflow-y-auto p-3 space-y-2 overscroll-contain">
+                              {/* Scrollable lots panel: min/max height scales with viewport so zoom doesn’t crush content */}
+                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto p-3 space-y-2 overscroll-contain">
                                 {seller.lots.length === 0 && (
                                   <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
                                 )}
@@ -2013,7 +2015,8 @@ const ArrivalsPage = () => {
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="grid grid-cols-4 gap-2 items-end">
+                                      <div className="overflow-x-auto -mx-1 px-1">
+                                        <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
                                         <div>
                                           <Input
                                             aria-label="Lot Name"
@@ -2068,6 +2071,7 @@ const ArrivalsPage = () => {
                                               <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
                                             ))}
                                           </select>
+                                        </div>
                                         </div>
                                       </div>
                                     </div>
@@ -2253,8 +2257,8 @@ const ArrivalsPage = () => {
                 const isExpanded = expandedDetail?.vehicleId === a.vehicleId;
                 return (
                   <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                    <div className="glass-card rounded-2xl overflow-hidden">
-                      <div className="w-full p-3.5 flex items-center justify-between gap-2">
+                    <div className="glass-card rounded-2xl overflow-x-auto overflow-y-visible max-w-full">
+                      <div className="w-full p-3.5 flex items-center justify-between gap-2 min-w-0">
                         <button type="button" onClick={() => loadExpandedDetail(a.vehicleId)} className="flex-1 flex items-center justify-between text-left min-w-0">
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
@@ -2595,8 +2599,8 @@ const ArrivalsPage = () => {
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl overflow-hidden">
-                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30">
+                        className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
+                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-start gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
@@ -2698,7 +2702,7 @@ const ArrivalsPage = () => {
                               transition={{ duration: 0.15 }}
                               className="border-t border-border/30"
                             >
-                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="h-[240px] overflow-y-auto p-3 space-y-2 overscroll-contain">
+                              <div ref={setLotsScrollRef(seller.seller_vehicle_id)} className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto p-3 space-y-2 overscroll-contain">
                                 {seller.lots.length === 0 && (
                                   <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
                                 )}
@@ -2716,7 +2720,8 @@ const ArrivalsPage = () => {
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="grid grid-cols-4 gap-2 items-end">
+                                      <div className="overflow-x-auto -mx-1 px-1">
+                                        <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
                                         <div>
                                           <Input
                                             aria-label="Lot Name"
@@ -2771,6 +2776,7 @@ const ArrivalsPage = () => {
                                               <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
                                             ))}
                                           </select>
+                                        </div>
                                         </div>
                                       </div>
                                     </div>
