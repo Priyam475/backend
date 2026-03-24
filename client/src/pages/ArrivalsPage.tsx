@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import BottomNav from '@/components/BottomNav';
 import {
-  ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, ChevronRight, Trash2,
+  ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, ChevronRight, ChevronsUpDown, Trash2,
   AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter, Share2, MapPin
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -161,6 +161,8 @@ function ArrivalSummaryVehicleSellerQty({
  */
 
 const LOTS_SCROLL_EPS = 2;
+/** Min pixels outer.scrollHeight must exceed clientHeight so overlay scrollbars + edge hints reliably engage. */
+const LOTS_SCROLL_MIN_OVERFLOW = 20;
 
 type RegisterLotsScrollEl = (sellerId: string) => (el: HTMLDivElement | null) => void;
 
@@ -174,12 +176,22 @@ function LotsScrollPanel({
   showEdgeHints,
   className,
   children,
+  /** Mobile: when lots exist but content is shorter than the panel, grow inner height so outer.scrollHeight exceeds the viewport (native bars + hints use a small EPS). */
+  ensureVerticalScrollThumbWhenShort = false,
+  contentLayoutKey = 0,
+  /** Always-visible hint under the viewport; native scrollbars often stay hidden until drag. */
+  showScrollAffordanceFooter = false,
+  scrollAffordanceHint = 'Scroll to see all lots',
 }: {
   sellerId: string;
   registerScrollEl: RegisterLotsScrollEl;
   showEdgeHints: boolean;
   className?: string;
   children: ReactNode;
+  ensureVerticalScrollThumbWhenShort?: boolean;
+  contentLayoutKey?: number | string;
+  showScrollAffordanceFooter?: boolean;
+  scrollAffordanceHint?: string;
 }) {
   const outerRef = useRef<HTMLDivElement | null>(null);
   const measureRef = useRef<HTMLDivElement | null>(null);
@@ -193,6 +205,27 @@ function LotsScrollPanel({
     },
     [registerScrollEl, sellerId],
   );
+
+  const applyVerticalThumbPadding = useCallback(() => {
+    const outer = outerRef.current;
+    const inner = measureRef.current;
+    if (!inner) return;
+    if (!ensureVerticalScrollThumbWhenShort) {
+      inner.style.minHeight = '';
+      return;
+    }
+    if (!outer) return;
+    inner.style.minHeight = '';
+    const och = outer.clientHeight;
+    const osh = outer.scrollHeight;
+    if (och <= 0) return;
+    if (osh <= och + LOTS_SCROLL_EPS) {
+      const bump = och + LOTS_SCROLL_MIN_OVERFLOW - osh;
+      if (bump > 0) {
+        inner.style.minHeight = `${inner.scrollHeight + bump}px`;
+      }
+    }
+  }, [ensureVerticalScrollThumbWhenShort]);
 
   const updateHints = useCallback(() => {
     const el = outerRef.current;
@@ -209,58 +242,78 @@ function LotsScrollPanel({
     setHintRight(hOverflow && notAtRight);
   }, [showEdgeHints]);
 
-  useLayoutEffect(() => {
+  const runScrollMetrics = useCallback(() => {
+    applyVerticalThumbPadding();
     updateHints();
-  }, [updateHints]);
+  }, [applyVerticalThumbPadding, updateHints]);
+
+  useLayoutEffect(() => {
+    runScrollMetrics();
+  }, [runScrollMetrics, contentLayoutKey]);
 
   useEffect(() => {
     const outer = outerRef.current;
     const inner = measureRef.current;
     if (!outer || !inner) return;
-    updateHints();
-    if (!showEdgeHints) return;
-    const ro = new ResizeObserver(() => updateHints());
+    runScrollMetrics();
+    const ro = new ResizeObserver(() => runScrollMetrics());
     ro.observe(inner);
-    outer.addEventListener('scroll', updateHints, { passive: true });
+    ro.observe(outer);
+    if (showEdgeHints) {
+      outer.addEventListener('scroll', updateHints, { passive: true });
+    }
     return () => {
       ro.disconnect();
       outer.removeEventListener('scroll', updateHints);
     };
-  }, [updateHints, showEdgeHints, sellerId]);
+  }, [runScrollMetrics, updateHints, showEdgeHints, sellerId]);
 
   return (
-    <div className="relative">
-      <div
-        ref={mergedRef}
-        className={cn('lots-scroll-panel', className)}
-        style={
-          showEdgeHints
-            ? { scrollbarWidth: 'thin', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch' }
-            : { scrollbarWidth: 'thin', scrollbarGutter: 'stable' }
-        }
-        onScroll={showEdgeHints ? updateHints : undefined}
-      >
-        <div ref={measureRef} className="space-y-2">
-          {children}
+    <>
+      <div className="relative">
+        <div
+          ref={mergedRef}
+          className={cn('lots-scroll-panel', className)}
+          style={
+            showEdgeHints
+              ? { scrollbarWidth: 'thin', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch' }
+              : { scrollbarWidth: 'thin', scrollbarGutter: 'stable' }
+          }
+          onScroll={showEdgeHints ? updateHints : undefined}
+        >
+          <div ref={measureRef} className="space-y-2">
+            {children}
+          </div>
         </div>
+        {showEdgeHints && hintBottom && (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex h-11 items-end justify-center bg-gradient-to-t from-background from-40% via-background/75 to-transparent pb-1.5"
+            aria-hidden
+          >
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+          </div>
+        )}
+        {showEdgeHints && hintRight && (
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-10 items-center justify-end bg-gradient-to-l from-background from-35% via-background/75 to-transparent pr-1"
+            aria-hidden
+          >
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+          </div>
+        )}
       </div>
-      {showEdgeHints && hintBottom && (
+      {showScrollAffordanceFooter && (
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex h-11 items-end justify-center bg-gradient-to-t from-background from-40% via-background/75 to-transparent pb-1.5"
-          aria-hidden
+          className="flex items-center justify-center gap-1.5 border-t border-border/40 bg-muted/25 py-2 px-2 dark:bg-muted/15"
+          role="note"
         >
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="text-center text-[10px] font-medium leading-snug text-muted-foreground">
+            {scrollAffordanceHint}
+          </span>
         </div>
       )}
-      {showEdgeHints && hintRight && (
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-10 items-center justify-end bg-gradient-to-l from-background from-35% via-background/75 to-transparent pr-1"
-          aria-hidden
-        >
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -2183,6 +2236,10 @@ const ArrivalsPage = () => {
                                 sellerId={seller.seller_vehicle_id}
                                 registerScrollEl={setLotsScrollRef}
                                 showEdgeHints
+                                ensureVerticalScrollThumbWhenShort={seller.lots.length > 0}
+                                contentLayoutKey={seller.lots.length}
+                                showScrollAffordanceFooter={seller.lots.length > 0}
+                                scrollAffordanceHint="Scroll to see all lots"
                                 className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
                               >
                                 {seller.lots.length === 0 && (
@@ -2922,6 +2979,10 @@ const ArrivalsPage = () => {
                                 sellerId={seller.seller_vehicle_id}
                                 registerScrollEl={setLotsScrollRef}
                                 showEdgeHints
+                                ensureVerticalScrollThumbWhenShort={seller.lots.length > 0}
+                                contentLayoutKey={seller.lots.length}
+                                showScrollAffordanceFooter={seller.lots.length > 0}
+                                scrollAffordanceHint="Swipe here to scroll lots"
                                 className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
                               >
                                 {seller.lots.length === 0 && (
