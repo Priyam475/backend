@@ -27,6 +27,7 @@ import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 
 // ── Types ─────────────────────────────────────────────────
 interface LotInfo {
@@ -229,6 +230,7 @@ const AuctionsPage = () => {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
   const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+  const [pendingDeleteBid, setPendingDeleteBid] = useState<{ id: string; label: string } | null>(null);
 
   // New entry form
   const [selectedBuyer, setSelectedBuyer] = useState<Contact | null>(null);
@@ -1725,7 +1727,7 @@ const AuctionsPage = () => {
                                 <Banknote className={cn(isDesktop ? "w-3.5 h-3.5" : "w-3 h-3")} />
                               </button>
                               <button
-                                onClick={() => removeEntry(entry.id)}
+                                onClick={() => setPendingDeleteBid({ id: entry.id, label: `${entry.buyerName} (${entry.buyerMark})` })}
                                 className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
                                 title="Delete bid"
                               >
@@ -2196,6 +2198,14 @@ const AuctionsPage = () => {
       </AnimatePresence>
 
       {isDesktop && <BottomNav />}
+
+      <ConfirmDeleteDialog
+        open={!!pendingDeleteBid}
+        onOpenChange={(v) => { if (!v) setPendingDeleteBid(null); }}
+        title="Delete bid?"
+        description={pendingDeleteBid ? `Remove bid for "${pendingDeleteBid.label}"? This cannot be undone.` : ''}
+        onConfirm={() => pendingDeleteBid && removeEntry(pendingDeleteBid.id)}
+      />
     </div>
   );
 };

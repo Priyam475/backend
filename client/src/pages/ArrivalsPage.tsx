@@ -24,6 +24,7 @@ import useAutofocusWhen from '@/hooks/useAutofocusWhen';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 
 /**
  * ArrivalsPage — SRS Part 2: Inward Logistics (REQ-ARR-001 to REQ-ARR-013)
@@ -183,6 +184,11 @@ const ArrivalsPage = () => {
   const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const editBaselineSnapshotRef = useRef<string | null>(null);
+  type PendingDelete =
+    | { kind: 'arrival'; vehicleId: number | string; label: string }
+    | { kind: 'seller'; idx: number; label: string }
+    | { kind: 'lot'; sellerIdx: number; lotIdx: number; label: string };
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
 
   // Broker: contact search or type any name
   const [brokerDropdown, setBrokerDropdown] = useState(false);
@@ -1471,7 +1477,7 @@ const ArrivalsPage = () => {
                                           <button type="button" onClick={() => handleEditArrival(a)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit"><Pencil className="w-4 h-4" /></button>
                                         )}
                                         {can('Arrivals', 'Delete') && (
-                                          <button type="button" onClick={() => handleDeleteArrival(a.vehicleId)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                          <button type="button" onClick={() => setPendingDelete({ kind: 'arrival', vehicleId: a.vehicleId, label: a.vehicleNumber })} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-600" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                         )}
                                       </div>
                                     </td>
@@ -1516,7 +1522,7 @@ const ArrivalsPage = () => {
                                                   <Button type="button" variant="outline" size="sm" onClick={e => { e.stopPropagation(); handleEditArrival(apiArrivals.find(x => x.vehicleId === expandedDetail.vehicleId)!); }}><Pencil className="w-3.5 h-3.5 mr-1" /> Edit</Button>
                                                 )}
                                                 {can('Arrivals', 'Delete') && (
-                                                  <Button type="button" variant="destructive" size="sm" onClick={e => { e.stopPropagation(); handleDeleteArrival(expandedDetail.vehicleId); }}><Trash2 className="w-3.5 h-3.5 mr-1" /> Delete</Button>
+                                                  <Button type="button" variant="destructive" size="sm" onClick={e => { e.stopPropagation(); setPendingDelete({ kind: 'arrival', vehicleId: expandedDetail.vehicleId, label: expandedDetail.vehicleNumber }); }}><Trash2 className="w-3.5 h-3.5 mr-1" /> Delete</Button>
                                                 )}
                                               </div>
                                             </div>
@@ -1974,7 +1980,7 @@ const ArrivalsPage = () => {
                                 <Plus className="w-3.5 h-3.5 text-white" />
                               </button>
                             </div>
-                            <button onClick={() => removeSeller(si)} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -2009,7 +2015,7 @@ const ArrivalsPage = () => {
                                           Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
                                         </p>
                                         <button
-                                          onClick={() => removeLot(si, li)}
+                                          onClick={() => setPendingDelete({ kind: 'lot', sellerIdx: si, lotIdx: li, label: lot.lot_name || `Lot ${li + 1}` })}
                                           className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2306,7 +2312,7 @@ const ArrivalsPage = () => {
                                   />
                                   <div className="flex gap-2 pt-1">
                                     {can('Arrivals', 'Edit') && <button type="button" onClick={() => handleEditArrival(a)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-muted/50 text-xs font-semibold"><Pencil className="w-3.5 h-3.5" /> Edit</button>}
-                                    {can('Arrivals', 'Delete') && <button type="button" onClick={() => handleDeleteArrival(a.vehicleId)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-50 dark:bg-red-950/20 text-xs font-semibold text-red-600"><Trash2 className="w-3.5 h-3.5" /> Delete</button>}
+                                    {can('Arrivals', 'Delete') && <button type="button" onClick={() => setPendingDelete({ kind: 'arrival', vehicleId: a.vehicleId, label: a.vehicleNumber })} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-50 dark:bg-red-950/20 text-xs font-semibold text-red-600"><Trash2 className="w-3.5 h-3.5" /> Delete</button>}
                                   </div>
                                 </>
                               ) : null}
@@ -2687,7 +2693,7 @@ const ArrivalsPage = () => {
                                 <Plus className="w-3.5 h-3.5 text-white" />
                               </button>
                             </div>
-                            <button onClick={() => removeSeller(si)} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -2714,7 +2720,7 @@ const ArrivalsPage = () => {
                                       <div className="flex items-center justify-between gap-2">
                                         <p className="text-[10px] font-bold text-muted-foreground uppercase">Lot {li + 1} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
                                         <button
-                                          onClick={() => removeLot(si, li)}
+                                          onClick={() => setPendingDelete({ kind: 'lot', sellerIdx: si, lotIdx: li, label: lot.lot_name || `Lot ${li + 1}` })}
                                           className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -2892,6 +2898,30 @@ const ArrivalsPage = () => {
         </AnimatePresence>,
         document.body
       )}
+
+      <ConfirmDeleteDialog
+        open={!!pendingDelete}
+        onOpenChange={(v) => { if (!v) setPendingDelete(null); }}
+        title={
+          pendingDelete?.kind === 'arrival' ? 'Delete arrival?'
+          : pendingDelete?.kind === 'seller' ? 'Remove seller?'
+          : 'Remove lot?'
+        }
+        description={
+          pendingDelete?.kind === 'arrival'
+            ? `Delete arrival for vehicle "${pendingDelete.label}"? This cannot be undone.`
+          : pendingDelete?.kind === 'seller'
+            ? `Remove "${pendingDelete.label}" and all their lots from this draft?`
+          : `Remove "${pendingDelete?.label}" from the draft form?`
+        }
+        confirmLabel={pendingDelete?.kind === 'arrival' ? 'Delete' : 'Remove'}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.kind === 'arrival') handleDeleteArrival(pendingDelete.vehicleId);
+          else if (pendingDelete.kind === 'seller') removeSeller(pendingDelete.idx);
+          else removeLot(pendingDelete.sellerIdx, pendingDelete.lotIdx);
+        }}
+      />
     </div>
   );
 };
