@@ -280,8 +280,6 @@ const AuctionsPage = () => {
   const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
-  const dockRef = useRef<HTMLDivElement>(null);
-  const [dockHeight, setDockHeight] = useState(0);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -677,24 +675,6 @@ const AuctionsPage = () => {
     forceMarkFocusRef.current = false;
   }, [scribbleMark]);
 
-  // Keep grid bottom-padding exactly equal to the dock's rendered height to prevent scroll gap
-  useEffect(() => {
-    if (isDesktop) { setDockHeight(0); return; }
-    let observer: ResizeObserver | null = null;
-    // rAF ensures the fixed dock element has been painted before we read its height
-    const raf = requestAnimationFrame(() => {
-      const el = dockRef.current;
-      if (!el) return;
-      setDockHeight(el.offsetHeight);
-      observer = new ResizeObserver(() => setDockHeight(el.offsetHeight));
-      observer.observe(el);
-    });
-    return () => {
-      cancelAnimationFrame(raf);
-      observer?.disconnect();
-    };
-  }, [isDesktop]);
-
   const handleMarkBackspace = useCallback(() => {
     if (editingBidId) return;
     lastScribbleSegmentRef.current = '';
@@ -731,22 +711,22 @@ const AuctionsPage = () => {
       setSelectedLot(prev =>
         prev && prev.lot_id === lotId
           ? {
-              ...prev,
-              bag_count: session.lot!.bag_count ?? prev.bag_count,
-              original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
-              was_modified: session.lot!.was_modified ?? prev.was_modified,
-            }
+            ...prev,
+            bag_count: session.lot!.bag_count ?? prev.bag_count,
+            original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
+            was_modified: session.lot!.was_modified ?? prev.was_modified,
+          }
           : prev
       );
       setAvailableLots(prev =>
         prev.map(l =>
           l.lot_id === lotId && session.lot
             ? {
-                ...l,
-                bag_count: session.lot!.bag_count ?? l.bag_count,
-                original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
-                was_modified: session.lot!.was_modified ?? l.was_modified,
-              }
+              ...l,
+              bag_count: session.lot!.bag_count ?? l.bag_count,
+              original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
+              was_modified: session.lot!.was_modified ?? l.was_modified,
+            }
             : l
         )
       );
@@ -754,12 +734,12 @@ const AuctionsPage = () => {
         prev.map(l =>
           l.selfSaleUnitId === selfSaleUnitId && session.lot
             ? {
-                ...l,
-                bag_count: session.lot!.bag_count ?? l.bag_count,
-                original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
-                was_modified: session.lot!.was_modified ?? l.was_modified,
-                remainingQty: session.lot!.bag_count ?? l.remainingQty,
-              }
+              ...l,
+              bag_count: session.lot!.bag_count ?? l.bag_count,
+              original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
+              was_modified: session.lot!.was_modified ?? l.was_modified,
+              remainingQty: session.lot!.bag_count ?? l.remainingQty,
+            }
             : l
         )
       );
@@ -1889,19 +1869,19 @@ const AuctionsPage = () => {
             Array.from(lotsByVehicle.entries())
               .sort(([a], [b]) => (a || '').localeCompare(b || ''))
               .map(([vehicle, lots]) => (
-              <div key={vehicle} className="glass-card rounded-2xl overflow-hidden">
-                <div className="p-3 bg-gradient-to-r from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 border-b border-border/30 flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-bold text-foreground">{vehicle}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{lots.length} lot(s)</span>
+                <div key={vehicle} className="glass-card rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-gradient-to-r from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 border-b border-border/30 flex items-center gap-2">
+                    <Truck className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-bold text-foreground">{vehicle}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{lots.length} lot(s)</span>
+                  </div>
+                  <div className="divide-y divide-border/20">
+                    {lots.map(lot => (
+                      <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+                    ))}
+                  </div>
                 </div>
-                <div className="divide-y divide-border/20">
-                  {lots.map(lot => (
-                    <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
-                  ))}
-                </div>
-              </div>
-            ))
+              ))
           ) : lotNavMode === 'seller' ? (
             (() => {
               const entries = Array.from(lotsBySeller.entries());
@@ -1945,89 +1925,89 @@ const AuctionsPage = () => {
   // ═══ SALES PAD (AUCTION) SCREEN ═══
   return (
     <div className={cn(
-      "bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
-      isDesktop ? "pb-28" : ""
+      "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
+      isDesktop ? "pb-28" : "pb-[38rem]"
     )}>
       {/* Mobile Header */}
       {!isDesktop && (
-      <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(6)].map((_, i) => (
-            <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
-              style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
-              animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
-              transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-            />
-          ))}
-        </div>
-
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-4">
-            <button onClick={goBackToSelector}
-              aria-label="Go back" className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-              <ArrowLeft className="w-5 h-5 text-white" />
-            </button>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <Gavel className="w-5 h-5" /> Sales Pad
-              </h1>
-              <p className="text-white/70 text-xs">Live auction operations</p>
-            </div>
-            {/* Lot navigation & list toggle */}
-            <div className="flex items-center gap-1">
-              <button onClick={() => navigateToLot('prev')} disabled={!canGoPrev}
-                aria-label="Previous lot" className={cn("w-9 h-9 rounded-full flex items-center justify-center transition-all",
-                  canGoPrev ? 'bg-white/20 backdrop-blur' : 'bg-white/10 opacity-40')}>
-                <ChevronLeft className="w-4 h-4 text-white" />
-              </button>
-              <button onClick={() => setShowLotList(!showLotList)}
-                aria-label="Lot list" className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-                <List className="w-4 h-4 text-white" />
-              </button>
-              <button onClick={() => navigateToLot('next')} disabled={!canGoNext}
-                aria-label="Next lot" className={cn("w-9 h-9 rounded-full flex items-center justify-center transition-all",
-                  canGoNext ? 'bg-white/20 backdrop-blur' : 'bg-white/10 opacity-40')}>
-                <ChevronRight className="w-4 h-4 text-white" />
-              </button>
-            </div>
+        <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(6)].map((_, i) => (
+              <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
+                style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
+                animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
+                transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+              />
+            ))}
           </div>
 
-          {/* Lot Info Strip */}
-          {selectedLot && (
-            <div className="grid grid-cols-4 gap-2">
-              {(
-                isSelfSaleReauction
-                  ? [
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <button onClick={goBackToSelector}
+                aria-label="Go back" className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <div className="flex-1">
+                <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Gavel className="w-5 h-5" /> Sales Pad
+                </h1>
+                <p className="text-white/70 text-xs">Live auction operations</p>
+              </div>
+              {/* Lot navigation & list toggle */}
+              <div className="flex items-center gap-1">
+                <button onClick={() => navigateToLot('prev')} disabled={!canGoPrev}
+                  aria-label="Previous lot" className={cn("w-9 h-9 rounded-full flex items-center justify-center transition-all",
+                    canGoPrev ? 'bg-white/20 backdrop-blur' : 'bg-white/10 opacity-40')}>
+                  <ChevronLeft className="w-4 h-4 text-white" />
+                </button>
+                <button onClick={() => setShowLotList(!showLotList)}
+                  aria-label="Lot list" className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                  <List className="w-4 h-4 text-white" />
+                </button>
+                <button onClick={() => navigateToLot('next')} disabled={!canGoNext}
+                  aria-label="Next lot" className={cn("w-9 h-9 rounded-full flex items-center justify-center transition-all",
+                    canGoNext ? 'bg-white/20 backdrop-blur' : 'bg-white/10 opacity-40')}>
+                  <ChevronRight className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            </div>
+
+            {/* Lot Info Strip */}
+            {selectedLot && (
+              <div className="grid grid-cols-4 gap-2">
+                {(
+                  isSelfSaleReauction
+                    ? [
                       { icon: User, label: 'Trader', value: trader?.business_name || 'Trader' },
                       { icon: Package, label: 'Lot', value: formatLotDisplayName(selectedLot) },
                       { icon: ShoppingCart, label: 'Remaining', value: `${remaining}/${selectedLot.bag_count}${selectedLot.was_modified ? '*' : ''}` },
                       { icon: Gavel, label: 'Prev Bids', value: String(previousSelfSaleEntries.length) },
                     ]
-                  : [
+                    : [
                       { icon: User, label: 'Seller', value: selectedLot.seller_name },
                       { icon: Truck, label: 'Vehicle', value: selectedLot.vehicle_number },
                       { icon: Package, label: 'Lot', value: formatLotDisplayName(selectedLot) },
                       { icon: ShoppingCart, label: 'Bags', value: `${remaining}/${selectedLot.bag_count}${selectedLot.was_modified ? '*' : ''}` },
                     ]
-              ).map((item) => (
-                <div key={item.label} className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                  <item.icon className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                  <p className="text-[9px] text-white/60 uppercase">{item.label}</p>
-                  <p className="text-[11px] font-semibold text-white truncate">{item.value}</p>
-                </div>
-              ))}
-            </div>
-          )}
+                ).map((item) => (
+                  <div key={item.label} className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
+                    <item.icon className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
+                    <p className="text-[9px] text-white/60 uppercase">{item.label}</p>
+                    <p className="text-[11px] font-semibold text-white truncate">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {/* Lot position indicator */}
-          {selectedLot && (
-            <div className="mt-2 flex items-center justify-center gap-2">
-              <span className="text-[10px] text-white/60">Lot {currentLotIndex + 1} of {navigationLots.length}</span>
-            </div>
-          )}
+            {/* Lot position indicator */}
+            {selectedLot && (
+              <div className="mt-2 flex items-center justify-center gap-2">
+                <span className="text-[10px] text-white/60">Lot {currentLotIndex + 1} of {navigationLots.length}</span>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
       )}
 
       {/* Desktop Toolbar */}
@@ -2145,10 +2125,10 @@ const AuctionsPage = () => {
               <div className="space-y-1">
                 {(lotNumberSearch
                   ? navigationLots.filter(l =>
-                      l.lot_name.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
-                      l.lot_id.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
-                      formatLotDisplayName(l).toLowerCase().includes(lotNumberSearch.toLowerCase())
-                    )
+                    l.lot_name.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
+                    l.lot_id.toLowerCase().includes(lotNumberSearch.toLowerCase()) ||
+                    formatLotDisplayName(l).toLowerCase().includes(lotNumberSearch.toLowerCase())
+                  )
                   : navigationLots
                 ).map(lot => {
                   const status = getRowLotStatus(lot, statusFilter);
@@ -2172,378 +2152,378 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <div className="px-4 mt-4 flex flex-col gap-3" style={!isDesktop && dockHeight > 0 ? { paddingBottom: dockHeight } : !isDesktop ? { paddingBottom: 96 } : undefined}>
+      <div className="px-4 mt-4 flex flex-col gap-3 h-auto min-h-0">
         {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Toggle to show/hide. */}
         {isDesktop && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">Show</span>
-              <Switch checked={showPresetMargin} onCheckedChange={handleShowPresetMarginChange} aria-label="Show preset margin" />
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Margin</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground">Show</span>
+                <Switch checked={showPresetMargin} onCheckedChange={handleShowPresetMarginChange} aria-label="Show preset margin" />
+              </div>
             </div>
-          </div>
 
-          {showPresetMargin && (
-          <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            {presetOptions.map((opt) => (
-              <button
-                key={opt.label + String(opt.value)}
-                type="button"
-                onClick={() => applyPreset(opt.value)}
-                className={cn(
-                  'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
-                  preset === opt.value
-                    ? opt.value >= 0
-                      ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
-                      : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
-                    : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-                  preset !== opt.value && opt.value >= 0 && 'text-success',
-                  preset !== opt.value && opt.value < 0 && 'text-destructive'
+            {showPresetMargin && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  {presetOptions.map((opt) => (
+                    <button
+                      key={opt.label + String(opt.value)}
+                      type="button"
+                      onClick={() => applyPreset(opt.value)}
+                      className={cn(
+                        'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
+                        preset === opt.value
+                          ? opt.value >= 0
+                            ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white shadow-md shadow-emerald-500/20'
+                            : 'bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-md shadow-red-500/20'
+                          : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                        preset !== opt.value && opt.value >= 0 && 'text-success',
+                        preset !== opt.value && opt.value < 0 && 'text-destructive'
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
+                    <IndianRupee className="w-3.5 h-3.5 text-primary" />
+                    <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
+                  </div>
+                </div>
+                {preset !== 0 && highestBid > 0 && (
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
+                    Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
+                    <span className={cn('font-semibold', preset >= 0 ? 'text-success' : 'text-destructive')}>
+                      ₹{calcSellerRate(highestBid, preset)}
+                    </span>
+                    <span className="ml-1">(base ₹{highestBid} + margin {preset >= 0 ? '+' : ''}{preset})</span>
+                  </motion.p>
                 )}
-              >
-                {opt.label}
-              </button>
-            ))}
-            <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-muted/30 min-w-[60px]">
-              <IndianRupee className="w-3.5 h-3.5 text-primary" />
-              <span className={cn("text-sm font-bold", preset >= 0 ? 'text-success' : 'text-destructive')}>{preset}</span>
-            </div>
-          </div>
-          {preset !== 0 && highestBid > 0 && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[10px] text-muted-foreground mt-2">
-              Buyer pays <span className="text-foreground font-semibold">₹{highestBid}</span> · Seller gets{' '}
-              <span className={cn('font-semibold', preset >= 0 ? 'text-success' : 'text-destructive')}>
-                ₹{calcSellerRate(highestBid, preset)}
-              </span>
-              <span className="ml-1">(base ₹{highestBid} + margin {preset >= 0 ? '+' : ''}{preset})</span>
-            </motion.p>
-          )}
-          </div>
-          )}
-        </motion.div>
+              </div>
+            )}
+          </motion.div>
         )}
 
         {/* Entry Form — buyer select/search + bid entry (desktop only) */}
         {isDesktop && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-2xl p-3 space-y-3">
-          <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[minmax(0,1fr)_280px]' : 'grid-cols-1')}>
-            <div className="space-y-2 min-w-0">
-              {isDesktop ? (
-                <div className="space-y-2 min-w-0">
-                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Scribble pad
-                  </p>
-                  <InlineScribblePad
-                    appendMode
-                    onMarkDetected={handleScribbleSegmentDetected}
-                    canvasHeight={280}
-                    resetTrigger={scribblePadResetTrigger}
-                  />
-                  <Input
-                    ref={markInputRef}
-                    type="text"
-                    value={scribbleMark}
-                    readOnly={!!editingBidId}
-                    onMouseDown={() => { manualMarkSelectionRef.current = true; }}
-                    onTouchStart={() => { manualMarkSelectionRef.current = true; }}
-                    onChange={(e) => {
-                      if (editingBidId) return;
-                      lastScribbleSegmentRef.current = '';
-                      const v = e.target.value.toUpperCase().slice(0, MAX_MARK_LEN);
-                      setScribbleMark(v);
-                      const rawPos = e.target.selectionStart ?? v.length;
-                      const clampedPos = clampInsideClosingParen(v, rawPos);
-                      markInsertPosRef.current = clampedPos;
-                      pendingMarkCaretPosRef.current = clampedPos;
-                      setSelectedBuyer(null);
-                    }}
-                    onSelect={(e) => {
-                      const rawPos = e.currentTarget.selectionStart ?? scribbleMark.length;
-                      const allowManualExit = manualMarkSelectionRef.current;
-                      manualMarkSelectionRef.current = false;
-                      const clampedPos = clampInsideClosingParen(scribbleMark, rawPos, allowManualExit);
-                      markInsertPosRef.current = clampedPos;
-                      pendingMarkCaretPosRef.current = clampedPos !== rawPos ? clampedPos : null;
-                    }}
-                    onFocus={() => setActiveNumpadField('mark')}
-                    placeholder="Or type mark / name to search…"
-                    className="h-11 rounded-xl text-sm sm:text-base font-medium bg-muted/20 border-violet-400/20"
-                  />
-                </div>
-              ) : null}
-              {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
-              {isDesktop && (
-              <div className="space-y-3 min-w-0">
-                {/* Row 1: Registered buyers — contacts — green. */}
-                <div className="min-w-0 w-full max-w-full space-y-1.5">
-                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Registered buyers
-                  </p>
-                  <div
-                    ref={contactScrollRef}
-                    role="region"
-                    aria-label="Registered buyers"
-                    tabIndex={0}
-                    {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
-                    style={{
-                      scrollbarWidth: 'thin',
-                      WebkitOverflowScrolling: 'touch',
-                      overscrollBehaviorX: 'contain',
-                    }}
-                  >
-                    {filteredContacts.length > 0 ? (
-                      filteredContacts.slice(0, 50).map((b) => (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-2xl p-3 space-y-3">
+            <div className={cn('grid gap-3', isDesktop ? 'grid-cols-[minmax(0,1fr)_280px]' : 'grid-cols-1')}>
+              <div className="space-y-2 min-w-0">
+                {isDesktop ? (
+                  <div className="space-y-2 min-w-0">
+                    <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Scribble pad
+                    </p>
+                    <InlineScribblePad
+                      appendMode
+                      onMarkDetected={handleScribbleSegmentDetected}
+                      canvasHeight={280}
+                      resetTrigger={scribblePadResetTrigger}
+                    />
+                    <Input
+                      ref={markInputRef}
+                      type="text"
+                      value={scribbleMark}
+                      readOnly={!!editingBidId}
+                      onMouseDown={() => { manualMarkSelectionRef.current = true; }}
+                      onTouchStart={() => { manualMarkSelectionRef.current = true; }}
+                      onChange={(e) => {
+                        if (editingBidId) return;
+                        lastScribbleSegmentRef.current = '';
+                        const v = e.target.value.toUpperCase().slice(0, MAX_MARK_LEN);
+                        setScribbleMark(v);
+                        const rawPos = e.target.selectionStart ?? v.length;
+                        const clampedPos = clampInsideClosingParen(v, rawPos);
+                        markInsertPosRef.current = clampedPos;
+                        pendingMarkCaretPosRef.current = clampedPos;
+                        setSelectedBuyer(null);
+                      }}
+                      onSelect={(e) => {
+                        const rawPos = e.currentTarget.selectionStart ?? scribbleMark.length;
+                        const allowManualExit = manualMarkSelectionRef.current;
+                        manualMarkSelectionRef.current = false;
+                        const clampedPos = clampInsideClosingParen(scribbleMark, rawPos, allowManualExit);
+                        markInsertPosRef.current = clampedPos;
+                        pendingMarkCaretPosRef.current = clampedPos !== rawPos ? clampedPos : null;
+                      }}
+                      onFocus={() => setActiveNumpadField('mark')}
+                      placeholder="Or type mark / name to search…"
+                      className="h-11 rounded-xl text-sm sm:text-base font-medium bg-muted/20 border-violet-400/20"
+                    />
+                  </div>
+                ) : null}
+                {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
+                {isDesktop && (
+                  <div className="space-y-3 min-w-0">
+                    {/* Row 1: Registered buyers — contacts — green. */}
+                    <div className="min-w-0 w-full max-w-full space-y-1.5">
+                      <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Registered buyers
+                      </p>
+                      <div
+                        ref={contactScrollRef}
+                        role="region"
+                        aria-label="Registered buyers"
+                        tabIndex={0}
+                        {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
+                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                        style={{
+                          scrollbarWidth: 'thin',
+                          WebkitOverflowScrolling: 'touch',
+                          overscrollBehaviorX: 'contain',
+                        }}
+                      >
+                        {filteredContacts.length > 0 ? (
+                          filteredContacts.slice(0, 50).map((b) => (
+                            <button
+                              key={b.contact_id}
+                              type="button"
+                              disabled={!!editingBidId}
+                              onClick={(e) => {
+                                if (didDragContactRef.current) {
+                                  e.preventDefault();
+                                  return;
+                                }
+                                hapticSelection();
+                                hideNativeKeyboard();
+                                setSelectedBuyer(b);
+                                lastScribbleSegmentRef.current = '';
+                                setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
+                                setScribblePadResetTrigger((t) => t + 1);
+                              }}
+                              className={cn(
+                                'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-2 min-h-[44px]',
+                                selectedBuyer?.contact_id === b.contact_id
+                                  ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                                  : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                              )}
+                            >
+                              <span className={cn(
+                                'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
+                                selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                              )}>
+                                {contactAvatarLetter(b.mark, b.name)}
+                              </span>
+                              <span className="text-sm sm:text-base font-semibold truncate max-w-[100px] sm:max-w-[120px]">{b.name}</span>
+                              {b.mark && <span className="text-xs opacity-90 flex-shrink-0">({b.mark})</span>}
+                            </button>
+                          ))
+                        ) : (
+                          <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
+                            No matching contact
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 2: Temporary buyers (scribble / quick-add), today — violet accent. */}
+                    <div className="min-w-0 w-full max-w-full space-y-1.5">
+                      <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Temporary buyers · today
+                      </p>
+                      <div
+                        ref={markScrollRef}
+                        role="region"
+                        aria-label="Temporary buyers"
+                        tabIndex={0}
+                        {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
+                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                        style={{
+                          scrollbarWidth: 'thin',
+                          WebkitOverflowScrolling: 'touch',
+                          overscrollBehaviorX: 'contain',
+                        }}
+                      >
+                        {filteredTemporaryMarks.length > 0 ? (
+                          filteredTemporaryMarks.slice(0, 50).map((mark) => {
+                            const isSelected = !selectedBuyer && scribbleMark === mark;
+                            return (
+                              <button
+                                key={mark}
+                                type="button"
+                                disabled={!!editingBidId}
+                                onClick={(e) => {
+                                  if (didDragMarkRef.current) {
+                                    e.preventDefault();
+                                    return;
+                                  }
+                                  hapticSelection();
+                                  hideNativeKeyboard();
+                                  setSelectedBuyer(null);
+                                  lastScribbleSegmentRef.current = '';
+                                  setScribbleMark(mark);
+                                  setScribblePadResetTrigger((t) => t + 1);
+                                }}
+                                className={cn(
+                                  'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-violet-500 flex items-center gap-2 min-h-[44px]',
+                                  isSelected
+                                    ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                                    : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                                )}
+                              >
+                                <span className={cn(
+                                  'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
+                                  isSelected ? 'bg-white/20' : 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
+                                )}>
+                                  {markAvatarLetter(mark)}
+                                </span>
+                                <span className="text-sm sm:text-base font-semibold truncate max-w-[100px]">{mark}</span>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-sm font-medium">
+                            No temporary marks yet today
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(scribbleMark || selectedBuyer) && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {selectedBuyer ? (
+                      <>
+                        <span className="text-[9px] font-semibold text-muted-foreground uppercase">Buyer:</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-primary/15 text-primary text-sm font-bold border border-primary/30">
+                          {selectedBuyer.name} {selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}
+                        </span>
                         <button
-                          key={b.contact_id}
                           type="button"
                           disabled={!!editingBidId}
-                          onClick={(e) => {
-                            if (didDragContactRef.current) {
-                              e.preventDefault();
-                              return;
-                            }
-                            hapticSelection();
-                            hideNativeKeyboard();
-                            setSelectedBuyer(b);
-                            lastScribbleSegmentRef.current = '';
-                            setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
-                            setScribblePadResetTrigger((t) => t + 1);
-                          }}
-                          className={cn(
-                            'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-2 min-h-[44px]',
-                            selectedBuyer?.contact_id === b.contact_id
-                              ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
-                              : 'bg-muted/40 border-border/50 hover:bg-muted/60'
-                          )}
+                          onClick={() => { setSelectedBuyer(null); lastScribbleSegmentRef.current = ''; setScribbleMark(''); }}
+                          className="text-muted-foreground hover:text-foreground p-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          <span className={cn(
-                            'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
-                            selectedBuyer?.contact_id === b.contact_id ? 'bg-white/20' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
-                          )}>
-                            {contactAvatarLetter(b.mark, b.name)}
-                          </span>
-                          <span className="text-sm sm:text-base font-semibold truncate max-w-[100px] sm:max-w-[120px]">{b.name}</span>
-                          {b.mark && <span className="text-xs opacity-90 flex-shrink-0">({b.mark})</span>}
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                      ))
+                      </>
                     ) : (
-                      <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
-                        No matching contact
-                      </div>
+                      <>
+                        <span className="text-[9px] font-semibold text-muted-foreground uppercase">Mark:</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold shadow-sm">{scribbleMark}</span>
+                        <button
+                          type="button"
+                          onClick={handleMarkBackspace}
+                          disabled={!!editingBidId || !scribbleMark}
+                          className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-muted/70 text-foreground hover:bg-muted disabled:opacity-40 border border-border/60"
+                          aria-label="Delete last character of mark"
+                        >
+                          Del
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!!editingBidId}
+                          onClick={() => { lastScribbleSegmentRef.current = ''; setScribbleMark(''); setScribblePadResetTrigger((t) => t + 1); }}
+                          className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Clear mark"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* Row 2: Temporary buyers (scribble / quick-add), today — violet accent. */}
-                <div className="min-w-0 w-full max-w-full space-y-1.5">
-                  <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Temporary buyers · today
-                  </p>
-                  <div
-                    ref={markScrollRef}
-                    role="region"
-                    aria-label="Temporary buyers"
-                    tabIndex={0}
-                    {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-                    className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
-                    style={{
-                      scrollbarWidth: 'thin',
-                      WebkitOverflowScrolling: 'touch',
-                      overscrollBehaviorX: 'contain',
-                    }}
-                  >
-                    {filteredTemporaryMarks.length > 0 ? (
-                      filteredTemporaryMarks.slice(0, 50).map((mark) => {
-                        const isSelected = !selectedBuyer && scribbleMark === mark;
-                        return (
-                          <button
-                            key={mark}
-                            type="button"
-                            disabled={!!editingBidId}
-                            onClick={(e) => {
-                              if (didDragMarkRef.current) {
-                                e.preventDefault();
-                                return;
-                              }
-                              hapticSelection();
-                              hideNativeKeyboard();
-                              setSelectedBuyer(null);
-                              lastScribbleSegmentRef.current = '';
-                              setScribbleMark(mark);
-                              setScribblePadResetTrigger((t) => t + 1);
-                            }}
-                            className={cn(
-                              'flex-shrink-0 pl-2.5 pr-3 py-2.5 rounded-xl text-left transition-all border border-l-4 border-l-violet-500 flex items-center gap-2 min-h-[44px]',
-                              isSelected
-                                ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
-                                : 'bg-muted/40 border-border/50 hover:bg-muted/60'
-                            )}
-                          >
-                            <span className={cn(
-                              'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0',
-                              isSelected ? 'bg-white/20' : 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
-                            )}>
-                              {markAvatarLetter(mark)}
-                            </span>
-                            <span className="text-sm sm:text-base font-semibold truncate max-w-[100px]">{mark}</span>
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-sm font-medium">
-                        No temporary marks yet today
-                      </div>
-                    )}
+              <div className={cn("space-y-2", !isDesktop && "hidden")}>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
+                    <Input
+                      ref={rateInputRef}
+                      type="number"
+                      value={rate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setRate(v);
+                        if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
+                      }}
+                      onFocus={(e) => {
+                        setActiveNumpadField('rate');
+                        if (isTouchLayout && !mobileKeyboardEnabled) {
+                          e.currentTarget.blur();
+                          hideNativeKeyboard();
+                        }
+                      }}
+                      onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
+                      readOnly={isTouchLayout && !mobileKeyboardEnabled}
+                      inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
+                      placeholder="0"
+                      className={cn(
+                        "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
+                        activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/50"
+                      )} />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
+                    <Input
+                      ref={qtyInputRef}
+                      type="number"
+                      value={qty}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setQty(v);
+                        if (editingBidId) setEditBidDraft((d) => (d ? { ...d, qty: v } : d));
+                      }}
+                      onFocus={(e) => {
+                        setActiveNumpadField('qty');
+                        if (isTouchLayout && !mobileKeyboardEnabled) {
+                          e.currentTarget.blur();
+                          hideNativeKeyboard();
+                        }
+                      }}
+                      onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
+                      readOnly={isTouchLayout && !mobileKeyboardEnabled}
+                      inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
+                      placeholder="0"
+                      className={cn(
+                        "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
+                        activeNumpadField === 'qty' && "ring-2 ring-primary border-primary/50"
+                      )} />
                   </div>
                 </div>
+                {isDesktop && (
+                  <div className="flex gap-2">
+                    {editingBidId && editBidDraft ? (
+                      <>
+                        <Button
+                          onClick={() => { if (editingEntry) void saveEditBid(editingEntry); }}
+                          disabled={!editingEntry || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                          className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
+                        >
+                          <Pencil className="w-4 h-4 mr-1" /> Update Bid
+                        </Button>
+                        <Button
+                          onClick={cancelEditBid}
+                          variant="outline"
+                          className="h-11 rounded-xl px-4 border-border/50 text-foreground hover:bg-muted/40"
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={handleUnifiedAdd}
+                          disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
+                          className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
+                        >
+                          <Plus className="w-4 h-4 mr-1" /> Add Bid
+                        </Button>
+                        {!isSelfSaleReauction && (
+                          <Button onClick={handleSelfSale} disabled={remaining <= 0}
+                            variant="outline" className="h-11 rounded-xl px-4 border-amber-400/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
+                            Self Sale
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-              )}
-              {(scribbleMark || selectedBuyer) && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  {selectedBuyer ? (
-                    <>
-                      <span className="text-[9px] font-semibold text-muted-foreground uppercase">Buyer:</span>
-                      <span className="px-2.5 py-1 rounded-lg bg-primary/15 text-primary text-sm font-bold border border-primary/30">
-                        {selectedBuyer.name} {selectedBuyer.mark ? `(${selectedBuyer.mark})` : ''}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!!editingBidId}
-                        onClick={() => { setSelectedBuyer(null); lastScribbleSegmentRef.current = ''; setScribbleMark(''); }}
-                        className="text-muted-foreground hover:text-foreground p-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-[9px] font-semibold text-muted-foreground uppercase">Mark:</span>
-                      <span className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold shadow-sm">{scribbleMark}</span>
-                      <button
-                        type="button"
-                        onClick={handleMarkBackspace}
-                        disabled={!!editingBidId || !scribbleMark}
-                        className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-muted/70 text-foreground hover:bg-muted disabled:opacity-40 border border-border/60"
-                        aria-label="Delete last character of mark"
-                      >
-                        Del
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!!editingBidId}
-                        onClick={() => { lastScribbleSegmentRef.current = ''; setScribbleMark(''); setScribblePadResetTrigger((t) => t + 1); }}
-                        className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-label="Clear mark"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
             </div>
-
-            <div className={cn("space-y-2", !isDesktop && "hidden")}>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
-                  <Input
-                    ref={rateInputRef}
-                    type="number"
-                    value={rate}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setRate(v);
-                      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
-                    }}
-                    onFocus={(e) => {
-                      setActiveNumpadField('rate');
-                      if (isTouchLayout && !mobileKeyboardEnabled) {
-                        e.currentTarget.blur();
-                        hideNativeKeyboard();
-                      }
-                    }}
-                    onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
-                    readOnly={isTouchLayout && !mobileKeyboardEnabled}
-                    inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
-                    placeholder="0"
-                    className={cn(
-                      "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
-                      activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/50"
-                    )} />
-                </div>
-                <div>
-                  <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
-                  <Input
-                    ref={qtyInputRef}
-                    type="number"
-                    value={qty}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setQty(v);
-                      if (editingBidId) setEditBidDraft((d) => (d ? { ...d, qty: v } : d));
-                    }}
-                    onFocus={(e) => {
-                      setActiveNumpadField('qty');
-                      if (isTouchLayout && !mobileKeyboardEnabled) {
-                        e.currentTarget.blur();
-                        hideNativeKeyboard();
-                      }
-                    }}
-                    onBlur={() => { if (isTouchLayout) setMobileKeyboardEnabled(false); }}
-                    readOnly={isTouchLayout && !mobileKeyboardEnabled}
-                    inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
-                    placeholder="0"
-                    className={cn(
-                      "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
-                      activeNumpadField === 'qty' && "ring-2 ring-primary border-primary/50"
-                    )} />
-                </div>
-              </div>
-              {isDesktop && (
-                <div className="flex gap-2">
-                  {editingBidId && editBidDraft ? (
-                    <>
-                      <Button
-                        onClick={() => { if (editingEntry) void saveEditBid(editingEntry); }}
-                        disabled={!editingEntry || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                        className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
-                      >
-                        <Pencil className="w-4 h-4 mr-1" /> Update Bid
-                      </Button>
-                      <Button
-                        onClick={cancelEditBid}
-                        variant="outline"
-                        className="h-11 rounded-xl px-4 border-border/50 text-foreground hover:bg-muted/40"
-                      >
-                        Cancel
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button
-                        onClick={handleUnifiedAdd}
-                        disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                        className="flex-1 h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white font-semibold shadow-md shadow-violet-500/20"
-                      >
-                        <Plus className="w-4 h-4 mr-1" /> Add Bid
-                      </Button>
-                      {!isSelfSaleReauction && (
-                      <Button onClick={handleSelfSale} disabled={remaining <= 0}
-                        variant="outline" className="h-11 rounded-xl px-4 border-amber-400/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
-                        Self Sale
-                      </Button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </motion.div>
+          </motion.div>
         )}
 
         {/* Auction Grid — entries list */}
@@ -2565,8 +2545,8 @@ const AuctionsPage = () => {
               <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
             </div>
           ) : (
-            <div className={cn("glass-card rounded-2xl overflow-hidden", !isDesktop && "max-h-[34dvh] overflow-y-auto")}>
-              <div className={cn("overflow-x-auto", isDesktop && "max-h-[50vh] overflow-y-auto")}>
+            <div className="glass-card rounded-2xl overflow-visible h-auto min-h-0">
+              <div className="overflow-x-auto overflow-y-visible h-auto min-h-0 pb-4">
                 <table className={cn("w-full text-left border-collapse", showPresetMargin ? "min-w-[380px]" : "min-w-[320px]")}>
                   <thead>
                     <tr className="border-b border-border/50 bg-muted/30 sticky top-0 z-10">
@@ -2599,8 +2579,8 @@ const AuctionsPage = () => {
                                 "inline-flex items-center justify-center rounded-lg font-bold flex-shrink-0",
                                 isDesktop ? "w-8 h-8 text-xs" : "w-6 h-6 text-[10px]",
                                 entry.isSelfSale ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white" :
-                                entry.isScribble ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white" :
-                                "bg-gradient-to-br from-blue-500 to-cyan-400 text-white"
+                                  entry.isScribble ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white" :
+                                    "bg-gradient-to-br from-blue-500 to-cyan-400 text-white"
                               )}>
                                 {markAvatarLetter(entry.buyerMark)}
                               </span>
@@ -2616,11 +2596,11 @@ const AuctionsPage = () => {
                           </td>
                           <td className={cn("font-semibold text-foreground align-top", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
                             <div>₹{entry.rate}</div>
-                              {showPresetMargin && (
-                                <div className="text-[10px] font-medium text-muted-foreground">
-                                  Total ₹{entry.sellerRate}
-                                </div>
-                              )}
+                            {showPresetMargin && (
+                              <div className="text-[10px] font-medium text-muted-foreground">
+                                Total ₹{entry.sellerRate}
+                              </div>
+                            )}
                           </td>
                           {showPresetMargin && (
                             <td
@@ -2759,7 +2739,7 @@ const AuctionsPage = () => {
 
       {/* Mobile/Tablet Dock: compact layout, preset below rate/qty. */}
       {!isDesktop && (
-        <div ref={dockRef} className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className="space-y-2 mb-1.5">
             <div>
               <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
@@ -3121,7 +3101,7 @@ const AuctionsPage = () => {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-1">
-                  {editingBidId && editBidDraft ? (
+                {editingBidId && editBidDraft ? (
                   <>
                     <button
                       type="button"
@@ -3142,14 +3122,14 @@ const AuctionsPage = () => {
                 ) : (
                   <>
                     {!isSelfSaleReauction && (
-                    <button
-                      type="button"
-                      onClick={handleSelfSale}
-                      disabled={remaining <= 0}
-                      className="h-8 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold disabled:opacity-50"
-                    >
-                      Self Sale
-                    </button>
+                      <button
+                        type="button"
+                        onClick={handleSelfSale}
+                        disabled={remaining <= 0}
+                        className="h-8 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold disabled:opacity-50"
+                      >
+                        Self Sale
+                      </button>
                     )}
                     <button
                       type="button"
