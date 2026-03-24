@@ -43,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ArrivalService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ArrivalService.class);
+    private static final LocalDate GLOBAL_SELLER_SERIAL_DATE = LocalDate.of(1970, 1, 1);
 
     /** JSON omitted {@code multiSeller} → multi mode (matches UI default); explicit false → single. */
     private static boolean effectiveRequestMultiSeller(ArrivalRequestDTO request) {
@@ -155,8 +156,9 @@ public class ArrivalService {
         weight.setRecordedAt(now);
         vehicleWeightRepository.save(weight);
 
-        DailySerial dailySerial = getOrCreateDailySerial(traderId, LocalDate.now());
+        DailySerial dailySerial = getOrCreateGlobalSellerSerialForUpdate(traderId);
         int sellerSerial = dailySerial.getSellerSerial() != null ? dailySerial.getSellerSerial() : 0;
+        int arrivalLotSerial = 0;
 
         List<SellerInVehicle> sellerLinks = new ArrayList<>();
         List<Lot> lots = new ArrayList<>();
@@ -184,7 +186,7 @@ public class ArrivalService {
             sellerInVehicle = sellerInVehicleRepository.save(sellerInVehicle);
             sellerLinks.add(sellerInVehicle);
 
-            sellerSerial++;
+            sellerSerial = nextSellerSerial(sellerSerial);
             List<ArrivalLotDTO> sellerLots = sellerDTO.getLots() != null ? sellerDTO.getLots() : List.of();
             for (ArrivalLotDTO lotDTO : sellerLots) {
                 // DB constraints require commodity_id + lot_name; skip incomplete lot rows.
@@ -203,6 +205,8 @@ public class ArrivalService {
                 if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                 if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
                 lot.setSellerSerialNo(sellerSerial);
+                arrivalLotSerial = nextLotSerial(arrivalLotSerial);
+                lot.setLotSerialNo(arrivalLotSerial);
                 lot.setCreatedAt(now);
                 lots.add(lot);
             }
@@ -451,10 +455,18 @@ public class ArrivalService {
                 sellerFull.setSellerMark(siv.getSellerMark() != null ? siv.getSellerMark() : null);
             }
             List<Lot> sellerLots = lots.stream().filter(l -> l.getSellerVehicleId().equals(siv.getId())).toList();
+            sellerFull.setSellerSerialNumber(
+                sellerLots.stream()
+                    .map(Lot::getSellerSerialNo)
+                    .filter(java.util.Objects::nonNull)
+                    .findFirst()
+                    .orElse(null)
+            );
             List<ArrivalLotFullDTO> lotFullList = sellerLots.stream().map(lot -> {
                 ArrivalLotFullDTO lf = new ArrivalLotFullDTO();
                 lf.setId(lot.getId());
                 lf.setLotName(lot.getLotName());
+                lf.setLotSerialNumber(lot.getLotSerialNo());
                 lf.setCommodityName(commodityNameById.getOrDefault(lot.getCommodityId(), ""));
                 lf.setBagCount(lot.getBagCount() != null ? lot.getBagCount() : 0);
                 lf.setBrokerTag(lot.getBrokerTag());
@@ -564,7 +576,11 @@ public class ArrivalService {
             sellerInVehicleRepository.deleteByVehicleId(vehicleId);
 
             Instant now = Instant.now();
+            DailySerial dailySerial = null;
             int sellerSerial = 0;
+            Set<Integer> usedSellerSerials = new HashSet<>();
+            Set<Integer> usedLotSerialsAcrossArrival = new HashSet<>();
+            int arrivalLotSerial = 0;
             Long updateBrokerContactId = update.getBrokerContactId();
             for (ArrivalSellerDTO sellerDTO : update.getSellers()) {
                 SellerInVehicle siv = new SellerInVehicle();
@@ -591,7 +607,20 @@ public class ArrivalService {
                     siv.setBrokerId(updateBrokerContactId);
                 }
                 siv = sellerInVehicleRepository.save(siv);
-                sellerSerial++;
+                Integer requestedSerial = normalizeSellerSerialNumber(sellerDTO.getSellerSerialNumber());
+                if (requestedSerial != null) {
+                    if (!usedSellerSerials.add(requestedSerial)) {
+                        throw new IllegalArgumentException("Duplicate seller serial number in arrival update: " + requestedSerial);
+                    }
+                } else {
+                    if (dailySerial == null) {
+                        dailySerial = getOrCreateGlobalSellerSerialForUpdate(traderId);
+                        sellerSerial = dailySerial.getSellerSerial() != null ? dailySerial.getSellerSerial() : 0;
+                    }
+                    requestedSerial = nextAvailableSellerSerial(sellerSerial, usedSellerSerials);
+                    sellerSerial = requestedSerial;
+                    usedSellerSerials.add(requestedSerial);
+                }
                 List<ArrivalLotDTO> sellerLots = sellerDTO.getLots() != null ? sellerDTO.getLots() : List.of();
                 for (ArrivalLotDTO lotDTO : sellerLots) {
                     // DB constraints require commodity_id + lot_name; skip incomplete lot rows.
@@ -609,10 +638,29 @@ public class ArrivalService {
                     lot.setBagCount(bagCount != null ? bagCount : 0);
                     if (lotDTO.getVariant() != null && !lotDTO.getVariant().isBlank()) lot.setVariant(lotDTO.getVariant().trim());
                     if (lotDTO.getBrokerTag() != null && !lotDTO.getBrokerTag().isBlank()) lot.setBrokerTag(lotDTO.getBrokerTag().trim());
-                    lot.setSellerSerialNo(sellerSerial);
+                    lot.setSellerSerialNo(requestedSerial);
+                    Integer requestedLotSerial = normalizeLotSerialNumber(lotDTO.getLotSerialNumber());
+                    if (requestedLotSerial != null) {
+                        if (!usedLotSerialsAcrossArrival.add(requestedLotSerial)) {
+                            throw new IllegalArgumentException("Duplicate lot serial number in arrival update: " + requestedLotSerial);
+                        }
+                        arrivalLotSerial = Math.max(arrivalLotSerial, requestedLotSerial);
+                    } else {
+                        requestedLotSerial = nextAvailableLotSerial(arrivalLotSerial, usedLotSerialsAcrossArrival);
+                        arrivalLotSerial = requestedLotSerial;
+                        usedLotSerialsAcrossArrival.add(requestedLotSerial);
+                    }
+                    lot.setLotSerialNo(requestedLotSerial);
                     lot.setCreatedAt(now);
                     currentLots.add(lot);
                 }
+            }
+            if (dailySerial != null) {
+                dailySerial.setSellerSerial(sellerSerial);
+                if (dailySerial.getLotSerial() == null) {
+                    dailySerial.setLotSerial(0);
+                }
+                dailySerialRepository.save(dailySerial);
             }
             if (updateBrokerContactId != null) {
                 contactService.ensureTraderUsesPortalContact(traderId, updateBrokerContactId);
@@ -1037,17 +1085,68 @@ public class ArrivalService {
         return traderContextService.getCurrentTraderId();
     }
 
-    private DailySerial getOrCreateDailySerial(Long traderId, LocalDate date) {
+    private DailySerial getOrCreateGlobalSellerSerialForUpdate(Long traderId) {
         return dailySerialRepository
-            .findOneByTraderIdAndSerialDate(traderId, date)
+            .findOneByTraderIdAndSerialDateForUpdate(traderId, GLOBAL_SELLER_SERIAL_DATE)
             .orElseGet(() -> {
                 DailySerial serial = new DailySerial();
                 serial.setTraderId(traderId);
-                serial.setSerialDate(date);
+                serial.setSerialDate(GLOBAL_SELLER_SERIAL_DATE);
                 serial.setSellerSerial(0);
                 serial.setLotSerial(0);
-                return dailySerialRepository.save(serial);
+                DailySerial saved = dailySerialRepository.saveAndFlush(serial);
+                return dailySerialRepository.findOneByTraderIdAndSerialDateForUpdate(traderId, GLOBAL_SELLER_SERIAL_DATE).orElse(saved);
             });
+    }
+
+    private int nextSellerSerial(int currentSerial) {
+        return currentSerial >= 9999 ? 1 : currentSerial + 1;
+    }
+
+    private int nextLotSerial(int currentSerial) {
+        return currentSerial >= 9999 ? 1 : currentSerial + 1;
+    }
+
+    private int nextAvailableSellerSerial(int currentSerial, Set<Integer> reservedSerials) {
+        int candidate = currentSerial;
+        for (int attempt = 0; attempt < 10000; attempt++) {
+            candidate = nextSellerSerial(candidate);
+            if (!reservedSerials.contains(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalArgumentException("No seller serial numbers available for this arrival context");
+    }
+
+    private int nextAvailableLotSerial(int currentSerial, Set<Integer> reservedSerials) {
+        int candidate = currentSerial;
+        for (int attempt = 0; attempt < 9999; attempt++) {
+            candidate = nextLotSerial(candidate);
+            if (!reservedSerials.contains(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalArgumentException("No lot serial numbers available for this seller context");
+    }
+
+    private Integer normalizeSellerSerialNumber(Integer sellerSerialNumber) {
+        if (sellerSerialNumber == null) {
+            return null;
+        }
+        if (sellerSerialNumber < 1 || sellerSerialNumber > 9999) {
+            throw new IllegalArgumentException("Seller serial number must be between 1 and 9999");
+        }
+        return sellerSerialNumber;
+    }
+
+    private Integer normalizeLotSerialNumber(Integer lotSerialNumber) {
+        if (lotSerialNumber == null) {
+            return null;
+        }
+        if (lotSerialNumber < 1 || lotSerialNumber > 9999) {
+            throw new IllegalArgumentException("Lot serial number must be between 1 and 9999");
+        }
+        return lotSerialNumber;
     }
 
     private Long resolveCommodityId(Long traderId, String commodityName) {
