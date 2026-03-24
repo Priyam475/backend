@@ -650,6 +650,8 @@ public final class ArrivalDTOs {
         private Boolean noRental;
         private Double advancePaid;
         private boolean partiallyCompleted;
+        /** Mirrors {@code vehicle.multi_seller}; used so edit form restores Multi vs Single seller mode. */
+        private boolean multiSeller = true;
         private List<ArrivalSellerFullDTO> sellers;
 
         public Long getVehicleId() { return vehicleId; }
@@ -691,6 +693,8 @@ public final class ArrivalDTOs {
         public List<ArrivalSellerFullDTO> getSellers() { return sellers; }
         public boolean isPartiallyCompleted() { return partiallyCompleted; }
         public void setPartiallyCompleted(boolean partiallyCompleted) { this.partiallyCompleted = partiallyCompleted; }
+        public boolean isMultiSeller() { return multiSeller; }
+        public void setMultiSeller(boolean multiSeller) { this.multiSeller = multiSeller; }
         public void setSellers(List<ArrivalSellerFullDTO> sellers) { this.sellers = sellers; }
     }
 

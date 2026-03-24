@@ -57,6 +57,10 @@ public class Vehicle extends AbstractAuditingEntity<Long> implements Serializabl
     @Column(name = "partially_completed", nullable = false)
     private Boolean partiallyCompleted = false;
 
+    /** When true, UI/API treat arrival as multi-seller (vehicle plate, multiple sellers). Persisted so drafts resume correctly. */
+    @Column(name = "multi_seller", nullable = false)
+    private Boolean multiSeller = true;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     @Override
@@ -154,6 +158,14 @@ public class Vehicle extends AbstractAuditingEntity<Long> implements Serializabl
 
     public void setPartiallyCompleted(Boolean partiallyCompleted) {
         this.partiallyCompleted = partiallyCompleted;
+    }
+
+    public Boolean getMultiSeller() {
+        return multiSeller;
+    }
+
+    public void setMultiSeller(Boolean multiSeller) {
+        this.multiSeller = multiSeller;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here

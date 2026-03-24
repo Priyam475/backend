@@ -111,6 +111,8 @@ export interface ArrivalFullDetail {
   noRental?: boolean;
   advancePaid?: number;
   partiallyCompleted?: boolean;
+  /** Persisted multi-seller vs single-seller mode (restored on edit). */
+  multiSeller?: boolean;
   sellers: ArrivalSellerFullDetail[];
 }
 

@@ -1111,7 +1111,7 @@ const ArrivalsPage = () => {
     }
   };
 
-  const handleEditArrival = async (a: ArrivalSummary) => {
+  const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
@@ -1157,13 +1157,16 @@ const ArrivalsPage = () => {
           return acc;
         }, {})
       );
-      setIsMultiSeller(mappedSellers.length > 1);
+      const multiFromApi = detail?.multiSeller;
+      const resolvedMulti =
+        typeof multiFromApi === 'boolean' ? multiFromApi : mappedSellers.length > 1;
+      setIsMultiSeller(resolvedMulti);
 
       // Capture baseline immediately after we populate all edit fields,
       // so dirty detection works reliably even with invalid data.
       editBaselineSnapshotRef.current = JSON.stringify({
         step: 2,
-        isMultiSeller: mappedSellers.length > 1,
+        isMultiSeller: resolvedMulti,
         vehicleNumber: detail?.vehicleNumber ?? '',
         loadedWeight: detail?.loadedWeight != null ? String(detail.loadedWeight) : '',
         emptyWeight: detail?.emptyWeight != null ? String(detail.emptyWeight) : '',
@@ -1519,7 +1522,7 @@ const ArrivalsPage = () => {
                                               />
                                               <div className="flex gap-2">
                                                 {can('Arrivals', 'Edit') && (
-                                                  <Button type="button" variant="outline" size="sm" onClick={e => { e.stopPropagation(); handleEditArrival(apiArrivals.find(x => x.vehicleId === expandedDetail.vehicleId)!); }}><Pencil className="w-3.5 h-3.5 mr-1" /> Edit</Button>
+                                                  <Button type="button" variant="outline" size="sm" onClick={e => { e.stopPropagation(); handleEditArrival({ vehicleId: expandedDetail.vehicleId }); }}><Pencil className="w-3.5 h-3.5 mr-1" /> Edit</Button>
                                                 )}
                                                 {can('Arrivals', 'Delete') && (
                                                   <Button type="button" variant="destructive" size="sm" onClick={e => { e.stopPropagation(); setPendingDelete({ kind: 'arrival', vehicleId: expandedDetail.vehicleId, label: expandedDetail.vehicleNumber }); }}><Trash2 className="w-3.5 h-3.5 mr-1" /> Delete</Button>

@@ -127,6 +127,7 @@ public class ArrivalService {
         vehicle.setArrivalDatetime(now);
         vehicle.setCreatedAt(now);
         vehicle.setPartiallyCompleted(isPartial);
+        vehicle.setMultiSeller(request.isMultiSeller());
         if (request.getGodown() != null) vehicle.setGodown(request.getGodown());
         if (request.getGatepassNumber() != null) vehicle.setGatepassNumber(request.getGatepassNumber());
         if (request.getOrigin() != null) vehicle.setOrigin(request.getOrigin());
@@ -453,6 +454,7 @@ public class ArrivalService {
             sellerFullList.add(sellerFull);
         }
         dto.setPartiallyCompleted(Boolean.TRUE.equals(vehicle.getPartiallyCompleted()));
+        dto.setMultiSeller(Boolean.TRUE.equals(vehicle.getMultiSeller()));
         dto.setSellers(sellerFullList);
         return dto;
     }
@@ -476,6 +478,9 @@ public class ArrivalService {
 
         if (update.getPartiallyCompleted() != null) {
             vehicle.setPartiallyCompleted(update.getPartiallyCompleted());
+        }
+        if (update.getMultiSeller() != null) {
+            vehicle.setMultiSeller(update.getMultiSeller());
         }
 
         if (update.getVehicleNumber() != null && !update.getVehicleNumber().isBlank()) {
