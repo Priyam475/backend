@@ -99,6 +99,37 @@ const VARIANT_OPTIONS = [
   { value: 'Large', label: 'Large' },
 ];
 
+const ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS =
+  'px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold shrink-0';
+
+/** Arrivals summary first column: Vehicle | Seller | Qty (shared desktop table + mobile cards). */
+function ArrivalSummaryVehicleSellerQty({
+  vehicleNumber,
+  primarySellerName,
+  totalBags,
+}: Pick<ArrivalSummary, 'vehicleNumber' | 'primarySellerName' | 'totalBags'>) {
+  const seller = primarySellerName ?? '-';
+  const qty = totalBags ?? 0;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+      <span className={ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS}>{vehicleNumber}</span>
+      <span className="text-muted-foreground text-xs shrink-0" aria-hidden>
+        |
+      </span>
+      <span
+        className="min-w-0 max-w-[min(12rem,40vw)] sm:max-w-xs truncate text-foreground text-xs font-medium"
+        title={seller}
+      >
+        {seller}
+      </span>
+      <span className="text-muted-foreground text-xs shrink-0" aria-hidden>
+        |
+      </span>
+      <span className={ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS}>{qty}</span>
+    </span>
+  );
+}
+
 /**
  * Bag totals for lot headers are constant per render:
  * - vehicleTotal: total bags for the whole vehicle (all sellers, all lots)
@@ -1392,7 +1423,7 @@ const ArrivalsPage = () => {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border/40 bg-muted/30">
-                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle | Seller (qty)</th>
+                            <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Vehicle | Seller | Qty</th>
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Status</th>
                             <th className="text-left px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">From</th>
                             <th className="text-right px-4 py-3 font-semibold text-muted-foreground text-xs uppercase">Bids</th>
@@ -1418,11 +1449,12 @@ const ArrivalsPage = () => {
                                     className="border-b border-border/20 hover:bg-muted/20 transition-colors cursor-pointer"
                                     onClick={() => loadExpandedDetail(a.vehicleId)}
                                   >
-                                    <td className="px-4 py-3 font-semibold text-foreground">
-                                      <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
-                                      <span className="text-muted-foreground mx-1">|</span>
-                                      <span className="text-foreground text-xs">{a.primarySellerName ?? '-'}</span>
-                                      <span className="text-muted-foreground text-xs"> ({(a.totalBags ?? 0)})</span>
+                                    <td className="px-4 py-3 text-foreground">
+                                      <ArrivalSummaryVehicleSellerQty
+                                        vehicleNumber={a.vehicleNumber}
+                                        primarySellerName={a.primarySellerName}
+                                        totalBags={a.totalBags}
+                                      />
                                     </td>
                                     <td className="px-4 py-3"><ArrivalStatusBadge status={status} /></td>
                                     <td className="px-4 py-3 text-muted-foreground text-xs">{a.godown ?? '—'}</td>
@@ -2229,11 +2261,12 @@ const ArrivalsPage = () => {
                             <Truck className="w-4 h-4 text-white" />
                           </div>
                             <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold">{a.vehicleNumber}</span>
-                                <span className="text-muted-foreground text-xs">|</span>
-                                <span className="text-foreground text-xs">{a.primarySellerName ?? '-'}</span>
-                                <span className="text-muted-foreground text-xs"> ({(a.totalBags ?? 0)})</span>
+                              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                <ArrivalSummaryVehicleSellerQty
+                                  vehicleNumber={a.vehicleNumber}
+                                  primarySellerName={a.primarySellerName}
+                                  totalBags={a.totalBags}
+                                />
                                 <ArrivalStatusBadge status={status} />
                               </div>
                               <p className="text-xs text-muted-foreground mt-0.5">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg · Bids: {a.bidsCount ?? 0} · Weighed: {a.weighedCount ?? 0}</p>
