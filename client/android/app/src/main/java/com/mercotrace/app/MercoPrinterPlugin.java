@@ -1,5 +1,7 @@
 package com.mercotrace.app;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -145,25 +147,36 @@ public class MercoPrinterPlugin extends Plugin {
 
     @PluginMethod
     public void listPrinters(PluginCall call) {
-        Context context = getContext();
-        if (context == null) {
-            call.reject("Context not available");
-            return;
-        }
-
         try {
-            // DantSu library constructor is no-arg in our dependency version.
-            BluetoothPrintersConnections printers = new BluetoothPrintersConnections();
-            BluetoothConnection[] available = printers.getList();
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null) {
+                call.reject("Bluetooth adapter not available");
+                return;
+            }
+
+            // This is the "paired devices" list from Android.
+            BluetoothDevice[] bonded = null;
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // On Android 12+, access to Bluetooth devices requires runtime permission.
+                    // We rely on requestBluetoothPermissions() to have been called from UI.
+                    bonded = new BluetoothDevice[0];
+                }
+                bonded = adapter.getBondedDevices() != null
+                    ? adapter.getBondedDevices().toArray(new BluetoothDevice[0])
+                    : new BluetoothDevice[0];
+            } catch (SecurityException se) {
+                call.reject("Bluetooth permission required to list paired printers");
+                return;
+            }
 
             List<JSObject> printerList = new ArrayList<>();
-            if (available != null) {
-                for (BluetoothConnection conn : available) {
-                    if (conn == null || conn.getDevice() == null) continue;
-                    String mac = conn.getDevice().getAddress();
-                    String name = conn.getDevice().getName();
-
+            if (bonded != null) {
+                for (BluetoothDevice d : bonded) {
+                    if (d == null) continue;
                     JSObject item = new JSObject();
+                    String mac = d.getAddress();
+                    String name = d.getName();
                     item.put("mac", mac);
                     item.put("name", name != null ? name : mac);
                     printerList.add(item);
@@ -174,8 +187,7 @@ public class MercoPrinterPlugin extends Plugin {
             ret.put("printers", printerList);
             call.resolve(ret);
         } catch (Exception e) {
-            // If permissions are missing, this will usually throw. Let UI show a helpful message.
-            call.reject("Failed to list Bluetooth printers: " + e.getMessage(), e);
+            call.reject("Failed to list paired Bluetooth devices: " + e.getMessage(), e);
         }
     }
 
@@ -305,23 +317,33 @@ public class MercoPrinterPlugin extends Plugin {
             return false;
         }
 
-        Context context = getContext();
-        if (context == null) return false;
-
         try {
-            BluetoothPrintersConnections printers = new BluetoothPrintersConnections();
-            BluetoothConnection[] available = printers.getList();
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter == null) return false;
 
-            if (available == null || available.length == 0) return false;
-
-            BluetoothConnection matched = null;
-            for (BluetoothConnection conn : available) {
-                if (conn == null || conn.getDevice() == null) continue;
-                String mac = conn.getDevice().getAddress();
-                if (mac != null && mac.equalsIgnoreCase(deviceMac.trim())) {
-                    matched = conn;
-                    break;
+            BluetoothDevice matchedDevice = null;
+            if (adapter.getBondedDevices() != null) {
+                for (BluetoothDevice d : adapter.getBondedDevices()) {
+                    if (d == null) continue;
+                    String mac = d.getAddress();
+                    if (mac != null && mac.equalsIgnoreCase(deviceMac.trim())) {
+                        matchedDevice = d;
+                        break;
+                    }
                 }
+            }
+
+            if (matchedDevice == null) return false;
+
+            // Create connection directly from the Bluetooth device.
+            // Use reflection to avoid compile-time dependency on a specific constructor signature.
+            BluetoothConnection matched = null;
+            try {
+                matched = BluetoothConnection.class
+                    .getConstructor(BluetoothDevice.class)
+                    .newInstance(matchedDevice);
+            } catch (Exception ignored) {
+                matched = null;
             }
 
             if (matched == null) return false;

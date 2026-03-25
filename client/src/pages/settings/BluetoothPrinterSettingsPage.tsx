@@ -124,6 +124,13 @@ const BluetoothPrinterSettingsPage = () => {
     ].join('');
 
     try {
+      // Ensure runtime permission is granted before attempting thermal printing.
+      const perm = await mercoPrinter.requestBluetoothPermissions();
+      if (!perm?.granted) {
+        toast.error('Bluetooth permission not granted. Please allow permissions and try again.');
+        return;
+      }
+
       const ok = await directPrint(sampleHtml, { mode: 'auto', deviceMac: mac });
       ok ? toast.success('Test print triggered') : toast.error('Could not trigger print');
     } catch {
