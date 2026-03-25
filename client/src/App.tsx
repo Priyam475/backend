@@ -29,6 +29,7 @@ import PortraitLock from "@/components/PortraitLock";
 import TraderLayout from "@/components/TraderLayout";
 import RouteAutofocus from "@/components/RouteAutofocus";
 import ClickToFocusNewFields from "@/components/ClickToFocusNewFields";
+import KeyboardAvoidance from "@/components/KeyboardAvoidance";
 import LoginScreen from "./pages/LoginScreen";
 import ContactPortalLoginPage from "./pages/ContactPortalLoginPage";
 import ContactPortalSignupPage from "./pages/ContactPortalSignupPage";
@@ -126,6 +127,7 @@ function AppShell() {
       <RootClassManager />
       <RouteAutofocus />
       <ClickToFocusNewFields />
+      <KeyboardAvoidance />
       <Suspense fallback={<LazyFallback />}>
         <Outlet />
       </Suspense>
