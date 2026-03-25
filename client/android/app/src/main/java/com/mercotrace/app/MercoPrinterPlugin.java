@@ -75,7 +75,8 @@ public class MercoPrinterPlugin extends Plugin {
         }
 
         try {
-            BluetoothPrintersConnections printers = new BluetoothPrintersConnections(context);
+            // DantSu library constructor is no-arg in our dependency version.
+            BluetoothPrintersConnections printers = new BluetoothPrintersConnections();
             BluetoothConnection[] available = printers.getList();
 
             List<JSObject> printerList = new ArrayList<>();
@@ -177,7 +178,7 @@ public class MercoPrinterPlugin extends Plugin {
         if (context == null) return false;
 
         try {
-            BluetoothPrintersConnections printers = new BluetoothPrintersConnections(context);
+            BluetoothPrintersConnections printers = new BluetoothPrintersConnections();
             BluetoothConnection[] available = printers.getList();
 
             if (available == null || available.length == 0) return false;
