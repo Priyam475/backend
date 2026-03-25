@@ -76,41 +76,81 @@ function firmHeader(): string {
 
 // ── Direct Print Engine ──────────────────────────────────
 export async function directPrint(html: string): Promise<boolean> {
-  // On Android native builds, `window.print()` / hidden iframes often do not show
-  // the system printer picker inside Capacitor WebView. Instead we route to a
-  // native Android plugin that uses `PrintManager` + `WebView.createPrintDocumentAdapter()`.
-  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") {
+  const isAndroidNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+
+  // 1) Android native attempt (system PrintManager dialog)
+  if (isAndroidNative) {
     try {
       await nativeHtmlPrint.printHtml({ html, jobName: "MercoPrint" });
       return true;
     } catch {
-      return false;
+      // If native plugin is not available/registered on this build/device,
+      // fall back to the WebView iframe printing approach below.
     }
   }
 
-  // Desktop / web fallback: open hidden iframe and trigger browser print.
+  // 2) Desktop / web (and Android fallback): open an offscreen iframe and trigger print()
+  return directPrintViaIframe(html);
+}
+
+async function directPrintViaIframe(html: string): Promise<boolean> {
   try {
     const printFrame = document.createElement("iframe");
+    // Use a real size (not 0x0) to help Android WebView render/print reliably.
     printFrame.style.cssText =
-      "position:fixed;top:-10000px;left:-10000px;width:0;height:0";
+      "position:fixed;top:-10000px;left:-10000px;width:800px;height:600px;opacity:0;pointer-events:none;border:0;";
     document.body.appendChild(printFrame);
-    const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
-    if (!frameDoc) {
-      document.body.removeChild(printFrame);
-      return false;
-    }
-    frameDoc.open();
-    frameDoc.write(html);
-    frameDoc.close();
-    setTimeout(() => {
+
+    const cleanup = () => {
       try {
-        printFrame.contentWindow?.print();
+        document.body.removeChild(printFrame);
       } catch {
         // ignore
       }
-      setTimeout(() => document.body.removeChild(printFrame), 1000);
-    }, 300);
-    return true;
+    };
+
+    // Prefer `srcdoc` so the iframe actually loads content before printing.
+    // (Some WebViews fail if we rely only on `contentDocument` immediately.)
+    printFrame.srcdoc = html;
+
+    const timeoutMs = 8000;
+    const startedAt = Date.now();
+
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        // Give WebView a moment to hand off the print job to Android.
+        if (ok) {
+          window.setTimeout(() => cleanup(), 1500);
+        } else {
+          cleanup();
+        }
+        resolve(ok);
+      };
+
+      printFrame.onload = () => {
+        setTimeout(() => {
+          try {
+            printFrame.contentWindow?.focus();
+            printFrame.contentWindow?.print();
+            finish(true);
+          } catch {
+            finish(false);
+          }
+        }, 250);
+      };
+
+      const timer = window.setTimeout(() => {
+        if (Date.now() - startedAt >= timeoutMs) {
+          // If load never happened, printing likely can't be triggered.
+          finish(false);
+        }
+        window.clearTimeout(timer);
+      }, timeoutMs);
+    });
   } catch {
     return false;
   }
