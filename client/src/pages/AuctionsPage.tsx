@@ -1243,7 +1243,7 @@ const AuctionsPage = () => {
         commodityName: completedAuction.commodityName,
         completedAt: completedAuction.completedAt,
         entries: completedAuction.entries,
-      }));
+      }), { mode: "system" });
       ok ? toast.success('Auction completion print opened') : toast.error('Printer not connected.');
     })();
   }, [showPrint, completedAuction]);
@@ -1666,7 +1666,7 @@ const AuctionsPage = () => {
                   commodityName: completedAuction.commodityName,
                   completedAt: completedAuction.completedAt,
                   entries: completedAuction.entries,
-                }));
+                }), { mode: "system" });
                 ok ? toast.success('Auction details sent to printer!') : toast.error('Printer not connected.');
               }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg"

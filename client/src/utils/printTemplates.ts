@@ -3,11 +3,21 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 // ── Print Templates for Print Hub ──────────────────────────
 // REQ-LOG-002: All print formats per SRS (same format as client_origin)
 
-type NativeHtmlPrintPlugin = {
-  printHtml(options: { html: string; jobName?: string }): Promise<void>;
+type MercoPrinterPlugin = {
+  printHtml(options: {
+    html: string;
+    mode?: "auto" | "system" | "thermal";
+    deviceMac?: string;
+    jobName?: string;
+  }): Promise<{ ok?: boolean }>;
+  listPrinters(): Promise<{ printers: { mac: string; name: string }[] }>;
 };
 
-const nativeHtmlPrint = registerPlugin<NativeHtmlPrintPlugin>("NativeHtmlPrint");
+const mercoPrinter = registerPlugin<MercoPrinterPlugin>("MercoPrinter");
+
+type PrintMode = "auto" | "system" | "thermal";
+
+const BOUND_PRINTER_MAC_KEY = "merco.boundBluetoothPrinterMac";
 
 export interface BidInfo {
   bidNumber: number;
@@ -75,22 +85,43 @@ function firmHeader(): string {
 }
 
 // ── Direct Print Engine ──────────────────────────────────
-export async function directPrint(html: string): Promise<boolean> {
+export async function directPrint(
+  html: string,
+  options?: { mode?: PrintMode; deviceMac?: string }
+): Promise<boolean> {
   const isAndroidNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
 
-  // 1) Android native attempt (system PrintManager dialog)
+  const mode: PrintMode = options?.mode ?? "system";
+  const deviceMac = options?.deviceMac ?? getBoundPrinterMac();
+
+  // 1) Android native attempt
   if (isAndroidNative) {
     try {
-      await nativeHtmlPrint.printHtml({ html, jobName: "MercoPrint" });
+      await Promise.race([
+        mercoPrinter.printHtml({ html, mode, deviceMac, jobName: "MercoPrint" }),
+        new Promise<never>((_resolve, reject) => {
+          window.setTimeout(() => reject(new Error("Native print timeout")), 12000);
+        }),
+      ]);
       return true;
     } catch {
       // If native plugin is not available/registered on this build/device,
-      // fall back to the WebView iframe printing approach below.
+      // fall back to iframe printing.
     }
   }
 
   // 2) Desktop / web (and Android fallback): open an offscreen iframe and trigger print()
   return directPrintViaIframe(html);
+}
+
+function getBoundPrinterMac(): string | undefined {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android") return undefined;
+  try {
+    const v = window.localStorage.getItem(BOUND_PRINTER_MAC_KEY);
+    return v ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function directPrintViaIframe(html: string): Promise<boolean> {

@@ -696,7 +696,7 @@ const BillingPage = () => {
               } catch {
                 // backend optional
               }
-              const ok = await directPrint(generateSalesBillPrintHTML(bill));
+              const ok = await directPrint(generateSalesBillPrintHTML(bill), { mode: "system" });
               ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
             }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
