@@ -238,7 +238,7 @@ const LogisticsPage = () => {
     } catch {
       // backend optional
     }
-    const ok = directPrint(generateSalesSticker(bid));
+    const ok = await directPrint(generateSalesSticker(bid));
     ok ? toast.success('Sticker sent to printer!') : toast.error('Printer not connected. Please check printer connection.');
   };
 
@@ -253,7 +253,7 @@ const LogisticsPage = () => {
     } catch {
       // optional
     }
-    const ok = directPrint(generateBuyerChiti(g.buyerName, g.buyerMark, g.bids));
+    const ok = await directPrint(generateBuyerChiti(g.buyerName, g.buyerMark, g.bids));
     ok ? toast.success('Buyer Chiti sent to printer!') : toast.error('Printer not connected.');
   };
 
@@ -268,7 +268,7 @@ const LogisticsPage = () => {
     } catch {
       // optional
     }
-    const ok = directPrint(generateSellerChiti(g.name, g.serial, g.bids));
+    const ok = await directPrint(generateSellerChiti(g.name, g.serial, g.bids));
     ok ? toast.success('Seller Chiti sent to printer!') : toast.error('Printer not connected.');
   };
 
@@ -289,7 +289,7 @@ const LogisticsPage = () => {
         : type === 'TENDER_SLIP'
           ? generateTenderSlip(filteredBids)
           : generateDispatchControl(filteredBids);
-    const ok = directPrint(html);
+    const ok = await directPrint(html);
     ok ? toast.success('Sent to printer!') : toast.error('Printer not connected.');
   };
 

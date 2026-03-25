@@ -1233,17 +1233,19 @@ const AuctionsPage = () => {
     const printKey = String(completedAuction.auction_id);
     if (autoPrintedAuctionRef.current === printKey) return;
     autoPrintedAuctionRef.current = printKey;
-    directPrint(generateAuctionCompletionPrintHTML({
-      auctionId: completedAuction.auction_id,
-      lotId: completedAuction.lotId,
-      lotName: completedAuction.lotName,
-      sellerName: completedAuction.sellerName,
-      vehicleNumber: completedAuction.vehicleNumber,
-      commodityName: completedAuction.commodityName,
-      completedAt: completedAuction.completedAt,
-      entries: completedAuction.entries,
-    }));
-    toast.success('Auction completion print opened');
+    void (async () => {
+      const ok = await directPrint(generateAuctionCompletionPrintHTML({
+        auctionId: completedAuction.auction_id,
+        lotId: completedAuction.lotId,
+        lotName: completedAuction.lotName,
+        sellerName: completedAuction.sellerName,
+        vehicleNumber: completedAuction.vehicleNumber,
+        commodityName: completedAuction.commodityName,
+        completedAt: completedAuction.completedAt,
+        entries: completedAuction.entries,
+      }));
+      ok ? toast.success('Auction completion print opened') : toast.error('Printer not connected.');
+    })();
   }, [showPrint, completedAuction]);
 
   const removeEntry = useCallback(async (id: string) => {
@@ -1654,8 +1656,8 @@ const AuctionsPage = () => {
 
           <div className="flex gap-3 mt-4">
             <Button
-              onClick={() => {
-                directPrint(generateAuctionCompletionPrintHTML({
+              onClick={async () => {
+                const ok = await directPrint(generateAuctionCompletionPrintHTML({
                   auctionId: completedAuction.auction_id,
                   lotId: completedAuction.lotId,
                   lotName: completedAuction.lotName,
@@ -1665,7 +1667,7 @@ const AuctionsPage = () => {
                   completedAt: completedAuction.completedAt,
                   entries: completedAuction.entries,
                 }));
-                toast.success('Auction details sent to printer!');
+                ok ? toast.success('Auction details sent to printer!') : toast.error('Printer not connected.');
               }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg"
             >
@@ -2652,10 +2654,8 @@ const AuctionsPage = () => {
                               </button>
                               <button
                                 onClick={() => setPendingDeleteBid({ id: entry.id, label: `${entry.buyerName} (${entry.buyerMark})` })}
-                                className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20"
                                 type="button"
                                 disabled={!!editingBidId}
-                                onClick={() => removeEntry(entry.id)}
                                 className="p-1 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40"
                                 title="Delete bid"
                               >

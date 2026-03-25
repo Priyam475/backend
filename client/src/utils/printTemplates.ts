@@ -1,5 +1,13 @@
+import { Capacitor, registerPlugin } from "@capacitor/core";
+
 // ── Print Templates for Print Hub ──────────────────────────
 // REQ-LOG-002: All print formats per SRS (same format as client_origin)
+
+type NativeHtmlPrintPlugin = {
+  printHtml(options: { html: string; jobName?: string }): Promise<void>;
+};
+
+const nativeHtmlPrint = registerPlugin<NativeHtmlPrintPlugin>("NativeHtmlPrint");
 
 export interface BidInfo {
   bidNumber: number;
@@ -67,27 +75,45 @@ function firmHeader(): string {
 }
 
 // ── Direct Print Engine ──────────────────────────────────
-export function directPrint(html: string): boolean {
-  const printFrame = document.createElement('iframe');
-  printFrame.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:0;height:0';
-  document.body.appendChild(printFrame);
-  const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
-  if (!frameDoc) {
-    document.body.removeChild(printFrame);
+export async function directPrint(html: string): Promise<boolean> {
+  // On Android native builds, `window.print()` / hidden iframes often do not show
+  // the system printer picker inside Capacitor WebView. Instead we route to a
+  // native Android plugin that uses `PrintManager` + `WebView.createPrintDocumentAdapter()`.
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") {
+    try {
+      await nativeHtmlPrint.printHtml({ html, jobName: "MercoPrint" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Desktop / web fallback: open hidden iframe and trigger browser print.
+  try {
+    const printFrame = document.createElement("iframe");
+    printFrame.style.cssText =
+      "position:fixed;top:-10000px;left:-10000px;width:0;height:0";
+    document.body.appendChild(printFrame);
+    const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
+    if (!frameDoc) {
+      document.body.removeChild(printFrame);
+      return false;
+    }
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
+    setTimeout(() => {
+      try {
+        printFrame.contentWindow?.print();
+      } catch {
+        // ignore
+      }
+      setTimeout(() => document.body.removeChild(printFrame), 1000);
+    }, 300);
+    return true;
+  } catch {
     return false;
   }
-  frameDoc.open();
-  frameDoc.write(html);
-  frameDoc.close();
-  setTimeout(() => {
-    try {
-      printFrame.contentWindow?.print();
-    } catch {
-      // ignore
-    }
-    setTimeout(() => document.body.removeChild(printFrame), 1000);
-  }, 300);
-  return true;
 }
 
 // ── 1. Sales Sticker (Thermal Adhesive, Landscape) ──────
