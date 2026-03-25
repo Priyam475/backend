@@ -15,8 +15,11 @@ import type { ArrivalDetail } from '@/services/api/arrivals';
 import {
   directPrint,
   generateSalesSticker,
+  generateSalesStickerThermal,
   generateBuyerChiti,
+  generateBuyerChitiThermal,
   generateSellerChiti,
+  generateSellerChitiThermal,
   generateSalePadPrint,
   generateTenderSlip,
   generateDispatchControl,
@@ -238,7 +241,10 @@ const LogisticsPage = () => {
     } catch {
       // backend optional
     }
-    const ok = await directPrint(generateSalesSticker(bid), { mode: "auto" });
+    const ok = await directPrint(
+      { html: generateSalesSticker(bid), thermalText: generateSalesStickerThermal(bid) },
+      { mode: "auto" }
+    );
     ok ? toast.success('Sticker sent to printer!') : toast.error('Printer not connected. Please check printer connection.');
   };
 
@@ -253,7 +259,13 @@ const LogisticsPage = () => {
     } catch {
       // optional
     }
-    const ok = await directPrint(generateBuyerChiti(g.buyerName, g.buyerMark, g.bids), { mode: "auto" });
+    const ok = await directPrint(
+      {
+        html: generateBuyerChiti(g.buyerName, g.buyerMark, g.bids),
+        thermalText: generateBuyerChitiThermal(g.buyerName, g.buyerMark, g.bids),
+      },
+      { mode: "auto" }
+    );
     ok ? toast.success('Buyer Chiti sent to printer!') : toast.error('Printer not connected.');
   };
 
@@ -268,7 +280,13 @@ const LogisticsPage = () => {
     } catch {
       // optional
     }
-    const ok = await directPrint(generateSellerChiti(g.name, g.serial, g.bids), { mode: "auto" });
+    const ok = await directPrint(
+      {
+        html: generateSellerChiti(g.name, g.serial, g.bids),
+        thermalText: generateSellerChitiThermal(g.name, g.serial, g.bids),
+      },
+      { mode: "auto" }
+    );
     ok ? toast.success('Seller Chiti sent to printer!') : toast.error('Printer not connected.');
   };
 

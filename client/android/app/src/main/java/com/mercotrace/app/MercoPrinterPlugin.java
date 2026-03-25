@@ -109,19 +109,25 @@ public class MercoPrinterPlugin extends Plugin {
         String html = call.getString("html");
         String mode = call.getString("mode", "auto"); // "system" | "thermal" | "auto"
         String deviceMac = call.getString("deviceMac", null);
+        String thermalText = call.getString("thermalText", null);
 
-        if (html == null || html.isEmpty()) {
-            call.reject("html is required");
+        if ((html == null || html.isEmpty()) && (thermalText == null || thermalText.isEmpty())) {
+            call.reject("html or thermalText is required");
             return;
         }
 
         if ("system".equalsIgnoreCase(mode)) {
+            // System printing always needs HTML to render via WebView.
+            if (html == null || html.isEmpty()) {
+                call.reject("html is required for system printing");
+                return;
+            }
             printSystem(html, call);
             return;
         }
 
         if ("thermal".equalsIgnoreCase(mode)) {
-            boolean ok = tryThermalByMac(html, deviceMac);
+            boolean ok = tryThermalByMac(html, deviceMac, thermalText);
             if (ok) {
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -134,13 +140,17 @@ public class MercoPrinterPlugin extends Plugin {
         }
 
         // auto: try thermal with bound MAC (if present). If it fails, always fall back to system.
-        boolean thermalOk = tryThermalByMac(html, deviceMac);
+        boolean thermalOk = tryThermalByMac(html, deviceMac, thermalText);
         if (thermalOk) {
             JSObject ret = new JSObject();
             ret.put("ok", true);
             ret.put("printedMode", "thermal");
             call.resolve(ret);
         } else {
+            if (html == null || html.isEmpty()) {
+                call.reject("html is required for system fallback");
+                return;
+            }
             printSystem(html, call);
         }
     }
@@ -312,7 +322,7 @@ public class MercoPrinterPlugin extends Plugin {
         });
     }
 
-    private boolean tryThermalByMac(String html, String deviceMac) {
+    private boolean tryThermalByMac(String html, String deviceMac, String thermalText) {
         if (deviceMac == null || deviceMac.trim().isEmpty()) {
             return false;
         }
@@ -351,7 +361,15 @@ public class MercoPrinterPlugin extends Plugin {
             // 80mm thermal paper width (per your requirement).
             // 203 DPI + 80mm => typically ~48 chars per line.
             EscPosPrinter printer = new EscPosPrinter(matched, 203, 80f, 48);
-            String text = htmlToPlainText(html);
+
+            String text;
+            if (thermalText != null && !thermalText.trim().isEmpty()) {
+                // Send ESC/POS formatted text directly. This avoids any HTML/CSS parsing.
+                text = thermalText;
+            } else {
+                text = htmlToPlainText(html);
+            }
+
             if (text.isEmpty()) {
                 text = "Mercotrace\nPrint job\n";
             }
@@ -374,6 +392,12 @@ public class MercoPrinterPlugin extends Plugin {
         // Remove the whole <head> section first, so even if <style> tags are
         // malformed/stripped on the way in, CSS won't be printed on thermal.
         text = text.replaceAll("(?is)<head[^>]*>.*?</head>", " ");
+
+        // Replace CSS-only separators with visible ASCII lines.
+        // (On ESC/POS thermal, CSS borders/dashed lines won't render.)
+        text = text.replaceAll("(?is)<div[^>]*class\\s*=\\s*\"[^\"]*cut-line[^\"]*\"[^>]*>\\s*</div>", "\n--------------------------------\n");
+        text = text.replaceAll("(?is)<div[^>]*class\\s*=\\s*\"[^\"]*totals[^\"]*\"[^>]*>", "\n================ Totals ================\n");
+        text = text.replaceAll("(?is)<div[^>]*class\\s*=\\s*\"[^\"]*sticker[^\"]*\"[^>]*>", "\n================== STICKER ==================\n");
 
         // Remove style/script/comments entirely (so we don't print CSS selectors/classes).
         text = text.replaceAll("(?is)<style[^>]*>.*?</style>", " ");
@@ -415,11 +439,37 @@ public class MercoPrinterPlugin extends Plugin {
             .replace("&#39;", "'");
 
         // Normalize whitespace while keeping newlines.
-        text = text.replaceAll("[\\t\\x0B\\f\\r ]+", " ");
+        // Preserve multiple spaces we intentionally add for thermal readability.
+        // Only normalize tabs/other whitespace, not normal spaces.
+        text = text.replaceAll("[\\t\\x0B\\f\\r]+", " ");
         text = text.replaceAll(" *\\n *", "\n");
         text = text.replaceAll("\\n{3,}", "\n\n");
 
-        return text.trim();
+        // Basic centering for the known receipt header.
+        // (ESC/POS thermal can't render CSS, so we align text by padding.)
+        final int charsPerLine = 48; // matches new EscPosPrinter(..., 48)
+        String[] lines = text.trim().split("\\n");
+        for (int i = 0; i < lines.length; i++) {
+            String t = lines[i].trim();
+            if (t.equalsIgnoreCase("mercotrace") || t.equalsIgnoreCase("mercotrace".toUpperCase())) {
+                lines[i] = centerToWidth(t.toUpperCase(), charsPerLine);
+            }
+        }
+        return String.join("\n", lines).trim();
+    }
+
+    private String centerToWidth(String s, int width) {
+        if (s == null) return "";
+        if (width <= 0) return s;
+        if (s.length() >= width) return s;
+        int padding = width - s.length();
+        int left = padding / 2;
+        int right = padding - left;
+        StringBuilder sb = new StringBuilder(width);
+        for (int i = 0; i < left; i++) sb.append(' ');
+        sb.append(s);
+        for (int i = 0; i < right; i++) sb.append(' ');
+        return sb.toString();
     }
 }
 

@@ -130,6 +130,11 @@ const BluetoothPrinterSettingsPage = () => {
       '<br/>',
       `<div style="font-family:monospace">MAC: ${escapeHtml(mac)}</div>`,
     ].join('');
+      const sampleThermalText = [
+        '[C]<b>MERCOTRACE</b>',
+        '[C]Bluetooth Thermal Test',
+        `[L]MAC: ${mac}`,
+      ].join('\n');
 
     try {
       // Ensure runtime permission is granted before attempting thermal printing.
@@ -139,7 +144,7 @@ const BluetoothPrinterSettingsPage = () => {
         return;
       }
 
-      const ok = await directPrint(sampleHtml, { mode: 'auto', deviceMac: mac });
+      const ok = await directPrint({ html: sampleHtml, thermalText: sampleThermalText }, { mode: 'auto', deviceMac: mac });
       ok ? toast.success('Test print triggered') : toast.error('Could not trigger print');
     } catch {
       toast.error('Test print failed');
