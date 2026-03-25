@@ -285,9 +285,9 @@ export function generateSalesStickerThermal(bid: BidInfo): string {
     "[C]" + escposBold(clampThermalText(lot, THERMAL_CHARS_PER_LINE)),
     "[C]" + escposBold(`[${String(bid.buyerMark ?? "").trim()}]`),
     "",
-    row(`Sl No ${bid.sellerSerial}`, `${bid.quantity} bags`),
-    row(`Godown ${bid.godown || "—"}`, `V No ${bid.vehicleNumber}`),
-    row(`Commodity ${commodity}`, `Date ${dateStr}`),
+    "[L]" + row(`Sl No ${bid.sellerSerial}`, `${bid.quantity} bags`),
+    "[L]" + row(`Godown ${bid.godown || "—"}`, `V No ${bid.vehicleNumber}`),
+    "[L]" + row(`Commodity ${commodity}`, `Date ${dateStr}`),
     "",
   ].join("\n");
 }
@@ -327,7 +327,7 @@ export function generateBuyerChitiThermal(
     "[C]" + clampThermalText(buyerName, THERMAL_CHARS_PER_LINE),
     "[C]" + escposBold(`[${String(buyerMark ?? "").trim()}]`),
     "",
-    pad("Lot", wLot) + pad("Gdwn", wGdwn) + pad("Qty", wQty) + pad("Mark", wMark) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
+    "[L]" + pad("Lot", wLot) + pad("Gdwn", wGdwn) + pad("Qty", wQty) + pad("Mark", wMark) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
   ].join("\n");
 
   const rows = bids
@@ -336,14 +336,15 @@ export function generateBuyerChitiThermal(
       const rateTxt = escapeThermalPrice(`₹${b.rate}`);
       const wtTxt = stage === "post-weighing" ? `${b.weight ?? "—"} kg` : "";
 
-      return (
+      const line1 =
         pad(lot, wLot) +
         pad(b.godown || "—", wGdwn) +
         pad(String(b.quantity), wQty) +
         pad(`[${b.buyerMark}]`, wMark) +
         pad(rateTxt, wRate) +
-        (stage === "post-weighing" ? pad(wtTxt, wWt) : "")
-      );
+        (stage === "post-weighing" ? pad(wtTxt, wWt) : "");
+
+      return "[L]" + line1;
     })
     .join("\n");
 
@@ -354,7 +355,7 @@ export function generateBuyerChitiThermal(
     "",
     "[C]Powered by Mercotrace",
     "",
-    "--------------------------------",
+    "[L]--------------------------------",
     "",
   ].join("\n");
 
@@ -399,7 +400,7 @@ export function generateSellerChitiThermal(
     "[C]" + (primaryMark ? escposBold(`[${String(primaryMark ?? "").trim()}]`) : ""),
     "[C]" + clampThermalText(`S.No: ${sellerSerial}`, THERMAL_CHARS_PER_LINE),
     "",
-    pad("Lot", wLot) + pad("Mark", wMark) + pad("Qty", wQty) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
+    "[L]" + pad("Lot", wLot) + pad("Mark", wMark) + pad("Qty", wQty) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
   ].join("\n");
 
   const rows = bids
@@ -407,13 +408,14 @@ export function generateSellerChitiThermal(
       const rateTxt = escapeThermalPrice(`₹${b.rate}`);
       const wtTxt = stage === "post-weighing" ? `${b.weight ?? "—"} kg` : "";
 
-      return (
+      const line =
         pad(lotDisplay(b), wLot) +
         pad(`[${b.buyerMark}]`, wMark) +
         pad(String(b.quantity), wQty) +
         pad(rateTxt, wRate) +
-        (stage === "post-weighing" ? pad(wtTxt, wWt) : "")
-      );
+        (stage === "post-weighing" ? pad(wtTxt, wWt) : "");
+
+      return "[L]" + line;
     })
     .join("\n");
 
@@ -424,7 +426,7 @@ export function generateSellerChitiThermal(
     "",
     "[C]Powered by Mercotrace",
     "",
-    "--------------------------------",
+    "[L]--------------------------------",
     "",
   ].join("\n");
 
