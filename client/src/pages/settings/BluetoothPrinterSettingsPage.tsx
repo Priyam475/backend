@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import BottomNav from '@/components/BottomNav';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import { useDesktopMode } from '@/hooks/use-desktop';
 import { directPrint } from '@/utils/printTemplates';
 
 type MercoPrinterPlugin = {
@@ -39,12 +40,15 @@ function escapeHtml(s: string): string {
 const BluetoothPrinterSettingsPage = () => {
   const navigate = useNavigate();
   const { canAccessModule, can } = usePermissions();
+  const isDesktop = useDesktopMode();
 
   const canViewSettings = canAccessModule('Settings');
   const canManageSettings = can('Settings', 'Manage Roles') || can('Settings', 'Manage Users') || can('Settings', 'View');
 
   const [loading, setLoading] = useState(false);
   const [printers, setPrinters] = useState<{ mac: string; name: string }[]>([]);
+  // `null` = not checked yet, `false` = explicitly denied, `true` = granted
+  const [bluetoothPermissionGranted, setBluetoothPermissionGranted] = useState<boolean | null>(null);
 
   const [boundMac, setBoundMac] = useState<string>(() => {
     try {
@@ -66,9 +70,12 @@ const BluetoothPrinterSettingsPage = () => {
     }
     try {
       setLoading(true);
+      setBluetoothPermissionGranted(null);
       // On Android 12+, Bluetooth requires runtime permission. Request it first.
       const perm = await mercoPrinter.requestBluetoothPermissions();
-      if (!perm?.granted) {
+      const granted = !!perm?.granted;
+      setBluetoothPermissionGranted(granted);
+      if (!granted) {
         toast.error('Bluetooth permission not granted. Please allow permissions and try again.');
         setPrinters([]);
         return;
@@ -77,6 +84,7 @@ const BluetoothPrinterSettingsPage = () => {
       setPrinters(Array.isArray(res?.printers) ? res.printers : []);
     } catch (e) {
       console.error(e);
+      setBluetoothPermissionGranted(false);
       toast.error('Failed to load paired Bluetooth printers. Check Bluetooth permissions and try again.');
       setPrinters([]);
     } finally {
@@ -144,19 +152,46 @@ const BluetoothPrinterSettingsPage = () => {
 
   return (
     <div className="min-h-[100dvh] bg-background pb-28 lg:pb-6">
-      <div className="px-4 md:px-8 pt-4 lg:pt-6 space-y-6">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} className="shrink-0">
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <Bluetooth className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">Bluetooth Printer Settings</h1>
-            <p className="text-sm text-muted-foreground">Bind ESC/POS thermal printer MAC for Print Hub sticker/chiti</p>
+      {/* Mobile hero (matches Print Hub style) */}
+      {!isDesktop && (
+        <div className="bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-4">
+              <button
+                onClick={() => navigate('/settings')}
+                aria-label="Go back"
+                className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"
+              >
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                <Bluetooth className="w-6 h-6 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-white">Bluetooth Printer Settings</h1>
+                <p className="text-white/70 text-xs mt-1">Bind ESC/POS thermal printer MAC for Print Hub sticker/chiti</p>
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      <div className={isDesktop ? 'px-4 md:px-8 pt-4 lg:pt-6 space-y-6' : 'px-4 md:px-8 pt-5 space-y-6'}>
+        {isDesktop && (
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/settings')} className="shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <Bluetooth className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground">Bluetooth Printer Settings</h1>
+              <p className="text-sm text-muted-foreground">Bind ESC/POS thermal printer MAC for Print Hub sticker/chiti</p>
+            </div>
+          </div>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -178,10 +213,14 @@ const BluetoothPrinterSettingsPage = () => {
             {loading && (
               <div className="text-xs text-muted-foreground">Loading paired printers…</div>
             )}
-            {!loading && printers.length === 0 && (
-              <div className="text-xs text-muted-foreground">
-                No paired printers found (or permissions not granted yet).
-              </div>
+            {!loading && printers.length === 0 && bluetoothPermissionGranted === false && (
+              <div className="text-xs text-red-600 font-semibold">Bluetooth permission not granted yet.</div>
+            )}
+            {!loading && printers.length === 0 && bluetoothPermissionGranted === true && (
+              <div className="text-xs text-muted-foreground">No paired printers found.</div>
+            )}
+            {!loading && printers.length === 0 && bluetoothPermissionGranted === null && (
+              <div className="text-xs text-muted-foreground">Tap “Refresh” to load paired printers.</div>
             )}
             {printers.map((p) => {
               const mac = normalizeMac(p.mac);
