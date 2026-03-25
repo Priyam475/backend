@@ -365,11 +365,60 @@ public class MercoPrinterPlugin extends Plugin {
 
     private String htmlToPlainText(String html) {
         if (html == null) return "";
-        String text = html
+        // Thermal printers can't render HTML/CSS. Convert the provided HTML into
+        // a readable plain-text representation that preserves the "receipt" content
+        // and ignores CSS (otherwise we print class/style definitions).
+        String text = html;
+
+        // Templates in this project keep all CSS inside <head>.
+        // Remove the whole <head> section first, so even if <style> tags are
+        // malformed/stripped on the way in, CSS won't be printed on thermal.
+        text = text.replaceAll("(?is)<head[^>]*>.*?</head>", " ");
+
+        // Remove style/script/comments entirely (so we don't print CSS selectors/classes).
+        text = text.replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+        text = text.replaceAll("(?is)<script[^>]*>.*?</script>", " ");
+        text = text.replaceAll("(?is)<!--.*?-->", " ");
+
+        // Extra hardening: sometimes CSS tags/sections can get partially stripped
+        // before reaching this converter. Remove common CSS blocks even when
+        // they are left as plain text.
+        text = text.replaceAll("(?is)@page\\s*\\{.*?\\}", " ");
+        text = text.replaceAll("(?is)@media\\s*[^\\{]*\\{.*?\\}", " ");
+        // Remove basic "selector { ... }" rules (non-nested).
+        text = text.replaceAll("(?is)[\\w@.#\\-\\s]+\\s*\\{[^\\}]*\\}", " ");
+
+        // Basic formatting hints.
+        text = text
             .replaceAll("(?i)<br\\s*/?>", "\n")
             .replaceAll("(?i)</p>", "\n\n")
-            .replaceAll("(?s)<[^>]*>", "")
-            .replace("&nbsp;", " ");
+            // Table rows are the natural line boundaries for chiti/stik.
+            .replaceAll("(?i)</tr>", "\n")
+            // Divs act like block sections.
+            .replaceAll("(?i)</div>", "\n")
+            // Separate cells a bit.
+            .replaceAll("(?i)</td>", "  ")
+            .replaceAll("(?i)</th>", "  ")
+            // Many templates use span inside divs for label/value pairs.
+            .replaceAll("(?i)</span>", "  ");
+
+        // Strip all remaining tags.
+        text = text.replaceAll("(?s)<[^>]*>", "");
+
+        // Decode a few common HTML entities used in our templates.
+        text = text
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'");
+
+        // Normalize whitespace while keeping newlines.
+        text = text.replaceAll("[\\t\\x0B\\f\\r ]+", " ");
+        text = text.replaceAll(" *\\n *", "\n");
+        text = text.replaceAll("\\n{3,}", "\n\n");
+
         return text.trim();
     }
 }
