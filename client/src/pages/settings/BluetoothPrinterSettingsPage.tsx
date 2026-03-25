@@ -15,6 +15,7 @@ import { directPrint } from '@/utils/printTemplates';
 
 type MercoPrinterPlugin = {
   listPrinters(): Promise<{ printers: { mac: string; name: string }[] }>;
+  requestBluetoothPermissions(): Promise<{ granted: boolean }>;
 };
 
 const mercoPrinter = registerPlugin<MercoPrinterPlugin>('MercoPrinter');
@@ -65,6 +66,13 @@ const BluetoothPrinterSettingsPage = () => {
     }
     try {
       setLoading(true);
+      // On Android 12+, Bluetooth requires runtime permission. Request it first.
+      const perm = await mercoPrinter.requestBluetoothPermissions();
+      if (!perm?.granted) {
+        toast.error('Bluetooth permission not granted. Please allow permissions and try again.');
+        setPrinters([]);
+        return;
+      }
       const res = await mercoPrinter.listPrinters();
       setPrinters(Array.isArray(res?.printers) ? res.printers : []);
     } catch (e) {

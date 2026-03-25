@@ -11,6 +11,7 @@ type MercoPrinterPlugin = {
     jobName?: string;
   }): Promise<{ ok?: boolean }>;
   listPrinters(): Promise<{ printers: { mac: string; name: string }[] }>;
+  requestBluetoothPermissions(): Promise<{ granted: boolean }>;
 };
 
 const mercoPrinter = registerPlugin<MercoPrinterPlugin>("MercoPrinter");
