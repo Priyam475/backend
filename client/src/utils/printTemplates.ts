@@ -555,8 +555,11 @@ export function generateSalePadPrint(bids: BidInfo[]): string {
     @page { size: A5 portrait; margin: 8mm; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 8mm; font-size: 11px; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th { background: #333; color: #fff; padding: 4px 6px; font-size: 9px; text-transform: uppercase; text-align: left; }
-    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 10px; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr { page-break-inside: avoid; }
+    th { background: #333; color: #fff; padding: 4px 6px; font-size: 9px; text-transform: uppercase; text-align: center; }
+    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 10px; text-align: center; }
     tr:nth-child(even) { background: #f9f9f9; }
     .sale-pad-title { text-align: center; font-size: 13px; font-weight: 800; margin-top: 2px; margin-bottom: 6px; letter-spacing: 0.3px; }
     @media print { body { margin: 0; padding: 8mm; } }
@@ -651,17 +654,20 @@ export function generateDispatchControl(bids: BidInfo[]): string {
     @page { size: A5 portrait; margin: 6mm; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 6mm; font-size: 10px; color: #111; }
     .sheet { border: 1px solid #8f8f8f; min-height: calc(100vh - 12mm); padding: 8px 10px; box-sizing: border-box; }
-    .head { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; margin-bottom: 4px; }
+    .head { display: flex; justify-content: center; gap: 24px; font-size: 10px; font-weight: 700; margin-bottom: 4px; text-align: center; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th { text-align: left; font-size: 9px; font-weight: 700; padding: 2px 3px; border-bottom: 1px dashed #777; }
-    td { font-size: 9px; font-weight: 700; padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px dotted #ddd; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr { page-break-inside: avoid; }
+    th { text-align: center; font-size: 9px; font-weight: 700; padding: 2px 3px; border-bottom: 1px dashed #777; }
+    td { font-size: 9px; font-weight: 700; padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px dotted #ddd; text-align: center; }
     th:nth-child(1), td:nth-child(1) { width: 8%; }
     th:nth-child(2), td:nth-child(2) { width: 19%; }
-    th:nth-child(3), td:nth-child(3) { width: 12%; text-align: right; }
+    th:nth-child(3), td:nth-child(3) { width: 12%; }
     th:nth-child(4), td:nth-child(4) { width: 9%; }
     th:nth-child(5), td:nth-child(5) { width: 24%; }
     th:nth-child(6), td:nth-child(6) { width: 14%; }
-    th:nth-child(7), td:nth-child(7) { width: 10%; text-align: right; }
+    th:nth-child(7), td:nth-child(7) { width: 10%; }
     @media print { body { margin: 0; padding: 6mm; } }
   </style></head><body>
     <div class="sheet">
