@@ -5,7 +5,7 @@
 
 // ── PART 1: Enum Types (matching DB ENUMs) ─────────────────
 
-export type ApprovalStatus = 'PENDING' | 'APPROVED';
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type ChargeType = 'PERCENT' | 'FIXED';
 export type AppliesTo = 'BUYER' | 'SELLER';
 export type FreightMethod = 'BY_WEIGHT' | 'BY_COUNT' | 'LUMPSUM' | 'DIVIDE_BY_WEIGHT';
@@ -31,6 +31,8 @@ export interface Trader {
   bill_prefix: string;
   created_at: string;
   updated_at: string;
+  /** When admin approved or rejected (ISO). */
+  approval_decision_at?: string | null;
   // Extended fields for app functionality (login, registration)
   mobile?: string;
   email?: string;

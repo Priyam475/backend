@@ -12,18 +12,26 @@ const EMAIL_ALREADY_REGISTERED =
 /** User-friendly message for duplicate mobile. */
 const MOBILE_ALREADY_USED = 'This mobile number is already in use. Please use a different number.';
 
+/** Safe to show for generic API errors (avoid leaking stack traces). */
 function isSafeMessage(s: string): boolean {
-  return s.length > 0 && s.length < 300 && !/stack|exception|at\s+\w+\./.i.test(s);
+  return (
+    s.length > 0 &&
+    s.length < 2000 &&
+    !/stack trace|java\.lang\.|at\s+[\w.$]+\([\w.]+\.java:\d+\)/i.test(s)
+  );
 }
 
 /** Strip HTTP status prefixes like "403 FORBIDDEN" or "Forbidden:" from messages. */
 function cleanMessage(msg: string): string {
   let out = msg.trim();
+  // JHipster ProblemDetail: 403 FORBIDDEN "Human readable message" (use greedy .+ between outer quotes)
+  const jhipsterQuoted = out.match(/^\d{3}\s+\w+\s*["'](.+)["']\s*$/s);
+  if (jhipsterQuoted) return jhipsterQuoted[1].trim();
   // Extract quoted message: "403 FORBIDDEN '...'" or "403 FORBIDDEN "...""
   const quotedMatch = out.match(/^\s*\d{3}\s+\w+\s*['"](.+?)['"]\s*$/s);
   if (quotedMatch) return quotedMatch[1].trim();
   // Or extract first quoted substring anywhere (e.g. status prefix + "real message")
-  const innerQuoted = out.match(/['"]([^'"]{10,300})['"]/);
+  const innerQuoted = out.match(/['"]([^'"]{10,2000})['"]/);
   if (innerQuoted) return innerQuoted[1].trim();
   out = out
     .replace(/^\s*\d{3}\s+(?:FORBIDDEN|Forbidden|UNAUTHORIZED|Unauthorized|BAD_REQUEST|Bad Request|CONFLICT|Conflict)\s*[:\s'"]*/i, '')
@@ -62,6 +70,15 @@ async function parseRegistrationError(res: Response): Promise<string> {
       const detail = typeof problem.detail === 'string' ? problem.detail.trim() : '';
       const title = typeof problem.title === 'string' ? problem.title.trim() : '';
       const msgKey = typeof problem.message === 'string' ? problem.message : '';
+
+      // 403: always prefer cleaned server detail (e.g. rejected registration). Do not run isSafeMessage on
+      // raw detail — patterns like /at \w+\./ false-positive on "...need help.".
+      if (status === 403 && detail.length > 0) {
+        const cleaned = cleanMessage(detail);
+        if (cleaned.length > 0 && isSafeMessage(cleaned)) {
+          return cleaned;
+        }
+      }
 
       // Known backend error keys: always use friendly message
       if (msgKey.includes('traderEmailExists')) return EMAIL_ALREADY_REGISTERED;

@@ -81,6 +81,9 @@ public class Trader implements Serializable {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    @Column(name = "approval_decision_at")
+    private Instant approvalDecisionAt;
+
     @Column(name = "shop_photos")
     private String shopPhotos; // comma-separated URLs/paths
 
@@ -268,6 +271,19 @@ public class Trader implements Serializable {
         this.updatedAt = updatedAt;
     }
 
+    public Instant getApprovalDecisionAt() {
+        return approvalDecisionAt;
+    }
+
+    public Trader approvalDecisionAt(Instant approvalDecisionAt) {
+        this.setApprovalDecisionAt(approvalDecisionAt);
+        return this;
+    }
+
+    public void setApprovalDecisionAt(Instant approvalDecisionAt) {
+        this.approvalDecisionAt = approvalDecisionAt;
+    }
+
     public String getShopPhotos() {
         return shopPhotos;
     }
@@ -338,6 +354,7 @@ public class Trader implements Serializable {
             ", billPrefix='" + getBillPrefix() + "'" +
             ", createdAt='" + getCreatedAt() + "'" +
             ", updatedAt='" + getUpdatedAt() + "'" +
+            ", approvalDecisionAt='" + getApprovalDecisionAt() + "'" +
             "}";
     }
 }

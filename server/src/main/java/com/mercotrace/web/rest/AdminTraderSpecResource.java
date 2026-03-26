@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import java.time.Instant;
 import tech.jhipster.web.util.PaginationUtil;
 import tech.jhipster.web.util.ResponseUtil;
 
@@ -109,6 +110,27 @@ public class AdminTraderSpecResource {
             .findOne(id)
             .map(dto -> {
                 dto.setApprovalStatus(ApprovalStatus.APPROVED);
+                dto.setApprovalDecisionAt(Instant.now());
+                TraderDTO updated = traderService.update(dto);
+                userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(id).forEach(ut ->
+                    traderOwnerAuthorityService.ensureTraderOwnerAuthorities(ut.getUser())
+                );
+                return ResponseEntity.ok(updated);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** PATCH /admin/traders/{id}/reject — Reject a pending trader registration. */
+    @PatchMapping("/{id}/reject")
+    public ResponseEntity<TraderDTO> rejectTrader(@PathVariable Long id) {
+        return traderService
+            .findOne(id)
+            .map(dto -> {
+                if (dto.getApprovalStatus() != ApprovalStatus.PENDING) {
+                    throw new BadRequestAlertException("Only pending traders can be rejected", "trader", "notpending");
+                }
+                dto.setApprovalStatus(ApprovalStatus.REJECTED);
+                dto.setApprovalDecisionAt(Instant.now());
                 TraderDTO updated = traderService.update(dto);
                 userTraderRepository.findAllWithUserByTraderIdAndPrimaryMappingTrue(id).forEach(ut ->
                     traderOwnerAuthorityService.ensureTraderOwnerAuthorities(ut.getUser())

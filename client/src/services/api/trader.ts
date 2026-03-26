@@ -17,6 +17,7 @@ type TraderDTO = {
   billPrefix?: string;
   createdAt?: string;
   updatedAt?: string;
+  approvalDecisionAt?: string | null;
   active?: boolean;
 };
 
@@ -37,6 +38,7 @@ function mapDtoToTrader(dto: TraderDTO): Trader {
     shop_photos: [],
     created_at: dto.createdAt ?? new Date().toISOString(),
     updated_at: dto.updatedAt ?? new Date().toISOString(),
+    approval_decision_at: dto.approvalDecisionAt ?? null,
     active: dto.active ?? true,
   };
 }
@@ -72,6 +74,14 @@ export const traderApi = {
   async approve(traderId: string): Promise<Trader> {
     const res = await apiFetch(`/admin/traders/${encodeURIComponent(traderId)}/approve`, { method: 'PATCH' });
     if (!res.ok) throw new Error('Failed to approve trader');
+    const dto = (await res.json()) as TraderDTO;
+    return mapDtoToTrader(dto);
+  },
+
+  /** Admin: reject pending trader (PATCH /api/admin/traders/{id}/reject). */
+  async reject(traderId: string): Promise<Trader> {
+    const res = await apiFetch(`/admin/traders/${encodeURIComponent(traderId)}/reject`, { method: 'PATCH' });
+    if (!res.ok) throw new Error('Failed to reject trader');
     const dto = (await res.json()) as TraderDTO;
     return mapDtoToTrader(dto);
   },

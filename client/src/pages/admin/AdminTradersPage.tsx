@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, CheckCircle2, XCircle, Clock, Eye,
@@ -16,7 +16,50 @@ import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 const statusConfig: Record<ApprovalStatus, { color: string; icon: typeof CheckCircle2; label: string }> = {
   PENDING: { color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', icon: Clock, label: 'Pending' },
   APPROVED: { color: 'bg-success/10 text-success', icon: CheckCircle2, label: 'Approved' },
+  REJECTED: { color: 'bg-destructive/10 text-destructive', icon: XCircle, label: 'Rejected' },
 };
+
+const LOC_PREVIEW_LEN = 10;
+
+function formatTableDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function traderLocationLine(t: { city?: string; state?: string }): string {
+  const parts = [t.city, t.state].filter(Boolean);
+  return parts.length ? parts.join(', ') : '—';
+}
+
+function LocationCell({
+  traderId,
+  expanded,
+  onToggle,
+  full,
+}: {
+  traderId: string;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+  full: string;
+}) {
+  const needsTruncate = full.length > LOC_PREVIEW_LEN;
+  const shown = needsTruncate && !expanded ? `${full.slice(0, LOC_PREVIEW_LEN)}…` : full;
+  return (
+    <button
+      type="button"
+      onClick={() => needsTruncate && onToggle(traderId)}
+      className={cn(
+        'text-left text-muted-foreground max-w-[200px]',
+        needsTruncate && 'cursor-pointer hover:text-foreground underline-offset-2 hover:underline',
+      )}
+      title={needsTruncate ? (expanded ? 'Click to collapse' : 'Click to expand') : undefined}
+    >
+      {shown}
+    </button>
+  );
+}
 
 type Tab = 'active' | 'inactive';
 
@@ -30,6 +73,7 @@ const AdminTradersPage = () => {
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<Trader | null>(null);
   const [deactivateConfirm, setDeactivateConfirm] = useState<Trader | null>(null);
   const [activateConfirm, setActivateConfirm] = useState<Trader | null>(null);
+  const [expandedLocationIds, setExpandedLocationIds] = useState<Set<string>>(() => new Set());
   const { canAccessModule, can } = useAdminPermissions();
 
   const canView = canAccessModule('Traders');
@@ -41,6 +85,15 @@ const AdminTradersPage = () => {
 
   const loadActive = () => traderApi.listForAdmin({ page: 0, size: 500 }).then(setTraders).catch(() => setTraders([]));
   const loadInactive = () => traderApi.listInactive({ page: 0, size: 500 }).then(setInactiveTraders).catch(() => setInactiveTraders([]));
+
+  const toggleLocationExpanded = useCallback((id: string) => {
+    setExpandedLocationIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     loadActive();
@@ -64,6 +117,15 @@ const AdminTradersPage = () => {
     if (!canApprove) return;
     try {
       const updated = await traderApi.approve(id);
+      setTraders(prev => prev.map(t => t.trader_id === id ? updated : t));
+      setSelectedTrader(null);
+    } catch { /* keep UI state */ }
+  };
+
+  const handleReject = async (id: string) => {
+    if (!canApprove) return;
+    try {
+      const updated = await traderApi.reject(id);
       setTraders(prev => prev.map(t => t.trader_id === id ? updated : t));
       setSelectedTrader(null);
     } catch { /* keep UI state */ }
@@ -105,6 +167,7 @@ const AdminTradersPage = () => {
     ALL: traders.length,
     PENDING: traders.filter(t => t.approval_status === 'PENDING').length,
     APPROVED: traders.filter(t => t.approval_status === 'APPROVED').length,
+    REJECTED: traders.filter(t => t.approval_status === 'REJECTED').length,
     INACTIVE: inactiveTraders.length,
   };
 
@@ -132,6 +195,7 @@ const AdminTradersPage = () => {
           { label: 'Active', value: counts.ALL, gradient: 'from-primary to-accent', icon: Crown },
           { label: 'Pending', value: counts.PENDING, gradient: 'from-amber-400 to-orange-500', icon: Clock },
           { label: 'Approved', value: counts.APPROVED, gradient: 'from-emerald-400 to-teal-500', icon: CheckCircle2 },
+          { label: 'Rejected', value: counts.REJECTED, gradient: 'from-rose-400 to-red-500', icon: XCircle },
           { label: 'Inactive', value: counts.INACTIVE, gradient: 'from-slate-400 to-slate-500', icon: PowerOff },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 + i * 0.06 }}
@@ -165,7 +229,7 @@ const AdminTradersPage = () => {
         </div>
         {tab === 'active' && (
           <div className="flex gap-2">
-            {(['ALL', 'PENDING', 'APPROVED'] as const).map(s => (
+            {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map(s => (
               <button key={s} onClick={() => setFilterStatus(s)}
                 className={cn('px-3 py-2 rounded-xl text-xs font-semibold transition-all', filterStatus === s ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
                 {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
@@ -184,14 +248,14 @@ const AdminTradersPage = () => {
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Business</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Owner</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Category</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Registration date</th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved / Rejected date</th>
                 <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody>
               {tab === 'active' && filtered.map((t, i) => {
-                const sc = statusConfig[t.approval_status];
+                const loc = traderLocationLine(t);
                 return (
                   <motion.tr key={t.trader_id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.04 }}
                     className="border-b border-border/20 hover:bg-primary/5 transition-colors">
@@ -204,12 +268,17 @@ const AdminTradersPage = () => {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-muted-foreground">{t.owner_name}</td>
-                    <td className="py-3.5 px-4 text-muted-foreground">{t.city}, {t.state}</td>
-                    <td className="py-3.5 px-4"><span className="px-2 py-1 rounded-lg bg-muted/50 text-xs font-medium text-foreground">{t.category}</span></td>
                     <td className="py-3.5 px-4">
-                      <span className={cn('px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1', sc.color)}>
-                        <sc.icon className="w-3 h-3" /> {sc.label}
-                      </span>
+                      <LocationCell
+                        traderId={t.trader_id}
+                        expanded={expandedLocationIds.has(t.trader_id)}
+                        onToggle={toggleLocationExpanded}
+                        full={loc}
+                      />
+                    </td>
+                    <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{formatTableDate(t.created_at)}</td>
+                    <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
+                      {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -219,6 +288,11 @@ const AdminTradersPage = () => {
                         {t.approval_status === 'PENDING' && canApprove && (
                           <button onClick={() => handleApprove(t.trader_id)} className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-all" title="Approve">
                             <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {t.approval_status === 'PENDING' && canApprove && (
+                          <button onClick={() => handleReject(t.trader_id)} className="p-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all" title="Reject">
+                            <XCircle className="w-4 h-4" />
                           </button>
                         )}
                         {canApprove && (
@@ -232,7 +306,7 @@ const AdminTradersPage = () => {
                 );
               })}
               {tab === 'inactive' && filteredInactive.map((t, i) => {
-                const sc = statusConfig[t.approval_status];
+                const loc = traderLocationLine(t);
                 return (
                   <motion.tr key={t.trader_id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.04 }}
                     className="border-b border-border/20 hover:bg-primary/5 transition-colors">
@@ -245,12 +319,17 @@ const AdminTradersPage = () => {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-muted-foreground">{t.owner_name}</td>
-                    <td className="py-3.5 px-4 text-muted-foreground">{t.city}, {t.state}</td>
-                    <td className="py-3.5 px-4"><span className="px-2 py-1 rounded-lg bg-muted/50 text-xs font-medium text-foreground">{t.category}</span></td>
                     <td className="py-3.5 px-4">
-                      <span className={cn('px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1', sc.color)}>
-                        <sc.icon className="w-3 h-3" /> {sc.label}
-                      </span>
+                      <LocationCell
+                        traderId={t.trader_id}
+                        expanded={expandedLocationIds.has(t.trader_id)}
+                        onToggle={toggleLocationExpanded}
+                        full={loc}
+                      />
+                    </td>
+                    <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{formatTableDate(t.created_at)}</td>
+                    <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
+                      {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -301,6 +380,15 @@ const AdminTradersPage = () => {
                 </div>
                 <div className="space-y-3 mb-6">
                   {[
+                    { icon: Clock, label: 'Registration date', value: formatTableDate(selectedTrader.created_at) },
+                    {
+                      icon: CheckCircle2,
+                      label: 'Approved / Rejected date',
+                      value:
+                        selectedTrader.approval_status === 'PENDING'
+                          ? '—'
+                          : formatTableDate(selectedTrader.approval_decision_at),
+                    },
                     { icon: Building2, label: 'Owner', value: selectedTrader.owner_name },
                     { icon: Phone, label: 'Mobile', value: selectedTrader.mobile || '' },
                     { icon: Mail, label: 'Email', value: selectedTrader.email || '' },
@@ -321,6 +409,11 @@ const AdminTradersPage = () => {
                   {selectedTrader.approval_status === 'PENDING' && canApprove && (
                     <Button onClick={() => handleApprove(selectedTrader.trader_id)} className="flex-1 min-w-[120px] bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl h-11">
                       <CheckCircle2 className="w-4 h-4 mr-2" /> Approve
+                    </Button>
+                  )}
+                  {selectedTrader.approval_status === 'PENDING' && canApprove && (
+                    <Button onClick={() => handleReject(selectedTrader.trader_id)} variant="outline" className="flex-1 min-w-[120px] border-destructive/50 text-destructive hover:bg-destructive/10 rounded-xl h-11">
+                      <XCircle className="w-4 h-4 mr-2" /> Reject
                     </Button>
                   )}
                   {canApprove && tab === 'active' && (
