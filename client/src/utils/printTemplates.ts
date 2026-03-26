@@ -236,35 +236,32 @@ async function directPrintViaIframe(html: string): Promise<boolean> {
 // ── 1. Sales Sticker (Thermal Adhesive, Landscape) ──────
 // Layout: top = firm name, then seller name; then origin full width; then lot id; then buyer mark; then grid (label + value start from left)
 export function generateSalesSticker(bid: BidInfo): string {
-  const commodity = (bid.commodityName && bid.commodityName.trim()) ? bid.commodityName.trim() : '—';
+  const lotIdentifier = formatLotIdentifierForBid(bid);
+  const shortOrigin = String(bid.origin || "—").trim().slice(0, 28);
   return `<!DOCTYPE html><html><head><style>
     @page { size: landscape; margin: 2mm; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 4mm; }
     .sticker { border: 2px dashed #333; border-radius: 8px; padding: 10px; max-width: 400px; }
-    .firm-name { text-align: center; font-size: 13px; font-weight: 900; letter-spacing: 1px; margin-bottom: 2px; }
+    .firm-name { text-align: center; font-size: 11px; font-weight: 800; letter-spacing: 1px; margin-bottom: 2px; text-transform: uppercase; }
     .cell { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11px; }
     .cell .lbl { color: #666; font-size: 9px; text-transform: uppercase; font-weight: 600; flex-shrink: 0; }
     .cell .val { font-weight: 800; font-size: 13px; }
-    .center-top { text-align: center; font-size: 14px; font-weight: 800; margin-bottom: 4px; }
-    .origin-full { text-align: center; font-size: 11px; font-weight: 700; width: 100%; margin-bottom: 6px; word-break: break-word; }
-    .lot-big { text-align: center; font-size: 36px; font-weight: 900; padding: 8px 0; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; margin: 6px 0; }
-    .mark-big { text-align: center; font-size: 28px; font-weight: 900; letter-spacing: 3px; background: #f0f0f0; border-radius: 6px; padding: 6px; margin: 4px 0; }
+    .center-top { text-align: center; font-size: 16px; font-weight: 900; margin-bottom: 2px; }
+    .origin-full { text-align: center; font-size: 10px; font-weight: 700; width: 100%; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 2px; }
     @media print { body { margin: 0; padding: 2mm; } }
   </style></head><body>
     <div class="sticker">
       <div class="firm-name">MERCOTRACE</div>
-      <div class="center-top">${escapeStickerHtml(bid.sellerName)}</div>
-      <div class="origin-full">${escapeStickerHtml(bid.origin || '—')}</div>
-      <div class="lot-big">${lotDisplay(bid)}</div>
-      <div class="mark-big">[${escapeStickerHtml(bid.buyerMark)}]</div>
+      <div class="center-top">${escapeStickerHtml(bid.sellerName || '—')}</div>
+      <div class="origin-full">${escapeStickerHtml(shortOrigin)}</div>
       <div class="grid2">
-        <div class="cell"><span class="lbl">Sl No</span><span class="val">${bid.sellerSerial}</span></div>
-        <div class="cell"><span class="lbl">Qty</span><span class="val">${bid.quantity} bags</span></div>
+        <div class="cell"><span class="lbl">Slr Sr No</span><span class="val">${escapeStickerHtml(String(bid.sellerSerial ?? '—'))}</span></div>
+        <div class="cell"><span class="lbl">Qty</span><span class="val">${escapeStickerHtml(String(bid.quantity ?? '—'))}</span></div>
+        <div class="cell"><span class="lbl">Lot Name / No</span><span class="val">${escapeStickerHtml(lotIdentifier || '—')}</span></div>
+        <div class="cell"><span class="lbl">Lot No</span><span class="val">${escapeStickerHtml(String(bid.lotNumber ?? '—'))}</span></div>
+        <div class="cell"><span class="lbl">V. No</span><span class="val">${escapeStickerHtml(bid.vehicleNumber || '—')}</span></div>
         <div class="cell"><span class="lbl">Godown</span><span class="val">${escapeStickerHtml(bid.godown || '—')}</span></div>
-        <div class="cell"><span class="lbl">V No</span><span class="val">${escapeStickerHtml(bid.vehicleNumber)}</span></div>
-        <div class="cell"><span class="lbl">Commodity</span><span class="val">${escapeStickerHtml(commodity)}</span></div>
-        <div class="cell"><span class="lbl">Date</span><span class="val">${todayStr()}</span></div>
       </div>
     </div>
   </body></html>`;
@@ -272,22 +269,22 @@ export function generateSalesSticker(bid: BidInfo): string {
 
 // ── Thermal (ESC/POS) Templates ───────────────────────────
 export function generateSalesStickerThermal(bid: BidInfo): string {
-  const commodity = (bid.commodityName && bid.commodityName.trim()) ? bid.commodityName.trim() : "—";
-  const lot = lotDisplay(bid);
-  const dateStr = todayStr();
+  const lotIdentifier = formatLotIdentifierForBid(bid);
+  const shortOrigin = String(bid.origin ?? "—").trim().slice(0, 28);
   const col = 24; // 48/2
   const row = (a: string, b: string) => padThermalRight(clampThermalText(a, col), col) + padThermalRight(clampThermalText(b, col), col);
 
   return [
     "[C]" + escposBold("MERCOTRACE"),
     "[C]" + escposBold(String(bid.sellerName ?? "")),
-    "[C]" + clampThermalText(String(bid.origin ?? "—"), THERMAL_CHARS_PER_LINE),
-    "[C]" + escposBold(clampThermalText(lot, THERMAL_CHARS_PER_LINE)),
-    "[C]" + escposBold(`[${String(bid.buyerMark ?? "").trim()}]`),
+    "[C]" + clampThermalText(shortOrigin, THERMAL_CHARS_PER_LINE),
     "",
-    "[L]" + row(`Sl No ${bid.sellerSerial}`, `${bid.quantity} bags`),
-    "[L]" + row(`Godown ${bid.godown || "—"}`, `V No ${bid.vehicleNumber}`),
-    "[L]" + row(`Commodity ${commodity}`, `Date ${dateStr}`),
+    "[L]" + row("SLR SR NO", "QTY"),
+    "[L]" + row(String(bid.sellerSerial ?? "—"), String(bid.quantity ?? "—")),
+    "[L]" + row("LOT NAME / NO", "LOT NO"),
+    "[L]" + row(String(lotIdentifier || "—"), String(bid.lotNumber ?? "—")),
+    "[L]" + row("V. NO", "GODOWN"),
+    "[L]" + row(String(bid.vehicleNumber || "—"), String(bid.godown || "—")),
     "",
   ].join("\n");
 }
