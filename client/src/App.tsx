@@ -90,6 +90,7 @@ const AdminRoleManagementPage = lazy(() => import("./pages/admin/settings/AdminR
 const AdminUserManagementPage = lazy(() => import("./pages/admin/settings/AdminUserManagementPage"));
 const AdminRoleAllocationPage = lazy(() => import("./pages/admin/settings/AdminRoleAllocationPage"));
 const AdminRbacSettingsPage = lazy(() => import("./pages/admin/settings/RbacSettingsPage"));
+const AdminGlobalPresetSettingsPage = lazy(() => import("./pages/admin/settings/AdminGlobalPresetSettingsPage"));
 
 const queryClient = new QueryClient();
 
@@ -238,6 +239,7 @@ const router = createBrowserRouter(
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
         <Route path="settings/rbac" element={<AdminRbacSettingsPage />} />
+        <Route path="settings/global-presets" element={<AdminGlobalPresetSettingsPage />} />
         <Route path="settings/roles" element={<AdminRoleManagementPage />} />
         <Route path="settings/users" element={<AdminUserManagementPage />} />
         <Route path="settings/role-allocation" element={<AdminRoleAllocationPage />} />

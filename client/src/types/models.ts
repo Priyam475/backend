@@ -44,6 +44,8 @@ export interface Trader {
   shop_photos?: string[];
   /** When false, trader and staff cannot log in. */
   active?: boolean;
+  /** When false, auction uses admin global presets; trader cannot edit preset settings. Omitted/undefined treated as true. */
+  preset_enabled?: boolean;
 }
 
 /** 2.2 Roles */

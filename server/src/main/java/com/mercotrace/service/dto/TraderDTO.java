@@ -67,6 +67,8 @@ public class TraderDTO implements Serializable {
 
     private Boolean active = true;
 
+    private Boolean presetEnabled = true;
+
     public Long getId() {
         return id;
     }
@@ -225,6 +227,14 @@ public class TraderDTO implements Serializable {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public Boolean getPresetEnabled() {
+        return presetEnabled;
+    }
+
+    public void setPresetEnabled(Boolean presetEnabled) {
+        this.presetEnabled = presetEnabled;
     }
 
     @Override

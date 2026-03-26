@@ -41,6 +41,11 @@ function cleanMessage(msg: string): string {
   return out;
 }
 
+/** Backend `preset_enabled`; missing => true for older responses. */
+function mapAuthPresetEnabled(raw: unknown): boolean {
+  return raw !== false;
+}
+
 /**
  * Reads response body as text (body can only be read once).
  * Tries to parse as JSON; falls back to raw text for non-JSON responses.
@@ -182,6 +187,7 @@ export const authApi = {
       gst_number: dataRes.trader.gst_number ?? data.gst_number,
       rmc_apmc_code: dataRes.trader.rmc_apmc_code ?? data.rmc_apmc_code,
       shop_photos: dataRes.trader.shop_photos ?? data.shop_photos ?? [],
+      preset_enabled: mapAuthPresetEnabled(dataRes.trader?.preset_enabled),
     };
 
     return { trader, user };
@@ -271,6 +277,7 @@ export const authApi = {
       gst_number: data.trader.gst_number,
       rmc_apmc_code: data.trader.rmc_apmc_code,
       shop_photos: data.trader.shop_photos ?? [],
+      preset_enabled: mapAuthPresetEnabled(data.trader?.preset_enabled),
     };
 
     return { trader, user };
@@ -338,6 +345,7 @@ export const authApi = {
       gst_number: data.trader.gst_number,
       rmc_apmc_code: data.trader.rmc_apmc_code,
       shop_photos: data.trader.shop_photos ?? [],
+      preset_enabled: mapAuthPresetEnabled(data.trader?.preset_enabled),
     };
 
     return { trader, user };
@@ -440,6 +448,7 @@ export const authApi = {
       gst_number: data.trader.gst_number,
       rmc_apmc_code: data.trader.rmc_apmc_code,
       shop_photos: data.trader.shop_photos ?? [],
+      preset_enabled: mapAuthPresetEnabled(data.trader?.preset_enabled),
     };
 
     return { trader, user };

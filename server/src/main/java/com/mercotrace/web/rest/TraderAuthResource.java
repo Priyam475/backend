@@ -623,6 +623,7 @@ public class TraderAuthResource {
             traderPayload.setGstNumber(trader.getGstNumber());
             traderPayload.setRmcApmcCode(trader.getRmcApmcCode());
             traderPayload.setShopPhotos(splitShopPhotos(trader.getShopPhotos()));
+            traderPayload.setPresetEnabled(trader.getPresetEnabled() != null ? trader.getPresetEnabled() : Boolean.TRUE);
 
             dto.setTrader(traderPayload);
         }

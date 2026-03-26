@@ -3,13 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, CheckCircle2, XCircle, Clock, Eye,
   Building2, Phone, Mail, MapPin, Crown, Users2,
-  Power, PowerOff, Trash2, AlertTriangle
+  Power, PowerOff, Trash2, AlertTriangle, Sliders,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { traderApi } from '@/services/api';
 import type { Trader, ApprovalStatus } from '@/types/models';
+import { Switch } from '@/components/ui/switch';
+import { toast } from 'sonner';
 import { useAdminPermissions } from '@/admin/lib/adminPermissions';
 import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
 
@@ -74,6 +76,7 @@ const AdminTradersPage = () => {
   const [deactivateConfirm, setDeactivateConfirm] = useState<Trader | null>(null);
   const [activateConfirm, setActivateConfirm] = useState<Trader | null>(null);
   const [expandedLocationIds, setExpandedLocationIds] = useState<Set<string>>(() => new Set());
+  const [presetToggleTraderId, setPresetToggleTraderId] = useState<string | null>(null);
   const { canAccessModule, can } = useAdminPermissions();
 
   const canView = canAccessModule('Traders');
@@ -163,6 +166,22 @@ const AdminTradersPage = () => {
     } catch { /* keep UI state */ }
   };
 
+  const handlePresetEnabledChange = async (t: Trader, enabled: boolean) => {
+    if (!canApprove) return;
+    setPresetToggleTraderId(t.trader_id);
+    try {
+      const updated = await traderApi.setPresetEnabled(t.trader_id, enabled);
+      setTraders(prev => prev.map(x => (x.trader_id === t.trader_id ? updated : x)));
+      setInactiveTraders(prev => prev.map(x => (x.trader_id === t.trader_id ? updated : x)));
+      setSelectedTrader(prev => (prev?.trader_id === t.trader_id ? updated : prev));
+      toast.success(enabled ? 'Trader can use own preset settings' : 'Trader now uses global presets');
+    } catch {
+      toast.error('Could not update preset setting');
+    } finally {
+      setPresetToggleTraderId(null);
+    }
+  };
+
   const counts = {
     ALL: traders.length,
     PENDING: traders.filter(t => t.approval_status === 'PENDING').length,
@@ -250,6 +269,7 @@ const AdminTradersPage = () => {
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Registration date</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved / Rejected date</th>
+                <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Preset</th>
                 <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -279,6 +299,16 @@ const AdminTradersPage = () => {
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{formatTableDate(t.created_at)}</td>
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
                       {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
+                    </td>
+                    <td className="py-3.5 px-4 text-center">
+                      <div className="flex justify-center" title="Allow this trader to define their own auction preset marks (off = global admin presets)">
+                        <Switch
+                          checked={t.preset_enabled !== false}
+                          disabled={!canApprove || presetToggleTraderId === t.trader_id}
+                          onCheckedChange={v => handlePresetEnabledChange(t, v)}
+                          aria-label="Trader own preset settings"
+                        />
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -331,6 +361,16 @@ const AdminTradersPage = () => {
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
                       {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
                     </td>
+                    <td className="py-3.5 px-4 text-center">
+                      <div className="flex justify-center" title="Allow this trader to define their own auction preset marks (off = global admin presets)">
+                        <Switch
+                          checked={t.preset_enabled !== false}
+                          disabled={!canApprove || presetToggleTraderId === t.trader_id}
+                          onCheckedChange={v => handlePresetEnabledChange(t, v)}
+                          aria-label="Trader own preset settings"
+                        />
+                      </div>
+                    </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={() => setSelectedTrader(t)} className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-all" title="View">
@@ -377,6 +417,27 @@ const AdminTradersPage = () => {
                   <span className={cn('px-2.5 py-1 rounded-lg text-xs font-semibold', statusConfig[selectedTrader.approval_status].color)}>
                     {statusConfig[selectedTrader.approval_status].label}
                   </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl glass-card mb-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center flex-shrink-0">
+                      <Sliders className="w-4 h-4 text-amber-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Own preset settings</p>
+                      <p className="text-sm text-foreground font-medium">
+                        {selectedTrader.preset_enabled !== false
+                          ? 'On — trader can edit presets in Settings'
+                          : 'Off — uses global admin presets in auction'}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={selectedTrader.preset_enabled !== false}
+                    disabled={!canApprove || presetToggleTraderId === selectedTrader.trader_id}
+                    onCheckedChange={v => handlePresetEnabledChange(selectedTrader, v)}
+                    aria-label="Toggle trader preset settings"
+                  />
                 </div>
                 <div className="space-y-3 mb-6">
                   {[

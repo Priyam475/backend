@@ -8,6 +8,7 @@ import com.mercotrace.service.TraderService;
 import com.mercotrace.service.criteria.TraderCriteria;
 import com.mercotrace.service.dto.TraderDTO;
 import com.mercotrace.web.rest.errors.BadRequestAlertException;
+import com.mercotrace.web.rest.vm.TraderPresetEnabledVM;
 import tech.jhipster.service.filter.BooleanFilter;
 import java.util.List;
 import org.springframework.data.domain.Page;
@@ -16,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import jakarta.validation.Valid;
 import java.time.Instant;
 import tech.jhipster.web.util.PaginationUtil;
 import tech.jhipster.web.util.ResponseUtil;
@@ -118,6 +120,16 @@ public class AdminTraderSpecResource {
                 return ResponseEntity.ok(updated);
             })
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** PATCH /admin/traders/{id}/preset-enabled — Enable or disable trader-owned preset marks (off = use global presets). */
+    @PatchMapping("/{id}/preset-enabled")
+    public ResponseEntity<TraderDTO> updatePresetEnabled(@PathVariable Long id, @Valid @RequestBody TraderPresetEnabledVM body) {
+        try {
+            return ResponseEntity.ok(traderService.setPresetEnabled(id, body.isEnabled()));
+        } catch (jakarta.persistence.EntityNotFoundException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     /** PATCH /admin/traders/{id}/reject — Reject a pending trader registration. */

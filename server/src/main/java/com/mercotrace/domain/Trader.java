@@ -99,6 +99,13 @@ public class Trader implements Serializable {
     @Column(name = "active", nullable = false)
     private Boolean active = true;
 
+    /**
+     * When true, trader may define own preset marks; when false, auction uses {@link GlobalPresetMarkSetting} rows only.
+     */
+    @NotNull
+    @Column(name = "preset_enabled", nullable = false)
+    private Boolean presetEnabled = true;
+
     // jhipster-needle-entity-add-field - JHipster will add fields here
 
     public Long getId() {
@@ -319,6 +326,19 @@ public class Trader implements Serializable {
 
     public void setActive(Boolean active) {
         this.active = active;
+    }
+
+    public Boolean getPresetEnabled() {
+        return presetEnabled;
+    }
+
+    public Trader presetEnabled(Boolean presetEnabled) {
+        this.setPresetEnabled(presetEnabled);
+        return this;
+    }
+
+    public void setPresetEnabled(Boolean presetEnabled) {
+        this.presetEnabled = presetEnabled;
     }
 
     // jhipster-needle-entity-add-getters-setters - JHipster will add getters and setters here
