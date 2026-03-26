@@ -543,28 +543,27 @@ export function generateSellerChiti(sellerName: string, sellerSerial: number, bi
 export function generateSalePadPrint(bids: BidInfo[]): string {
   const rows = bids.map(b => `
     <tr>
-      <td>${b.sellerSerial}</td>
-      <td>${b.sellerName}</td>
-      <td>${lotDisplay(b)}</td>
-      <td>[${b.buyerMark}]</td>
-      <td>${b.quantity}</td>
-      <td>₹${b.rate}</td>
-      <td>₹${b.quantity * b.rate}</td>
+      <td>${b.vehicleTotalQty ?? b.quantity}</td>
+      <td>${b.sellerSerial && b.sellerSerial > 0 ? b.sellerSerial : '—'}</td>
+      <td>${escapeStickerHtml(b.sellerName || '—')}</td>
+      <td>${b.sellerVehicleQty ?? b.quantity}</td>
+      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
+      <td>${escapeStickerHtml(formatLotIdentifierForBid(b))}</td>
     </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><style>
     @page { size: A5 portrait; margin: 8mm; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 8mm; font-size: 11px; }
-    ${firmHeaderCSS()}
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th { background: #333; color: #fff; padding: 4px 6px; font-size: 9px; text-transform: uppercase; text-align: left; }
     td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 10px; }
     tr:nth-child(even) { background: #f9f9f9; }
+    .sale-pad-title { text-align: center; font-size: 13px; font-weight: 800; margin-top: 2px; margin-bottom: 6px; letter-spacing: 0.3px; }
     @media print { body { margin: 0; padding: 8mm; } }
   </style></head><body>
-    ${firmHeader()}
+    <div class="sale-pad-title">SALE PAD</div>
     <table>
-      <thead><tr><th>Sl</th><th>Seller</th><th>Lot</th><th>Mark</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+      <thead><tr><th>Vehicle Qty</th><th>Seller SL No</th><th>Seller Name</th><th>Seller Qty</th><th>Lot SL No</th><th>Lot Name</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </body></html>`;
@@ -616,45 +615,69 @@ export function generateTenderSlip(bids: BidInfo[]): string {
 
 // ── 6. Dispatch Control for Coolie (A5 Portrait) ────────
 export function generateDispatchControl(bids: BidInfo[]): string {
-  const sellerGroups: Record<string, BidInfo[]> = {};
-  bids.forEach(b => {
-    const key = b.sellerName;
-    if (!sellerGroups[key]) sellerGroups[key] = [];
-    sellerGroups[key].push(b);
-  });
+  const safeBids = bids.length > 0 ? bids : [{
+    bidNumber: 0,
+    buyerMark: '—',
+    buyerName: '—',
+    quantity: 0,
+    rate: 0,
+    lotId: '0',
+    lotName: '—',
+    sellerName: '—',
+    sellerSerial: 0,
+    lotNumber: 0,
+    vehicleNumber: '—',
+    commodityName: '—',
+    origin: '—',
+    godown: '—',
+  }];
 
-  let sections = '';
-  Object.entries(sellerGroups).forEach(([seller, sBids]) => {
-    const sellerQty = sBids.reduce((s, b) => s + b.quantity, 0);
-    sections += `<div class="seller-block">
-      <div class="seller-head">
-        <span class="sname">${seller}</span>
-        <span class="sqty">Total: ${sellerQty} bags</span>
-      </div>`;
-    sBids.forEach((b, idx) => {
-      sections += `<div class="lot-row">
-        <span>Sr ${idx + 1}</span>
-        <span>Lot ${lotDisplay(b)}</span>
-        <span>Gdwn: ${b.godown || '—'}</span>
-        <span>[${b.buyerMark}]</span>
-        <span>${b.quantity} bags</span>
-      </div>`;
-    });
-    sections += `</div>`;
-  });
+  const vehicleQty = safeBids.reduce((s, b) => s + b.quantity, 0);
+  const godown = safeBids[0]?.godown || '—';
+
+  const rows = safeBids.map((b) => `
+    <tr>
+      <td>${b.sellerSerial && b.sellerSerial > 0 ? b.sellerSerial : '—'}</td>
+      <td>${escapeStickerHtml(b.sellerName || '—')}</td>
+      <td>${b.sellerVehicleQty ?? b.quantity}</td>
+      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
+      <td>${escapeStickerHtml(formatLotIdentifierForBid(b))}</td>
+      <td>${escapeStickerHtml(b.buyerMark || '—')}</td>
+      <td>${b.quantity}</td>
+    </tr>
+  `).join('');
 
   return `<!DOCTYPE html><html><head><style>
     @page { size: A5 portrait; margin: 6mm; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 6mm; font-size: 11px; }
-    .title { text-align: center; font-size: 14px; font-weight: 900; margin-bottom: 8px; border-bottom: 2px solid #333; padding-bottom: 4px; }
-    .seller-block { margin-bottom: 8px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
-    .seller-head { background: #333; color: #fff; padding: 4px 8px; display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; }
-    .lot-row { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 10px; border-bottom: 1px dotted #eee; }
-    .lot-row:last-child { border-bottom: none; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 6mm; font-size: 10px; color: #111; }
+    .sheet { border: 1px solid #8f8f8f; min-height: calc(100vh - 12mm); padding: 8px 10px; box-sizing: border-box; }
+    .head { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; margin-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { text-align: left; font-size: 9px; font-weight: 700; padding: 2px 3px; border-bottom: 1px dashed #777; }
+    td { font-size: 9px; font-weight: 700; padding: 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px dotted #ddd; }
+    th:nth-child(1), td:nth-child(1) { width: 8%; }
+    th:nth-child(2), td:nth-child(2) { width: 19%; }
+    th:nth-child(3), td:nth-child(3) { width: 12%; text-align: right; }
+    th:nth-child(4), td:nth-child(4) { width: 9%; }
+    th:nth-child(5), td:nth-child(5) { width: 24%; }
+    th:nth-child(6), td:nth-child(6) { width: 14%; }
+    th:nth-child(7), td:nth-child(7) { width: 10%; text-align: right; }
     @media print { body { margin: 0; padding: 6mm; } }
   </style></head><body>
-    <div class="title">Dispatch Control - Coolie</div>
-    ${sections}
+    <div class="sheet">
+      <div class="head">
+        <span>Vehicle Qty ${vehicleQty}</span>
+        <span>Godown: ${escapeStickerHtml(godown)}</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Slr No</th><th>Seller Name</th><th>Seller QTY</th><th>Lot No</th><th>Lot Name</th><th>Buyer Mark</th><th>Quantity</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   </body></html>`;
 }
 
