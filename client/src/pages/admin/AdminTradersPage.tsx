@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { traderApi } from '@/services/api';
 import type { Trader, ApprovalStatus } from '@/types/models';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useAdminPermissions } from '@/admin/lib/adminPermissions';
 import AdminForbiddenPage from '@/admin/components/AdminForbiddenPage';
@@ -28,6 +29,28 @@ function formatTableDate(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function ApprovalStatusBadge({ status }: { status: ApprovalStatus }) {
+  if (status === 'APPROVED') {
+    return (
+      <Badge className="border-transparent bg-emerald-600 text-white hover:bg-emerald-600/90 shadow-none pointer-events-none whitespace-nowrap">
+        Approved
+      </Badge>
+    );
+  }
+  if (status === 'REJECTED') {
+    return (
+      <Badge variant="destructive" className="shadow-none pointer-events-none whitespace-nowrap">
+        Rejected
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="border-transparent bg-amber-500 text-white hover:bg-amber-500/90 shadow-none pointer-events-none whitespace-nowrap">
+      Pending
+    </Badge>
+  );
 }
 
 function traderLocationLine(t: { city?: string; state?: string }): string {
@@ -269,6 +292,7 @@ const AdminTradersPage = () => {
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Location</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Registration date</th>
                 <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approved / Rejected date</th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Status</th>
                 <th className="text-center py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Preset</th>
                 <th className="text-right py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
               </tr>
@@ -299,6 +323,9 @@ const AdminTradersPage = () => {
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{formatTableDate(t.created_at)}</td>
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
                       {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <ApprovalStatusBadge status={t.approval_status} />
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <div className="flex justify-center" title="Allow this trader to define their own auction preset marks (off = global admin presets)">
@@ -360,6 +387,9 @@ const AdminTradersPage = () => {
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{formatTableDate(t.created_at)}</td>
                     <td className="py-3.5 px-4 text-muted-foreground whitespace-nowrap">
                       {t.approval_status === 'PENDING' ? '—' : formatTableDate(t.approval_decision_at)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <ApprovalStatusBadge status={t.approval_status} />
                     </td>
                     <td className="py-3.5 px-4 text-center">
                       <div className="flex justify-center" title="Allow this trader to define their own auction preset marks (off = global admin presets)">

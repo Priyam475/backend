@@ -491,23 +491,6 @@ const ArrivalsPage = () => {
     return String(sellerSerialNumber);
   }, []);
 
-  const getNextLotSerialNumber = useCallback((seller: SellerEntry) => {
-    const existingLotSerials = new Set(
-      seller.lots
-        .map((lot) => lot.lot_serial_number)
-        .filter((lotSerialNumber): lotSerialNumber is number => lotSerialNumber != null && lotSerialNumber >= 1)
-    );
-
-    let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
-    for (let attempt = 0; attempt < 9999; attempt += 1) {
-      candidate = candidate >= 9999 ? 1 : candidate + 1;
-      if (!existingLotSerials.has(candidate)) {
-        return candidate;
-      }
-    }
-    return null;
-  }, []);
-
   const isArrivalDirty = useMemo(() => {
     if (!isArrivalPanelOpen) return false;
     if (editLoading) return false;
@@ -1075,24 +1058,41 @@ const ArrivalsPage = () => {
     pendingLotsScrollToEndSellerIdRef.current = seller.seller_vehicle_id;
     setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: true }));
 
-    setSellers(prev => prev.map((s, i) => {
-      if (i !== sellerIdx) return s;
-      if (!canAddAnotherLot(s)) return s;
-      const nextLotSerialNumber = getNextLotSerialNumber(s);
-      if (nextLotSerialNumber == null) return s;
-      return {
-        ...s,
-        lots: [...s.lots, {
-          lot_id: crypto.randomUUID(),
-          lot_name: '',
-          lot_serial_number: nextLotSerialNumber,
-          quantity: 0,
-          commodity_name: commodities[0]?.commodity_name || '',
-          broker_tag: '',
-          variant: '',
-        }],
-      };
-    }));
+    setSellers(prev => {
+      const existingLotSerials = new Set(
+        prev
+          .flatMap((entry) => entry.lots)
+          .map((lot) => lot.lot_serial_number)
+          .filter((lotSerialNumber): lotSerialNumber is number => lotSerialNumber != null && lotSerialNumber >= 1)
+      );
+      let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
+      let nextLotSerialNumber: number | null = null;
+      for (let attempt = 0; attempt < 9999; attempt += 1) {
+        candidate = candidate >= 9999 ? 1 : candidate + 1;
+        if (!existingLotSerials.has(candidate)) {
+          nextLotSerialNumber = candidate;
+          break;
+        }
+      }
+      if (nextLotSerialNumber == null) return prev;
+
+      return prev.map((s, i) => {
+        if (i !== sellerIdx) return s;
+        if (!canAddAnotherLot(s)) return s;
+        return {
+          ...s,
+          lots: [...s.lots, {
+            lot_id: crypto.randomUUID(),
+            lot_name: '',
+            lot_serial_number: nextLotSerialNumber,
+            quantity: 0,
+            commodity_name: commodities[0]?.commodity_name || '',
+            broker_tag: '',
+            variant: '',
+          }],
+        };
+      });
+    });
   };
 
   // Scroll the seller's lots panel to the newly added lot (internal scroll only).
