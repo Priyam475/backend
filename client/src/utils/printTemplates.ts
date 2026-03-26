@@ -295,16 +295,18 @@ export function generateBuyerChitiThermal(
   bids: BidInfo[],
   stage: "post-auction" | "post-weighing" = "post-auction"
 ): string {
+  const _stage = stage;
+  void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
-  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
+  const totalBid = bids.length;
 
   // Column widths sum to 48 (approximation for thermal alignment)
-  const wLot = 15;
+  const wLot = 13;
+  const wLotSl = 6;
   const wGdwn = 8;
+  const wRate = 7;
   const wQty = 4;
   const wMark = 8;
-  const wRate = 8;
-  const wWt = stage === "post-weighing" ? 5 : 0;
 
   const pad = (s: string, w: number) => padThermalRight(clampThermalText(s, w), w);
   const lineLR = (left: string, right: string) => {
@@ -323,23 +325,23 @@ export function generateBuyerChitiThermal(
     "[C]Mercotrace",
     "[C]" + clampThermalText(buyerName, THERMAL_CHARS_PER_LINE),
     "[C]" + escposBold(`[${String(buyerMark ?? "").trim()}]`),
+    "[L]--------------------------------",
     "",
-    "[L]" + pad("Lot", wLot) + pad("Gdwn", wGdwn) + pad("Qty", wQty) + pad("Mark", wMark) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
+    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Rate", wRate) + pad("Qty", wQty) + pad("Mark", wMark),
   ].join("\n");
 
   const rows = bids
     .map((b) => {
-      const lot = lotDisplay(b);
+      const lot = formatLotIdentifierForBid(b);
       const rateTxt = escapeThermalPrice(`₹${b.rate}`);
-      const wtTxt = stage === "post-weighing" ? `${b.weight ?? "—"} kg` : "";
 
       const line1 =
         pad(lot, wLot) +
+        pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
         pad(b.godown || "—", wGdwn) +
-        pad(String(b.quantity), wQty) +
-        pad(`[${b.buyerMark}]`, wMark) +
         pad(rateTxt, wRate) +
-        (stage === "post-weighing" ? pad(wtTxt, wWt) : "");
+        pad(String(b.quantity), wQty) +
+        pad(`[${b.buyerMark}]`, wMark);
 
       return "[L]" + line1;
     })
@@ -347,10 +349,8 @@ export function generateBuyerChitiThermal(
 
   const totals = [
     "",
-    "[L]" + lineLR("Total Qty", `${totalQty} bags`),
-    "[L]" + lineLR("Total Amount", `₹${totalAmt.toLocaleString("en-IN")}`),
-    "",
-    "[C]Powered by Mercotrace",
+    "[L]" + lineLR("Total Bid", String(totalBid)),
+    "[L]" + lineLR("Total QTY", `${totalQty}`),
     "",
     "[L]--------------------------------",
     "",
@@ -441,16 +441,18 @@ function escapeStickerHtml(s: string): string {
 
 // ── 2. Buyer Chiti (80mm thermal) ────────────────────────
 export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+  const _stage = stage;
+  void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
-  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
+  const totalBid = bids.length;
   const rows = bids.map(b => `
     <tr>
-      <td>${lotDisplay(b)}</td>
+      <td>${formatLotIdentifierForBid(b)}</td>
+      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
       <td>${b.godown || '—'}</td>
+      <td>₹${b.rate}</td>
       <td>${b.quantity}</td>
       <td>[${b.buyerMark}]</td>
-      <td>₹${b.rate}</td>
-      ${stage === 'post-weighing' ? `<td>${b.weight ?? '—'} kg</td>` : ''}
     </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><style>
@@ -477,14 +479,13 @@ export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: B
       <div class="mark">[${buyerMark}]</div>
     </div>
     <table>
-      <thead><tr><th>Lot</th><th>Gdwn</th><th>Qty</th><th>Mark</th><th>Rate</th>${stage === 'post-weighing' ? '<th>Wt</th>' : ''}</tr></thead>
+      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Rate</th><th>Qty</th><th>Mark</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
-      <div class="row"><span>Total Qty</span><span>${totalQty} bags</span></div>
-      <div class="row"><span>Total Amount</span><span>₹${totalAmt.toLocaleString('en-IN')}</span></div>
+      <div class="row"><span>Total Bid</span><span>${totalBid}</span></div>
+      <div class="row"><span>Total QTY</span><span>${totalQty}</span></div>
     </div>
-    <div class="powered">Powered by Mercotrace</div>
     <div class="cut-line"></div>
   </body></html>`;
 }

@@ -67,6 +67,7 @@ const LogisticsPage = () => {
         .map((arr) => arr.vehicleId);
       const lotIdToCommodity = new Map<string, string>();
       const lotIdToSellerSerial = new Map<string, number>();
+      const lotIdToLotSerial = new Map<string, number>();
       await Promise.all(
         [...new Set(vehicleIdsToFetch)].map(async (vehicleId) => {
           try {
@@ -77,6 +78,9 @@ const LogisticsPage = () => {
                 if (name) lotIdToCommodity.set(String(lot.id), name);
                 if (seller.sellerSerialNumber != null && seller.sellerSerialNumber > 0) {
                   lotIdToSellerSerial.set(String(lot.id), seller.sellerSerialNumber);
+                }
+                if (lot.lotSerialNumber != null && lot.lotSerialNumber > 0) {
+                  lotIdToLotSerial.set(String(lot.id), lot.lotSerialNumber);
                 }
               });
             });
@@ -97,6 +101,7 @@ const LogisticsPage = () => {
           const commodityName = lotIdToCommodity.get(String(auction.lotId)) || fromAuction;
           let lotName = auction.lotName || '';
           let sellerSerial = lotIdToSellerSerial.get(String(auction.lotId)) ?? 0;
+          let lotNumber = lotIdToLotSerial.get(String(auction.lotId)) ?? 0;
           let origin: string | undefined;
           let godown: string | undefined;
 
@@ -124,7 +129,7 @@ const LogisticsPage = () => {
             lotName,
             sellerName,
             sellerSerial,
-            lotNumber: 0,
+            lotNumber,
             vehicleNumber,
             commodityName,
             origin,
@@ -167,7 +172,8 @@ const LogisticsPage = () => {
           ...b,
           // Seller serial must come from arrival auto-generated serial only.
           sellerSerial: b.sellerSerial,
-          lotNumber: res.lotNumbers[b.lotId] ?? b.lotNumber,
+          // Lot serial must come from arrival auto-generated serial only.
+          lotNumber: b.lotNumber,
           vehicleTotalQty: vehicleTotals.get(b.vehicleNumber || '') ?? b.quantity,
           sellerVehicleQty: vehicleSellerTotals.get(`${b.vehicleNumber || ''}||${b.sellerName}`) ?? b.quantity,
         }));
