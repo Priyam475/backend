@@ -199,6 +199,11 @@ function LotsScrollPanel({
   const measureRef = useRef<HTMLDivElement | null>(null);
   const [hintBottom, setHintBottom] = useState(false);
   const [hintRight, setHintRight] = useState(false);
+  const [thumbMetrics, setThumbMetrics] = useState<{ visible: boolean; top: number; height: number }>({
+    visible: false,
+    top: 0,
+    height: 0,
+  });
 
   const mergedRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -229,6 +234,37 @@ function LotsScrollPanel({
     }
   }, [ensureVerticalScrollThumbWhenShort]);
 
+  const updateThumbMetrics = useCallback(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    const clientH = outer.clientHeight;
+    if (clientH <= 0) return;
+
+    const totalScrollable = Math.max(0, outer.scrollHeight - outer.clientHeight);
+    const visible = Boolean(ensureVerticalScrollThumbWhenShort) || totalScrollable > LOTS_SCROLL_EPS;
+
+    if (!visible) {
+      setThumbMetrics({ visible: false, top: 0, height: 0 });
+      return;
+    }
+
+    // Keep thumb inside capsule ends and clear top/bottom arrow buttons.
+    const insetPx = 14;
+    const available = Math.max(0, clientH - insetPx * 2);
+    if (available <= 0) return;
+
+    const minThumbPx = 26;
+    const thumbHeightFromRatio = (clientH / Math.max(1, outer.scrollHeight)) * available;
+    const thumbHeight = Math.max(minThumbPx, Math.min(available, thumbHeightFromRatio));
+
+    const maxTop = Math.max(0, available - thumbHeight);
+    const ratio = totalScrollable > LOTS_SCROLL_EPS ? outer.scrollTop / totalScrollable : 0;
+    const top = insetPx + maxTop * Math.max(0, Math.min(1, ratio));
+
+    setThumbMetrics({ visible: true, top, height: thumbHeight });
+  }, [ensureVerticalScrollThumbWhenShort]);
+
   const updateHints = useCallback(() => {
     const el = outerRef.current;
     if (!el || !showEdgeHints) {
@@ -247,7 +283,15 @@ function LotsScrollPanel({
   const runScrollMetrics = useCallback(() => {
     applyVerticalThumbPadding();
     updateHints();
-  }, [applyVerticalThumbPadding, updateHints]);
+    updateThumbMetrics();
+  }, [applyVerticalThumbPadding, updateHints, updateThumbMetrics]);
+
+  const scrollByStep = useCallback((dir: 'up' | 'down') => {
+    const el = outerRef.current;
+    if (!el) return;
+    const step = Math.max(56, Math.round(el.clientHeight * 0.28));
+    el.scrollBy({ top: dir === 'up' ? -step : step, behavior: 'smooth' });
+  }, []);
 
   useLayoutEffect(() => {
     runScrollMetrics();
@@ -261,32 +305,103 @@ function LotsScrollPanel({
     const ro = new ResizeObserver(() => runScrollMetrics());
     ro.observe(inner);
     ro.observe(outer);
+    outer.addEventListener('scroll', updateThumbMetrics, { passive: true });
     if (showEdgeHints) {
       outer.addEventListener('scroll', updateHints, { passive: true });
     }
     return () => {
       ro.disconnect();
+      outer.removeEventListener('scroll', updateThumbMetrics);
       outer.removeEventListener('scroll', updateHints);
     };
-  }, [runScrollMetrics, updateHints, showEdgeHints, sellerId]);
+  }, [runScrollMetrics, updateHints, updateThumbMetrics, showEdgeHints, sellerId]);
 
   return (
     <>
       <div className="relative">
         <div
           ref={mergedRef}
-          className={cn('lots-scroll-panel', className)}
+          className={cn('lots-scroll-panel', 'no-scrollbar', className)}
           style={
             showEdgeHints
-              ? { scrollbarWidth: 'thin', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch' }
-              : { scrollbarWidth: 'thin', scrollbarGutter: 'stable' }
+              ? { WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }
+              : { scrollbarWidth: 'none', msOverflowStyle: 'none' }
           }
-          onScroll={showEdgeHints ? updateHints : undefined}
         >
           <div ref={measureRef} className="space-y-2">
             {children}
           </div>
         </div>
+        {thumbMetrics.visible && (
+          <div
+            className="absolute right-0 top-0 bottom-0 w-[18px] z-[4]"
+            aria-hidden
+          >
+            {/* Track capsule */}
+            <div
+              className="absolute right-0 w-[18px] rounded-full"
+              style={{
+                top: 2,
+                bottom: 2,
+                backgroundColor: 'hsl(var(--card))',
+                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+              }}
+            />
+
+            {/* Clickable end buttons */}
+            <button
+              type="button"
+              onClick={() => scrollByStep('up')}
+              className="absolute left-1/2 top-[6px] -translate-x-1/2 h-[8px] w-[8px] rounded-full grid place-items-center"
+              style={{
+                backgroundColor: 'hsl(var(--card))',
+                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+              }}
+              aria-label="Scroll lots up"
+            >
+              <ChevronUp className="h-[5px] w-[5px]" style={{ color: 'hsl(var(--foreground) / 0.58)' }} strokeWidth={1.7} />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollByStep('down')}
+              className="absolute left-1/2 bottom-[6px] -translate-x-1/2 h-[8px] w-[8px] rounded-full grid place-items-center"
+              style={{
+                backgroundColor: 'hsl(var(--card))',
+                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+              }}
+              aria-label="Scroll lots down"
+            >
+              <ChevronDown className="h-[5px] w-[5px]" style={{ color: 'hsl(var(--foreground) / 0.58)' }} strokeWidth={1.7} />
+            </button>
+
+            {/* Thumb capsule */}
+            <div
+              className="absolute left-0 right-0 rounded-full border-2"
+              style={{
+                top: thumbMetrics.top,
+                height: thumbMetrics.height,
+                borderColor: 'hsl(var(--card))',
+                backgroundColor: 'hsl(var(--card))',
+                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.32)',
+              }}
+            >
+              {/* Grip lines */}
+              <div className="absolute inset-0">
+                {[38, 50, 62].map(pct => (
+                  <div
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={pct}
+                    className="absolute left-[20%] right-[20%] h-[1px]"
+                    style={{
+                      top: `${pct}%`,
+                      backgroundColor: 'hsl(var(--foreground) / 0.42)',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {showEdgeHints && hintBottom && (
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex h-11 items-end justify-center bg-gradient-to-t from-background from-40% via-background/75 to-transparent pb-1.5"
