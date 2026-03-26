@@ -365,17 +365,17 @@ export function generateSellerChitiThermal(
   bids: BidInfo[],
   stage: "post-auction" | "post-weighing" = "post-auction"
 ): string {
+  const _stage = stage;
+  void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
-  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
-
-  const primaryMark = bids[0]?.buyerMark ?? "";
+  const totalLot = bids.length;
 
   // Column widths sum to 48 (approximation for thermal alignment)
-  const wLot = 18;
-  const wMark = 10;
+  const wLot = 14;
+  const wLotSl = 6;
+  const wMark = 9;
   const wQty = 4;
-  const wRate = 10;
-  const wWt = stage === "post-weighing" ? 6 : 0;
+  const wRate = 8;
 
   const pad = (s: string, w: number) => padThermalRight(clampThermalText(s, w), w);
   const lineLR = (left: string, right: string) => {
@@ -394,23 +394,22 @@ export function generateSellerChitiThermal(
     "[C]Mercotrace",
     "",
     "[C]" + clampThermalText(sellerName, THERMAL_CHARS_PER_LINE),
-    "[C]" + (primaryMark ? escposBold(`[${String(primaryMark ?? "").trim()}]`) : ""),
     "[C]" + clampThermalText(`S.No: ${sellerSerial}`, THERMAL_CHARS_PER_LINE),
+    "[L]--------------------------------",
     "",
-    "[L]" + pad("Lot", wLot) + pad("Mark", wMark) + pad("Qty", wQty) + pad("Rate", wRate) + (stage === "post-weighing" ? pad("Wt", wWt) : ""),
+    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Mark", wMark) + pad("Qty", wQty) + pad("Rate", wRate),
   ].join("\n");
 
   const rows = bids
     .map((b) => {
       const rateTxt = escapeThermalPrice(`₹${b.rate}`);
-      const wtTxt = stage === "post-weighing" ? `${b.weight ?? "—"} kg` : "";
 
       const line =
-        pad(lotDisplay(b), wLot) +
+        pad(formatLotIdentifierForBid(b), wLot) +
+        pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
         pad(`[${b.buyerMark}]`, wMark) +
         pad(String(b.quantity), wQty) +
-        pad(rateTxt, wRate) +
-        (stage === "post-weighing" ? pad(wtTxt, wWt) : "");
+        pad(rateTxt, wRate);
 
       return "[L]" + line;
     })
@@ -418,10 +417,8 @@ export function generateSellerChitiThermal(
 
   const totals = [
     "",
-    "[L]" + lineLR("Total Qty", `${totalQty} bags`),
-    "[L]" + lineLR("Total Amount", `₹${totalAmt.toLocaleString("en-IN")}`),
-    "",
-    "[C]Powered by Mercotrace",
+    "[L]" + lineLR("Total Lot", String(totalLot)),
+    "[L]" + lineLR("Total QTY", String(totalQty)),
     "",
     "[L]--------------------------------",
     "",
@@ -492,16 +489,17 @@ export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: B
 
 // ── 3. Seller Chiti (80mm thermal) ───────────────────────
 export function generateSellerChiti(sellerName: string, sellerSerial: number, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+  const _stage = stage;
+  void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
-  const totalAmt = bids.reduce((s, b) => s + b.quantity * b.rate, 0);
-  const primaryMark = bids[0]?.buyerMark ?? '';
+  const totalLot = bids.length;
   const rows = bids.map(b => `
     <tr>
-      <td>${lotDisplay(b)}</td>
+      <td>${formatLotIdentifierForBid(b)}</td>
+      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
       <td>[${b.buyerMark}]</td>
       <td>${b.quantity}</td>
       <td>₹${b.rate}</td>
-      ${stage === 'post-weighing' ? `<td>${b.weight ?? '—'} kg</td>` : ''}
     </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><style>
@@ -527,18 +525,16 @@ export function generateSellerChiti(sellerName: string, sellerSerial: number, bi
     <div class="header"><h3>Mercotrace</h3></div>
     <div class="seller-info">
       <div class="name">${sellerName}</div>
-      ${primaryMark ? `<div class="mark">[${primaryMark}]</div>` : ''}
       <div class="serial">S.No: ${sellerSerial}</div>
     </div>
     <table>
-      <thead><tr><th>Lot</th><th>Mark</th><th>Qty</th><th>Rate</th>${stage === 'post-weighing' ? '<th>Wt</th>' : ''}</tr></thead>
+      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Mark</th><th>Qty</th><th>Rate</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
-      <div class="row"><span>Total Qty</span><span>${totalQty} bags</span></div>
-      <div class="row"><span>Total Amount</span><span>₹${totalAmt.toLocaleString('en-IN')}</span></div>
+      <div class="row"><span>Total Lot</span><span>${totalLot}</span></div>
+      <div class="row"><span>Total QTY</span><span>${totalQty}</span></div>
     </div>
-    <div class="powered">Powered by Mercotrace</div>
     <div class="cut-line"></div>
   </body></html>`;
 }
