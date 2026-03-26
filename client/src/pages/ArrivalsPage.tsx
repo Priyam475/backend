@@ -204,6 +204,7 @@ function LotsScrollPanel({
     top: 0,
     height: 0,
   });
+  const [thumbPressed, setThumbPressed] = useState(false);
 
   const mergedRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -250,17 +251,18 @@ function LotsScrollPanel({
     }
 
     // Keep thumb inside capsule ends and clear top/bottom arrow buttons.
-    const insetPx = 14;
+    const insetPx = 12;
     const available = Math.max(0, clientH - insetPx * 2);
     if (available <= 0) return;
 
-    const minThumbPx = 26;
-    const thumbHeightFromRatio = (clientH / Math.max(1, outer.scrollHeight)) * available;
-    const thumbHeight = Math.max(minThumbPx, Math.min(available, thumbHeightFromRatio));
+    // Single small round "volume knob" (fixed size).
+    const knobSizePx = 26;
+    const thumbHeight = Math.min(available, knobSizePx);
 
     const maxTop = Math.max(0, available - thumbHeight);
     const ratio = totalScrollable > LOTS_SCROLL_EPS ? outer.scrollTop / totalScrollable : 0;
-    const top = insetPx + maxTop * Math.max(0, Math.min(1, ratio));
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const top = insetPx + maxTop * clampedRatio;
 
     setThumbMetrics({ visible: true, top, height: thumbHeight });
   }, [ensureVerticalScrollThumbWhenShort]);
@@ -316,6 +318,48 @@ function LotsScrollPanel({
     };
   }, [runScrollMetrics, updateHints, updateThumbMetrics, showEdgeHints, sellerId]);
 
+  const setScrollTopFromPointerY = useCallback((clientY: number) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    const totalScrollable = Math.max(0, outer.scrollHeight - outer.clientHeight);
+    if (totalScrollable <= LOTS_SCROLL_EPS) return;
+
+    const insetPx = 12;
+    const rect = outer.getBoundingClientRect();
+    const yInPanel = clientY - rect.top;
+    const available = Math.max(0, outer.clientHeight - insetPx * 2);
+    if (available <= 0) return;
+
+    const ratio = Math.max(0, Math.min(1, (yInPanel - insetPx) / available));
+    outer.scrollTop = ratio * totalScrollable;
+  }, []);
+
+  const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    setThumbPressed(true);
+
+    // Immediately seek based on press location.
+    setScrollTopFromPointerY(e.clientY);
+
+    const onMove = (ev: PointerEvent) => setScrollTopFromPointerY(ev.clientY);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setThumbPressed(false);
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    window.addEventListener('pointercancel', onUp, { passive: true });
+  }, [setScrollTopFromPointerY]);
+
   return (
     <>
       <div className="relative">
@@ -334,12 +378,11 @@ function LotsScrollPanel({
         </div>
         {thumbMetrics.visible && (
           <div
-            className="absolute right-0 top-0 bottom-0 w-[18px] z-[4]"
-            aria-hidden
+            className="absolute right-0 top-0 bottom-0 w-[22px] z-[4]"
           >
             {/* Track capsule */}
             <div
-              className="absolute right-0 w-[18px] rounded-full"
+              className="absolute right-0 w-[22px] rounded-full"
               style={{
                 top: 2,
                 bottom: 2,
@@ -348,57 +391,26 @@ function LotsScrollPanel({
               }}
             />
 
-            {/* Clickable end buttons */}
-            <button
-              type="button"
-              onClick={() => scrollByStep('up')}
-              className="absolute left-1/2 top-[6px] -translate-x-1/2 h-[8px] w-[8px] rounded-full grid place-items-center"
-              style={{
-                backgroundColor: 'hsl(var(--card))',
-                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
-              }}
-              aria-label="Scroll lots up"
-            >
-              <ChevronUp className="h-[5px] w-[5px]" style={{ color: 'hsl(var(--foreground) / 0.58)' }} strokeWidth={1.7} />
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollByStep('down')}
-              className="absolute left-1/2 bottom-[6px] -translate-x-1/2 h-[8px] w-[8px] rounded-full grid place-items-center"
-              style={{
-                backgroundColor: 'hsl(var(--card))',
-                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
-              }}
-              aria-label="Scroll lots down"
-            >
-              <ChevronDown className="h-[5px] w-[5px]" style={{ color: 'hsl(var(--foreground) / 0.58)' }} strokeWidth={1.7} />
-            </button>
-
             {/* Thumb capsule */}
             <div
-              className="absolute left-0 right-0 rounded-full border-2"
+              className="absolute left-0 right-0 rounded-full border-2 cursor-ns-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
               style={{
                 top: thumbMetrics.top,
                 height: thumbMetrics.height,
-                borderColor: 'hsl(var(--card))',
-                backgroundColor: 'hsl(var(--card))',
-                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.32)',
+                borderColor: thumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
+                backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+                // "Gooey/glow" look: crisp inner border + soft outer glow
+                boxShadow:
+                  thumbPressed
+                    ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 26px hsl(var(--foreground) / 0.26)'
+                    : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 18px hsl(var(--foreground) / 0.18)',
               }}
+              onPointerDown={onThumbPointerDown}
+              role="slider"
+              aria-label="Drag to scroll lots"
+              aria-valuemin={0}
+              aria-valuemax={1}
             >
-              {/* Grip lines */}
-              <div className="absolute inset-0">
-                {[38, 50, 62].map(pct => (
-                  <div
-                    // eslint-disable-next-line react/no-array-index-key
-                    key={pct}
-                    className="absolute left-[20%] right-[20%] h-[1px]"
-                    style={{
-                      top: `${pct}%`,
-                      backgroundColor: 'hsl(var(--foreground) / 0.42)',
-                    }}
-                  />
-                ))}
-              </div>
             </div>
           </div>
         )}
@@ -439,6 +451,31 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [hintRight, setHintRight] = useState(false);
+  const [thumbPressed, setThumbPressed] = useState(false);
+  const [thumbMetrics, setThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
+    visible: false,
+    left: 0,
+    width: 0,
+  });
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  const setScrollLeftFromPointerX = useCallback((clientX: number) => {
+    const el = scrollRef.current;
+    const trackEl = trackRef.current;
+    if (!el || !trackEl) return;
+
+    const totalScrollableX = Math.max(0, el.scrollWidth - el.clientWidth);
+    if (totalScrollableX <= LOTS_SCROLL_EPS) return;
+
+    const insetPx = 4;
+    const available = Math.max(0, trackEl.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+
+    const rect = trackEl.getBoundingClientRect();
+    const xInTrack = clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, (xInTrack - insetPx) / available));
+    el.scrollLeft = ratio * totalScrollableX;
+  }, []);
 
   const update = useCallback(() => {
     const el = scrollRef.current;
@@ -446,6 +483,34 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
     const hOverflow = el.scrollWidth > el.clientWidth + LOTS_SCROLL_EPS;
     const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - LOTS_SCROLL_EPS;
     setHintRight(hOverflow && notAtRight);
+
+    const trackEl = trackRef.current;
+    if (!trackEl) return;
+
+    if (!hOverflow) {
+      setThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+
+    const totalScrollableX = Math.max(0, el.scrollWidth - el.clientWidth);
+    if (totalScrollableX <= LOTS_SCROLL_EPS) {
+      setThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+
+    const insetPx = 4;
+    const available = Math.max(0, trackEl.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+
+    const knobWidthPx = 18;
+    const thumbWidth = Math.min(available, knobWidthPx);
+
+    const ratio = el.scrollLeft / totalScrollableX;
+    const maxLeft = Math.max(0, available - thumbWidth);
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const left = insetPx + maxLeft * clampedRatio;
+
+    setThumbMetrics({ visible: true, left, width: thumbWidth });
   }, []);
 
   useLayoutEffect(() => {
@@ -467,16 +532,75 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
     };
   }, [update]);
 
+  const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    const trackEl = trackRef.current;
+    if (!el || !trackEl) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    setThumbPressed(true);
+    setScrollLeftFromPointerX(e.clientX);
+
+    const onMove = (ev: PointerEvent) => setScrollLeftFromPointerX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setThumbPressed(false);
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    window.addEventListener('pointercancel', onUp, { passive: true });
+  }, [setScrollLeftFromPointerX]);
+
   return (
-    <div className="relative -mx-1 px-1">
+    <div className="relative -mx-1 px-1 pb-[16px]">
       <div
         ref={scrollRef}
-        className="lot-fields-x-scroll overflow-x-scroll overflow-y-visible overscroll-x-contain"
-        style={{ scrollbarWidth: 'thin' }}
+        className="lot-fields-x-scroll overflow-x-scroll overflow-y-visible overscroll-x-contain no-scrollbar"
         onScroll={update}
       >
         <div ref={contentRef}>{children}</div>
       </div>
+
+      {/* Horizontal thumb (volume-like) for the lot fields scroller */}
+      <div
+        ref={trackRef}
+        className="pointer-events-none absolute left-1 right-1 bottom-0 z-[2] h-[18px] flex items-center"
+        aria-hidden
+      >
+        <div
+          className="relative w-full h-[6px] rounded-full"
+          style={{
+            backgroundColor: 'hsl(var(--card))',
+            boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.22)',
+          }}
+        >
+          {thumbMetrics.visible && (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 rounded-full cursor-ew-resize select-none touch-none pointer-events-auto transition-[box-shadow,transform] duration-150 active:scale-[0.98]"
+              style={{
+                left: thumbMetrics.left,
+                width: thumbMetrics.width,
+                height: 12,
+                backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+                boxShadow: thumbPressed
+                  ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 26px hsl(var(--foreground) / 0.26)'
+                  : 'inset 0 0 0 1px hsl(var(--foreground) / 0.45), 0 0 18px hsl(var(--foreground) / 0.18)',
+              }}
+              onPointerDown={onThumbPointerDown}
+              role="slider"
+              aria-label="Drag to scroll lots horizontally"
+              aria-valuemin={0}
+              aria-valuemax={1}
+            />
+          )}
+        </div>
+      </div>
+
       {hintRight && (
         <div
           className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5"
