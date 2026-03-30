@@ -2477,8 +2477,8 @@ const ArrivalsPage = () => {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
-                                  <div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 flex-1">
+                                  <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
@@ -2487,20 +2487,20 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-9 rounded-lg text-xs",
+                                        "h-9 w-full min-w-0 rounded-lg text-xs",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
                                     />
                                     {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
                                   </div>
-                                  <div>
+                                  <div className="min-w-0">
                                     <Input
                                       placeholder="Mark / alias (optional, 2–50)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-9 rounded-lg text-xs",
+                                        "h-9 w-full min-w-0 rounded-lg text-xs",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
@@ -3271,8 +3271,8 @@ const ArrivalsPage = () => {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="grid grid-cols-1 gap-2 min-w-0 flex-1">
-                                  <div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 flex-1">
+                                  <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
@@ -3281,20 +3281,20 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-9 rounded-lg text-xs",
+                                        "h-9 w-full min-w-0 rounded-lg text-xs",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
                                     />
                                     {isSellerNameInvalid(seller) && <p className="text-[9px] text-red-500 mt-0.5">2–100 characters</p>}
                                   </div>
-                                  <div>
+                                  <div className="min-w-0">
                                     <Input
                                       placeholder="Mark / alias (optional, 2–50)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-9 rounded-lg text-xs",
+                                        "h-9 w-full min-w-0 rounded-lg text-xs",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
