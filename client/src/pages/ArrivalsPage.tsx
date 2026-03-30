@@ -1983,7 +1983,7 @@ const ArrivalsPage = () => {
                         </div>
                       </div>
                     </div>
-                    {/* Search + sub-categories (Arrivals / Sellers / Lots) — blue active raghav */}
+                    {/* Search + sub-categories (Arrivals) */}
                     <div className="flex items-center gap-4 mb-4">
                       <div className="relative w-[300px]">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -1997,8 +1997,6 @@ const ArrivalsPage = () => {
                       </div>
                       <div className="flex items-center gap-1.5 text-xs">
                         <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
-                        <button type="button" onClick={() => setSummaryMode('sellers')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'sellers' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Sellers ({totalSellers})</button>
-                        <button type="button" onClick={() => setSummaryMode('lots')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
                       </div>
                     </div>
                     {summaryMode === 'arrivals' && (
@@ -2846,11 +2844,9 @@ const ArrivalsPage = () => {
                 className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF] text-foreground placeholder:text-muted-foreground"
               />
             </div>
-            {/* Sub-categories: Arrivals / Sellers / Lots — blue active (raghav) */}
+            {/* Sub-categories: Arrivals */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 text-xs">
               <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
-              <button type="button" onClick={() => setSummaryMode('sellers')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'sellers' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Sellers ({totalSellers})</button>
-              <button type="button" onClick={() => setSummaryMode('lots')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'lots' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Lots ({totalLots})</button>
             </div>
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
