@@ -1539,6 +1539,7 @@ const ArrivalsPage = () => {
         commodity_name: addLotForm.commodityName,
         variant: addLotForm.variant,
       });
+      toast.success(`Lot "${trimmedName}" updated successfully`);
       setAddLotForm(null);
       return;
     }
@@ -1578,6 +1579,7 @@ const ArrivalsPage = () => {
     // Expand seller panel and close form
     setSellerExpanded(prev => ({ ...prev, [addLotForm.sellerId]: true }));
     pendingLotsScrollToEndSellerIdRef.current = addLotForm.sellerId;
+    toast.success(`Lot "${trimmedName}" added successfully`);
     setAddLotForm(null);
   };
 
@@ -2528,17 +2530,17 @@ const ArrivalsPage = () => {
                           );
                         })}
                       </RadioGroup>
-                      <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-3">
                         <button onClick={() => setNoRental(!noRental)}
-                          className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner",
+                          className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner flex-shrink-0",
                             noRental ? 'bg-gradient-to-r from-red-500 to-rose-500 shadow-red-500/30' : 'bg-slate-300 dark:bg-slate-600')}>
                           <motion.div className="w-6 h-6 rounded-full bg-white shadow-md absolute top-1" animate={{ x: noRental ? 28 : 4 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }} />
                         </button>
-                        <span className="text-sm text-foreground font-medium">No Rental</span>
+                        <span className="text-xs sm:text-sm text-foreground font-medium">No Rental</span>
                       </div>
                       {!noRental && (
                         <>
-                          <div className="grid grid-cols-2 gap-3 mb-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-3">
                             <div>
                               <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
                                 Rate {isFreightRateInvalid && '⚠ 0–100,000'}
@@ -2546,8 +2548,8 @@ const ArrivalsPage = () => {
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
                                 className={cn("h-11 rounded-xl text-sm font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                             </div>
-                            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
-                              <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
+                            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-2 sm:p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
+                              <p className="text-[9px] sm:text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
                               <p className="text-lg font-bold text-foreground">₹{freightTotal.toLocaleString()}</p>
                             </div>
                           </div>
@@ -2594,36 +2596,25 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
-                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
-                          <div className="flex items-start gap-2 min-w-0 flex-1">
+                        <div className="p-3 sm:p-4 flex items-center justify-between gap-1 sm:gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="min-w-0 flex-1">
                               {seller.contact_id !== '' ? (
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-semibold text-[12px] text-foreground truncate">
+                                <>
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
                                     {seller.seller_name}
                                   </p>
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    {seller.seller_mark ? (
-                                      <span className="text-[10px] text-muted-foreground truncate whitespace-nowrap">
-                                        ({seller.seller_mark})
-                                      </span>
-                                    ) : null}
-                                    {sellerSerialLabel ? (
-                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        SL. NO {sellerSerialLabel}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
-                                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                  </div>
-                                </div>
+                                  {seller.seller_mark && (
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                      {seller.seller_mark}
+                                    </p>
+                                  )}
+                                </>
                               ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 flex-1">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
@@ -2633,7 +2624,7 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-9 w-full min-w-0 rounded-lg text-xs",
+                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
@@ -2646,101 +2637,60 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-9 w-full min-w-0 rounded-lg text-xs",
+                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
                                     />
                                     {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                   </div>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {sellerSerialLabel ? (
-                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        SL. NO {sellerSerialLabel}
-                                      </span>
-                                    ) : null}
-                                  </div>
                                 </div>
                               )}
-                              {/* Prominent total bags beside seller details */}
-                              <div className="shrink-0 self-center">
-                                <div className="px-3 py-1.5 rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
-                                  <span className="text-xl leading-none">{sellerTotal}</span>
-                                </div>
+                            </div>
+                            {/* Quantity badge */}
+                            <div className="shrink-0">
+                              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                                <span className="text-lg sm:text-xl leading-none whitespace-nowrap">{sellerTotal}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end justify-center gap-2 pl-2">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                                className={cn(
-                                  "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
-                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                                )}
-                              >
-                                {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canAddAnotherLot(seller)) return;
-                                  // If form already open for this seller, close it
-                                  if (addLotForm?.sellerId === seller.seller_vehicle_id) {
-                                    setAddLotForm(null);
-                                    return;
-                                  }
-                                  // Open the inline form
-                                  setAddLotForm({
-                                    sellerId: seller.seller_vehicle_id,
-                                    lotName: '',
-                                    bags: '',
-                                    commodityName: commodities[0]?.commodity_name || '',
-                                    variant: '',
-                                    errors: {},
-                                  });
-                                }}
-                                disabled={!canAddAnotherLot(seller)}
-                                className={cn(
-                                  "w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-opacity",
-                                  !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
-                                )}
-                              >
-                                {addLotForm?.sellerId === seller.seller_vehicle_id ? (
-                                  <span className="text-white text-lg leading-none">×</span>
-                                ) : (
-                                  <Plus className="w-3.5 h-3.5 text-white" />
-                                )}
-                              </button>
-                            </div>
-                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                          <div className="flex flex-col items-end justify-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-colors",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                            </button>
+                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
-                          {addLotForm?.sellerId === seller.seller_vehicle_id && (
+                          {expanded && addLotForm?.sellerId === seller.seller_vehicle_id && (
                             <motion.div
                               key="add-lot-form"
                               initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
+                              animate={{ opacity: 1, height: "auto" }}
                               exit={{ opacity: 0, height: 0 }}
                               transition={{ duration: 0.15 }}
                               className="overflow-hidden"
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {/* Lot Name */}
                                   <div>
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
-                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
                                     />
@@ -2753,7 +2703,7 @@ const ArrivalsPage = () => {
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
-                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
                                     />
@@ -2764,7 +2714,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
-                                      className={cn("h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
                                       {commodities.map((c: any) => (
@@ -2778,7 +2728,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
-                                      className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
                                         <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
@@ -2795,6 +2745,45 @@ const ArrivalsPage = () => {
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                 </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <AnimatePresence initial={false}>
+                          {expanded && !addLotForm?.sellerId && (
+                            <motion.div
+                              key={`${seller.seller_vehicle_id}-add-lot-button`}
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-3 border-t border-border/30 bg-muted/5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!canAddAnotherLot(seller)) return;
+                                    setAddLotForm({
+                                      sellerId: seller.seller_vehicle_id,
+                                      lotName: "",
+                                      bags: "",
+                                      commodityName: commodities[0]?.commodity_name || "",
+                                      variant: "",
+                                      errors: {},
+                                    });
+                                  }}
+                                  disabled={!canAddAnotherLot(seller)}
+                                  className={cn(
+                                    "w-full py-3 sm:py-2 px-3 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors",
+                                    canAddAnotherLot(seller)
+                                      ? "bg-blue-600 hover:bg-blue-700 text-white"
+                                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                                  )}
+                                >
+                                  <Plus className="w-4 h-4" />
+                                  Add Lot
+                                </button>
                               </div>
                             </motion.div>
                           )}
@@ -2825,15 +2814,15 @@ const ArrivalsPage = () => {
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Click + to add a lot.</p>
                                   ) : (
                                     <div className="overflow-x-auto">
-                                      <table className="w-full text-xs min-w-[28rem]">
+                                      <table className="w-full text-xs sm:text-sm min-w-[min(100%,28rem)]">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold w-14">SL. NO</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Lot Name</th>
-                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Bags</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Commodity</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Variant</th>
-                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Actions</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -2845,21 +2834,21 @@ const ArrivalsPage = () => {
                                                 "border-b border-border/10 transition-colors",
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
-                                                <td className="py-2 px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-3">
-                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[11px] font-bold">
+                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-2 sm:px-3">
+                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold line-clamp-1">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
-                                                <td className="py-2 px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-3 text-foreground">{lot.commodity_name || "-"}</td>
-                                                <td className="py-2 px-3 text-muted-foreground">{lot.variant || "None"}</td>
-                                                <td className="py-2 px-3">
+                                                <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-foreground hidden sm:table-cell">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-2 sm:px-3">
                                                   <div className="flex justify-end gap-1">
                                                     <button
                                                       type="button"
                                                       onClick={() => editFormLot(si, li)}
-                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Edit lot"
                                                     >
                                                       <Pencil className="w-3 h-3" />
@@ -2867,7 +2856,7 @@ const ArrivalsPage = () => {
                                                     <button
                                                       type="button"
                                                       onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
-                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
                                                       <Trash2 className="w-3 h-3" />
@@ -2933,23 +2922,25 @@ const ArrivalsPage = () => {
                     )}
 
                     {/* Add Seller + Submit (reduced submit width to make room) */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-stretch gap-2 sm:gap-3">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={openSellerSearchPanel}
                         disabled={!isMultiSeller && sellers.length >= 1}
-                        className="h-12 rounded-xl flex-1"
+                        className="h-11 sm:h-12 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center"
                       >
-                        <Users className="w-4 h-4 mr-2" /> Add Seller
+                        <Users className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="ml-1.5 sm:ml-2">Add Seller</span>
                       </Button>
                       <Button
                         onClick={handleSubmitArrival}
                         disabled={isFormInvalid}
-                        className="flex-1 h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+                        className="flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center"
                       >
-                        <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
+                        <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="ml-1.5 sm:ml-2">{editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}</span>
                       </Button>
                     </div>
                   </div>
@@ -3143,7 +3134,7 @@ const ArrivalsPage = () => {
                       </div>
                       <AnimatePresence>
                         {isExpanded && (
-                          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-border/30">
+                          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-border/30">
                             <div className="p-4 space-y-3 text-sm">
                               {expandedDetailLoading ? (
                                 <p className="text-muted-foreground">Loading…</p>
@@ -3420,13 +3411,13 @@ const ArrivalsPage = () => {
                           );
                         })}
                       </RadioGroup>
-                      <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-3">
                         <button onClick={() => setNoRental(!noRental)}
-                          className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner",
+                          className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner flex-shrink-0",
                             noRental ? 'bg-gradient-to-r from-red-500 to-rose-500 shadow-red-500/30' : 'bg-slate-300 dark:bg-slate-600')}>
                           <motion.div className="w-6 h-6 rounded-full bg-white shadow-md absolute top-1" animate={{ x: noRental ? 28 : 4 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }} />
                         </button>
-                        <span className="text-sm text-foreground font-medium">No Rental</span>
+                        <span className="text-xs sm:text-sm text-foreground font-medium">No Rental</span>
                       </div>
                       {!noRental && (
                         <>
@@ -3482,36 +3473,25 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
-                        <div className="p-4 flex items-stretch justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
-                          <div className="flex items-start gap-2 min-w-0 flex-1">
+                        <div className="p-3 sm:p-4 flex items-center justify-between gap-1 sm:gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
                             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="min-w-0 flex-1">
                               {seller.contact_id !== '' ? (
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-semibold text-[12px] text-foreground truncate">
+                                <>
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
                                     {seller.seller_name}
                                   </p>
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    {seller.seller_mark ? (
-                                      <span className="text-[10px] text-muted-foreground truncate whitespace-nowrap">
-                                        ({seller.seller_mark})
-                                      </span>
-                                    ) : null}
-                                    {sellerSerialLabel ? (
-                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        SL. NO {sellerSerialLabel}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground truncate">{seller.seller_phone}</p>
-                                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                  </div>
-                                </div>
+                                  {seller.seller_mark && (
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                      {seller.seller_mark}
+                                    </p>
+                                  )}
+                                </>
                               ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 flex-1">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
@@ -3521,7 +3501,7 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-9 w-full min-w-0 rounded-lg text-xs",
+                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
@@ -3534,98 +3514,60 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-9 w-full min-w-0 rounded-lg text-xs",
+                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
                                     />
                                     {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
                                   </div>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <p className="text-[10px] text-muted-foreground/80 truncate">{seller.lots.length} lot(s)</p>
-                                    {sellerSerialLabel ? (
-                                      <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                        SL. NO {sellerSerialLabel}
-                                      </span>
-                                    ) : null}
-                                  </div>
                                 </div>
                               )}
-                              {/* Prominent total bags beside seller details */}
-                              <div className="shrink-0 self-center">
-                                <div className="px-3 py-1.5 rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
-                                  <span className="text-xl leading-none">{sellerTotal}</span>
-                                </div>
+                            </div>
+                            {/* Quantity badge */}
+                            <div className="shrink-0">
+                              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                                <span className="text-lg sm:text-xl leading-none whitespace-nowrap">{sellerTotal}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end justify-center gap-2 pl-2">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                                className={cn(
-                                  "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
-                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                                )}
-                              >
-                                {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canAddAnotherLot(seller)) return;
-                                  // If form already open for this seller, close it
-                                  if (addLotForm?.sellerId === seller.seller_vehicle_id) {
-                                    setAddLotForm(null);
-                                    return;
-                                  }
-                                  // Open the inline form
-                                  setAddLotForm({
-                                    sellerId: seller.seller_vehicle_id,
-                                    lotName: '',
-                                    bags: '',
-                                    commodityName: commodities[0]?.commodity_name || '',
-                                    variant: '',
-                                    errors: {},
-                                  });
-                                }}
-                                className={cn("w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-opacity", !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed")}
-                                disabled={!canAddAnotherLot(seller)}
-                              >
-                                {addLotForm?.sellerId === seller.seller_vehicle_id ? (
-                                  <span className="text-white text-lg leading-none">×</span>
-                                ) : (
-                                  <Plus className="w-3.5 h-3.5 text-white" />
-                                )}
-                              </button>
-                            </div>
-                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+                          <div className="flex flex-col items-end justify-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-colors",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                            </button>
+                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
-                          {addLotForm?.sellerId === seller.seller_vehicle_id && (
+                          {expanded && addLotForm?.sellerId === seller.seller_vehicle_id && (
                             <motion.div
                               key="add-lot-form"
                               initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
+                              animate={{ opacity: 1, height: "auto" }}
                               exit={{ opacity: 0, height: 0 }}
                               transition={{ duration: 0.15 }}
                               className="overflow-hidden"
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                   {/* Lot Name */}
                                   <div>
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
-                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
                                     />
@@ -3638,7 +3580,7 @@ const ArrivalsPage = () => {
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
-                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
                                     />
@@ -3649,7 +3591,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
-                                      className={cn("h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
                                       {commodities.map((c: any) => (
@@ -3663,7 +3605,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
-                                      className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
                                         <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
@@ -3680,6 +3622,45 @@ const ArrivalsPage = () => {
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                 </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                        <AnimatePresence initial={false}>
+                          {expanded && !addLotForm?.sellerId && (
+                            <motion.div
+                              key={`${seller.seller_vehicle_id}-add-lot-button-mobile`}
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-3 border-t border-border/30 bg-muted/5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!canAddAnotherLot(seller)) return;
+                                    setAddLotForm({
+                                      sellerId: seller.seller_vehicle_id,
+                                      lotName: "",
+                                      bags: "",
+                                      commodityName: commodities[0]?.commodity_name || "",
+                                      variant: "",
+                                      errors: {},
+                                    });
+                                  }}
+                                  disabled={!canAddAnotherLot(seller)}
+                                  className={cn(
+                                    "w-full py-3 sm:py-2 px-3 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors",
+                                    canAddAnotherLot(seller)
+                                      ? "bg-blue-600 hover:bg-blue-700 text-white"
+                                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                                  )}
+                                >
+                                  <Plus className="w-4 h-4" />
+                                  Add Lot
+                                </button>
                               </div>
                             </motion.div>
                           )}
@@ -3709,15 +3690,15 @@ const ArrivalsPage = () => {
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Tap + to add a lot.</p>
                                   ) : (
                                     <div className="overflow-x-auto">
-                                      <table className="w-full text-xs min-w-[28rem]">
+                                      <table className="w-full text-xs sm:text-sm min-w-[min(100%,28rem)]">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold w-14">SL. NO</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Lot Name</th>
-                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Bags</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Commodity</th>
-                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Variant</th>
-                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Actions</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3729,21 +3710,21 @@ const ArrivalsPage = () => {
                                                 "border-b border-border/10 transition-colors",
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
-                                                <td className="py-2 px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-3">
-                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[11px] font-bold">
+                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-2 sm:px-3">
+                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold line-clamp-1">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
-                                                <td className="py-2 px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-3 text-foreground">{lot.commodity_name || "-"}</td>
-                                                <td className="py-2 px-3 text-muted-foreground">{lot.variant || "None"}</td>
-                                                <td className="py-2 px-3">
+                                                <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-foreground hidden sm:table-cell">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-2 sm:px-3">
                                                   <div className="flex justify-end gap-1">
                                                     <button
                                                       type="button"
                                                       onClick={() => editFormLot(si, li)}
-                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Edit lot"
                                                     >
                                                       <Pencil className="w-3 h-3" />
@@ -3751,7 +3732,7 @@ const ArrivalsPage = () => {
                                                     <button
                                                       type="button"
                                                       onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
-                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
                                                       <Trash2 className="w-3 h-3" />
@@ -3823,25 +3804,27 @@ const ArrivalsPage = () => {
                   </div>
 
                   {/* Fixed bottom submit bar - sits above bottom nav */}
-                  <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-4 py-3 md:px-6">
+                  <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-3 py-2.5 sm:px-4 sm:py-3 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-stretch gap-2 sm:gap-3">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                        onClick={openSellerSearchPanel}
+                          onClick={openSellerSearchPanel}
                           disabled={!isMultiSeller && sellers.length >= 1}
-                          className="h-14 rounded-xl flex-1"
+                          className="h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center"
                         >
-                          <Users className="w-4 h-4 mr-2" /> Add Seller
+                          <Users className="w-4 h-4 md:w-5 md:h-5" />
+                          <span className="ml-1.5 sm:ml-2">Add Seller</span>
                         </Button>
                         <Button
                           onClick={handleSubmitArrival}
                           disabled={isFormInvalid}
-                          className="flex-1 h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+                          className="flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center"
                         >
-                          <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})` : 'Submit Arrival')}
+                          <FileText className="w-4 h-4 md:w-5 md:h-5" />
+                          <span className="ml-1.5 sm:ml-2 truncate">{editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit (${sellers.length})` : 'Submit Arrival')}</span>
                         </Button>
                       </div>
                     </div>
