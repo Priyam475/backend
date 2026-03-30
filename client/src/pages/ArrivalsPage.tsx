@@ -747,11 +747,20 @@ const ArrivalsPage = () => {
   const lotsScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const pendingLotsScrollToEndSellerIdRef = useRef<string | null>(null);
   const newArrivalPanelScrollRef = useRef<HTMLDivElement | null>(null);
-  const [sellerSearch, setSellerSearch] = useState('');
+  const sellerNameInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const pendingSellerFocusIdRef = useRef<string | null>(null);
+  const [sellerFocusNonce, setSellerFocusNonce] = useState(0);
+  // Rapid-click safety helpers (avoid stale closures around `sellers.length` / `isMultiSeller`).
+  const isMultiSellerRef = useRef(isMultiSeller);
+  const sellerCountRef = useRef(0);
+
+  // Seller search (replaces "instant blank seller" UX)
+  const [sellerSearchOpen, setSellerSearchOpen] = useState(false);
+  const [sellerSearchTerm, setSellerSearchTerm] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
-  const [sellerAddOpen, setSellerAddOpen] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const sellerSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const [sellerDropdownPos, setSellerDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   // Inline autofocus targets for the "New Arrival" panel/sheet.
   // We keep one ref per target because only one layout branch renders at a time.
@@ -769,6 +778,7 @@ const ArrivalsPage = () => {
 
   useAutofocusWhen(isStep1PanelOpen && isMultiSeller, vehicleNumberInputRef);
   useAutofocusWhen(isStep1PanelOpen && !isMultiSeller, loadedWeightInputRef);
+  useAutofocusWhen(sellerSearchOpen, sellerSearchInputRef);
 
   const isArrivalPanelOpen = isDesktop ? desktopTab === 'new-arrival' : showAdd;
   // Detect the "lots flow" context.
@@ -981,13 +991,6 @@ const ArrivalsPage = () => {
     if (brokerSearchWrapRef.current) {
       const rect = brokerSearchWrapRef.current.getBoundingClientRect();
       setBrokerDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
-  }, []);
-
-  const refreshDropdownPos = useCallback(() => {
-    if (sellerSearchWrapRef.current) {
-      const rect = sellerSearchWrapRef.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
     }
   }, []);
 
@@ -1210,18 +1213,6 @@ const ArrivalsPage = () => {
     loadArrivalsFromApi();
   }, [statusFilter]);
 
-  // Close seller dropdown on scroll or resize (portal is fixed-position; use document so any scrollable container closes it)
-  useEffect(() => {
-    if (!sellerDropdown) return;
-    const close = () => setSellerDropdown(false);
-    document.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      document.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [sellerDropdown]);
-
   // Close broker dropdown on scroll or resize (same: close when any scroll happens so it doesn't stay stuck)
   useEffect(() => {
     if (!brokerDropdown) return;
@@ -1234,15 +1225,35 @@ const ArrivalsPage = () => {
     };
   }, [brokerDropdown]);
 
-  // Close seller dropdown if the new "Add Seller" search UI is hidden.
+  // Close seller dropdown on scroll/resize (portal is fixed-position)
   useEffect(() => {
-    if (!sellerAddOpen) setSellerDropdown(false);
-  }, [sellerAddOpen]);
+    if (!sellerDropdown) return;
+    const close = () => setSellerDropdown(false);
+    document.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [sellerDropdown]);
 
-  // In single-seller mode, hide "Add Seller" search once the limit is reached.
   useEffect(() => {
-    if (!isMultiSeller && sellers.length >= 1) setSellerAddOpen(false);
-  }, [isMultiSeller, sellers.length]);
+    if (!sellerSearchOpen) setSellerDropdown(false);
+  }, [sellerSearchOpen]);
+
+  // In single-seller mode, hide seller search once the limit is reached.
+  useEffect(() => {
+    if (!sellerSearchOpen) return;
+    if (!isMultiSeller && sellers.length >= 1) setSellerSearchOpen(false);
+  }, [sellerSearchOpen, isMultiSeller, sellers.length]);
+
+  // Keep refs in sync for rapid-click append-only safety.
+  useEffect(() => {
+    isMultiSellerRef.current = isMultiSeller;
+  }, [isMultiSeller]);
+  useEffect(() => {
+    sellerCountRef.current = sellers.length;
+  }, [sellers.length]);
 
   // REQ-ARR-001: Tonnage Calculation
   const netWeight = useMemo(() => {
@@ -1298,60 +1309,108 @@ const ArrivalsPage = () => {
     ).slice(0, 8);
   }, [brokerName, contacts]);
 
-  // REQ-CON-004 / REQ-ARR-007: Unified contact search via mark or phone
+  // Seller search suggestions (used by the "Add Seller" search panel).
   const filteredContacts = useMemo(() => {
-    if (!sellerSearch) return [];
-    const q = sellerSearch.toLowerCase();
+    if (!sellerSearchTerm.trim()) return [];
+    const q = sellerSearchTerm.toLowerCase();
     return contacts.filter(c =>
       (c.name?.toLowerCase()?.includes(q)) ||
       (c.phone?.includes(q)) ||
       (c.mark?.toLowerCase()?.includes(q))
     ).slice(0, 5);
-  }, [sellerSearch, contacts]);
+  }, [sellerSearchTerm, contacts]);
 
-  const addSeller = (contact: Contact) => {
-    if (!isMultiSeller && sellers.length >= 1) {
+  const refreshSellerDropdownPos = useCallback(() => {
+    if (sellerSearchWrapRef.current) {
+      const rect = sellerSearchWrapRef.current.getBoundingClientRect();
+      setSellerDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+  }, []);
+
+  /**
+   * Append an empty seller card immediately (free-text seller).
+   * Used by the “Add Seller” button beside Submit/Update.
+   */
+  const addSellerInstant = (sellerName?: string) => {
+    if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
       toast.error('Single-seller arrival allows only one seller');
       return;
     }
-    if (sellers.some(s => s.contact_id === contact.contact_id)) {
-      toast.error('Seller already added to this vehicle');
-      return;
-    }
-    const newSeller: SellerEntry = {
-      seller_vehicle_id: crypto.randomUUID(),
-      contact_id: contact.contact_id,
-      seller_serial_number: null,
-      seller_name: contact.name,
-      seller_phone: contact.phone,
-      seller_mark: contact.mark || '',
-      lots: [],
-    };
-    setSellers(prev => [...prev, newSeller]);
-    setSellerExpanded(prev => ({ ...prev, [newSeller.seller_vehicle_id]: true }));
-    setSellerSearch('');
-    setSellerDropdown(false);
-  };
 
-  /** Add a seller by name/phone only (no contact). Prefills name from the search box. */
-  const addSellerByName = () => {
-    if (!isMultiSeller && sellers.length >= 1) {
-      toast.error('Single-seller arrival allows only one seller');
-      return;
-    }
-    const nameFromSearch = sellerSearch.trim();
+    const newSellerId = crypto.randomUUID();
     const newSeller: SellerEntry = {
-      seller_vehicle_id: crypto.randomUUID(),
+      seller_vehicle_id: newSellerId,
       contact_id: '',
       seller_serial_number: null,
-      seller_name: nameFromSearch,
+      seller_name: sellerName ?? '',
       seller_phone: '',
       seller_mark: '',
       lots: [],
     };
+
+    sellerCountRef.current += 1;
     setSellers(prev => [...prev, newSeller]);
-    setSellerExpanded(prev => ({ ...prev, [newSeller.seller_vehicle_id]: true }));
-    setSellerSearch('');
+    setSellerExpanded(prev => ({ ...prev, [newSellerId]: true }));
+
+    pendingSellerFocusIdRef.current = newSellerId;
+    setSellerFocusNonce(n => n + 1);
+  };
+
+  const addSellerFromContact = (contact: Contact) => {
+    if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
+
+    const contactId = contact.contact_id != null ? String(contact.contact_id) : '';
+    if (sellers.some(s => s.contact_id === contactId)) {
+      toast.error('Seller already added to this vehicle');
+      return;
+    }
+
+    const newSellerId = crypto.randomUUID();
+    const newSeller: SellerEntry = {
+      seller_vehicle_id: newSellerId,
+      contact_id: contactId,
+      seller_serial_number: null,
+      seller_name: contact.name ?? '',
+      seller_phone: contact.phone ?? '',
+      seller_mark: contact.mark ?? '',
+      lots: [],
+    };
+
+    setSellers(prev => [...prev, newSeller]);
+    setSellerExpanded(prev => ({ ...prev, [newSellerId]: true }));
+
+    setSellerSearchTerm('');
+    setSellerDropdown(false);
+    setSellerSearchOpen(false);
+  };
+
+  const confirmAddSellerFromSearch = () => {
+    const term = sellerSearchTerm.trim();
+    if (!term) return;
+
+    if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
+
+    // Free-text seller creation (works even if the typed seller doesn't exist).
+    addSellerInstant(term);
+    setSellerSearchTerm('');
+    setSellerDropdown(false);
+    setSellerSearchOpen(false);
+  };
+
+  const openSellerSearchPanel = () => {
+    if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
+      toast.error('Single-seller arrival allows only one seller');
+      return;
+    }
+
+    setSellerSearchTerm('');
+    setSellerSearchOpen(true);
     setSellerDropdown(false);
   };
 
@@ -1454,6 +1513,39 @@ const ArrivalsPage = () => {
     window.setTimeout(tryBringActiveIntoView, 1300);
   }, [sellers, sellerExpanded]);
 
+  // Scroll + focus the seller card input created by the “Add Seller” button.
+  useLayoutEffect(() => {
+    const sellerId = pendingSellerFocusIdRef.current;
+    if (!sellerId) return;
+
+    const input = sellerNameInputRefs.current[sellerId];
+    if (!input) return;
+
+    pendingSellerFocusIdRef.current = null;
+
+    input.scrollIntoView({ block: 'center', behavior: 'auto' });
+    input.focus();
+
+    // Mobile keyboard: when likely open, nudge the active element back into view.
+    const panel = newArrivalPanelScrollRef.current;
+    const vp = window.visualViewport;
+    const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
+
+    if (!panel || !isKeyboardLikelyOpen) return;
+
+    const tryBringActiveIntoView = () => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement)) return;
+      if (!panel.contains(active)) return;
+      active.scrollIntoView({ block: 'center' });
+    };
+
+    requestAnimationFrame(tryBringActiveIntoView);
+    window.setTimeout(tryBringActiveIntoView, 120);
+    window.setTimeout(tryBringActiveIntoView, 280);
+    window.setTimeout(tryBringActiveIntoView, 520);
+  }, [sellerFocusNonce, sellers]);
+
   const updateLot = (sellerIdx: number, lotIdx: number, updates: Partial<LotEntry>) => {
     setSellers(prev => prev.map((s, i) => {
       if (i !== sellerIdx) return s;
@@ -1553,8 +1645,8 @@ const ArrivalsPage = () => {
     setOrigin('');
     setSellers([]);
     setSellerExpanded({});
-    setSellerSearch('');
-    setSellerAddOpen(false);
+    setSellerSearchOpen(false);
+    setSellerSearchTerm('');
     setSellerDropdown(false);
     setIsMultiSeller(true);
     setEditingVehicleId(null);
@@ -1594,9 +1686,9 @@ const ArrivalsPage = () => {
   };
 
   const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
-    setSellerAddOpen(false);
+    setSellerSearchOpen(false);
+    setSellerSearchTerm('');
     setSellerDropdown(false);
-    setSellerSearch('');
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
@@ -2168,12 +2260,12 @@ const ArrivalsPage = () => {
 
                 {/* Desktop form: two-column layout */}
                 {editingVehicleId != null && editLoading ? (
-                  <div className="glass-card rounded-2xl p-12 text-center">
+                <div className="glass-card rounded-2xl p-12 text-center">
                     <p className="text-muted-foreground font-medium">Loading arrival details…</p>
                     <p className="text-xs text-muted-foreground mt-1">Fetching vehicle, sellers and lots</p>
                   </div>
                 ) : (
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-6">
                   {/* LEFT: Vehicle & Tonnage */}
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 mb-1">
@@ -2391,6 +2483,9 @@ const ArrivalsPage = () => {
                                       placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
                                       onChange={e => updateSeller(si, { seller_name: e.target.value })}
+                                      ref={el => {
+                                        sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
+                                      }}
                                       className={cn(
                                         "h-9 rounded-lg text-xs",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
@@ -2578,62 +2673,69 @@ const ArrivalsPage = () => {
                       </motion.div>
                     ); })}
 
-                    {/* Add Seller (near submit) */}
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSellerAddOpen(v => !v)}
-                          disabled={!isMultiSeller && sellers.length >= 1}
-                          className="h-12 rounded-xl flex-1"
-                        >
-                          <Users className="w-4 h-4 mr-2" /> Add Seller
-                        </Button>
-                        {!isMultiSeller && sellers.length >= 1 && (
-                          <span className="text-muted-foreground text-xs whitespace-nowrap">(single-seller: one only)</span>
+                    {/* Seller search panel (open-only UX) */}
+                    {sellerSearchOpen && (
+                      <div className="glass-card rounded-2xl p-5">
+                        <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+                          <Search className="w-3.5 h-3.5" /> Search seller
+                        </label>
+                        <div className="flex gap-3">
+                          <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                            <Input
+                              ref={sellerSearchInputRef}
+                              placeholder="Search by name, phone, or mark…"
+                              value={sellerSearchTerm}
+                              onChange={e => {
+                                setSellerSearchTerm(e.target.value);
+                                refreshSellerDropdownPos();
+                                setSellerDropdown(true);
+                              }}
+                              onFocus={() => {
+                                refreshSellerDropdownPos();
+                                setSellerDropdown(true);
+                              }}
+                              onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                              className="h-12 rounded-xl pl-10 text-sm"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={confirmAddSellerFromSearch}
+                            className="h-12 rounded-xl shrink-0"
+                            disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
+                          >
+                            <Users className="w-4 h-4 mr-2" /> Add Seller
+                          </Button>
+                        </div>
+                        {sellerSearchTerm.trim() && filteredContacts.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center mt-2">Not found. Click Add Seller to create.</p>
                         )}
                       </div>
+                    )}
 
-                      {sellerAddOpen && (
-                        <div className="glass-card rounded-2xl p-5">
-                          <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                            <Search className="w-3.5 h-3.5" /> Add Seller
-                          </label>
-                          <div className="flex gap-3">
-                            <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                              <Input
-                                placeholder="Search by name, phone, or mark…"
-                                value={sellerSearch}
-                                onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                                onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                                className="h-12 rounded-xl pl-10 text-sm"
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={addSellerByName}
-                              className="h-12 rounded-xl shrink-0"
-                              disabled={!isMultiSeller && sellers.length >= 1}
-                            >
-                              Add by name
-                            </Button>
-                          </div>
-                        </div>
-                      )}
+                    {/* Add Seller + Submit (reduced submit width to make room) */}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={openSellerSearchPanel}
+                        disabled={!isMultiSeller && sellers.length >= 1}
+                        className="h-12 rounded-xl flex-1"
+                      >
+                        <Users className="w-4 h-4 mr-2" /> Add Seller
+                      </Button>
+                      <Button
+                        onClick={handleSubmitArrival}
+                        disabled={isFormInvalid}
+                        className="flex-1 h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+                      >
+                        <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
+                      </Button>
                     </div>
-
-                    {/* Submit */}
-                    <Button onClick={handleSubmitArrival}
-                      disabled={isFormInvalid}
-                      className="w-full h-12 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
-                      <FileText className="w-4 h-4 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}
-                    </Button>
                   </div>
                 </div>
                 )}
@@ -3175,6 +3277,9 @@ const ArrivalsPage = () => {
                                       placeholder="Seller name (2–100)"
                                       value={seller.seller_name}
                                       onChange={e => updateSeller(si, { seller_name: e.target.value })}
+                                      ref={el => {
+                                        sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
+                                      }}
                                       className={cn(
                                         "h-9 rounded-lg text-xs",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
@@ -3345,53 +3450,48 @@ const ArrivalsPage = () => {
 
                     </> )}
 
-                    {/* Add Seller (near submit) */}
-                    <div className="space-y-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setSellerAddOpen(v => !v)}
-                        disabled={!isMultiSeller && sellers.length >= 1}
-                        className="h-12 rounded-xl w-full"
-                      >
-                        <Users className="w-4 h-4 mr-2" /> Add Seller
-                      </Button>
-                      {!isMultiSeller && sellers.length >= 1 && (
-                        <p className="text-muted-foreground text-xs">(single-seller: one only)</p>
-                      )}
-
-                      {sellerAddOpen && (
-                        <div className="glass-card rounded-2xl p-5">
-                          <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                            <Search className="w-3.5 h-3.5" /> Add Seller
-                          </label>
-                          <div className="flex gap-3">
-                            <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                              <Input
-                                placeholder="Search by name, phone, or mark…"
-                                value={sellerSearch}
-                                onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                                onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                                className="h-12 rounded-xl pl-10"
-                              />
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={addSellerByName}
-                              className="h-12 rounded-xl shrink-0"
-                              disabled={!isMultiSeller && sellers.length >= 1}
-                            >
-                              Add by name
-                            </Button>
+                    {/* Seller search panel (open-only UX) */}
+                    {sellerSearchOpen && (
+                      <div className="glass-card rounded-2xl p-5">
+                        <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+                          <Search className="w-3.5 h-3.5" /> Search seller
+                        </label>
+                        <div className="flex gap-3">
+                          <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                            <Input
+                              ref={sellerSearchInputRef}
+                              placeholder="Search by name, phone, or mark…"
+                              value={sellerSearchTerm}
+                              onChange={e => {
+                                setSellerSearchTerm(e.target.value);
+                                refreshSellerDropdownPos();
+                                setSellerDropdown(true);
+                              }}
+                              onFocus={() => {
+                                refreshSellerDropdownPos();
+                                setSellerDropdown(true);
+                              }}
+                              onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                              className="h-12 rounded-xl pl-10 text-sm"
+                            />
                           </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={confirmAddSellerFromSearch}
+                            className="h-12 rounded-xl shrink-0"
+                            disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
+                          >
+                            <Users className="w-4 h-4 mr-2" /> Add Seller
+                          </Button>
                         </div>
-                      )}
-                    </div>
+                        {sellerSearchTerm.trim() && filteredContacts.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center mt-2">Not found. Click Add Seller to create.</p>
+                        )}
+                      </div>
+                    )}
 
                     {/* ── Sticky Submit Button ── */}
                     <div className="h-4" />
@@ -3400,11 +3500,25 @@ const ArrivalsPage = () => {
                   {/* Fixed bottom submit bar - sits above bottom nav */}
                   <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-4 py-3 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
-                      <Button onClick={handleSubmitArrival}
-                        disabled={isFormInvalid}
-                        className="w-full h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60">
-                        <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})` : 'Submit Arrival')}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                        onClick={openSellerSearchPanel}
+                          disabled={!isMultiSeller && sellers.length >= 1}
+                          className="h-14 rounded-xl flex-1"
+                        >
+                          <Users className="w-4 h-4 mr-2" /> Add Seller
+                        </Button>
+                        <Button
+                          onClick={handleSubmitArrival}
+                          disabled={isFormInvalid}
+                          className="flex-1 h-14 rounded-xl font-bold text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60"
+                        >
+                          <FileText className="w-5 h-5 mr-2" /> {editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit Arrival (${sellers.length} seller${sellers.length !== 1 ? 's' : ''})` : 'Submit Arrival')}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3417,7 +3531,7 @@ const ArrivalsPage = () => {
 
       {!isDesktop && <BottomNav />}
 
-      {/* ── Seller search dropdown rendered via portal so it escapes all overflow:hidden parents ── */}
+      {/* ── Seller search dropdown rendered via portal (escapes overflow-hidden) ── */}
       {sellerDropdown && filteredContacts.length > 0 && createPortal(
         <AnimatePresence>
           <motion.div
@@ -3428,9 +3542,9 @@ const ArrivalsPage = () => {
             transition={{ duration: 0.15 }}
             style={{
               position: 'fixed',
-              top: dropdownPos.top,
-              left: dropdownPos.left,
-              width: dropdownPos.width,
+              top: sellerDropdownPos.top,
+              left: sellerDropdownPos.left,
+              width: sellerDropdownPos.width,
               zIndex: 9999,
             }}
             className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto"
@@ -3438,11 +3552,15 @@ const ArrivalsPage = () => {
             {filteredContacts.map(c => (
               <button
                 key={c.contact_id}
-                onMouseDown={e => { e.preventDefault(); addSeller(c); }}
+                type="button"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  addSellerFromContact(c);
+                }}
                 className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0"
               >
                 <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-[10px] font-bold">{c.mark || c.name.charAt(0)}</span>
+                  <span className="text-white text-[10px] font-bold">{c.mark || c.name?.charAt(0) || '?'}</span>
                 </div>
                 <div className="min-w-0">
                   <span className="text-foreground font-medium">{c.name}</span>
