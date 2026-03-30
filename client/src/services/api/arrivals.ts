@@ -27,6 +27,7 @@ export interface ArrivalCreatePayload {
   empty_weight: number;
   deducted_weight: number;
   freight_method: FreightMethod;
+  freight_mode?: FreightMethod;
   freight_rate: number;
   no_rental: boolean;
   advance_paid: number;
@@ -150,6 +151,7 @@ export interface ArrivalUpdatePayload {
   empty_weight?: number;
   deducted_weight?: number;
   freight_method?: FreightMethod;
+  freight_mode?: FreightMethod;
   freight_rate?: number;
   no_rental?: boolean;
   advance_paid?: number;
@@ -219,7 +221,7 @@ export const arrivalsApi = {
       loadedWeight: payload.loaded_weight,
       emptyWeight: payload.empty_weight,
       deductedWeight: payload.deducted_weight,
-      freightMethod: payload.freight_method,
+      freightMethod: payload.freight_mode ?? payload.freight_method,
       freightRate: payload.freight_rate,
       noRental: payload.no_rental,
       advancePaid: payload.advance_paid,
@@ -275,7 +277,9 @@ export const arrivalsApi = {
     if (payload.loaded_weight !== undefined) body.loadedWeight = payload.loaded_weight;
     if (payload.empty_weight !== undefined) body.emptyWeight = payload.empty_weight;
     if (payload.deducted_weight !== undefined) body.deductedWeight = payload.deducted_weight;
-    if (payload.freight_method !== undefined) body.freightMethod = payload.freight_method;
+    if (payload.freight_mode !== undefined || payload.freight_method !== undefined) {
+      body.freightMethod = payload.freight_mode ?? payload.freight_method;
+    }
     if (payload.freight_rate !== undefined) body.freightRate = payload.freight_rate;
     if (payload.no_rental !== undefined) body.noRental = payload.no_rental;
     if (payload.advance_paid !== undefined) body.advancePaid = payload.advance_paid;

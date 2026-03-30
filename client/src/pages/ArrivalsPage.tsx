@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
@@ -707,6 +708,11 @@ const ArrivalsPage = () => {
   const [emptyWeight, setEmptyWeight] = useState('');
   const [deductedWeight, setDeductedWeight] = useState('');
   const [freightMethod, setFreightMethod] = useState<FreightMethod>('BY_WEIGHT');
+  const handleFreightMethodChange = useCallback((value: string) => {
+    const selected = FREIGHT_METHODS.find(method => method.value === value)?.value;
+    setFreightMethod(selected ?? 'BY_WEIGHT');
+  }, []);
+
   const [freightRate, setFreightRate] = useState('');
   const [noRental, setNoRental] = useState(false);
   const [advancePaid, setAdvancePaid] = useState('');
@@ -896,6 +902,7 @@ const ArrivalsPage = () => {
     empty_weight: parseFloat(emptyWeight) || 0,
     deducted_weight: parseFloat(deductedWeight) || 0,
     freight_method: freightMethod,
+    freight_mode: freightMethod,
     freight_rate: parseFloat(freightRate) || 0,
     no_rental: noRental,
     advance_paid: parseFloat(advancePaid) || 0,
@@ -1799,6 +1806,7 @@ const ArrivalsPage = () => {
         empty_weight: emptyWeight ? parseFloat(emptyWeight) : undefined,
         deducted_weight: deductedWeight ? parseFloat(deductedWeight) : undefined,
         freight_method: freightMethod,
+        freight_mode: freightMethod,
         freight_rate: freightRate ? parseFloat(freightRate) : undefined,
         no_rental: noRental,
         advance_paid: advancePaid ? parseFloat(advancePaid) : undefined,
@@ -2373,15 +2381,40 @@ const ArrivalsPage = () => {
                       <label className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-3 block flex items-center gap-1.5">
                         <Banknote className="w-3.5 h-3.5" /> Freight Calculator
                       </label>
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        {FREIGHT_METHODS.map(m => (
-                          <button key={m.value} onClick={() => setFreightMethod(m.value)}
-                            className={cn("py-2 rounded-xl text-xs font-semibold transition-all",
-                              freightMethod === m.value ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md' : 'bg-muted/40 text-muted-foreground')}>
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
+                      <RadioGroup
+                        value={freightMethod}
+                        onValueChange={handleFreightMethodChange}
+                        className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 mb-3"
+                      >
+                        {FREIGHT_METHODS.map(m => {
+                          const isSelected = freightMethod === m.value;
+                          const optionId = `freight-method-desktop-${m.value.toLowerCase()}`;
+                          return (
+                            <label
+                              key={m.value}
+                              htmlFor={optionId}
+                              className={cn(
+                                'flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-11',
+                                isSelected
+                                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white border-orange-500 shadow-md'
+                                  : 'bg-muted/40 text-muted-foreground border-border',
+                              )}
+                            >
+                              <RadioGroupItem
+                                id={optionId}
+                                value={m.value}
+                                className={cn(
+                                  'h-4 w-4 shrink-0',
+                                  isSelected
+                                    ? 'border-white text-white'
+                                    : 'border-muted-foreground/60 text-muted-foreground',
+                                )}
+                              />
+                              <span>{m.label}</span>
+                            </label>
+                          );
+                        })}
+                      </RadioGroup>
                       <div className="flex items-center gap-3 mb-3">
                         <button onClick={() => setNoRental(!noRental)}
                           className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner",
@@ -3171,15 +3204,40 @@ const ArrivalsPage = () => {
                       <label className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-3 block flex items-center gap-1.5">
                         <Banknote className="w-3.5 h-3.5" /> Freight Calculator
                       </label>
-                      <div className="grid grid-cols-2 gap-2 mb-3">
-                        {FREIGHT_METHODS.map(m => (
-                          <button key={m.value} onClick={() => setFreightMethod(m.value)}
-                            className={cn("py-2 rounded-xl text-xs font-semibold transition-all",
-                              freightMethod === m.value ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md' : 'bg-muted/40 text-muted-foreground')}>
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
+                      <RadioGroup
+                        value={freightMethod}
+                        onValueChange={handleFreightMethodChange}
+                        className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3"
+                      >
+                        {FREIGHT_METHODS.map(m => {
+                          const isSelected = freightMethod === m.value;
+                          const optionId = `freight-method-mobile-${m.value.toLowerCase()}`;
+                          return (
+                            <label
+                              key={m.value}
+                              htmlFor={optionId}
+                              className={cn(
+                                'flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold transition-all cursor-pointer min-h-11',
+                                isSelected
+                                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white border-orange-500 shadow-md'
+                                  : 'bg-muted/40 text-muted-foreground border-border',
+                              )}
+                            >
+                              <RadioGroupItem
+                                id={optionId}
+                                value={m.value}
+                                className={cn(
+                                  'h-4 w-4 shrink-0',
+                                  isSelected
+                                    ? 'border-white text-white'
+                                    : 'border-muted-foreground/60 text-muted-foreground',
+                                )}
+                              />
+                              <span>{m.label}</span>
+                            </label>
+                          );
+                        })}
+                      </RadioGroup>
                       <div className="flex items-center gap-3 mb-3">
                         <button onClick={() => setNoRental(!noRental)}
                           className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner",
