@@ -769,6 +769,17 @@ const ArrivalsPage = () => {
   const sellerSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [sellerDropdownPos, setSellerDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
+  // Add Lot inline form state
+  type AddLotFormState = {
+    sellerId: string;
+    lotName: string;
+    bags: string;
+    commodityName: string;
+    variant: string;
+    errors: { lotName?: string; bags?: string; commodity?: string };
+  };
+  const [addLotForm, setAddLotForm] = useState<AddLotFormState | null>(null);
+
   // Inline autofocus targets for the "New Arrival" panel/sheet.
   // We keep one ref per target because only one layout branch renders at a time.
   const vehicleNumberInputRef = useRef<HTMLInputElement | null>(null);
@@ -1491,6 +1502,62 @@ const ArrivalsPage = () => {
         };
       });
     });
+  };
+
+  const saveFormLot = (sellerIdx: number) => {
+    if (!addLotForm) return;
+
+    // Validate
+    const errors: AddLotFormState['errors'] = {};
+    const trimmedName = addLotForm.lotName.trim();
+    const bagsNum = parseInt(addLotForm.bags, 10);
+
+    if (!trimmedName) errors.lotName = 'Lot name is required';
+    if (!addLotForm.bags || isNaN(bagsNum) || bagsNum <= 0)
+      errors.bags = 'Enter a valid bag count (> 0)';
+    if (!addLotForm.commodityName.trim()) errors.commodity = 'Select a commodity';
+
+    if (Object.keys(errors).length > 0) {
+      setAddLotForm(prev => prev ? { ...prev, errors } : null);
+      return;
+    }
+
+    // Reuse serial-number logic from addLot
+    setSellers(prev => {
+      const existingLotSerials = new Set(
+        prev.flatMap(e => e.lots)
+          .map(l => l.lot_serial_number)
+          .filter((n): n is number => n != null && n >= 1)
+      );
+      let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
+      let nextSerial: number | null = null;
+      for (let attempt = 0; attempt < 9999; attempt++) {
+        candidate = candidate >= 9999 ? 1 : candidate + 1;
+        if (!existingLotSerials.has(candidate)) { nextSerial = candidate; break; }
+      }
+      if (nextSerial == null) return prev;
+
+      return prev.map((s, i) => {
+        if (i !== sellerIdx) return s;
+        return {
+          ...s,
+          lots: [...s.lots, {
+            lot_id: crypto.randomUUID(),
+            lot_name: trimmedName,
+            lot_serial_number: nextSerial,
+            quantity: bagsNum,
+            commodity_name: addLotForm.commodityName,
+            broker_tag: '',
+            variant: addLotForm.variant,
+          }],
+        };
+      });
+    });
+
+    // Expand seller panel and close form
+    setSellerExpanded(prev => ({ ...prev, [addLotForm.sellerId]: true }));
+    pendingLotsScrollToEndSellerIdRef.current = addLotForm.sellerId;
+    setAddLotForm(null);
   };
 
   // Scroll the seller's lots panel to the newly added lot (internal scroll only).
@@ -2584,7 +2651,20 @@ const ArrivalsPage = () => {
                                 type="button"
                                 onClick={() => {
                                   if (!canAddAnotherLot(seller)) return;
-                                  addLot(si);
+                                  // If form already open for this seller, close it
+                                  if (addLotForm?.sellerId === seller.seller_vehicle_id) {
+                                    setAddLotForm(null);
+                                    return;
+                                  }
+                                  // Open the inline form
+                                  setAddLotForm({
+                                    sellerId: seller.seller_vehicle_id,
+                                    lotName: '',
+                                    bags: '',
+                                    commodityName: commodities[0]?.commodity_name || '',
+                                    variant: '',
+                                    errors: {},
+                                  });
                                 }}
                                 disabled={!canAddAnotherLot(seller)}
                                 className={cn(
@@ -2592,7 +2672,11 @@ const ArrivalsPage = () => {
                                   !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed"
                                 )}
                               >
-                                <Plus className="w-3.5 h-3.5 text-white" />
+                                {addLotForm?.sellerId === seller.seller_vehicle_id ? (
+                                  <span className="text-white text-lg leading-none">×</span>
+                                ) : (
+                                  <Plus className="w-3.5 h-3.5 text-white" />
+                                )}
                               </button>
                             </div>
                             <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
@@ -2600,6 +2684,84 @@ const ArrivalsPage = () => {
                             </button>
                           </div>
                         </div>
+                        <AnimatePresence initial={false}>
+                          {addLotForm?.sellerId === seller.seller_vehicle_id && (
+                            <motion.div
+                              key="add-lot-form"
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
+                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Lot</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {/* Lot Name */}
+                                  <div>
+                                    <Input
+                                      placeholder="Lot Name"
+                                      value={addLotForm.lotName}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
+                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      maxLength={50}
+                                      autoFocus
+                                    />
+                                    {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
+                                  </div>
+                                  {/* Bags */}
+                                  <div>
+                                    <Input
+                                      type="number"
+                                      placeholder="Bags"
+                                      value={addLotForm.bags}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
+                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      min={1}
+                                      max={100000}
+                                    />
+                                    {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
+                                  </div>
+                                  {/* Commodity */}
+                                  <div>
+                                    <select
+                                      value={addLotForm.commodityName}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
+                                      className={cn("h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                    >
+                                      <option value="" disabled>Select Commodity</option>
+                                      {commodities.map((c: any) => (
+                                        <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
+                                      ))}
+                                    </select>
+                                    {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
+                                  </div>
+                                  {/* Variant */}
+                                  <div>
+                                    <select
+                                      value={addLotForm.variant}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
+                                      className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                    >
+                                      {VARIANT_OPTIONS.map(opt => (
+                                        <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                {/* Action buttons */}
+                                <div className="flex gap-2 justify-end pt-1">
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => setAddLotForm(null)} className="h-8 text-xs">
+                                    Cancel
+                                  </Button>
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                    Save Lot
+                                  </Button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                         <AnimatePresence initial={false}>
                           {expanded && (
                             <motion.div
@@ -3398,8 +3560,33 @@ const ArrivalsPage = () => {
                               >
                                 {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                               </button>
-                              <button onClick={() => addLot(si)} className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-colors">
-                                <Plus className="w-3.5 h-3.5 text-white" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!canAddAnotherLot(seller)) return;
+                                  // If form already open for this seller, close it
+                                  if (addLotForm?.sellerId === seller.seller_vehicle_id) {
+                                    setAddLotForm(null);
+                                    return;
+                                  }
+                                  // Open the inline form
+                                  setAddLotForm({
+                                    sellerId: seller.seller_vehicle_id,
+                                    lotName: '',
+                                    bags: '',
+                                    commodityName: commodities[0]?.commodity_name || '',
+                                    variant: '',
+                                    errors: {},
+                                  });
+                                }}
+                                className={cn("w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm transition-opacity", !canAddAnotherLot(seller) && "opacity-50 cursor-not-allowed")}
+                                disabled={!canAddAnotherLot(seller)}
+                              >
+                                {addLotForm?.sellerId === seller.seller_vehicle_id ? (
+                                  <span className="text-white text-lg leading-none">×</span>
+                                ) : (
+                                  <Plus className="w-3.5 h-3.5 text-white" />
+                                )}
                               </button>
                             </div>
                             <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
@@ -3407,6 +3594,84 @@ const ArrivalsPage = () => {
                             </button>
                           </div>
                         </div>
+                        <AnimatePresence initial={false}>
+                          {addLotForm?.sellerId === seller.seller_vehicle_id && (
+                            <motion.div
+                              key="add-lot-form"
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.15 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
+                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Lot</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {/* Lot Name */}
+                                  <div>
+                                    <Input
+                                      placeholder="Lot Name"
+                                      value={addLotForm.lotName}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
+                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      maxLength={50}
+                                      autoFocus
+                                    />
+                                    {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
+                                  </div>
+                                  {/* Bags */}
+                                  <div>
+                                    <Input
+                                      type="number"
+                                      placeholder="Bags"
+                                      value={addLotForm.bags}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
+                                      className={cn("h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      min={1}
+                                      max={100000}
+                                    />
+                                    {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
+                                  </div>
+                                  {/* Commodity */}
+                                  <div>
+                                    <select
+                                      value={addLotForm.commodityName}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
+                                      className={cn("h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                    >
+                                      <option value="" disabled>Select Commodity</option>
+                                      {commodities.map((c: any) => (
+                                        <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
+                                      ))}
+                                    </select>
+                                    {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
+                                  </div>
+                                  {/* Variant */}
+                                  <div>
+                                    <select
+                                      value={addLotForm.variant}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
+                                      className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                    >
+                                      {VARIANT_OPTIONS.map(opt => (
+                                        <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                {/* Action buttons */}
+                                <div className="flex gap-2 justify-end pt-1">
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => setAddLotForm(null)} className="h-8 text-xs">
+                                    Cancel
+                                  </Button>
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                    Save Lot
+                                  </Button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                         <AnimatePresence initial={false}>
                           {expanded && (
                             <motion.div
