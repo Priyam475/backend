@@ -777,6 +777,8 @@ const ArrivalsPage = () => {
     commodityName: string;
     variant: string;
     errors: { lotName?: string; bags?: string; commodity?: string };
+    editingLotId?: string;
+    editingLotIdx?: number;
   };
   const [addLotForm, setAddLotForm] = useState<AddLotFormState | null>(null);
 
@@ -1517,12 +1519,31 @@ const ArrivalsPage = () => {
       errors.bags = 'Enter a valid bag count (> 0)';
     if (!addLotForm.commodityName.trim()) errors.commodity = 'Select a commodity';
 
+    // Duplicate name check (excluding current lot in edit mode)
+    const isDuplicate = sellers[sellerIdx]?.lots.some(
+      (l) => l.lot_id !== addLotForm.editingLotId &&
+             l.lot_name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (isDuplicate) errors.lotName = 'Lot name already exists for this seller';
+
     if (Object.keys(errors).length > 0) {
       setAddLotForm(prev => prev ? { ...prev, errors } : null);
       return;
     }
 
-    // Reuse serial-number logic from addLot
+    // Edit mode: update existing lot
+    if (addLotForm.editingLotId !== undefined && addLotForm.editingLotIdx !== undefined) {
+      updateLot(sellerIdx, addLotForm.editingLotIdx, {
+        lot_name: trimmedName,
+        quantity: bagsNum,
+        commodity_name: addLotForm.commodityName,
+        variant: addLotForm.variant,
+      });
+      setAddLotForm(null);
+      return;
+    }
+
+    // Create mode: reuse serial-number logic from addLot
     setSellers(prev => {
       const existingLotSerials = new Set(
         prev.flatMap(e => e.lots)
@@ -1558,6 +1579,22 @@ const ArrivalsPage = () => {
     setSellerExpanded(prev => ({ ...prev, [addLotForm.sellerId]: true }));
     pendingLotsScrollToEndSellerIdRef.current = addLotForm.sellerId;
     setAddLotForm(null);
+  };
+
+  const editFormLot = (si: number, li: number) => {
+    const seller = sellers[si];
+    const lot = seller?.lots[li];
+    if (!seller || !lot) return;
+    setAddLotForm({
+      sellerId: seller.seller_vehicle_id,
+      lotName: lot.lot_name,
+      bags: String(lot.quantity),
+      commodityName: lot.commodity_name,
+      variant: lot.variant ?? "",
+      errors: {},
+      editingLotId: lot.lot_id,
+      editingLotIdx: li,
+    });
   };
 
   // Scroll the seller's lots panel to the newly added lot (internal scroll only).
@@ -2695,7 +2732,7 @@ const ArrivalsPage = () => {
                               className="overflow-hidden"
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
-                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Lot</p>
+                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
                                 <div className="grid grid-cols-2 gap-2">
                                   {/* Lot Name */}
                                   <div>
@@ -2755,7 +2792,7 @@ const ArrivalsPage = () => {
                                     Cancel
                                   </Button>
                                   <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
-                                    Save Lot
+                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                 </div>
                               </div>
@@ -2783,93 +2820,68 @@ const ArrivalsPage = () => {
                                 scrollAffordanceHint="Scroll to see all lots"
                                 className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
                               >
-                                {seller.lots.length === 0 && (
-                                  <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Click + to add a lot.</p>
-                                )}
-                                {seller.lots.length > 0 && !canAddAnotherLot(seller) && (
-                                  <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-1">
-                                    Complete current lot name and bags before adding another lot.
-                                  </p>
-                                )}
-                                {seller.lots.map((lot, li) => {
-                                  const vehicleTotal = vehicleTotalBags;
-                                  const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
-                                  const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : null;
-                                  return (
-                                    <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">
-                                          {lotSerialLabel ? `SL. NO ${lotSerialLabel}` : 'Lot'} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span>
-                                        </p>
-                                        <button
-                                          onClick={() => setPendingDelete({ kind: 'lot', sellerIdx: si, lotIdx: li, label: lot.lot_name || `Lot ${li + 1}` })}
-                                          className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                      <LotFieldsHorizontalScroll>
-                                        <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
-                                        <div>
-                                          <Input
-                                            aria-label="Lot Name"
-                                            placeholder="Lot Name"
-                                            value={lot.lot_name}
-                                            onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                            className={cn(
-                                              "h-9 w-full rounded-lg text-sm",
-                                              (isLotNameInvalid(lot) || lotDuplicateError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
-                                            )}
-                                            inputMode="text"
-                                            maxLength={50}
-                                          />
-                                          {lotDuplicateError && <p className="text-[9px] text-red-500 mt-0.5">{lotDuplicateError}</p>}
-                                        </div>
-                                        <div>
-                                          <Input
-                                            aria-label="Bags Quantity"
-                                            type="number"
-                                            placeholder="Bags"
-                                            value={lot.quantity || ''}
-                                            onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                            className={cn(
-                                              "h-9 w-full rounded-lg text-sm",
-                                              isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
-                                            )}
-                                            min={1}
-                                            max={100000}
-                                          />
-                                        </div>
-                                        <div>
-                                          <select
-                                            aria-label="Commodity"
-                                            value={lot.commodity_name}
-                                            onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
-                                          >
-                                            {commodities.map((c: any) => (
-                                              <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
-                                            ))}
-                                            {commodities.length === 0 && <option value="">No commodities</option>}
-                                          </select>
-                                        </div>
-                                        <div>
-                                          <select
-                                            aria-label="Variant"
-                                            value={lot.variant ?? ''}
-                                            onChange={e => updateLot(si, li, { variant: e.target.value })}
-                                            className="h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
-                                          >
-                                            {VARIANT_OPTIONS.map(opt => (
-                                              <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                        </div>
-                                      </LotFieldsHorizontalScroll>
+                                <div className="border-t border-border/30">
+                                  {seller.lots.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Click + to add a lot.</p>
+                                  ) : (
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-xs min-w-[28rem]">
+                                        <thead>
+                                          <tr className="border-b border-border/20 bg-muted/20">
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold w-14">SL. NO</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Bags</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Commodity</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Variant</th>
+                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Actions</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {seller.lots.map((lot, li) => {
+                                            const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
+                                            const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
+                                            return (
+                                              <tr key={lot.lot_id} className={cn(
+                                                "border-b border-border/10 transition-colors",
+                                                isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
+                                              )}>
+                                                <td className="py-2 px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-3">
+                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[11px] font-bold">
+                                                    {lot.lot_name || "-"}
+                                                  </span>
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-3 text-foreground">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-3 text-muted-foreground">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-3">
+                                                  <div className="flex justify-end gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => editFormLot(si, li)}
+                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                                                      aria-label="Edit lot"
+                                                    >
+                                                      <Pencil className="w-3 h-3" />
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
+                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                                      aria-label="Delete lot"
+                                                    >
+                                                      <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                  </div>
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
                                     </div>
-                                  );
-                                })}
+                                  )}
+                                </div>
                               </LotsScrollPanel>
                             </motion.div>
                           )}
@@ -3605,7 +3617,7 @@ const ArrivalsPage = () => {
                               className="overflow-hidden"
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
-                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">New Lot</p>
+                                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
                                 <div className="grid grid-cols-2 gap-2">
                                   {/* Lot Name */}
                                   <div>
@@ -3665,7 +3677,7 @@ const ArrivalsPage = () => {
                                     Cancel
                                   </Button>
                                   <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
-                                    Save Lot
+                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                 </div>
                               </div>
@@ -3692,86 +3704,68 @@ const ArrivalsPage = () => {
                                 scrollAffordanceHint="Swipe here to scroll lots"
                                 className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
                               >
-                                {seller.lots.length === 0 && (
-                                  <p className="text-xs text-muted-foreground text-center py-2 italic">No lots. Tap + to add a lot.</p>
-                                )}
-                                {seller.lots.map((lot, li) => {
-                                  const vehicleTotal = vehicleTotalBags;
-                                  const lotDuplicateError = !isLotNameInvalid(lot) ? getLotNameDuplicateError(si, li) : null;
-                                  const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : null;
-                                  return (
-                                    <div key={lot.lot_id} className="rounded-xl border border-border/30 p-3 space-y-2">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <p className="text-[10px] font-bold text-muted-foreground uppercase">{lotSerialLabel ? `SL. NO ${lotSerialLabel}` : 'Lot'} <span className="font-normal text-foreground">— {vehicleTotal} / {sellerTotal} bags</span></p>
-                                        <button
-                                          onClick={() => setPendingDelete({ kind: 'lot', sellerIdx: si, lotIdx: li, label: lot.lot_name || `Lot ${li + 1}` })}
-                                          className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors shrink-0"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                      <LotFieldsHorizontalScroll>
-                                        <div className="grid grid-cols-4 gap-2 items-end min-w-[34rem]">
-                                        <div>
-                                          <Input
-                                            aria-label="Lot Name"
-                                            placeholder="Lot Name"
-                                            value={lot.lot_name}
-                                            onChange={e => updateLot(si, li, { lot_name: e.target.value })}
-                                            className={cn(
-                                              "h-10 w-full rounded-lg text-sm",
-                                              (isLotNameInvalid(lot) || lotDuplicateError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
-                                            )}
-                                            inputMode="text"
-                                            maxLength={50}
-                                          />
-                                          {lotDuplicateError && <p className="text-[9px] text-red-500 mt-0.5">{lotDuplicateError}</p>}
-                                        </div>
-                                        <div>
-                                          <Input
-                                            aria-label="Bags Quantity"
-                                            type="number"
-                                            placeholder="Bags"
-                                            value={lot.quantity || ''}
-                                            onChange={e => updateLot(si, li, { quantity: parseInt(e.target.value) || 0 })}
-                                            className={cn(
-                                              "h-10 w-full rounded-lg text-sm",
-                                              isLotQuantityInvalid(lot) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
-                                            )}
-                                            min={1}
-                                            max={100000}
-                                          />
-                                        </div>
-                                        <div>
-                                          <select
-                                            aria-label="Commodity"
-                                            value={lot.commodity_name}
-                                            onChange={e => updateLot(si, li, { commodity_name: e.target.value })}
-                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2"
-                                          >
-                                            {commodities.map((c: any) => (
-                                              <option key={c.commodity_id} value={c.commodity_name}>{c.commodity_name}</option>
-                                            ))}
-                                            {commodities.length === 0 && <option value="">No commodities</option>}
-                                          </select>
-                                        </div>
-                                        <div>
-                                          <select
-                                            aria-label="Variant"
-                                            value={lot.variant ?? ''}
-                                            onChange={e => updateLot(si, li, { variant: e.target.value })}
-                                            className="h-10 w-full rounded-lg bg-background border border-input text-sm px-2"
-                                          >
-                                            {VARIANT_OPTIONS.map(opt => (
-                                              <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                        </div>
-                                      </LotFieldsHorizontalScroll>
+                                <div className="border-t border-border/30">
+                                  {seller.lots.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Tap + to add a lot.</p>
+                                  ) : (
+                                    <div className="overflow-x-auto">
+                                      <table className="w-full text-xs min-w-[28rem]">
+                                        <thead>
+                                          <tr className="border-b border-border/20 bg-muted/20">
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold w-14">SL. NO</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Bags</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Commodity</th>
+                                            <th className="text-left py-2 px-3 text-muted-foreground font-semibold">Variant</th>
+                                            <th className="text-right py-2 px-3 text-muted-foreground font-semibold w-16">Actions</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {seller.lots.map((lot, li) => {
+                                            const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
+                                            const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
+                                            return (
+                                              <tr key={lot.lot_id} className={cn(
+                                                "border-b border-border/10 transition-colors",
+                                                isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
+                                              )}>
+                                                <td className="py-2 px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-3">
+                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[11px] font-bold">
+                                                    {lot.lot_name || "-"}
+                                                  </span>
+                                                </td>
+                                                <td className="py-2 px-3 text-right font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-3 text-foreground">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-3 text-muted-foreground">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-3">
+                                                  <div className="flex justify-end gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => editFormLot(si, li)}
+                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                                                      aria-label="Edit lot"
+                                                    >
+                                                      <Pencil className="w-3 h-3" />
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
+                                                      className="w-6 h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                                      aria-label="Delete lot"
+                                                    >
+                                                      <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                  </div>
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
                                     </div>
-                                  );
-                                })}
+                                  )}
+                                </div>
                               </LotsScrollPanel>
                             </motion.div>
                           )}
