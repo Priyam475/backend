@@ -749,6 +749,7 @@ const ArrivalsPage = () => {
   const newArrivalPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const [sellerSearch, setSellerSearch] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
+  const [sellerAddOpen, setSellerAddOpen] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
@@ -1233,6 +1234,16 @@ const ArrivalsPage = () => {
     };
   }, [brokerDropdown]);
 
+  // Close seller dropdown if the new "Add Seller" search UI is hidden.
+  useEffect(() => {
+    if (!sellerAddOpen) setSellerDropdown(false);
+  }, [sellerAddOpen]);
+
+  // In single-seller mode, hide "Add Seller" search once the limit is reached.
+  useEffect(() => {
+    if (!isMultiSeller && sellers.length >= 1) setSellerAddOpen(false);
+  }, [isMultiSeller, sellers.length]);
+
   // REQ-ARR-001: Tonnage Calculation
   const netWeight = useMemo(() => {
     const lw = parseFloat(loadedWeight) || 0;
@@ -1543,6 +1554,8 @@ const ArrivalsPage = () => {
     setSellers([]);
     setSellerExpanded({});
     setSellerSearch('');
+    setSellerAddOpen(false);
+    setSellerDropdown(false);
     setIsMultiSeller(true);
     setEditingVehicleId(null);
     editBaselineSnapshotRef.current = null;
@@ -1581,6 +1594,9 @@ const ArrivalsPage = () => {
   };
 
   const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
+    setSellerAddOpen(false);
+    setSellerDropdown(false);
+    setSellerSearch('');
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
@@ -2333,36 +2349,6 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className={cn("glass-card rounded-2xl p-5", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
-                      <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                        <Search className="w-3.5 h-3.5" /> Add Seller
-                        {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
-                      </label>
-                        <div className="flex gap-3">
-                        <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                          <Input
-                            placeholder="Search by name, phone, or mark…"
-                            value={sellerSearch}
-                            onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                            onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                            onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                            className="h-12 rounded-xl pl-10 text-sm"
-                          />
-                        </div>
-                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-12 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
-                          Add by name
-                        </Button>
-                      </div>
-                    </div>
-
-                    {sellers.length === 0 && (
-                      <div className="glass-card rounded-2xl p-8 text-center">
-                        <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                        <p className="text-muted-foreground text-sm">Search and add sellers to this arrival</p>
-                      </div>
-                    )}
-
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
@@ -2591,6 +2577,56 @@ const ArrivalsPage = () => {
                         </AnimatePresence>
                       </motion.div>
                     ); })}
+
+                    {/* Add Seller (near submit) */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSellerAddOpen(v => !v)}
+                          disabled={!isMultiSeller && sellers.length >= 1}
+                          className="h-12 rounded-xl flex-1"
+                        >
+                          <Users className="w-4 h-4 mr-2" /> Add Seller
+                        </Button>
+                        {!isMultiSeller && sellers.length >= 1 && (
+                          <span className="text-muted-foreground text-xs whitespace-nowrap">(single-seller: one only)</span>
+                        )}
+                      </div>
+
+                      {sellerAddOpen && (
+                        <div className="glass-card rounded-2xl p-5">
+                          <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+                            <Search className="w-3.5 h-3.5" /> Add Seller
+                          </label>
+                          <div className="flex gap-3">
+                            <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                              <Input
+                                placeholder="Search by name, phone, or mark…"
+                                value={sellerSearch}
+                                onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                                onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                                className="h-12 rounded-xl pl-10 text-sm"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={addSellerByName}
+                              className="h-12 rounded-xl shrink-0"
+                              disabled={!isMultiSeller && sellers.length >= 1}
+                            >
+                              Add by name
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Submit */}
                     <Button onClick={handleSubmitArrival}
@@ -3097,33 +3133,6 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className={cn("glass-card rounded-2xl p-5", !isMultiSeller && sellers.length >= 1 && "opacity-60 pointer-events-none")}>
-                      <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5" /> Add Seller
-                        {!isMultiSeller && sellers.length >= 1 && <span className="text-muted-foreground font-normal normal-case">(single-seller: one only)</span>}
-                      </label>
-                      <div className="flex gap-3">
-                        <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                          <Input placeholder="Search by name, phone, or mark…" value={sellerSearch}
-                            onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
-                            onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
-                            onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                            className="h-12 rounded-xl pl-10" />
-                        </div>
-                        <Button type="button" variant="outline" size="sm" onClick={addSellerByName} className="h-12 rounded-xl shrink-0" disabled={!isMultiSeller && sellers.length >= 1}>
-                          Add by name
-                        </Button>
-                      </div>
-                    </div>
-
-                    {sellers.length === 0 && (
-                      <div className="glass-card rounded-2xl p-6 text-center">
-                        <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                        <p className="text-muted-foreground text-sm">Search and add sellers to this arrival</p>
-                      </div>
-                    )}
-
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
                       const sellerTotal = sellerTotalBagsById[seller.seller_vehicle_id] ?? 0;
@@ -3335,6 +3344,55 @@ const ArrivalsPage = () => {
                     );})}
 
                     </> )}
+
+                    {/* Add Seller (near submit) */}
+                    <div className="space-y-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSellerAddOpen(v => !v)}
+                        disabled={!isMultiSeller && sellers.length >= 1}
+                        className="h-12 rounded-xl w-full"
+                      >
+                        <Users className="w-4 h-4 mr-2" /> Add Seller
+                      </Button>
+                      {!isMultiSeller && sellers.length >= 1 && (
+                        <p className="text-muted-foreground text-xs">(single-seller: one only)</p>
+                      )}
+
+                      {sellerAddOpen && (
+                        <div className="glass-card rounded-2xl p-5">
+                          <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+                            <Search className="w-3.5 h-3.5" /> Add Seller
+                          </label>
+                          <div className="flex gap-3">
+                            <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                              <Input
+                                placeholder="Search by name, phone, or mark…"
+                                value={sellerSearch}
+                                onChange={e => { setSellerSearch(e.target.value); refreshDropdownPos(); setSellerDropdown(true); }}
+                                onFocus={() => { if (sellerSearch) { refreshDropdownPos(); setSellerDropdown(true); } }}
+                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                                className="h-12 rounded-xl pl-10"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={addSellerByName}
+                              className="h-12 rounded-xl shrink-0"
+                              disabled={!isMultiSeller && sellers.length >= 1}
+                            >
+                              Add by name
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* ── Sticky Submit Button ── */}
                     <div className="h-4" />
                   </div>
