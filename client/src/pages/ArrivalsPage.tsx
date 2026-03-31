@@ -820,6 +820,15 @@ const ArrivalsPage = () => {
     lotsScrollRefs.current[sellerId] = el;
   }, []);
 
+  const expandOnlySeller = useCallback((sellerId: string) => {
+    setSellerExpanded(
+      sellers.reduce<Record<string, boolean>>((acc, entry) => {
+        acc[entry.seller_vehicle_id] = entry.seller_vehicle_id === sellerId;
+        return acc;
+      }, {})
+    );
+  }, [sellers]);
+
   const isStep1PanelOpen =
     step === 1 &&
     !editLoading &&
@@ -1520,7 +1529,7 @@ const ArrivalsPage = () => {
     if (!canAddAnotherLot(seller)) return;
 
     pendingLotsScrollToEndSellerIdRef.current = seller.seller_vehicle_id;
-    setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: true }));
+    expandOnlySeller(seller.seller_vehicle_id);
 
     setSellers(prev => {
       const existingLotSerials = new Set(
@@ -1638,7 +1647,7 @@ const ArrivalsPage = () => {
     });
 
     // Expand seller panel and close form
-    setSellerExpanded(prev => ({ ...prev, [sellerId]: true }));
+    expandOnlySeller(sellerId);
     pendingLotsScrollToEndSellerIdRef.current = sellerId;
     toast.success(`Lot "${trimmedName}" added successfully`);
     setAddLotForm({
@@ -2764,7 +2773,11 @@ const ArrivalsPage = () => {
                               type="button"
                               onClick={() => {
                                 const nextExpanded = !expanded;
-                                setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: nextExpanded }));
+                                if (nextExpanded) {
+                                  expandOnlySeller(seller.seller_vehicle_id);
+                                } else {
+                                  setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: false }));
+                                }
                                 if (!nextExpanded) return;
                                 setAddLotForm({
                                   sellerId: seller.seller_vehicle_id,
@@ -3662,7 +3675,11 @@ const ArrivalsPage = () => {
                               type="button"
                               onClick={() => {
                                 const nextExpanded = !expanded;
-                                setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: nextExpanded }));
+                                if (nextExpanded) {
+                                  expandOnlySeller(seller.seller_vehicle_id);
+                                } else {
+                                  setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: false }));
+                                }
                                 if (!nextExpanded) return;
                                 setAddLotForm({
                                   sellerId: seller.seller_vehicle_id,
