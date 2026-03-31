@@ -507,7 +507,7 @@ function LotsScrollPanel({
           </div>
         )}
       </div>
-      {showScrollAffordanceFooter && (
+      {showScrollAffordanceFooter && (hintBottom || hintRight || thumbMetrics.visible) && (
         <div
           className="flex items-center justify-center gap-1.5 border-t border-border/40 bg-muted/25 py-2 px-2 dark:bg-muted/15"
           role="note"
@@ -560,11 +560,15 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
     const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - LOTS_SCROLL_EPS;
     setHintRight(hOverflow && notAtRight);
 
-    const trackEl = trackRef.current;
-    if (!trackEl) return;
-
     if (!hOverflow) {
       setThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+
+    const trackEl = trackRef.current;
+    if (!trackEl) {
+      // Show mobile indicator as soon as overflow exists; exact knob position updates once track mounts.
+      setThumbMetrics((prev) => ({ visible: true, left: prev.left, width: prev.width || 18 }));
       return;
     }
 
@@ -633,7 +637,7 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
   }, [setScrollLeftFromPointerX]);
 
   return (
-    <div className="relative -mx-1 px-1 pb-[16px] sm:pb-0">
+    <div className="relative pb-[16px] sm:pb-0">
       <div
         ref={scrollRef}
         className="lot-fields-x-scroll overflow-x-auto md:overflow-x-hidden overflow-y-visible overscroll-x-contain no-scrollbar"
@@ -646,7 +650,7 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
       {thumbMetrics.visible && (
         <div
           ref={trackRef}
-          className="pointer-events-none absolute left-1 right-1 bottom-0 z-[2] h-[18px] flex items-center md:hidden"
+          className="pointer-events-none absolute left-0 right-0 bottom-0 z-[2] h-[18px] flex items-center md:hidden"
           aria-hidden
         >
           <div
@@ -676,7 +680,6 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-
       {hintRight && (
         <div
           className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5 md:hidden"
@@ -2889,26 +2892,25 @@ const ArrivalsPage = () => {
                                 sellerId={seller.seller_vehicle_id}
                                 registerScrollEl={setLotsScrollRef}
                                 showEdgeHints
-                                ensureVerticalScrollThumbWhenShort={seller.lots.length > 0}
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Scroll to see all lots"
-                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
-                                      <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
+                                      <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-20 sm:w-[14%]">SL. NO</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-[18%]">Variant</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-[14%]">Actions</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -2916,11 +2918,15 @@ const ArrivalsPage = () => {
                                             const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
                                             const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
                                             return (
-                                              <tr key={lot.lot_id} className={cn(
-                                                "border-b border-border/10 transition-colors",
-                                                isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
-                                              )}>
-                                                <td className="py-2 px-2 sm:px-3">
+                                              <tr
+                                                key={lot.lot_id}
+                                                onClick={() => editFormLot(si, li)}
+                                                className={cn(
+                                                  "border-b border-border/10 transition-colors cursor-pointer",
+                                                  isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
+                                                )}
+                                              >
+                                                <td className="py-2 px-3 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
@@ -2929,27 +2935,22 @@ const ArrivalsPage = () => {
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2 px-2 sm:px-3 align-top">
+                                                <td className="py-2 px-3 align-middle text-center">
                                                   <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
-                                                <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-foreground truncate">{lot.commodity_name || "-"}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
-                                                <td className="py-2 px-2 sm:px-3">
-                                                  <div className="flex justify-end gap-1">
+                                                <td className="py-2 px-3 align-middle text-center font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-3 align-middle text-center text-foreground truncate">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-3 align-middle text-center text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-3 align-middle text-center">
+                                                  <div className="flex justify-center gap-1">
                                                     <button
                                                       type="button"
-                                                      onClick={() => editFormLot(si, li)}
-                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors flex-shrink-0"
-                                                      aria-label="Edit lot"
-                                                    >
-                                                      <Pencil className="w-3 h-3" />
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) });
+                                                      }}
                                                       className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
@@ -3758,26 +3759,25 @@ const ArrivalsPage = () => {
                                 sellerId={seller.seller_vehicle_id}
                                 registerScrollEl={setLotsScrollRef}
                                 showEdgeHints
-                                ensureVerticalScrollThumbWhenShort={seller.lots.length > 0}
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Swipe here to scroll lots"
-                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
-                                      <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
+                                      <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-20 sm:w-[14%]">SL. NO</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-[18%]">Variant</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-[14%]">Actions</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
+                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3785,11 +3785,15 @@ const ArrivalsPage = () => {
                                             const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
                                             const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
                                             return (
-                                              <tr key={lot.lot_id} className={cn(
-                                                "border-b border-border/10 transition-colors",
-                                                isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
-                                              )}>
-                                                <td className="py-2 px-2 sm:px-3">
+                                              <tr
+                                                key={lot.lot_id}
+                                                onClick={() => editFormLot(si, li)}
+                                                className={cn(
+                                                  "border-b border-border/10 transition-colors cursor-pointer",
+                                                  isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
+                                                )}
+                                              >
+                                                <td className="py-2 px-3 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
@@ -3798,27 +3802,22 @@ const ArrivalsPage = () => {
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2 px-2 sm:px-3 align-top">
+                                                <td className="py-2 px-3 align-middle text-center">
                                                   <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
-                                                <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-foreground truncate">{lot.commodity_name || "-"}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
-                                                <td className="py-2 px-2 sm:px-3">
-                                                  <div className="flex justify-end gap-1">
+                                                <td className="py-2 px-3 align-middle text-center font-medium text-foreground">{lot.quantity}</td>
+                                                <td className="py-2 px-3 align-middle text-center text-foreground truncate">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-3 align-middle text-center text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
+                                                <td className="py-2 px-3 align-middle text-center">
+                                                  <div className="flex justify-center gap-1">
                                                     <button
                                                       type="button"
-                                                      onClick={() => editFormLot(si, li)}
-                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors flex-shrink-0"
-                                                      aria-label="Edit lot"
-                                                    >
-                                                      <Pencil className="w-3 h-3" />
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) })}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) });
+                                                      }}
                                                       className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
