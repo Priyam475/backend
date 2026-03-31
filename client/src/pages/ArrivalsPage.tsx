@@ -2199,9 +2199,7 @@ const ArrivalsPage = () => {
                           className="w-full min-w-0 h-9 pl-9 pr-4 rounded-xl text-xs bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
                         />
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [-webkit-overflow-scrolling:touch]">
-                        <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
-                      </div>
+                      <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [-webkit-overflow-scrolling:touch]" />
                     </div>
                     {summaryMode === 'arrivals' && (
                       <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px] sm:overflow-x-auto sm:flex-nowrap sm:pb-1 sm:-mx-0.5 sm:px-0.5 [-webkit-overflow-scrolling:touch]">
@@ -3140,9 +3138,7 @@ const ArrivalsPage = () => {
               />
             </div>
             {/* Sub-categories: Arrivals */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 text-xs">
-              <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('flex-shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
-            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 text-xs" />
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
                 {SUMMARY_STATUS_FILTERS.map(s => (
