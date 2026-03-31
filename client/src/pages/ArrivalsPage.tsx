@@ -3018,7 +3018,6 @@ const ArrivalsPage = () => {
                       </Button>
                       <Button
                         onClick={handleSubmitArrival}
-                        disabled={isFormInvalid}
                         className="flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
                       >
                         <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -3922,7 +3921,6 @@ const ArrivalsPage = () => {
                         </Button>
                         <Button
                           onClick={handleSubmitArrival}
-                          disabled={isFormInvalid}
                           className="flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
                         >
                           <FileText className="w-4 h-4 md:w-5 md:h-5" />
