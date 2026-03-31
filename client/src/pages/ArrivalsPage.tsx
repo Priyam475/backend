@@ -788,6 +788,28 @@ const ArrivalsPage = () => {
     editingLotIdx?: number;
   };
   const [addLotForm, setAddLotForm] = useState<AddLotFormState | null>(null);
+  const prevSellerExpandedRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const prevExpanded = prevSellerExpandedRef.current;
+    const newlyExpandedSeller = sellers.find((s) => {
+      const isNowExpanded = !!sellerExpanded[s.seller_vehicle_id];
+      const wasExpanded = !!prevExpanded[s.seller_vehicle_id];
+      return isNowExpanded && !wasExpanded;
+    });
+
+    prevSellerExpandedRef.current = sellerExpanded;
+    if (!newlyExpandedSeller || addLotForm) return;
+
+    setAddLotForm({
+      sellerId: newlyExpandedSeller.seller_vehicle_id,
+      lotName: "",
+      bags: "",
+      commodityName: commodities[0]?.commodity_name || "",
+      variant: "",
+      errors: {},
+    });
+  }, [addLotForm, sellers, sellerExpanded, commodities]);
 
   // Inline autofocus targets for the "New Arrival" panel/sheet.
   // We keep one ref per target because only one layout branch renders at a time.
@@ -1407,7 +1429,7 @@ const ArrivalsPage = () => {
 
     sellerCountRef.current += 1;
     setSellers(prev => [...prev, newSeller]);
-    setSellerExpanded(prev => ({ ...prev, [newSellerId]: true }));
+    setSellerExpanded(prev => ({ ...prev, [newSellerId]: false }));
 
     pendingSellerFocusIdRef.current = newSellerId;
     setSellerFocusNonce(n => n + 1);
@@ -1437,7 +1459,7 @@ const ArrivalsPage = () => {
     };
 
     setSellers(prev => [...prev, newSeller]);
-    setSellerExpanded(prev => ({ ...prev, [newSellerId]: true }));
+    setSellerExpanded(prev => ({ ...prev, [newSellerId]: false }));
 
     setSellerDraftName('');
     setSellerDraftMark('');
@@ -1539,6 +1561,7 @@ const ArrivalsPage = () => {
 
   const saveFormLot = (sellerIdx: number) => {
     if (!addLotForm) return;
+    const sellerId = addLotForm.sellerId;
 
     // Validate
     const errors: AddLotFormState['errors'] = {};
@@ -1571,7 +1594,14 @@ const ArrivalsPage = () => {
         variant: addLotForm.variant,
       });
       toast.success(`Lot "${trimmedName}" updated successfully`);
-      setAddLotForm(null);
+      setAddLotForm({
+        sellerId,
+        lotName: "",
+        bags: "",
+        commodityName: commodities[0]?.commodity_name || "",
+        variant: "",
+        errors: {},
+      });
       return;
     }
 
@@ -1608,10 +1638,17 @@ const ArrivalsPage = () => {
     });
 
     // Expand seller panel and close form
-    setSellerExpanded(prev => ({ ...prev, [addLotForm.sellerId]: true }));
-    pendingLotsScrollToEndSellerIdRef.current = addLotForm.sellerId;
+    setSellerExpanded(prev => ({ ...prev, [sellerId]: true }));
+    pendingLotsScrollToEndSellerIdRef.current = sellerId;
     toast.success(`Lot "${trimmedName}" added successfully`);
-    setAddLotForm(null);
+    setAddLotForm({
+      sellerId,
+      lotName: "",
+      bags: "",
+      commodityName: commodities[0]?.commodity_name || "",
+      variant: "",
+      errors: {},
+    });
   };
 
   const editFormLot = (si: number, li: number) => {
@@ -2706,7 +2743,19 @@ const ArrivalsPage = () => {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              onClick={() => {
+                                const nextExpanded = !expanded;
+                                setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: nextExpanded }));
+                                if (!nextExpanded) return;
+                                setAddLotForm({
+                                  sellerId: seller.seller_vehicle_id,
+                                  lotName: "",
+                                  bags: "",
+                                  commodityName: commodities[0]?.commodity_name || "",
+                                  variant: "",
+                                  errors: {},
+                                });
+                              }}
                               aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
                               className={cn(
                                 "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
@@ -2732,9 +2781,9 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
-                                  <div>
+                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
@@ -2746,7 +2795,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
                                   </div>
                                   {/* Bags */}
-                                  <div>
+                                  <div className="w-[7rem] sm:w-[8rem] flex-none">
                                     <Input
                                       type="number"
                                       placeholder="Bags"
@@ -2759,7 +2808,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
                                   </div>
                                   {/* Commodity */}
-                                  <div>
+                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
@@ -2773,7 +2822,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
                                   </div>
                                   {/* Variant */}
-                                  <div>
+                                  <div className="w-[10rem] sm:w-[12rem] flex-none">
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
@@ -2787,52 +2836,26 @@ const ArrivalsPage = () => {
                                 </div>
                                 {/* Action buttons */}
                                 <div className="flex gap-2 justify-end pt-1">
-                                  <Button type="button" variant="ghost" size="sm" onClick={() => setAddLotForm(null)} className="h-8 text-xs">
-                                    Cancel
-                                  </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
-                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
-                                  </Button>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                        <AnimatePresence initial={false}>
-                          {expanded && !addLotForm?.sellerId && (
-                            <motion.div
-                              key={`${seller.seller_vehicle_id}-add-lot-button`}
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              transition={{ duration: 0.15 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-3 border-t border-border/30 bg-muted/5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!canAddAnotherLot(seller)) return;
-                                    setAddLotForm({
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setAddLotForm({
                                       sellerId: seller.seller_vehicle_id,
                                       lotName: "",
                                       bags: "",
                                       commodityName: commodities[0]?.commodity_name || "",
                                       variant: "",
                                       errors: {},
-                                    });
-                                  }}
-                                  disabled={!canAddAnotherLot(seller)}
-                                  className={cn(
-                                    "w-full py-3 sm:py-2 px-3 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors",
-                                    canAddAnotherLot(seller)
-                                      ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                      : "bg-muted text-muted-foreground cursor-not-allowed"
-                                  )}
-                                >
-                                  <Plus className="w-4 h-4" />
-                                  Add Lot
-                                </button>
+                                    })}
+                                    className="h-8 text-xs"
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                  </Button>
+                                </div>
                               </div>
                             </motion.div>
                           )}
@@ -2860,7 +2883,7 @@ const ArrivalsPage = () => {
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Click + to add a lot.</p>
+                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
                                       <table className="w-full text-xs sm:text-sm min-w-[32rem]">
@@ -3617,7 +3640,19 @@ const ArrivalsPage = () => {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              onClick={() => {
+                                const nextExpanded = !expanded;
+                                setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: nextExpanded }));
+                                if (!nextExpanded) return;
+                                setAddLotForm({
+                                  sellerId: seller.seller_vehicle_id,
+                                  lotName: "",
+                                  bags: "",
+                                  commodityName: commodities[0]?.commodity_name || "",
+                                  variant: "",
+                                  errors: {},
+                                });
+                              }}
                               aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
                               className={cn(
                                 "min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center transition-colors touch-manipulation",
@@ -3643,9 +3678,9 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
-                                  <div>
+                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
@@ -3657,7 +3692,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
                                   </div>
                                   {/* Bags */}
-                                  <div>
+                                  <div className="w-[7rem] sm:w-[8rem] flex-none">
                                     <Input
                                       type="number"
                                       placeholder="Bags"
@@ -3670,7 +3705,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
                                   </div>
                                   {/* Commodity */}
-                                  <div>
+                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
@@ -3684,7 +3719,7 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
                                   </div>
                                   {/* Variant */}
-                                  <div>
+                                  <div className="w-[10rem] sm:w-[12rem] flex-none">
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
@@ -3698,52 +3733,26 @@ const ArrivalsPage = () => {
                                 </div>
                                 {/* Action buttons */}
                                 <div className="flex gap-2 justify-end pt-1">
-                                  <Button type="button" variant="ghost" size="sm" onClick={() => setAddLotForm(null)} className="h-8 text-xs">
-                                    Cancel
-                                  </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
-                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
-                                  </Button>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                        <AnimatePresence initial={false}>
-                          {expanded && !addLotForm?.sellerId && (
-                            <motion.div
-                              key={`${seller.seller_vehicle_id}-add-lot-button-mobile`}
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              transition={{ duration: 0.15 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-3 border-t border-border/30 bg-muted/5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!canAddAnotherLot(seller)) return;
-                                    setAddLotForm({
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setAddLotForm({
                                       sellerId: seller.seller_vehicle_id,
                                       lotName: "",
                                       bags: "",
                                       commodityName: commodities[0]?.commodity_name || "",
                                       variant: "",
                                       errors: {},
-                                    });
-                                  }}
-                                  disabled={!canAddAnotherLot(seller)}
-                                  className={cn(
-                                    "w-full py-3 sm:py-2 px-3 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-colors",
-                                    canAddAnotherLot(seller)
-                                      ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                      : "bg-muted text-muted-foreground cursor-not-allowed"
-                                  )}
-                                >
-                                  <Plus className="w-4 h-4" />
-                                  Add Lot
-                                </button>
+                                    })}
+                                    className="h-8 text-xs"
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                  </Button>
+                                </div>
                               </div>
                             </motion.div>
                           )}
@@ -3770,7 +3779,7 @@ const ArrivalsPage = () => {
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Tap + to add a lot.</p>
+                                    <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
                                       <table className="w-full text-xs sm:text-sm min-w-[32rem]">
