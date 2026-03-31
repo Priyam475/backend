@@ -2678,15 +2678,8 @@ const ArrivalsPage = () => {
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
-                            <div className="flex flex-col items-center gap-0.5 shrink-0">
-                              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                                <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
-                              </div>
-                              {sellerSerialLabel && (
-                                <span className="text-[9px] leading-none font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap tabular-nums">
-                                  SL.{sellerSerialLabel}
-                                </span>
-                              )}
+                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-[10px] font-bold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
@@ -2930,7 +2923,7 @@ const ArrivalsPage = () => {
                                                 <td className="py-2 px-2 sm:px-3">
                                                   {lotSerialLabel !== "-" ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                                      SL. NO {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal} bags
+                                                      {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
@@ -3555,15 +3548,8 @@ const ArrivalsPage = () => {
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
-                            <div className="flex flex-col items-center gap-0.5 shrink-0">
-                              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                                <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
-                              </div>
-                              {sellerSerialLabel && (
-                                <span className="text-[9px] leading-none font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap tabular-nums">
-                                  SL.{sellerSerialLabel}
-                                </span>
-                              )}
+                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-[10px] font-bold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
@@ -3806,7 +3792,7 @@ const ArrivalsPage = () => {
                                                 <td className="py-2 px-2 sm:px-3">
                                                   {lotSerialLabel !== "-" ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                                      SL. NO {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal} bags
+                                                      {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
