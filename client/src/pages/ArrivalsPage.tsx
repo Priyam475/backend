@@ -2715,8 +2715,15 @@ const ArrivalsPage = () => {
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
-                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
+                            <div className="flex flex-col items-center gap-0.5 shrink-0">
+                              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                                <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
+                              </div>
+                              {sellerSerialLabel && (
+                                <span className="text-[9px] leading-none font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap tabular-nums">
+                                  SL.{sellerSerialLabel}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
@@ -2923,7 +2930,7 @@ const ArrivalsPage = () => {
                                       <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[8%]">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-20 sm:w-[14%]">SL. NO</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
@@ -2940,7 +2947,15 @@ const ArrivalsPage = () => {
                                                 "border-b border-border/10 transition-colors",
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
-                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-2 sm:px-3">
+                                                  {lotSerialLabel !== "-" ? (
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                      SL. NO {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal} bags
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-muted-foreground font-mono text-xs">—</span>
+                                                  )}
+                                                </td>
                                                 <td className="py-2 px-2 sm:px-3 align-top">
                                                   <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
@@ -3617,8 +3632,15 @@ const ArrivalsPage = () => {
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
-                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
+                            <div className="flex flex-col items-center gap-0.5 shrink-0">
+                              <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                                <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
+                              </div>
+                              {sellerSerialLabel && (
+                                <span className="text-[9px] leading-none font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap tabular-nums">
+                                  SL.{sellerSerialLabel}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
@@ -3824,7 +3846,7 @@ const ArrivalsPage = () => {
                                       <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[8%]">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-20 sm:w-[14%]">SL. NO</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
@@ -3841,7 +3863,15 @@ const ArrivalsPage = () => {
                                                 "border-b border-border/10 transition-colors",
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
-                                                <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
+                                                <td className="py-2 px-2 sm:px-3">
+                                                  {lotSerialLabel !== "-" ? (
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                      SL. NO {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal} bags
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-muted-foreground font-mono text-xs">—</span>
+                                                  )}
+                                                </td>
                                                 <td className="py-2 px-2 sm:px-3 align-top">
                                                   <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
