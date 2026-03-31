@@ -733,7 +733,7 @@ const ArrivalsPage = () => {
   const [expandedDetail, setExpandedDetail] = useState<ArrivalFullDetail | null>(null);
   const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
+  let summaryMode: 'arrivals' | 'sellers' | 'lots' = 'arrivals';
   type StatusFilter = 'ALL' | ArrivalStatus;
   const SUMMARY_STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'WEIGHED', 'AUCTIONED', 'SETTLED', 'PARTIALLY_COMPLETED'];
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
@@ -2199,7 +2199,6 @@ const ArrivalsPage = () => {
                           className="w-full min-w-0 h-9 pl-9 pr-4 rounded-xl text-xs bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
                         />
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [-webkit-overflow-scrolling:touch]" />
                     </div>
                     {summaryMode === 'arrivals' && (
                       <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px] sm:overflow-x-auto sm:flex-nowrap sm:pb-1 sm:-mx-0.5 sm:px-0.5 [-webkit-overflow-scrolling:touch]">
@@ -2364,7 +2363,7 @@ const ArrivalsPage = () => {
                     </div>
                       )
                     )}
-                    {summaryMode === 'sellers' && (
+                    {false && (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         {filteredArrivals.flatMap(a => {
                           const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
@@ -2408,7 +2407,7 @@ const ArrivalsPage = () => {
                         })}
                       </div>
                     )}
-                    {summaryMode === 'lots' && (
+                    {false && (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {filteredArrivals.flatMap(a => {
                           const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
@@ -3052,7 +3051,7 @@ const ArrivalsPage = () => {
                     )}
 
                     {/* Add Seller + Submit (reduced submit width to make room) */}
-                    <div className="flex items-stretch gap-2 sm:gap-3">
+                    <div className="flex items-stretch gap-0 rounded-2xl bg-white dark:bg-card p-1.5 shadow-sm border border-border/30">
                       <Button
                         type="button"
                         size="sm"
@@ -3063,6 +3062,7 @@ const ArrivalsPage = () => {
                         <Users className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span className="ml-1.5 sm:ml-2">Add Seller</span>
                       </Button>
+                      <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
                       <Button
                         onClick={handleSubmitArrival}
                         className="flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
@@ -3137,8 +3137,6 @@ const ArrivalsPage = () => {
                 className="w-full h-10 pl-10 pr-4 rounded-xl text-sm bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF] text-foreground placeholder:text-muted-foreground"
               />
             </div>
-            {/* Sub-categories: Arrivals */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 text-xs" />
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
                 {SUMMARY_STATUS_FILTERS.map(s => (
@@ -3191,7 +3189,7 @@ const ArrivalsPage = () => {
                 </Button>
               </motion.div>
               )
-            ) : summaryMode === 'sellers' ? (
+            ) : false ? (
               <div className="grid grid-cols-1 gap-3">
                 {filteredArrivals.flatMap(a => {
                   const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
@@ -3210,7 +3208,7 @@ const ArrivalsPage = () => {
                   </motion.div>
                 ))}
               </div>
-            ) : summaryMode === 'lots' ? (
+            ) : false ? (
               <div className="grid grid-cols-1 gap-3">
                 {filteredArrivals.flatMap(a => {
                   const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
@@ -3974,7 +3972,7 @@ const ArrivalsPage = () => {
                   {/* Fixed bottom submit bar - sits above bottom nav */}
                   <div className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] sm:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] md:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-0.75rem-1px)] lg:bottom-0 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl px-3 pt-2.5 pb-0 sm:px-4 sm:pt-3 sm:pb-0 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
-                      <div className="flex items-stretch gap-2 sm:gap-3">
+                      <div className="flex items-stretch gap-0 rounded-2xl bg-white dark:bg-card p-1.5 shadow-sm border border-border/30">
                         <Button
                           type="button"
                           size="sm"
@@ -3985,6 +3983,7 @@ const ArrivalsPage = () => {
                           <Users className="w-4 h-4 md:w-5 md:h-5" />
                           <span className="ml-1.5 sm:ml-2">Add Seller</span>
                         </Button>
+                        <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
                         <Button
                           onClick={handleSubmitArrival}
                           className="flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
