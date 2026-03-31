@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
 import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail, ArrivalDetail } from '@/services/api/arrivals';
-import ArrivalStatusBadge, { getArrivalStatus, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
+import ArrivalStatusBadge, { getArrivalStatus, ALL_STATUSES, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import FreightDetailsCard from '@/components/arrivals/FreightDetailsCard';
 import SellerInfoCard from '@/components/arrivals/SellerInfoCard';
 import BuyerMarkSection from '@/components/arrivals/BuyerMarkSection';
@@ -208,13 +208,18 @@ function ArrivalSummaryVehicleSellerQty({
   const seller = primarySellerName ?? '-';
   const qty = totalBags ?? 0;
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-      <span className={ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS}>{vehicleNumber?.trim() ? vehicleNumber : '—'}</span>
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 max-w-full">
+      <span
+        className={cn(ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS, 'max-w-[min(100%,10rem)] truncate')}
+        title={vehicleNumber?.trim() ? vehicleNumber : undefined}
+      >
+        {vehicleNumber?.trim() ? vehicleNumber : '—'}
+      </span>
       <span className="text-muted-foreground text-xs shrink-0" aria-hidden>
         |
       </span>
       <span
-        className="min-w-0 max-w-[min(12rem,40vw)] sm:max-w-xs truncate text-foreground text-xs font-medium"
+        className="min-w-0 max-w-[min(100%,14rem)] sm:max-w-[min(100%,18rem)] truncate text-foreground text-xs font-medium"
         title={seller}
       >
         {seller}
@@ -729,8 +734,7 @@ const ArrivalsPage = () => {
   const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
-  type StatusFilter = 'ALL' | ArrivalStatus;
-  const SUMMARY_STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'WEIGHED', 'AUCTIONED', 'SETTLED', 'PARTIALLY_COMPLETED'];
+  type StatusFilter = 'ALL' | 'COMPLETED' | ArrivalStatus;
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [partialArrivals, setPartialArrivals] = useState<ArrivalSummary[]>([]);
   const [partialArrivalsLoading, setPartialArrivalsLoading] = useState(false);
@@ -1010,10 +1014,19 @@ const ArrivalsPage = () => {
   }, [confirmIfDirty]);
 
   const refreshBrokerDropdownPos = useCallback(() => {
-    if (brokerSearchWrapRef.current) {
-      const rect = brokerSearchWrapRef.current.getBoundingClientRect();
-      setBrokerDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
+    const el = brokerSearchWrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const vw = typeof window !== 'undefined' ? window.innerWidth : rect.width;
+    const pad = 12;
+    const maxW = Math.max(0, vw - pad * 2);
+    const minReadableW = Math.min(320, maxW);
+    let width = Math.max(rect.width, minReadableW);
+    width = Math.min(width, maxW);
+    let left = rect.left;
+    if (left + width > vw - pad) left = Math.max(pad, vw - pad - width);
+    if (left < pad) left = pad;
+    setBrokerDropdownPos({ top: rect.bottom + 4, left, width });
   }, []);
 
   // ── Validation (raghav branch: field-level checks; no UI wiring — validation only) ──────────────────
@@ -1197,6 +1210,7 @@ const ArrivalsPage = () => {
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFilter, number> = {
       ALL: apiArrivals.length + partialArrivals.length,
+      COMPLETED: apiArrivals.length,
       PENDING: 0, WEIGHED: 0, AUCTIONED: 0, SETTLED: 0, PARTIALLY_COMPLETED: partialArrivals.length,
     };
     apiArrivals.forEach(a => {
@@ -1210,12 +1224,7 @@ const ArrivalsPage = () => {
     if (s === 'PARTIALLY_COMPLETED') return 'Partially Completed';
     return s.charAt(0) + s.slice(1).toLowerCase();
   };
-  const activeArrivalsLoading =
-    statusFilter === 'ALL'
-      ? apiArrivalsLoading || partialArrivalsLoading
-      : statusFilter === 'PARTIALLY_COMPLETED'
-        ? partialArrivalsLoading
-        : apiArrivalsLoading;
+  const activeArrivalsLoading = statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivalsLoading : apiArrivalsLoading;
 
   const loadArrivalsFromApi = async () => {
     setApiArrivalsLoading(true);
@@ -1356,10 +1365,20 @@ const ArrivalsPage = () => {
   }, [sellerSearchTerm, contacts]);
 
   const refreshSellerDropdownPos = useCallback(() => {
-    if (sellerSearchWrapRef.current) {
-      const rect = sellerSearchWrapRef.current.getBoundingClientRect();
-      setSellerDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
+    const el = sellerSearchWrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const vw = typeof window !== 'undefined' ? window.innerWidth : rect.width;
+    const pad = 12;
+    const maxW = Math.max(0, vw - pad * 2);
+    // Prefer at least ~min(320px, viewport) so suggestion rows aren’t crushed beside the Add Seller button.
+    const minReadableW = Math.min(320, maxW);
+    let width = Math.max(rect.width, minReadableW);
+    width = Math.min(width, maxW);
+    let left = rect.left;
+    if (left + width > vw - pad) left = Math.max(pad, vw - pad - width);
+    if (left < pad) left = pad;
+    setSellerDropdownPos({ top: rect.bottom + 4, left, width });
   }, []);
 
   /**
@@ -2003,9 +2022,9 @@ const ArrivalsPage = () => {
 
       {/* ═══ DESKTOP: TAB LAYOUT ═══ */}
       {isDesktop && (
-        <div className="px-8 pb-6">
+        <div className="px-4 sm:px-6 lg:px-8 pb-6 max-w-[100vw] overflow-x-hidden">
           {/* Tab Bar */}
-          <div className="flex items-center gap-1 mb-6 border-b border-border/40">
+          <div className="flex min-w-0 flex-wrap items-center gap-1 border-b border-border/40 pb-px mb-6 overflow-x-auto [-webkit-overflow-scrolling:touch]">
             <button
               onClick={() => {
                 void tryCloseArrivalPanel(() => setDesktopTab('summary'));
@@ -2056,7 +2075,7 @@ const ArrivalsPage = () => {
                 ) : (
                   <>
                     {/* Four summary cards — raghav: all blue icon #6075FF */}
-                    <div className="grid grid-cols-4 gap-4 mb-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4 mb-6">
                       <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
                           <Truck className="w-5 h-5 text-white" />
@@ -2095,39 +2114,28 @@ const ArrivalsPage = () => {
                       </div>
                     </div>
                     {/* Search + sub-categories (Arrivals) */}
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="relative w-[300px]">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4 mb-4 min-w-0">
+                      <div className="relative w-full min-w-0 sm:max-w-sm md:max-w-md">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <input
                           type="search"
                           placeholder="Search seller, vehicle, origin..."
                           value={searchQuery}
                           onChange={e => setSearchQuery(e.target.value)}
-                          className="w-full h-9 pl-9 pr-4 rounded-xl text-xs bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
+                          className="w-full min-w-0 h-9 pl-9 pr-4 rounded-xl text-xs bg-white dark:bg-card border border-border/40 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
                         />
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs">
-                        <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
+                      <div className="flex items-center gap-1.5 text-xs overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [-webkit-overflow-scrolling:touch]">
+                        <button type="button" onClick={() => setSummaryMode('arrivals')} className={cn('shrink-0 px-4 py-1.5 rounded-full font-medium transition-colors', summaryMode === 'arrivals' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-transparent text-muted-foreground hover:bg-muted/50')}>Arrivals ({totalVehicles})</button>
                       </div>
                     </div>
                     {summaryMode === 'arrivals' && (
-                      <div className="flex items-center gap-2 mb-4 text-[11px]">
-                        {SUMMARY_STATUS_FILTERS.map(s => (
-                          <button
-                            key={s}
-                            type="button"
-                            onClick={() => setStatusFilter(s)}
-                            className={cn(
-                              'px-4 py-1 rounded-full font-medium transition-colors',
-                              statusFilter === s
-                                ? s === 'PARTIALLY_COMPLETED'
-                                  ? 'bg-orange-500 text-white shadow-sm'
-                                  : 'bg-[#6075FF] text-white shadow-sm'
-                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700',
-                            )}
-                          >
-                            {s === 'ALL' ? 'All' : statusLabel(s)} ({statusCounts[s]})
-                          </button>
+                      <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px] sm:overflow-x-auto sm:flex-nowrap sm:pb-1 sm:-mx-0.5 sm:px-0.5 [-webkit-overflow-scrolling:touch]">
+                        <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                        <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
+                        <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
+                        {ALL_STATUSES.map(s => (
+                          <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
                         ))}
                       </div>
                     )}
@@ -2158,7 +2166,7 @@ const ArrivalsPage = () => {
                           </div>
                         )
                       ) : (
-                    <div className="glass-card rounded-2xl overflow-x-auto max-w-full">
+                    <div className="glass-card rounded-2xl overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
                       <table className="w-full min-w-[56rem] text-sm">
                         <thead>
                           <tr className="border-b border-border/40 bg-muted/30">
@@ -2221,8 +2229,8 @@ const ArrivalsPage = () => {
                                         {expandedDetailLoading ? (
                                           <p className="text-sm text-muted-foreground">Loading…</p>
                                         ) : expandedDetail ? (
-                                          <div className="overflow-x-auto -mx-1 px-1">
-                                          <div className="grid grid-cols-2 gap-4 text-sm min-w-[36rem]">
+                                          <div className="overflow-x-auto -mx-1 px-1 max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm min-w-0 w-full">
                                             <div className="space-y-3">
                                               <FreightDetailsCard
                                                 freightRate={expandedDetail.freightRate ?? 0}
@@ -2367,11 +2375,11 @@ const ArrivalsPage = () => {
             {desktopTab === 'new-arrival' && (
               <motion.div key="new-arrival" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
                 {/* Sub-tabs: Multi-Seller / Single Seller */}
-                <div className="flex items-center gap-2 mb-5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-2 mb-5 min-w-0">
                   <button
                     onClick={() => { setIsMultiSeller(true); resetForm(); setIsMultiSeller(true); }}
                     className={cn(
-                      "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all",
+                      "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0",
                       isMultiSeller
                         ? 'bg-gradient-to-r from-blue-500 to-violet-500 text-white shadow-md'
                         : 'bg-muted/50 text-muted-foreground hover:bg-muted'
@@ -2383,7 +2391,7 @@ const ArrivalsPage = () => {
                   <button
                     onClick={() => { setIsMultiSeller(false); resetForm(); setIsMultiSeller(false); }}
                     className={cn(
-                      "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all",
+                      "px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0",
                       !isMultiSeller
                         ? 'bg-gradient-to-r from-blue-500 to-violet-500 text-white shadow-md'
                         : 'bg-muted/50 text-muted-foreground hover:bg-muted'
@@ -2392,7 +2400,7 @@ const ArrivalsPage = () => {
                     <Users className="w-4 h-4 inline mr-1.5" />
                     Single Seller
                   </button>
-                  <p className="ml-3 text-xs text-muted-foreground">
+                  <p className="w-full min-w-0 text-xs text-muted-foreground xl:ml-3 xl:w-auto xl:flex-1">
                     {isMultiSeller ? 'Multi-seller vehicle arrival (e.g., Bangalore APMC)' : 'Single seller arrival (e.g., Gadag, Byadagi APMC)'}
                   </p>
                 </div>
@@ -2470,18 +2478,24 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                      <div className="grid grid-cols-1 gap-3 min-w-0 sm:grid-cols-2 sm:gap-3 sm:items-start">
+                        <div className="min-w-0">
+                          <label className={cn(
+                            "text-xs font-bold uppercase tracking-wider mb-2 block leading-snug sm:mb-2 sm:flex sm:min-h-[2.85rem] sm:items-end sm:pb-0.5",
+                            isGodownInvalid ? "text-red-500" : "text-muted-foreground",
+                          )}>
                             Godown (optional) {isGodownInvalid && '⚠ 2–50, letters only'}
                           </label>
-                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-11 rounded-xl text-sm", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                          <Input placeholder="Godown name (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-11 w-full min-w-0 rounded-xl text-sm", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                         </div>
-                        <div>
-                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        <div className="min-w-0">
+                          <label className={cn(
+                            "text-xs font-bold uppercase tracking-wider mb-2 block leading-snug sm:mb-2 sm:flex sm:min-h-[2.85rem] sm:items-end sm:pb-0.5",
+                            isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground",
+                          )}>
                             Gatepass (optional) {isGatepassNumberInvalid && '⚠ 1–30, alphanumeric'}
                           </label>
-                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-11 rounded-xl text-sm", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
+                          <Input placeholder="Gatepass no. (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-11 w-full min-w-0 rounded-xl text-sm", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
                         </div>
                       </div>
                     </div>
@@ -2597,13 +2611,15 @@ const ArrivalsPage = () => {
 
                   {/* RIGHT: Sellers & Lots */}
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                        <Users className="w-3 h-3 text-white" />
+                    {sellers.length > 0 && (
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                          <Users className="w-3 h-3 text-white" />
+                        </div>
+                        <h3 className="text-sm font-bold text-foreground">Sellers & Lots</h3>
+                        <div className="flex-1 h-px bg-border/30" />
                       </div>
-                      <h3 className="text-sm font-bold text-foreground">Sellers & Lots</h3>
-                      <div className="flex-1 h-px bg-border/30" />
-                    </div>
+                    )}
 
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
@@ -2611,26 +2627,26 @@ const ArrivalsPage = () => {
                       const sellerSerialLabel = formatSellerSerialNumber(seller.seller_serial_number);
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
-                        <div className="p-3 sm:p-4 flex items-center justify-between gap-1 sm:gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                        className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
+                        <div className="p-3 sm:p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
+                          <div className="flex items-start gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
+                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
                                 <>
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground break-words line-clamp-3">
                                     {seller.seller_name}
                                   </p>
                                   {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground break-words line-clamp-2 mt-0.5">
                                       {seller.seller_mark}
                                     </p>
                                   )}
                                 </>
                               ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
@@ -2640,7 +2656,7 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
@@ -2653,7 +2669,7 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
@@ -2663,28 +2679,27 @@ const ArrivalsPage = () => {
                                 </div>
                               )}
                             </div>
-                            {/* Quantity badge */}
-                            <div className="shrink-0">
-                              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
-                                <span className="text-lg sm:text-xl leading-none whitespace-nowrap">{sellerTotal}</span>
-                              </div>
-                            </div>
                           </div>
-                          <div className="flex flex-col items-end justify-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                              className={cn(
-                                "w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-colors",
-                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                              )}
-                            >
-                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                            </button>
-                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          <div className="flex flex-row items-center justify-between gap-3 shrink-0 border-t border-border/30 pt-3 sm:border-0 sm:pt-0 sm:flex-col sm:items-end sm:justify-center sm:gap-2 sm:pl-2">
+                            <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                              <span className="text-lg sm:text-xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                                className={cn(
+                                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
+                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                                )}
+                              >
+                                {expanded ? <ChevronUp className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" />}
+                              </button>
+                              <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
+                                <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
@@ -2823,20 +2838,20 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Scroll to see all lots"
-                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Click + to add a lot.</p>
                                   ) : (
-                                    <div className="overflow-x-auto">
-                                      <table className="w-full text-xs sm:text-sm min-w-[min(100%,28rem)]">
+                                    <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                      <table className="w-full text-xs sm:text-sm min-w-[32rem]">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold min-w-[7rem]">Lot Name</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell min-w-[6rem]">Commodity</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
                                           </tr>
@@ -2851,8 +2866,8 @@ const ArrivalsPage = () => {
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-2 sm:px-3">
-                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold line-clamp-1">
+                                                <td className="py-2 px-2 sm:px-3 max-w-[14rem] align-top">
+                                                  <span className="inline-block max-w-full px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold break-words line-clamp-2">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
@@ -3031,28 +3046,17 @@ const ArrivalsPage = () => {
             </div>
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
-                {SUMMARY_STATUS_FILTERS.map(s => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setStatusFilter(s)}
-                    className={cn(
-                      'flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors',
-                      statusFilter === s
-                        ? s === 'PARTIALLY_COMPLETED'
-                          ? 'bg-orange-500 text-white shadow-sm'
-                          : 'bg-[#6075FF] text-white shadow-sm'
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700',
-                    )}
-                  >
-                    {s === 'ALL' ? 'All' : statusLabel(s)} ({statusCounts[s]})
-                  </button>
+                <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
+                <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
+                <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
+                {ALL_STATUSES.map(s => (
+                  <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
                 ))}
               </div>
             )}
           </div>
           <div className="px-4 space-y-2.5">
-            {activeArrivalsLoading ? (
+            {(statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivalsLoading : apiArrivalsLoading) ? (
               <div className="glass-card p-8 rounded-2xl text-center">
                 <p className="text-muted-foreground">Loading arrivals…</p>
               </div>
@@ -3136,27 +3140,33 @@ const ArrivalsPage = () => {
                 const isExpanded = sameArrivalVehicleId(expandedDetail?.vehicleId, a.vehicleId);
                 return (
                   <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                    <div className="glass-card rounded-2xl overflow-x-auto overflow-y-visible max-w-full">
-                      <div className="w-full p-3.5 flex items-center justify-between gap-2 min-w-0">
-                        <button type="button" onClick={() => loadExpandedDetail(a.vehicleId)} className="flex-1 flex items-center justify-between text-left min-w-0">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
+                    <div className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
+                      <div className="w-full p-3.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => loadExpandedDetail(a.vehicleId)}
+                          className="flex w-full min-w-0 flex-1 items-start gap-3 text-left touch-manipulation"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20 flex-shrink-0">
                             <Truck className="w-4 h-4 text-white" />
                           </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                <ArrivalSummaryVehicleSellerQty
-                                  vehicleNumber={a.vehicleNumber}
-                                  primarySellerName={a.primarySellerName}
-                                  totalBags={a.totalBags}
-                                />
-                                <ArrivalStatusBadge status={status} />
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg · Bids: {a.bidsCount ?? 0} · Weighed: {a.weighedCount ?? 0}</p>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5 gap-y-1 min-w-0">
+                              <ArrivalSummaryVehicleSellerQty
+                                vehicleNumber={a.vehicleNumber}
+                                primarySellerName={a.primarySellerName}
+                                totalBags={a.totalBags}
+                              />
+                              <ArrivalStatusBadge status={status} />
                             </div>
+                            <p className="text-xs text-muted-foreground mt-1 break-words">{a.sellerCount} seller(s) · {a.lotCount} lot(s) · {a.netWeight}kg · Bids: {a.bidsCount ?? 0} · Weighed: {a.weighedCount ?? 0}</p>
                           </div>
-                          <span className="text-xs text-muted-foreground flex-shrink-0">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
-                          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+                          <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">{new Date(a.arrivalDatetime).toLocaleDateString()}</span>
+                            <span className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-muted/30" aria-hidden>
+                              {isExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+                            </span>
+                          </div>
                         </button>
                       </div>
                       <AnimatePresence>
@@ -3264,7 +3274,9 @@ const ArrivalsPage = () => {
                         </button>
                         <div>
                           <h2 className="text-lg font-bold text-white">New Arrival</h2>
-                          <p className="text-white/70 text-xs">Vehicle & Tonnage · Sellers & Lots</p>
+                          <p className="text-white/70 text-xs">
+                            {sellers.length > 0 ? 'Vehicle & Tonnage · Sellers & Lots' : 'Vehicle & Tonnage'}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -3362,18 +3374,24 @@ const ArrivalsPage = () => {
                     </div>
 
                     <div className="glass-card rounded-2xl p-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGodownInvalid ? "text-red-500" : "text-muted-foreground")}>
+                      <div className="grid grid-cols-1 gap-3 min-w-0 sm:grid-cols-2 sm:gap-3 sm:items-start">
+                        <div className="min-w-0">
+                          <label className={cn(
+                            "text-xs font-bold uppercase tracking-wider mb-2 block leading-snug sm:mb-2 sm:flex sm:min-h-[2.85rem] sm:items-end sm:pb-0.5",
+                            isGodownInvalid ? "text-red-500" : "text-muted-foreground",
+                          )}>
                             Godown (optional) {isGodownInvalid && '⚠ 2–50'}
                           </label>
-                          <Input placeholder="Godown (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-12 rounded-xl", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
+                          <Input placeholder="Godown (optional)" value={godown} onChange={e => setGodown(e.target.value)} className={cn("h-12 w-full min-w-0 rounded-xl", isGodownInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={50} />
                         </div>
-                        <div>
-                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block", isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground")}>
+                        <div className="min-w-0">
+                          <label className={cn(
+                            "text-xs font-bold uppercase tracking-wider mb-2 block leading-snug sm:mb-2 sm:flex sm:min-h-[2.85rem] sm:items-end sm:pb-0.5",
+                            isGatepassNumberInvalid ? "text-red-500" : "text-muted-foreground",
+                          )}>
                             Gatepass (optional) {isGatepassNumberInvalid && '⚠ 1–30'}
                           </label>
-                          <Input placeholder="Gatepass (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-12 rounded-xl", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
+                          <Input placeholder="Gatepass (optional)" value={gatepassNumber} onChange={e => setGatepassNumber(e.target.value.length <= 30 ? e.target.value : gatepassNumber)} className={cn("h-12 w-full min-w-0 rounded-xl", isGatepassNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={30} />
                         </div>
                       </div>
                     </div>
@@ -3485,13 +3503,15 @@ const ArrivalsPage = () => {
                     </div>
 
                     {/* ── Section 2: Sellers & Lots ── */}
-                    <div className="flex items-center gap-2 pt-2">
-                      <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-                        <Users className="w-3 h-3 text-white" />
+                    {sellers.length > 0 && (
+                      <div className="flex items-center gap-2 pt-2">
+                        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
+                          <Users className="w-3 h-3 text-white" />
+                        </div>
+                        <h3 className="text-sm font-bold text-foreground">Sellers & Lots</h3>
+                        <div className="flex-1 h-px bg-border/30" />
                       </div>
-                      <h3 className="text-sm font-bold text-foreground">Sellers & Lots</h3>
-                      <div className="flex-1 h-px bg-border/30" />
-                    </div>
+                    )}
 
                     {sellers.map((seller, si) => {
                       const expanded = sellerExpanded[seller.seller_vehicle_id] ?? true;
@@ -3499,26 +3519,26 @@ const ArrivalsPage = () => {
                       const sellerSerialLabel = formatSellerSerialNumber(seller.seller_serial_number);
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-                        className="glass-card rounded-2xl overflow-x-auto overflow-y-visible">
-                        <div className="p-3 sm:p-4 flex items-center justify-between gap-1 sm:gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                        className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
+                        <div className="p-3 sm:p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
+                          <div className="flex items-start gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
+                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
-                            <div className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
                                 <>
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground break-words line-clamp-3">
                                     {seller.seller_name}
                                   </p>
                                   {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground break-words line-clamp-2 mt-0.5">
                                       {seller.seller_mark}
                                     </p>
                                   )}
                                 </>
                               ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
                                     <Input
                                       placeholder="Seller name (2–100)"
@@ -3528,7 +3548,7 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
@@ -3541,7 +3561,7 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={50}
@@ -3551,28 +3571,27 @@ const ArrivalsPage = () => {
                                 </div>
                               )}
                             </div>
-                            {/* Quantity badge */}
-                            <div className="shrink-0">
-                              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
-                                <span className="text-lg sm:text-xl leading-none whitespace-nowrap">{sellerTotal}</span>
-                              </div>
-                            </div>
                           </div>
-                          <div className="flex flex-col items-end justify-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                              className={cn(
-                                "w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-colors",
-                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                              )}
-                            >
-                              {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                            </button>
-                            <button onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          <div className="flex flex-row items-center justify-between gap-3 shrink-0 border-t border-border/30 pt-3 sm:border-0 sm:pt-0 sm:flex-col sm:items-end sm:justify-center sm:gap-2 sm:pl-2">
+                            <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
+                              <span className="text-lg sm:text-xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                                className={cn(
+                                  "min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center transition-colors touch-manipulation",
+                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                                )}
+                              >
+                                {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+                              </button>
+                              <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
@@ -3710,20 +3729,20 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Swipe here to scroll lots"
-                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain"
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet. Tap + to add a lot.</p>
                                   ) : (
-                                    <div className="overflow-x-auto">
-                                      <table className="w-full text-xs sm:text-sm min-w-[min(100%,28rem)]">
+                                    <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                      <table className="w-full text-xs sm:text-sm min-w-[32rem]">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold">Lot Name</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold min-w-[7rem]">Lot Name</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell min-w-[6rem]">Commodity</th>
                                             <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
                                             <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
                                           </tr>
@@ -3738,8 +3757,8 @@ const ArrivalsPage = () => {
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-2 sm:px-3">
-                                                  <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold line-clamp-1">
+                                                <td className="py-2 px-2 sm:px-3 max-w-[14rem] align-top">
+                                                  <span className="inline-block max-w-full px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold break-words line-clamp-2">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
@@ -3882,7 +3901,7 @@ const ArrivalsPage = () => {
               width: sellerDropdownPos.width,
               zIndex: 9999,
             }}
-            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto"
+            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-60 overflow-y-auto overflow-x-hidden"
           >
             {filteredContacts.map(c => (
               <button
@@ -3892,16 +3911,22 @@ const ArrivalsPage = () => {
                   e.preventDefault();
                   addSellerFromContact(c);
                 }}
-                className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0"
+                className="w-full px-3 py-3 text-left text-sm hover:bg-muted/50 transition-colors flex items-start gap-3 border-b border-border/20 last:border-0 touch-manipulation"
               >
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center flex-shrink-0">
+                <div className="mt-0.5 w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                   <span className="text-white text-[10px] font-bold">{c.mark || c.name?.charAt(0) || '?'}</span>
                 </div>
-                <div className="min-w-0">
-                  <span className="text-foreground font-medium">{c.name}</span>
-                  {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
+                <div className="min-w-0 flex-1 flex flex-col gap-1">
+                  <div className="min-w-0">
+                    <span className="text-foreground font-medium break-words">{c.name}</span>
+                    {c.mark ? (
+                      <span className="text-muted-foreground text-xs"> ({c.mark})</span>
+                    ) : null}
+                  </div>
+                  {c.phone ? (
+                    <span className="text-xs text-muted-foreground tabular-nums break-all">{c.phone}</span>
+                  ) : null}
                 </div>
-                <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{c.phone}</span>
               </button>
             ))}
           </motion.div>
@@ -3925,23 +3950,29 @@ const ArrivalsPage = () => {
               width: brokerDropdownPos.width,
               zIndex: 9999,
             }}
-            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto"
+            className="bg-card border border-border/50 rounded-xl shadow-2xl max-h-60 overflow-y-auto overflow-x-hidden"
           >
             {filteredBrokers.map(c => (
               <button
                 key={c.contact_id}
                 type="button"
                 onMouseDown={e => { e.preventDefault(); setBrokerName(c.name ?? ''); setBrokerContactId(Number(c.contact_id) || null); setBrokerDropdown(false); }}
-                className="w-full px-3 py-2.5 text-left text-sm hover:bg-muted/50 transition-colors flex items-center gap-2 border-b border-border/20 last:border-0"
+                className="w-full px-3 py-3 text-left text-sm hover:bg-muted/50 transition-colors flex items-start gap-3 border-b border-border/20 last:border-0 touch-manipulation"
               >
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0">
+                <div className="mt-0.5 w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shrink-0">
                   <span className="text-white text-[10px] font-bold">{c.mark || c.name?.charAt(0) || '?'}</span>
                 </div>
-                <div className="min-w-0">
-                  <span className="text-foreground font-medium">{c.name}</span>
-                  {c.mark && <span className="text-muted-foreground text-xs ml-1">({c.mark})</span>}
+                <div className="min-w-0 flex-1 flex flex-col gap-1">
+                  <div className="min-w-0">
+                    <span className="text-foreground font-medium break-words">{c.name}</span>
+                    {c.mark ? (
+                      <span className="text-muted-foreground text-xs"> ({c.mark})</span>
+                    ) : null}
+                  </div>
+                  {c.phone ? (
+                    <span className="text-xs text-muted-foreground tabular-nums break-all">{c.phone}</span>
+                  ) : null}
                 </div>
-                <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{c.phone}</span>
               </button>
             ))}
           </motion.div>
