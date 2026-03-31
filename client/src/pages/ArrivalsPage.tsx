@@ -1709,32 +1709,51 @@ const ArrivalsPage = () => {
     const sellerId = pendingSellerFocusIdRef.current;
     if (!sellerId) return;
 
-    const input = sellerNameInputRefs.current[sellerId];
-    if (!input) return;
+    const ensureSellerInputVisible = () => {
+      const input = sellerNameInputRefs.current[sellerId];
+      if (!input) return;
 
-    pendingSellerFocusIdRef.current = null;
+      pendingSellerFocusIdRef.current = null;
 
-    input.scrollIntoView({ block: 'center', behavior: 'auto' });
-    input.focus();
+      input.scrollIntoView({ block: 'center', behavior: 'auto' });
+      input.focus();
 
-    // Mobile keyboard: when likely open, nudge the active element back into view.
-    const panel = newArrivalPanelScrollRef.current;
-    const vp = window.visualViewport;
-    const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
+      // Mobile keyboard: when likely open, keep nudging the active element into
+      // view. This covers the +Add Seller path where focus can land before the
+      // sheet's scroll container is fully settled.
+      const panel = newArrivalPanelScrollRef.current;
+      const vp = window.visualViewport;
+      const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
+      if (!panel || !isKeyboardLikelyOpen) return;
 
-    if (!panel || !isKeyboardLikelyOpen) return;
+      const tryBringActiveIntoView = () => {
+        const active = document.activeElement;
+        if (!(active instanceof HTMLElement)) return;
+        if (!panel.contains(active)) return;
+        active.scrollIntoView({ block: 'center' });
+      };
 
-    const tryBringActiveIntoView = () => {
-      const active = document.activeElement;
-      if (!(active instanceof HTMLElement)) return;
-      if (!panel.contains(active)) return;
-      active.scrollIntoView({ block: 'center' });
+      requestAnimationFrame(tryBringActiveIntoView);
+      window.setTimeout(tryBringActiveIntoView, 120);
+      window.setTimeout(tryBringActiveIntoView, 280);
+      window.setTimeout(tryBringActiveIntoView, 520);
+      window.setTimeout(tryBringActiveIntoView, 900);
+      window.setTimeout(tryBringActiveIntoView, 1300);
+      window.setTimeout(tryBringActiveIntoView, 2000);
+      window.setTimeout(tryBringActiveIntoView, 2500);
     };
 
-    requestAnimationFrame(tryBringActiveIntoView);
-    window.setTimeout(tryBringActiveIntoView, 120);
-    window.setTimeout(tryBringActiveIntoView, 280);
-    window.setTimeout(tryBringActiveIntoView, 520);
+    // The newly added seller card can mount a little later on mobile due to
+    // render + animation timing. Retry to avoid missing the first focus cycle.
+    requestAnimationFrame(ensureSellerInputVisible);
+    window.setTimeout(ensureSellerInputVisible, 80);
+    window.setTimeout(ensureSellerInputVisible, 180);
+    window.setTimeout(ensureSellerInputVisible, 320);
+    window.setTimeout(ensureSellerInputVisible, 520);
+    window.setTimeout(ensureSellerInputVisible, 900);
+    window.setTimeout(ensureSellerInputVisible, 1300);
+    window.setTimeout(ensureSellerInputVisible, 2000);
+    window.setTimeout(ensureSellerInputVisible, 2500);
   }, [sellerFocusNonce, sellers]);
 
   const updateLot = (sellerIdx: number, lotIdx: number, updates: Partial<LotEntry>) => {
