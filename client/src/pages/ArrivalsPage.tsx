@@ -2879,22 +2879,22 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Scroll to see all lots"
-                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
-                                      <table className="w-full text-xs sm:text-sm min-w-[32rem]">
+                                      <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold min-w-[7rem]">Lot Name</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell min-w-[6rem]">Commodity</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[8%]">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-[18%]">Variant</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-[14%]">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -2907,13 +2907,13 @@ const ArrivalsPage = () => {
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-2 sm:px-3 max-w-[14rem] align-top">
-                                                  <span className="inline-block max-w-full px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold break-words line-clamp-2">
+                                                <td className="py-2 px-2 sm:px-3 align-top">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
                                                 <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-foreground hidden sm:table-cell">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-foreground truncate">{lot.commodity_name || "-"}</td>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
                                                 <td className="py-2 px-2 sm:px-3">
                                                   <div className="flex justify-end gap-1">
@@ -3775,22 +3775,22 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Swipe here to scroll lots"
-                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-scroll overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
                               >
                                 <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
-                                      <table className="w-full text-xs sm:text-sm min-w-[32rem]">
+                                      <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-14">SL</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold min-w-[7rem]">Lot Name</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-16">Bags</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden sm:table-cell min-w-[6rem]">Commodity</th>
-                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell">Variant</th>
-                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-16">Actions</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[8%]">SL</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[28%]">Lot Name</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-12 sm:w-[12%]">Bags</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold sm:w-[20%]">Commodity</th>
+                                            <th className="text-left py-2 px-2 sm:px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-[18%]">Variant</th>
+                                            <th className="text-right py-2 px-2 sm:px-3 text-muted-foreground font-semibold w-14 sm:w-[14%]">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3803,13 +3803,13 @@ const ArrivalsPage = () => {
                                                 isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                               )}>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground font-mono">{lotSerialLabel}</td>
-                                                <td className="py-2 px-2 sm:px-3 max-w-[14rem] align-top">
-                                                  <span className="inline-block max-w-full px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold break-words line-clamp-2">
+                                                <td className="py-2 px-2 sm:px-3 align-top">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
                                                 <td className="py-2 px-2 sm:px-3 text-right font-medium text-foreground">{lot.quantity}</td>
-                                                <td className="py-2 px-2 sm:px-3 text-foreground hidden sm:table-cell">{lot.commodity_name || "-"}</td>
+                                                <td className="py-2 px-2 sm:px-3 text-foreground truncate">{lot.commodity_name || "-"}</td>
                                                 <td className="py-2 px-2 sm:px-3 text-muted-foreground hidden md:table-cell">{lot.variant || "None"}</td>
                                                 <td className="py-2 px-2 sm:px-3">
                                                   <div className="flex justify-end gap-1">
