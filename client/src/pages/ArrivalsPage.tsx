@@ -2800,7 +2800,8 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                <LotFieldsHorizontalScroll>
+                                  <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
                                   <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <Input
@@ -2852,7 +2853,8 @@ const ArrivalsPage = () => {
                                       ))}
                                     </select>
                                   </div>
-                                </div>
+                                  </div>
+                                </LotFieldsHorizontalScroll>
                                 {/* Action buttons */}
                                 <div className="flex gap-2 justify-end pt-1">
                                   <Button
@@ -2904,7 +2906,7 @@ const ArrivalsPage = () => {
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
-                                    <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                    <LotFieldsHorizontalScroll>
                                       <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
@@ -2959,7 +2961,7 @@ const ArrivalsPage = () => {
                                           })}
                                         </tbody>
                                       </table>
-                                    </div>
+                                    </LotFieldsHorizontalScroll>
                                   )}
                                 </div>
                               </LotsScrollPanel>
@@ -3696,7 +3698,8 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                <LotFieldsHorizontalScroll>
+                                  <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
                                   <div className="w-[12rem] sm:w-[14rem] flex-none">
                                     <Input
@@ -3748,7 +3751,8 @@ const ArrivalsPage = () => {
                                       ))}
                                     </select>
                                   </div>
-                                </div>
+                                  </div>
+                                </LotFieldsHorizontalScroll>
                                 {/* Action buttons */}
                                 <div className="flex gap-2 justify-end pt-1">
                                   <Button
@@ -3799,7 +3803,7 @@ const ArrivalsPage = () => {
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
-                                    <div className="overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                    <LotFieldsHorizontalScroll>
                                       <table className="w-max sm:w-full text-xs sm:text-sm min-w-[24rem] sm:min-w-0 table-auto sm:table-fixed">
                                         <thead>
                                           <tr className="border-b border-border/20 bg-muted/20">
@@ -3854,7 +3858,7 @@ const ArrivalsPage = () => {
                                           })}
                                         </tbody>
                                       </table>
-                                    </div>
+                                    </LotFieldsHorizontalScroll>
                                   )}
                                 </div>
                               </LotsScrollPanel>
