@@ -647,9 +647,25 @@ const BillingPage = () => {
     }
   }, [bill]);
 
-  // Recalculate grand total
+  const calculateGroupCharges = (group: CommodityGroup) => {
+    const commissionAmount = Math.round(group.subtotal * (group.commissionPercent || 0) / 100);
+    const userFeeAmount = Math.round(group.subtotal * (group.userFeePercent || 0) / 100);
+    const gstAmount = Math.round(group.subtotal * ((group.gstRate ?? 0) / 100));
+    const totalCharges = commissionAmount + userFeeAmount + gstAmount;
+    return { commissionAmount, userFeeAmount, totalCharges };
+  };
+
+  // Recalculate grand total (includes GST from commodity config)
   const recalcGrandTotal = useCallback((b: BillData): BillData => {
-    const subtotalSum = b.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
+    const commodityGroups = b.commodityGroups.map(group => {
+      const next = { ...group };
+      const charges = calculateGroupCharges(next);
+      next.commissionAmount = charges.commissionAmount;
+      next.userFeeAmount = charges.userFeeAmount;
+      next.totalCharges = charges.totalCharges;
+      return next;
+    });
+    const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
     const additions = b.buyerCoolie + b.outboundFreight;
     let discountAmount = b.discount;
     if (b.discountType === 'PERCENT') {
@@ -658,7 +674,7 @@ const BillingPage = () => {
     const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
     const tokenAdvance = b.tokenAdvance ?? 0;
     const pendingBalance = grandTotal - tokenAdvance;
-    return { ...b, grandTotal, pendingBalance };
+    return { ...b, commodityGroups, grandTotal, pendingBalance };
   }, []);
 
   // Generate Bill (commodity config from API)
@@ -904,14 +920,21 @@ const BillingPage = () => {
     return null;
   }, [buyerBidMarkInput, buyers, selectedBuyerFromDropdown]);
 
-  const handleGetBidsForMark = useCallback(() => {
+  const handleGetBidsForMark = useCallback(async () => {
     const buyer = findBuyerByInput();
     if (!buyer) return;
+    const switchingBuyer =
+      !!selectedBuyer &&
+      (selectedBuyer.buyerMark !== buyer.buyerMark || selectedBuyer.buyerName !== buyer.buyerName);
+    if (switchingBuyer) {
+      const saved = await autoSaveCurrentBillBeforeBuyerSwitch();
+      if (!saved) return;
+    }
     setShowBuyerSuggestions(false);
     setSelectBidBuyer(null);
     setSelectedBidNumbers([]);
     generateBill(buyer);
-  }, [findBuyerByInput, generateBill]);
+  }, [autoSaveCurrentBillBeforeBuyerSwitch, findBuyerByInput, generateBill, selectedBuyer]);
 
   const handleSelectBidMode = useCallback(() => {
     const buyer = findBuyerByInput();
@@ -928,7 +951,7 @@ const BillingPage = () => {
     );
   };
 
-  const handleCreateBillFromSelected = useCallback(() => {
+  const handleCreateBillFromSelected = useCallback(async () => {
     if (!selectBidBuyer) return;
     if (selectedBidNumbers.length === 0) {
       toast.error('Select at least one bid to create bill');
@@ -939,10 +962,17 @@ const BillingPage = () => {
       toast.error('Selected bids are not available');
       return;
     }
+    const switchingBuyer =
+      !!selectedBuyer &&
+      (selectedBuyer.buyerMark !== selectBidBuyer.buyerMark || selectedBuyer.buyerName !== selectBidBuyer.buyerName);
+    if (switchingBuyer) {
+      const saved = await autoSaveCurrentBillBeforeBuyerSwitch();
+      if (!saved) return;
+    }
     generateBill({ ...selectBidBuyer, entries: selectedEntries });
     setSelectBidBuyer(null);
     setSelectedBidNumbers([]);
-  }, [generateBill, selectBidBuyer, selectedBidNumbers]);
+  }, [autoSaveCurrentBillBeforeBuyerSwitch, generateBill, selectBidBuyer, selectedBidNumbers, selectedBuyer]);
 
   // Add a bid from another buyer into the current bill (cross-buyer aggregation).
 
@@ -1163,6 +1193,24 @@ const BillingPage = () => {
     }
   };
 
+  async function autoSaveCurrentBillBeforeBuyerSwitch(): Promise<boolean> {
+    if (!bill) return true;
+    const hasItems = bill.commodityGroups.some(g => (g.items?.length ?? 0) > 0);
+    if (!hasItems) return true;
+
+    const currentBuyerLabel = bill.buyerMark || bill.buyerName || 'current buyer';
+    const saved = await persistBill();
+    if (!saved) {
+      toast.error('Could not auto-save current bill. Please fix highlighted fields and try again.');
+      return false;
+    }
+
+    setHasSavedOnce(isBackendBillId(String(saved.billId)));
+    loadSavedBills();
+    toast.success(`Draft for ${currentBuyerLabel} moved to Bill In Progress.`);
+    return true;
+  }
+
   const handleSaveDraft = async () => {
     if (!bill) return;
     const result = await persistBill();
@@ -1266,6 +1314,15 @@ const BillingPage = () => {
 
   // ═══ PRINT PREVIEW ═══
   if (showPrint && bill) {
+    let activePrintBill: BillData = bill;
+    if (selectedPrintVersion !== 'latest' && Array.isArray((bill as any).versions)) {
+      const versions = (bill as any).versions as any[];
+      const found = versions.find(v => v.version === selectedPrintVersion);
+      const versionPayload = found?.data ?? found?.billData ?? found?.snapshot ?? null;
+      if (versionPayload) {
+        activePrintBill = normalizeBillFromApi(versionPayload as any, fullConfigs, commodities) as BillData;
+      }
+    }
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
         <UnsavedChangesDialog />
@@ -1280,7 +1337,7 @@ const BillingPage = () => {
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <Printer className="w-5 h-5" /> Sales Bill Print
               </h1>
-              <p className="text-white/70 text-xs">{bill.billNumber || 'Draft'}</p>
+              <p className="text-white/70 text-xs">{activePrintBill.billNumber || 'Draft'}</p>
             </div>
           </div>
         </div>
@@ -1293,7 +1350,7 @@ const BillingPage = () => {
             <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
               <Printer className="w-5 h-5 text-indigo-500" /> Sales Bill Print
             </h2>
-            <p className="text-sm text-muted-foreground">{bill.billNumber || 'Draft'}</p>
+            <p className="text-sm text-muted-foreground">{activePrintBill.billNumber || 'Draft'}</p>
           </div>
         </div>
         )}
@@ -1303,17 +1360,17 @@ const BillingPage = () => {
             <div className="text-center border-b border-dashed border-border pb-2">
               <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
               <p className="text-muted-foreground">Sales Bill (Buyer Invoice)</p>
-              <p className="text-muted-foreground">{new Date(bill.billDate).toLocaleDateString()}</p>
+              <p className="text-muted-foreground">{new Date(activePrintBill.billDate).toLocaleDateString()}</p>
             </div>
 
             <div className="border-b border-dashed border-border pb-2 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Bill No.</span><span className="font-bold text-foreground">{bill.billNumber || 'DRAFT'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Buyer</span><span className="font-bold text-foreground">{bill.billingName} ({bill.buyerMark})</span></div>
-              {bill.outboundVehicle && <div className="flex justify-between"><span className="text-muted-foreground">Out Vehicle</span><span className="font-bold text-foreground">{bill.outboundVehicle}</span></div>}
+              <div className="flex justify-between"><span className="text-muted-foreground">Bill No.</span><span className="font-bold text-foreground">{activePrintBill.billNumber || 'DRAFT'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Buyer</span><span className="font-bold text-foreground">{activePrintBill.billingName} ({activePrintBill.buyerMark})</span></div>
+              {activePrintBill.outboundVehicle && <div className="flex justify-between"><span className="text-muted-foreground">Out Vehicle</span><span className="font-bold text-foreground">{activePrintBill.outboundVehicle}</span></div>}
             </div>
 
             {/* Per-commodity tables — REQ-BIL-004 */}
-            {bill.commodityGroups.map((group, gi) => (
+            {activePrintBill.commodityGroups.map((group, gi) => (
               <div key={gi} className="border-b border-dashed border-border pb-2">
                 <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}{(group.gstRate ?? 0) > 0 && ` · GST: ${group.gstRate}%`}</p>
                 {group.items.map((item, ii) => (
@@ -1332,18 +1389,18 @@ const BillingPage = () => {
             ))}
 
             {/* Additions */}
-            {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
+            {(activePrintBill.buyerCoolie > 0 || activePrintBill.outboundFreight > 0) && (
               <div className="border-b border-dashed border-border pb-2">
                 <p className="font-bold text-foreground mb-1">ADDITIONS</p>
-                {bill.buyerCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Buyer Coolie</span><span className="text-foreground">₹{bill.buyerCoolie.toLocaleString()}</span></div>}
-                {bill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{bill.outboundFreight.toLocaleString()}</span></div>}
+                {activePrintBill.buyerCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Buyer Coolie</span><span className="text-foreground">₹{activePrintBill.buyerCoolie.toLocaleString()}</span></div>}
+                {activePrintBill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{activePrintBill.outboundFreight.toLocaleString()}</span></div>}
               </div>
             )}
 
             {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
             <div className="border-b border-dashed border-border pb-2">
               <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
-              {bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g, i) => (
+              {activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g, i) => (
                 <div key={i} className="text-[10px] space-y-0.5">
                   <span className="text-muted-foreground">{g.commodityName}:</span>
                   {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{g.commissionAmount}</span></div>}
@@ -1354,7 +1411,7 @@ const BillingPage = () => {
 
               {/* Overall cumulative row (REQ-BIL-010) */}
               {(() => {
-                const groups = bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
+                const groups = activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
                 const totalCommission = groups.reduce((s, g) => s + g.commissionAmount, 0);
                 const totalUserFee = groups.reduce((s, g) => s + g.userFeeAmount, 0);
                 const totalGst = groups.reduce(
@@ -1375,23 +1432,23 @@ const BillingPage = () => {
               })()}
             </div>
 
-            {bill.discount > 0 && (
+            {activePrintBill.discount > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Discount</span>
                 <span className="text-destructive">
-                  −₹{bill.discountType === 'PERCENT'
+                  −₹{activePrintBill.discountType === 'PERCENT'
                     ? Math.round(
-                        bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0) * bill.discount / 100,
+                        activePrintBill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0) * activePrintBill.discount / 100,
                       )
-                    : bill.discount}
+                    : activePrintBill.discount}
                 </span>
               </div>
             )}
-            {bill.manualRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span></div>}
+            {activePrintBill.manualRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{activePrintBill.manualRoundOff > 0 ? '+' : ''}₹{activePrintBill.manualRoundOff}</span></div>}
 
             <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
               <span className="font-bold text-foreground">GRAND TOTAL</span>
-              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{activePrintBill.grandTotal.toLocaleString()}</span>
             </div>
 
             <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2">
@@ -1428,6 +1485,9 @@ const BillingPage = () => {
                     </option>
                   ))}
                 </select>
+                {selectedPrintVersion !== 'latest' && (
+                  <span className="text-[11px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
+                )}
               </div>
             )}
 
@@ -1437,24 +1497,18 @@ const BillingPage = () => {
               try {
                 await printLogApi.create({
                   reference_type: 'SALES_BILL',
-                  reference_id: bill.billId,
+                  reference_id: activePrintBill.billId,
                   print_type: 'SALES_BILL',
                   printed_at: printedAt,
                 });
               } catch {
                 // backend optional
               }
-
-      let billToPrint: BillData = bill;
-      if (selectedPrintVersion !== 'latest' && Array.isArray((bill as any).versions)) {
-        const versions = (bill as any).versions as any[];
-        const found = versions.find(v => v.version === selectedPrintVersion);
-        if (found && found.data) {
-          billToPrint = normalizeBillFromApi(found.data as any, fullConfigs, commodities) as BillData;
-        }
-      }
-
-      const ok = await directPrint(generateSalesBillPrintHTML(billToPrint), { mode: "system" });
+              if (selectedPrintVersion !== 'latest' && activePrintBill === bill) {
+                toast.error(`Version v${selectedPrintVersion} data not found.`);
+                return;
+              }
+      const ok = await directPrint(generateSalesBillPrintHTML(activePrintBill), { mode: "system" });
               ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
             }}
               className="flex-1 sm:flex-none h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
@@ -1482,22 +1536,32 @@ const BillingPage = () => {
   }
 
   // ═══ BILLING HOME: TABS + LISTS ═══
-  const handleClearBillEditor = () => {
-                     setSelectedBuyer(null);
-                     setBill(null);
+  const handleClearBillEditor = async () => {
+    const saved = await autoSaveCurrentBillBeforeBuyerSwitch();
+    if (!saved) return;
+    setSelectedBuyer(null);
+    setBill(null);
+    setBuyerBidMarkInput('');
+    setSelectedBuyerFromDropdown(null);
+    setShowBuyerSuggestions(false);
+    setSelectBidBuyer(null);
+    setSelectedBidNumbers([]);
     setHasSavedOnce(false);
   };
 
   const handleCreateNewBill = () => {
                   setBill(null);
     setHasSavedOnce(false);
+    setSelectedPrintVersion('latest');
     setEditLocked(false);
     setBillingMainTab('create');
   };
 
   const openBillFromList = (b: SalesBillDTO) => {
-    setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [] });
+    setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [], tokenAdvanceTotal: 0 });
     setBill(normalizeBillFromApi(b, fullConfigs, commodities));
+    setHasSavedOnce(isBackendBillId(String(b.billId)));
+    setSelectedPrintVersion('latest');
     setEditLocked(false);
     setBillingMainTab('create');
   };
@@ -1735,7 +1799,7 @@ const BillingPage = () => {
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    handleGetBidsForMark();
+                    void handleGetBidsForMark();
                   }
                   if (e.key === 'Escape') setShowBuyerSuggestions(false);
                 }}
@@ -1778,7 +1842,7 @@ const BillingPage = () => {
                 </div>
               )}
             </div>
-              <Button type="button" onClick={handleGetBidsForMark} className="h-11 sm:h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-sm shadow-md sm:self-end">
+              <Button type="button" onClick={() => void handleGetBidsForMark()} className="h-11 sm:h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-sm shadow-md sm:self-end">
                 Get Bid
               </Button>
               <Button type="button" onClick={handleSelectBidMode} variant="outline" className="h-11 sm:h-12 rounded-xl font-bold text-sm sm:self-end">
@@ -1839,7 +1903,7 @@ const BillingPage = () => {
                 </div>
                 <Button
                   type="button"
-                  onClick={handleCreateBillFromSelected}
+                  onClick={() => void handleCreateBillFromSelected()}
                   disabled={selectedBidNumbers.length === 0}
                   className="w-full h-10 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold disabled:opacity-50"
                 >
@@ -1856,7 +1920,7 @@ const BillingPage = () => {
           </motion.div>
         )}
 
-        {bill && selectedBuyer && (
+        {billingMainTab === 'create' && bill && selectedBuyer && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
             <div className="glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1872,7 +1936,7 @@ const BillingPage = () => {
                   </div>
                 </div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
-              <Button type="button" variant="outline" size="sm" className="rounded-xl h-9" onClick={handleClearBillEditor}>
+              <Button type="button" variant="outline" size="sm" className="rounded-xl h-9" onClick={() => void handleClearBillEditor()}>
                 Change buyer
               </Button>
             </div>
@@ -2256,6 +2320,26 @@ const BillingPage = () => {
                       );
                     })}
 
+                    <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-lg border-t border-border/40 pt-2 px-1 text-[11px] font-bold text-center">
+                      <div />
+                      <div className="text-foreground">
+                        {group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString()}
+                      </div>
+                      <div className="text-foreground">
+                        {group.items.reduce((s, i) => s + (Number(i.weight) || 0), 0).toLocaleString()}
+                      </div>
+                      <div />
+                      <div />
+                      <div />
+                      <div />
+                      <div />
+                      <div />
+                      <div className="text-foreground">
+                        ₹{group.items.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
+                      </div>
+                      <div />
+                    </div>
+
                     <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Subtotal</span>
@@ -2565,6 +2649,9 @@ const BillingPage = () => {
                           </option>
                         ))}
                       </select>
+                      {selectedPrintVersion !== 'latest' && (
+                        <span className="text-[10px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
+                      )}
                     </div>
                   )}
                 </div>
