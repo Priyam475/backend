@@ -2950,10 +2950,9 @@ const ArrivalsPage = () => {
                           </div>
                           <Button
                             type="button"
-                            variant="outline"
                             size="sm"
                             onClick={confirmAddSellerFromSearch}
-                            className="h-12 rounded-xl shrink-0"
+                            className="h-12 rounded-xl shrink-0 bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                             disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
                           >
                             <Users className="w-4 h-4 mr-2" /> Add Seller
@@ -2969,11 +2968,10 @@ const ArrivalsPage = () => {
                     <div className="flex items-stretch gap-2 sm:gap-3">
                       <Button
                         type="button"
-                        variant="outline"
                         size="sm"
                         onClick={openSellerSearchPanel}
                         disabled={!isMultiSeller && sellers.length >= 1}
-                        className="h-11 sm:h-12 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center"
+                        className="h-11 sm:h-12 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                       >
                         <Users className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span className="ml-1.5 sm:ml-2">Add Seller</span>
@@ -2981,7 +2979,7 @@ const ArrivalsPage = () => {
                       <Button
                         onClick={handleSubmitArrival}
                         disabled={isFormInvalid}
-                        className="flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center"
+                        className="flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
                       >
                         <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span className="ml-1.5 sm:ml-2">{editingVehicleId != null ? 'Update Arrival' : 'Submit Arrival'}</span>
@@ -3854,10 +3852,9 @@ const ArrivalsPage = () => {
                           </div>
                           <Button
                             type="button"
-                            variant="outline"
                             size="sm"
                             onClick={confirmAddSellerFromSearch}
-                            className="h-12 rounded-xl shrink-0"
+                            className="h-12 rounded-xl shrink-0 bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                             disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
                           >
                             <Users className="w-4 h-4 mr-2" /> Add Seller
@@ -3870,20 +3867,19 @@ const ArrivalsPage = () => {
                     )}
 
                     {/* ── Sticky Submit Button ── */}
-                    <div className="h-4" />
+                    <div className="h-2" />
                   </div>
 
                   {/* Fixed bottom submit bar - sits above bottom nav */}
-                  <div className="fixed bottom-14 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl border-t border-border/40 px-3 py-2.5 sm:px-4 sm:py-3 md:px-6">
+                  <div className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] sm:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] md:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-0.75rem-1px)] lg:bottom-0 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl px-3 pt-2.5 pb-0 sm:px-4 sm:pt-3 sm:pb-0 md:px-6">
                     <div className="max-w-[480px] md:max-w-full mx-auto">
                       <div className="flex items-stretch gap-2 sm:gap-3">
                         <Button
                           type="button"
-                          variant="outline"
                           size="sm"
                           onClick={openSellerSearchPanel}
                           disabled={!isMultiSeller && sellers.length >= 1}
-                          className="h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center"
+                          className="h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                         >
                           <Users className="w-4 h-4 md:w-5 md:h-5" />
                           <span className="ml-1.5 sm:ml-2">Add Seller</span>
@@ -3891,7 +3887,7 @@ const ArrivalsPage = () => {
                         <Button
                           onClick={handleSubmitArrival}
                           disabled={isFormInvalid}
-                          className="flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 disabled:opacity-60 flex items-center justify-center"
+                          className="flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:shadow-xl active:shadow-emerald-500/35 active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center"
                         >
                           <FileText className="w-4 h-4 md:w-5 md:h-5" />
                           <span className="ml-1.5 sm:ml-2 truncate">{editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit (${sellers.length})` : 'Submit Arrival')}</span>
