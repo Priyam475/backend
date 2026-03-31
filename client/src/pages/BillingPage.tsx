@@ -1,21 +1,24 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
   Percent, FileText, ChevronDown, ChevronUp,
-  History
+  RefreshCw, UserPlus, AlertCircle, BookOpen, X, Loader2, Clock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi } from '@/services/api';
+import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi } from '@/services/api';
+import { ContactApiError } from '@/services/api/contacts';
+import type { Contact } from '@/types/models';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
@@ -31,6 +34,8 @@ interface BuyerPurchase {
   buyerName: string;
   buyerContactId: string | null;
   entries: BillEntry[];
+  /** Total token advance for this buyer across all bids (₹). */
+  tokenAdvanceTotal: number;
 }
 
 interface BillEntry {
@@ -42,14 +47,21 @@ interface BillEntry {
   rate: number;
   quantity: number;
   weight: number;
+  /** Total bags for the whole vehicle (all sellers on same vehicle). */
+  vehicleTotalQty?: number;
+  /** Total bags for this seller on the vehicle (all lots of that seller). */
+  sellerVehicleQty?: number;
   presetApplied: number;
   isSelfSale: boolean;
+  /** Token advance collected at auction stage for this bid (₹). */
+  tokenAdvance?: number;
 }
 
 interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
   gstRate: number;
+  divisor: number;
   commissionPercent: number;
   userFeePercent: number;
   items: BillLineItem[];
@@ -69,6 +81,7 @@ interface BillLineItem {
   presetApplied: number; // P = Preset
   brokerage: number; // BRK
   otherCharges: number; // Other (from preset or manual)
+  sellerOtherCharges: number; // Other (dynamic, appliesTo=SELLER) - read-only for settlement deductions
   newRate: number; // REQ-BIL-002: NR = B + P + BRK + Other
   amount: number;
 }
@@ -86,6 +99,8 @@ interface BillData {
   outboundVehicle: string;
   discount: number;
   discountType: 'PERCENT' | 'AMOUNT';
+  /** Total token advance to deduct from payable (₹). */
+  tokenAdvance: number;
   manualRoundOff: number;
   grandTotal: number;
   brokerageType: 'PERCENT' | 'AMOUNT';
@@ -100,29 +115,87 @@ function isBackendBillId(billId: string): boolean {
   return /^\d+$/.test(billId);
 }
 
+/** Lot identifier for billing rows: Vehicle QTY / Seller QTY / Lot Name - Lot QTY. */
+function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): string {
+  const qty = (entry as any).quantity ?? 0;
+  const vTotal = (entry as any).vehicleTotalQty ?? qty;
+  const sTotal = (entry as any).sellerVehicleQty ?? qty;
+  const lotName = (entry as any).lotName || String(qty || '');
+  const lotQty = qty;
+  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+}
+
 /** Normalize bill from API: add presetApplied (derived) and gstRate to items/groups. */
 function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], commodities?: any[]): BillData {
-  const configByCommName = new Map<string, number>();
+  const configByCommName = new Map<string, { gstRate: number; divisor: number }>();
+  const dynamicChargesByCommName = new Map<string, any[]>();
   if (fullConfigs && commodities) {
     commodities.forEach((c: any) => {
       const cfg = fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id));
       const name = c.commodity_name ?? c.commodityName;
-      if (name && cfg?.config?.gstRate != null) configByCommName.set(name, cfg.config.gstRate);
+      if (!name) return;
+      const gstRate = cfg?.config?.gstRate ?? 0;
+      const divisorRaw = cfg?.config?.ratePerUnit ?? 50;
+      const divisor = Number(divisorRaw) > 0 ? Number(divisorRaw) : 50;
+      configByCommName.set(name, { gstRate, divisor });
+      dynamicChargesByCommName.set(name, cfg?.dynamicCharges ?? []);
     });
   }
   const groups = (b.commodityGroups || []).map((g: any) => ({
     ...g,
-    gstRate: g.gstRate ?? configByCommName.get(g.commodityName) ?? 0,
+    gstRate: g.gstRate ?? configByCommName.get(g.commodityName)?.gstRate ?? 0,
+    divisor: g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50,
     items: (g.items || []).map((item: any) => {
       const base = Number(item.baseRate) || 0;
       const brk = Number(item.brokerage) || 0;
       const other = Number(item.otherCharges) || 0;
       const nr = Number(item.newRate) || 0;
       const preset = Math.max(0, nr - base - brk - other);
-      return { ...item, presetApplied: item.presetApplied ?? preset };
+      const presetApplied = item.presetApplied ?? preset;
+
+      const divisorUsed = (g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50) > 0
+        ? (g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50)
+        : 50;
+
+      // Compute seller-side dynamic "Other Charges" (read-only for settlement deductions).
+      const dynCharges = dynamicChargesByCommName.get(g.commodityName) ?? [];
+      const weight = Number(item.weight) || 0;
+      const qty = Number(item.quantity) || 0;
+
+      const baseNewRateWithoutOther = base + presetApplied + brk;
+      const baseAmount = (weight * baseNewRateWithoutOther) / divisorUsed;
+
+      let sellerOtherCharges = 0;
+      dynCharges.forEach((ch: any) => {
+        const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
+        if (appliesTo !== 'SELLER') return;
+
+        const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
+        const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+        if (value <= 0) return;
+
+        if (chargeType === 'PERCENT') {
+          const chargeTotal = baseAmount * (value / 100);
+          const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+          sellerOtherCharges += rateAdd;
+          return;
+        }
+
+        const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
+        if (fixedBasis === 'PER_COUNT') {
+          const chargeTotal = value * qty;
+          const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+          sellerOtherCharges += rateAdd;
+        } else {
+          sellerOtherCharges += value * (divisorUsed / 50);
+        }
+      });
+
+      return { ...item, presetApplied, sellerOtherCharges };
     }),
   }));
-  return { ...b, commodityGroups: groups };
+  const tokenAdvance = Number((b as any).tokenAdvance) || 0;
+  return { ...b, tokenAdvance, commodityGroups: groups };
 }
 
 // ── Validation ────────────────────────────────────────────
@@ -222,6 +295,8 @@ const BillingPage = () => {
   const { trader } = useAuth();
   const { canAccessModule, can } = usePermissions();
   const canView = canAccessModule('Billing');
+  const canCreateContact = can('Contacts', 'Create');
+  const canEditContact = can('Contacts', 'Edit');
   const [buyers, setBuyers] = useState<BuyerPurchase[]>([]);
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerPurchase | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -229,8 +304,9 @@ const BillingPage = () => {
   // Bill state
   const [bill, setBill] = useState<BillData | null>(null);
   const [editLocked, setEditLocked] = useState(true);
+  const [hasSavedOnce, setHasSavedOnce] = useState(false);
+  const [selectedPrintVersion, setSelectedPrintVersion] = useState<'latest' | number>('latest');
   const [showPrint, setShowPrint] = useState(false);
-  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
 
   const isBillingDirty = !!bill && !showPrint && !isBackendBillId(bill.billId);
   const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
@@ -240,16 +316,51 @@ const BillingPage = () => {
   // Validation
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
-  // Search mode for bill search
-  const [billSearchMode, setBillSearchMode] = useState<'buyer' | 'bill'>('buyer');
+  type BillingMainTab = 'create' | 'progress' | 'saved';
+  const [billingMainTab, setBillingMainTab] = useState<BillingMainTab>('create');
+  const [buyerBidMarkInput, setBuyerBidMarkInput] = useState('');
+  const [selectBidBuyer, setSelectBidBuyer] = useState<BuyerPurchase | null>(null);
+  const [selectedBidNumbers, setSelectedBidNumbers] = useState<number[]>([]);
+  const [selectedBuyerFromDropdown, setSelectedBuyerFromDropdown] = useState<BuyerPurchase | null>(null);
+  const [showBuyerSuggestions, setShowBuyerSuggestions] = useState(false);
+  const buyerSelectRef = useRef<HTMLDivElement | null>(null);
+  const [resyncing, setResyncing] = useState(false);
   const [savedBills, setSavedBills] = useState<SalesBillDTO[]>([]);
   const [savedBillsLoading, setSavedBillsLoading] = useState(false);
   const [commodities, setCommodities] = useState<any[]>([]);
   const [fullConfigs, setFullConfigs] = useState<FullCommodityConfigDto[]>([]);
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
+  const [buyerCoolieRate, setBuyerCoolieRate] = useState<number>(0);
 
-  const { auctionResults: auctionData } = useAuctionResults();
+  const { auctionResults: auctionData, refetch: refetchAuctions } = useAuctionResults();
+
+  // Precompute per-commodity average weight bounds from full config (minWeight/maxWeight).
+  const commodityAvgWeightBounds = useMemo(() => {
+    const map: Record<string, { min: number; max: number }> = {};
+    if (!fullConfigs.length || !commodities.length) return map;
+    commodities.forEach((c: any) => {
+      const cfg = fullConfigs.find(
+        (f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id),
+      );
+      const min = Number(cfg?.config?.minWeight ?? 0);
+      const max = Number(cfg?.config?.maxWeight ?? 0);
+      if (min > 0 || max > 0) {
+        const name = c.commodity_name ?? c.commodityName;
+        if (name) {
+          map[name] = { min, max };
+        }
+      }
+    });
+    return map;
+  }, [fullConfigs, commodities]);
+
+  // Add contact from billing (same fields/validation as Contacts module — add only)
+  const [contactSheetOpen, setContactSheetOpen] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: '', phone: '', mark: '', address: '', enablePortal: false });
+  const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
+  const [contactsRegistry, setContactsRegistry] = useState<Contact[]>([]);
+  const [restorePendingPhone, setRestorePendingPhone] = useState<string | null>(null);
 
   useEffect(() => {
     commodityApi.list().then(setCommodities);
@@ -258,23 +369,6 @@ const BillingPage = () => {
 
   useEffect(() => {
     weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
-  }, []);
-
-  // Load arrival details for buyer/lot enrichment (seller name, lot name, commodity from arrivals API)
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      const all: ArrivalDetail[] = [];
-      for (let page = 0; page < 20; page++) {
-        const chunk = await arrivalsApi.listDetail(page, 100);
-        if (chunk.length === 0) break;
-        all.push(...chunk);
-        if (chunk.length < 100) break;
-      }
-      if (!cancelled) setArrivalDetails(all);
-    };
-    load();
-    return () => { cancelled = true; };
   }, []);
 
   // Load saved bills from backend
@@ -291,12 +385,189 @@ const BillingPage = () => {
   }, []);
 
   useEffect(() => {
-    if (billSearchMode === 'bill') loadSavedBills();
-  }, [billSearchMode, loadSavedBills]);
+    loadSavedBills();
+  }, [loadSavedBills]);
+
+  const reloadArrivalDetails = useCallback(async () => {
+    const all: ArrivalDetail[] = [];
+    for (let page = 0; page < 20; page++) {
+      const chunk = await arrivalsApi.listDetail(page, 100);
+      if (chunk.length === 0) break;
+      all.push(...chunk);
+      if (chunk.length < 100) break;
+    }
+    setArrivalDetails(all);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await reloadArrivalDetails();
+      } catch {
+        if (!cancelled) setArrivalDetails([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reloadArrivalDetails]);
+
+  const handleResync = useCallback(async () => {
+    setResyncing(true);
+    try {
+      await Promise.all([
+        refetchAuctions(),
+        commodityApi.list().then(setCommodities),
+        commodityApi.getAllFullConfigs().then(setFullConfigs),
+        weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([])),
+        loadSavedBills(),
+        reloadArrivalDetails(),
+      ]);
+      toast.success('Billing data refreshed');
+    } catch {
+      toast.error('Some data failed to refresh');
+    } finally {
+      setResyncing(false);
+    }
+  }, [refetchAuctions, loadSavedBills, reloadArrivalDetails]);
+
+  useEffect(() => {
+    if (!isDesktop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'x' || k === 'y' || k === 'z' || k === 'e' || k === 's' || k === 'p' || k === 'n') {
+        e.preventDefault();
+      }
+      if (k === 'x') setBillingMainTab('create');
+      if (k === 'y') setBillingMainTab('progress');
+      if (k === 'z') setBillingMainTab('saved');
+
+      if (!bill || showPrint) return;
+      const isUpdate = bill.billId && isBackendBillId(bill.billId);
+      if (k === 'e' && isUpdate) {
+        setEditLocked(false);
+      }
+      if (k === 's') {
+        void handleSaveDraft();
+      }
+      if (k === 'p' && hasSavedOnce) {
+        void saveAndPreparePrint();
+      }
+      if (k === 'n') {
+        handleCreateNewBill();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isDesktop, bill, showPrint, hasSavedOnce]);
+
+  const openContactFromBilling = async () => {
+    if (!canCreateContact) {
+      toast.error('You do not have permission to create contacts.');
+      return;
+    }
+    setContactForm({ name: '', phone: '', mark: '', address: '', enablePortal: false });
+    setContactErrors({});
+    try {
+      const list = await contactApi.list({ scope: 'registry' });
+      setContactsRegistry(list);
+    } catch {
+      setContactsRegistry([]);
+    }
+    setContactSheetOpen(true);
+  };
+
+  const closeContactSheet = () => {
+    setContactSheetOpen(false);
+    setContactErrors({});
+  };
+
+  const validateBillingContactForm = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!contactForm.name.trim()) errs.name = 'Name is required';
+    if (!contactForm.phone.trim()) {
+      errs.phone = 'Phone number is required';
+    } else if (!/^[6-9]\d{9}$/.test(contactForm.phone.trim())) {
+      errs.phone = 'Enter a valid 10-digit mobile number';
+    } else if (contactsRegistry.some(c => c.phone === contactForm.phone.trim())) {
+      errs.phone = 'This phone number is already registered';
+    }
+    if (contactForm.mark.trim()) {
+      const markLower = contactForm.mark.trim().toLowerCase();
+      const hasDuplicate = contactsRegistry.some(
+        c => c.mark && c.mark.toLowerCase() === markLower,
+      );
+      if (hasDuplicate) errs.mark = 'This mark is already in use by another contact';
+    }
+    setContactErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const submitBillingContactAdd = async () => {
+    if (!canCreateContact) {
+      toast.error('You do not have permission to create contacts.');
+      return;
+    }
+    if (!validateBillingContactForm()) return;
+    try {
+      await contactApi.create({
+        name: contactForm.name.trim(),
+        phone: contactForm.phone.trim(),
+        mark: contactForm.mark.trim().toUpperCase(),
+        address: contactForm.address.trim(),
+        trader_id: '',
+      });
+      closeContactSheet();
+      toast.success(`Contact ${contactForm.name.trim()} registered`);
+    } catch (err) {
+      if (err instanceof ContactApiError && err.errorKey === 'phoneexistsinactive') {
+        setRestorePendingPhone(contactForm.phone.trim());
+        closeContactSheet();
+        return;
+      }
+      if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+        setContactErrors(prev => ({ ...prev, mark: err.message }));
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to register contact');
+    }
+  };
+
+  const handleRestoreContactFromBilling = async () => {
+    if (!restorePendingPhone || !canEditContact) return;
+    const phone = restorePendingPhone;
+    try {
+      const existing = await contactApi.getByPhone(phone);
+      if (!existing) {
+        toast.error('Contact no longer found');
+        setRestorePendingPhone(null);
+        return;
+      }
+      await contactApi.restore(existing.contact_id);
+      setRestorePendingPhone(null);
+      toast.success(`Contact with phone ${phone} restored.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to restore contact');
+    }
+  };
 
   // Load buyer data from completed auctions (arrivals from API; weighing from API)
   useEffect(() => {
     const buyerMap = new Map<string, BuyerPurchase>();
+
+    // Compute vehicle & seller totals (same logic as Auctions/Logistics)
+    const vehicleTotals = new Map<string, number>();
+    const vehicleSellerTotals = new Map<string, number>();
+    auctionData.forEach((auction: any) => {
+      const vKey = auction.vehicleNumber || '';
+      const sKey = `${vKey}||${auction.sellerName || ''}`;
+      (auction.entries || []).forEach((entry: any) => {
+        if (entry.isSelfSale) return;
+        const qty = Number(entry.quantity) || 0;
+        vehicleTotals.set(vKey, (vehicleTotals.get(vKey) ?? 0) + qty);
+        vehicleSellerTotals.set(sKey, (vehicleSellerTotals.get(sKey) ?? 0) + qty);
+      });
+    });
 
     auctionData.forEach((auction: any) => {
       let sellerName = auction.sellerName || 'Unknown';
@@ -314,6 +585,9 @@ const BillingPage = () => {
         });
       });
 
+      const vKey = auction.vehicleNumber || '';
+      const sKey = `${vKey}||${sellerName || ''}`;
+
       (auction.entries || []).forEach((entry: any) => {
         if (entry.isSelfSale) return;
 
@@ -324,13 +598,18 @@ const BillingPage = () => {
             buyerName: entry.buyerName,
             buyerContactId: entry.buyerContactId ?? (entry.buyerId != null ? String(entry.buyerId) : null),
             entries: [],
+            tokenAdvanceTotal: 0,
           });
         }
+
+        const tokenAdvance = Number(entry.tokenAdvance) || 0;
+        const buyerEntry = buyerMap.get(key)!;
+        buyerEntry.tokenAdvanceTotal += tokenAdvance;
 
         const ws = weighingSessions.find((s: any) => s.bid_number === entry.bidNumber);
         const weight = ws ? ws.net_weight : entry.quantity * 50;
 
-        buyerMap.get(key)!.entries.push({
+        buyerEntry.entries.push({
           bidNumber: entry.bidNumber,
           lotId: auction.lotId,
           lotName,
@@ -339,8 +618,11 @@ const BillingPage = () => {
           rate: entry.rate,
           quantity: entry.quantity,
           weight,
+          vehicleTotalQty: vehicleTotals.get(vKey) ?? entry.quantity,
+          sellerVehicleQty: vehicleSellerTotals.get(sKey) ?? entry.quantity,
           presetApplied: entry.presetApplied || 0,
           isSelfSale: false,
+          tokenAdvance,
         });
       });
     });
@@ -348,10 +630,137 @@ const BillingPage = () => {
     setBuyers(Array.from(buyerMap.values()));
   }, [auctionData, weighingSessions, arrivalDetails]);
 
+  // Keep buyerCoolieRate in sync with current bill & total bags (approx rate per bag).
+  useEffect(() => {
+    if (!bill) {
+      setBuyerCoolieRate(0);
+      return;
+    }
+    const totalBags = bill.commodityGroups.reduce(
+      (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
+      0,
+    );
+    if (totalBags > 0 && bill.buyerCoolie > 0) {
+      setBuyerCoolieRate(bill.buyerCoolie / totalBags);
+    } else {
+      setBuyerCoolieRate(0);
+    }
+  }, [bill]);
+
+  // Recalculate grand total
+  const recalcGrandTotal = useCallback((b: BillData): BillData => {
+    const subtotalSum = b.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
+    const additions = b.buyerCoolie + b.outboundFreight;
+    let discountAmount = b.discount;
+    if (b.discountType === 'PERCENT') {
+      discountAmount = Math.round(subtotalSum * b.discount / 100);
+    }
+    const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
+    const tokenAdvance = b.tokenAdvance ?? 0;
+    const pendingBalance = grandTotal - tokenAdvance;
+    return { ...b, grandTotal, pendingBalance };
+  }, []);
+
   // Generate Bill (commodity config from API)
   const generateBill = useCallback((buyer: BuyerPurchase) => {
     setSelectedBuyer(buyer);
     const commodityMap = new Map<string, CommodityGroup>();
+
+    // Derive "Other Charges" rate-add from commodity dynamic charges (REQ-BIL-002 / REQ-BIL-007).
+    // These dynamic charges are configured as either PERCENT or FIXED with appliesTo=BUYER/SELLER.
+    const computeBuyerOtherChargesRateAdd = (entry: BillEntry, commName: string, divisor: number): number => {
+      const commodity = commodities.find((c: any) => c.commodity_name === commName);
+      const fullCfg = commodity
+        ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id))
+        : null;
+      const dynCharges = fullCfg?.dynamicCharges ?? [];
+      if (!dynCharges.length) return 0;
+
+      const brokerage = 0; // initial; user can edit brokerage/otherCharges afterwards
+      const presetApplied = entry.presetApplied ?? 0;
+      const baseNewRateWithoutOther = (entry.rate || 0) + presetApplied + brokerage;
+
+      const weight = entry.weight || 0;
+      const baseAmount = (weight * baseNewRateWithoutOther) / (divisor > 0 ? divisor : 50);
+
+      let sumRateAdd = 0;
+      dynCharges.forEach((ch: any) => {
+        const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
+        if (appliesTo !== 'BUYER') return; // buyer bill only includes BUYER-side charges
+
+        const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
+        const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+        if (value <= 0) return;
+
+        if (chargeType === 'PERCENT') {
+          const chargeTotal = baseAmount * (value / 100);
+          const rateAdd = weight > 0 ? (chargeTotal * divisor) / weight : 0;
+          sumRateAdd += rateAdd;
+          return;
+        }
+
+        const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
+        if (fixedBasis === 'PER_COUNT') {
+          const qty = entry.quantity || 0;
+          const chargeTotal = value * qty;
+          const rateAdd = weight > 0 ? (chargeTotal * divisor) / weight : 0;
+          sumRateAdd += rateAdd;
+        } else {
+          // PER_50KG default: value is configured as fixed ₹ per 50kg
+          const rateAdd = value * (divisor / 50);
+          sumRateAdd += rateAdd;
+        }
+      });
+
+      return sumRateAdd;
+    };
+
+    const computeSellerOtherChargesRateAdd = (entry: BillEntry, commName: string, divisor: number): number => {
+      const commodity = commodities.find((c: any) => c.commodity_name === commName);
+      const fullCfg = commodity
+        ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id))
+        : null;
+      const dynCharges = fullCfg?.dynamicCharges ?? [];
+      if (!dynCharges.length) return 0;
+
+      const brokerage = 0; // initial; user can edit brokerage/otherCharges afterwards
+      const presetApplied = entry.presetApplied ?? 0;
+      const baseNewRateWithoutOther = (entry.rate || 0) + presetApplied + brokerage;
+
+      const weight = entry.weight || 0;
+      const baseAmount = (weight * baseNewRateWithoutOther) / (divisor > 0 ? divisor : 50);
+
+      let sumRateAdd = 0;
+      dynCharges.forEach((ch: any) => {
+        const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
+        if (appliesTo !== 'SELLER') return; // seller-side charges are for settlement deductions
+
+        const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
+        const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+        if (value <= 0) return;
+
+        if (chargeType === 'PERCENT') {
+          const chargeTotal = baseAmount * (value / 100);
+          const rateAdd = weight > 0 ? (chargeTotal * divisor) / weight : 0;
+          sumRateAdd += rateAdd;
+          return;
+        }
+
+        const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
+        if (fixedBasis === 'PER_COUNT') {
+          const qty = entry.quantity || 0;
+          const chargeTotal = value * qty;
+          const rateAdd = weight > 0 ? (chargeTotal * divisor) / weight : 0;
+          sumRateAdd += rateAdd;
+        } else {
+          // PER_50KG default: value is configured as fixed ₹ per 50kg
+          const rateAdd = value * (divisor / 50);
+          sumRateAdd += rateAdd;
+        }
+      });
+
+      return sumRateAdd;
+    };
 
     buyer.entries.forEach(entry => {
       const commName = entry.commodityName || 'Unknown';
@@ -359,11 +768,14 @@ const BillingPage = () => {
         const commodity = commodities.find((c: any) => c.commodity_name === commName);
         const fullCfg = commodity ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id)) : null;
         const config = fullCfg?.config;
+        const divisorRaw = config?.ratePerUnit ?? 50;
+        const divisor = Number(divisorRaw) > 0 ? Number(divisorRaw) : 50;
 
         commodityMap.set(commName, {
           commodityName: commName,
           hsnCode: config?.hsnCode || '',
           gstRate: config?.gstRate ?? 0,
+          divisor,
           commissionPercent: config?.commissionPercent || 0,
           userFeePercent: config?.userFeePercent || 0,
           items: [],
@@ -378,7 +790,8 @@ const BillingPage = () => {
       
       // REQ-BIL-002: NR = B + P + BRK + Other Charges
       const brokerage = 0; // default, can be edited
-      const otherCharges = 0; // default
+      const otherCharges = computeBuyerOtherChargesRateAdd(entry, commName, group.divisor); // preset-based extra price
+      const sellerOtherCharges = computeSellerOtherChargesRateAdd(entry, commName, group.divisor);
       const presetApplied = entry.presetApplied ?? 0;
       const newRate = entry.rate + presetApplied + brokerage + otherCharges;
 
@@ -392,8 +805,9 @@ const BillingPage = () => {
         presetApplied,
         brokerage,
         otherCharges,
+        sellerOtherCharges,
         newRate,
-        amount: newRate * entry.quantity,
+        amount: (entry.weight * newRate) / group.divisor,
       });
     });
     
@@ -411,7 +825,7 @@ const BillingPage = () => {
     const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
     
     // REQ-BIL-009: GT = Σ(Commodity Totals) + Additions - Discount + Manual Round OFF
-    setBill({
+    const initialBill: BillData = {
       billId: crypto.randomUUID(),
       billNumber: '', // Generated on print (per SRS)
       buyerName: buyer.buyerName,
@@ -424,6 +838,7 @@ const BillingPage = () => {
       outboundVehicle: '',
       discount: 0,
       discountType: 'AMOUNT',
+      tokenAdvance: buyer.tokenAdvanceTotal ?? 0,
       manualRoundOff: 0,
       grandTotal: subtotalSum,
       brokerageType: 'AMOUNT',
@@ -431,33 +846,159 @@ const BillingPage = () => {
       globalOtherCharges: 0,
       pendingBalance: subtotalSum,
       versions: [],
-    });
+    };
+    setBill(recalcGrandTotal(initialBill));
     setEditLocked(false);
-  }, [commodities, fullConfigs]);
+  }, [commodities, fullConfigs, recalcGrandTotal]);
 
-  // Recalculate grand total
-  const recalcGrandTotal = useCallback((b: BillData): BillData => {
-    const subtotalSum = b.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
-    const additions = b.buyerCoolie + b.outboundFreight;
-    let discountAmount = b.discount;
-    if (b.discountType === 'PERCENT') {
-      discountAmount = Math.round(subtotalSum * b.discount / 100);
+  const findBuyerByInput = useCallback((): BuyerPurchase | null => {
+    if (selectedBuyerFromDropdown) {
+      if (selectedBuyerFromDropdown.entries.length === 0) {
+        toast.error('Selected buyer has no bids yet.');
+        return null;
+      }
+      return selectedBuyerFromDropdown;
     }
-    const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
-    return { ...b, grandTotal, pendingBalance: grandTotal };
-  }, []);
 
-  // Update brokerage/charges on a line item
-  const updateLineItem = (commIdx: number, itemIdx: number, field: 'brokerage' | 'otherCharges', value: number) => {
+    const raw = buyerBidMarkInput.trim();
+    if (!raw) {
+      toast.error('Enter buyer bid mark');
+      return null;
+    }
+    const q = raw.toLowerCase();
+    const exactBuyer = buyers.find(
+      b =>
+        (b.buyerMark?.trim().toLowerCase() === q)
+        || (b.buyerName?.trim().toLowerCase() === q),
+    );
+    if (exactBuyer) {
+      if (exactBuyer.entries.length === 0) {
+        toast.error('Selected buyer has no bids yet.');
+        return null;
+      }
+      return exactBuyer;
+    }
+
+    const partial = buyers.filter(
+      b =>
+        b.buyerMark?.toLowerCase().includes(q)
+        || b.buyerName?.toLowerCase().includes(q),
+    );
+    if (partial.length === 1) {
+      if (partial[0].entries.length === 0) {
+        toast.error('Selected buyer has no bids yet.');
+        return null;
+      }
+      return partial[0];
+    }
+    if (partial.length > 1) {
+      toast.error('Multiple buyers found. Select one from dropdown.');
+      setShowBuyerSuggestions(true);
+      return null;
+    }
+
+    if (partial.length === 0) {
+      toast.error('No buyer or bids found for this mark. Check completed auctions and weighing.');
+      return null;
+    }
+    return null;
+  }, [buyerBidMarkInput, buyers, selectedBuyerFromDropdown]);
+
+  const handleGetBidsForMark = useCallback(() => {
+    const buyer = findBuyerByInput();
+    if (!buyer) return;
+    setShowBuyerSuggestions(false);
+    setSelectBidBuyer(null);
+    setSelectedBidNumbers([]);
+    generateBill(buyer);
+  }, [findBuyerByInput, generateBill]);
+
+  const handleSelectBidMode = useCallback(() => {
+    const buyer = findBuyerByInput();
+    if (!buyer) return;
+    setShowBuyerSuggestions(false);
+    setSelectBidBuyer(buyer);
+    setSelectedBidNumbers([]);
+    toast.success(`Loaded ${buyer.entries.length} bids. Select required bids to create bill.`);
+  }, [findBuyerByInput]);
+
+  const toggleBidSelection = (bidNumber: number) => {
+    setSelectedBidNumbers(prev =>
+      prev.includes(bidNumber) ? prev.filter(b => b !== bidNumber) : [...prev, bidNumber],
+    );
+  };
+
+  const handleCreateBillFromSelected = useCallback(() => {
+    if (!selectBidBuyer) return;
+    if (selectedBidNumbers.length === 0) {
+      toast.error('Select at least one bid to create bill');
+      return;
+    }
+    const selectedEntries = selectBidBuyer.entries.filter(e => selectedBidNumbers.includes(e.bidNumber));
+    if (selectedEntries.length === 0) {
+      toast.error('Selected bids are not available');
+      return;
+    }
+    generateBill({ ...selectBidBuyer, entries: selectedEntries });
+    setSelectBidBuyer(null);
+    setSelectedBidNumbers([]);
+  }, [generateBill, selectBidBuyer, selectedBidNumbers]);
+
+  // Add a bid from another buyer into the current bill (cross-buyer aggregation).
+
+  // Update numeric fields on a line item (quantity, weight, bid rate, brokerage, other charges)
+  const updateLineItem = (
+    commIdx: number,
+    itemIdx: number,
+    field: 'quantity' | 'weight' | 'baseRate' | 'brokerage' | 'otherCharges',
+    value: number,
+  ) => {
     if (!bill) return;
     const updated = { ...bill };
     const group = { ...updated.commodityGroups[commIdx] };
     const item = { ...group.items[itemIdx] };
-    item[field] = value;
+    (item as any)[field] = value;
     const preset = (item as { presetApplied?: number }).presetApplied ?? 0;
     // REQ-BIL-002: NR = B + P + BRK + Other
     item.newRate = item.baseRate + preset + item.brokerage + item.otherCharges;
-    item.amount = item.newRate * item.quantity;
+    item.amount = (item.weight * item.newRate) / (group.divisor > 0 ? group.divisor : 50);
+
+    // Seller-side dynamic Other Charges (appliesTo=SELLER) - read-only visualization.
+    const commName = group.commodityName;
+    const commodity = commodities.find((c: any) => c.commodity_name === commName);
+    const fullCfg = commodity
+      ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id))
+      : null;
+    const dynCharges = fullCfg?.dynamicCharges ?? [];
+    const divisorUsed = group.divisor > 0 ? group.divisor : 50;
+    const weight = item.weight || 0;
+    const qty = item.quantity || 0;
+    const baseNewRateWithoutOther = item.baseRate + preset + item.brokerage;
+    const baseAmount = (weight * baseNewRateWithoutOther) / divisorUsed;
+    let sellerOtherCharges = 0;
+    dynCharges.forEach((ch: any) => {
+      const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
+      if (appliesTo !== 'SELLER') return;
+      const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
+      const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+      if (value <= 0) return;
+      if (chargeType === 'PERCENT') {
+        const chargeTotal = baseAmount * (value / 100);
+        const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+        sellerOtherCharges += rateAdd;
+      } else {
+        const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
+        if (fixedBasis === 'PER_COUNT') {
+          const chargeTotal = value * qty;
+          const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+          sellerOtherCharges += rateAdd;
+        } else {
+          sellerOtherCharges += value * (divisorUsed / 50);
+        }
+      }
+    });
+    item.sellerOtherCharges = sellerOtherCharges;
+
     group.items = [...group.items];
     group.items[itemIdx] = item;
     group.subtotal = group.items.reduce((s, i) => s + i.amount, 0);
@@ -469,11 +1010,39 @@ const BillingPage = () => {
     setBill(recalcGrandTotal(updated));
   };
 
+  const removeLineItem = (commIdx: number, itemIdx: number) => {
+    if (!bill) return;
+    const updated = { ...bill };
+    const groups = [...updated.commodityGroups];
+    const group = { ...groups[commIdx] };
+    const items = [...group.items];
+    items.splice(itemIdx, 1);
+
+    if (items.length === 0) {
+      groups.splice(commIdx, 1);
+    } else {
+      group.items = items;
+      group.subtotal = items.reduce((s, i) => s + i.amount, 0);
+      group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
+      group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
+      group.totalCharges = group.commissionAmount + group.userFeeAmount;
+      groups[commIdx] = group;
+    }
+
+    updated.commodityGroups = groups;
+    setBill(recalcGrandTotal(updated));
+  };
+
   // Apply global brokerage/charges to all items
   const applyGlobalCharges = () => {
     if (!bill) return;
     const updated = { ...bill };
     updated.commodityGroups = updated.commodityGroups.map(group => {
+      const commodity = commodities.find((c: any) => c.commodity_name === group.commodityName);
+      const fullCfg = commodity
+        ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id))
+        : null;
+      const dynCharges = fullCfg?.dynamicCharges ?? [];
       const items = group.items.map(item => {
         const preset = item.presetApplied ?? 0;
         const brk = bill.brokerageType === 'PERCENT'
@@ -486,7 +1055,39 @@ const BillingPage = () => {
           newRate: item.baseRate + preset + brk + bill.globalOtherCharges,
           amount: 0,
         };
-        newItem.amount = newItem.newRate * newItem.quantity;
+        newItem.amount = (newItem.weight * newItem.newRate) / (group.divisor > 0 ? group.divisor : 50);
+
+        // Seller-side dynamic Other Charges (appliesTo=SELLER) - read-only visualization.
+        const divisorUsed = group.divisor > 0 ? group.divisor : 50;
+        const weight = newItem.weight || 0;
+        const qty = newItem.quantity || 0;
+        const baseNewRateWithoutOther = newItem.baseRate + preset + newItem.brokerage;
+        const baseAmount = (weight * baseNewRateWithoutOther) / divisorUsed;
+        let sellerOtherCharges = 0;
+        dynCharges.forEach((ch: any) => {
+          const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
+          if (appliesTo !== 'SELLER') return;
+          const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
+          const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+          if (value <= 0) return;
+
+          if (chargeType === 'PERCENT') {
+            const chargeTotal = baseAmount * (value / 100);
+            const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+            sellerOtherCharges += rateAdd;
+            return;
+          }
+
+          const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
+          if (fixedBasis === 'PER_COUNT') {
+            const chargeTotal = value * qty;
+            const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
+            sellerOtherCharges += rateAdd;
+          } else {
+            sellerOtherCharges += value * (divisorUsed / 50);
+          }
+        });
+        newItem.sellerOtherCharges = sellerOtherCharges;
         return newItem;
       });
       const subtotal = items.reduce((s, i) => s + i.amount, 0);
@@ -503,24 +1104,28 @@ const BillingPage = () => {
     toast.success('Global charges applied to all line items');
   };
 
-  // Save bill (backend assigns bill number; vouchers created by backend when coolie/freight > 0)
-  const saveBill = async () => {
+  const buildSavePayload = () => {
     if (!bill) return;
-
     const { isValid, errors } = validateBill(bill);
     setValidationErrors(errors);
     if (!isValid) {
       const count = Object.keys(errors).length;
       toast.error(`Please fix ${count} validation ${count === 1 ? 'error' : 'errors'} before saving`);
-      return;
+      return null;
     }
-
     const payload = {
       buyerName: bill.buyerName,
       buyerMark: bill.buyerMark,
       billingName: bill.billingName,
       billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
-      commodityGroups: bill.commodityGroups,
+      // Backend DTO does not accept frontend-only fields (`divisor`, `sellerOtherCharges`).
+      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, ...g }: any) => ({
+        ...g,
+        items: (g.items ?? []).map((it: any) => {
+          const { sellerOtherCharges: _soc, ...restIt } = it;
+          return restIt;
+        }),
+      })),
       buyerCoolie: bill.buyerCoolie ?? 0,
       outboundFreight: bill.outboundFreight ?? 0,
       outboundVehicle: bill.outboundVehicle ?? '',
@@ -533,45 +1138,127 @@ const BillingPage = () => {
       globalOtherCharges: bill.globalOtherCharges ?? 0,
       pendingBalance: bill.pendingBalance ?? bill.grandTotal,
     };
-    if (!can('Billing', 'Create')) {
+    const canCreate = can('Billing', 'Create');
+    const canEdit = can('Billing', 'Edit');
+    const isUpdate = bill.billId && isBackendBillId(bill.billId);
+    if ((isUpdate && !canEdit) || (!isUpdate && !canCreate)) {
       toast.error('You do not have permission to save bills.');
-      return;
+      return null;
     }
+    return { payload, isUpdate };
+  };
+
+  const persistBill = async (): Promise<SalesBillDTO | null> => {
+    const built = buildSavePayload();
+    if (!built) return null;
+    const { payload, isUpdate } = built;
     try {
-      const isUpdate = bill.billId && isBackendBillId(bill.billId);
       const result = isUpdate
-        ? await billingApi.update(bill.billId, payload)
+        ? await billingApi.update(bill!.billId, payload)
         : await billingApi.create(payload);
-      setBill(normalizeBillFromApi(result, fullConfigs, commodities) as BillData);
-      toast.success(`Bill ${result.billNumber} saved!`);
-      setShowPrint(true);
-      loadSavedBills();
+      return result;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save bill');
+      return null;
     }
   };
 
-  const filteredBuyers = useMemo(() => {
-    if (!searchQuery) return buyers;
-    const q = searchQuery.toLowerCase();
-    return buyers.filter(b =>
-      b.buyerMark.toLowerCase().includes(q) ||
-      b.buyerName.toLowerCase().includes(q)
-    );
-  }, [buyers, searchQuery]);
+  const handleSaveDraft = async () => {
+    if (!bill) return;
+    const result = await persistBill();
+    if (!result) return;
+    // Assign bill number on save (completed bill), idempotent if already numbered.
+    const assigned = await billingApi.assignNumber(result.billId);
+    const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
+    // Preserve frontend-only/transient fields that backend does not store.
+    const merged: BillData = {
+      ...normalized,
+      tokenAdvance: bill.tokenAdvance,
+    };
+    setBill(merged);
+    setHasSavedOnce(true);
+    toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
+    loadSavedBills();
+  };
 
-  // Search saved bills
-  const filteredBills = useMemo(() => {
-    if (!searchQuery) return savedBills;
+  // Save bill and open print preview (bill number assigned via separate assign-number call)
+  const saveAndPreparePrint = async () => {
+    if (!bill) return;
+    const result = await persistBill();
+    if (!result) return;
+    try {
+      const assigned = await billingApi.assignNumber(result.billId);
+      const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
+      const merged: BillData = {
+        ...normalized,
+        tokenAdvance: bill.tokenAdvance,
+      };
+      setBill(merged);
+      setHasSavedOnce(true);
+      toast.success(`Bill ${assigned.billNumber} ready for print.`);
+      setShowPrint(true);
+      loadSavedBills();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to prepare bill for print');
+      return;
+    }
+  };
+
+  const filteredBuyerOptions = useMemo(() => {
+    const q = buyerBidMarkInput.trim().toLowerCase();
+    if (!q) return buyers.slice(0, 12);
+    return buyers
+      .filter(
+        b =>
+          b.buyerMark?.toLowerCase().includes(q)
+          || b.buyerName?.toLowerCase().includes(q),
+      )
+      .slice(0, 12);
+  }, [buyers, buyerBidMarkInput]);
+
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      if (!buyerSelectRef.current) return;
+      if (!buyerSelectRef.current.contains(e.target as Node)) {
+        setShowBuyerSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, []);
+
+  const inProgressBills = useMemo(
+    () => savedBills.filter(b => !b.billNumber?.trim()),
+    [savedBills],
+  );
+
+  const numberedBills = useMemo(
+    () => savedBills.filter(b => !!b.billNumber?.trim()),
+    [savedBills],
+  );
+
+  const filteredInProgressBills = useMemo(() => {
+    if (!searchQuery.trim()) return inProgressBills;
     const q = searchQuery.toLowerCase();
-    return savedBills.filter((b: any) =>
+    return inProgressBills.filter((b: any) =>
+      b.buyerMark?.toLowerCase().includes(q) ||
+      b.buyerName?.toLowerCase().includes(q) ||
+      b.billingName?.toLowerCase().includes(q) ||
+      b.outboundVehicle?.toLowerCase().includes(q)
+    );
+  }, [inProgressBills, searchQuery]);
+
+  const filteredSavedBillsOnly = useMemo(() => {
+    if (!searchQuery.trim()) return numberedBills;
+    const q = searchQuery.toLowerCase();
+    return numberedBills.filter((b: any) =>
       b.buyerMark?.toLowerCase().includes(q) ||
       b.buyerName?.toLowerCase().includes(q) ||
       b.billNumber?.toLowerCase().includes(q) ||
       b.billingName?.toLowerCase().includes(q) ||
       b.outboundVehicle?.toLowerCase().includes(q)
     );
-  }, [savedBills, searchQuery]);
+  }, [numberedBills, searchQuery]);
 
   if (!canView) {
     return <ForbiddenPage moduleName="Billing" />;
@@ -581,6 +1268,7 @@ const BillingPage = () => {
   if (showPrint && bill) {
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        <UnsavedChangesDialog />
         {!isDesktop ? (
         <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-[2rem]">
           <div className="relative z-10 flex items-center gap-3">
@@ -663,9 +1351,42 @@ const BillingPage = () => {
                   {(g.gstRate ?? 0) > 0 && <div className="flex justify-between pl-2"><span>GST ({g.gstRate}%)</span><span>₹{Math.round(g.subtotal * (g.gstRate ?? 0) / 100).toLocaleString()}</span></div>}
                 </div>
               ))}
+
+              {/* Overall cumulative row (REQ-BIL-010) */}
+              {(() => {
+                const groups = bill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
+                const totalCommission = groups.reduce((s, g) => s + g.commissionAmount, 0);
+                const totalUserFee = groups.reduce((s, g) => s + g.userFeeAmount, 0);
+                const totalGst = groups.reduce(
+                  (s, g) => s + ((g.gstRate ?? 0) > 0 ? Math.round(g.subtotal * (g.gstRate ?? 0) / 100) : 0),
+                  0,
+                );
+                return (
+                  <div className="mt-1 pt-1 border-t border-dotted border-border/60 text-[10px] space-y-0.5">
+                    <div className="flex justify-between pl-2">
+                      <span className="text-muted-foreground font-semibold">TOTAL</span>
+                      <span className="font-bold">₹{(totalCommission + totalUserFee + totalGst).toLocaleString()}</span>
+                    </div>
+                    {totalCommission > 0 && <div className="flex justify-between pl-2"><span>Commission Total</span><span>₹{totalCommission.toLocaleString()}</span></div>}
+                    {totalUserFee > 0 && <div className="flex justify-between pl-2"><span>User Fee Total</span><span>₹{totalUserFee.toLocaleString()}</span></div>}
+                    {totalGst > 0 && <div className="flex justify-between pl-2"><span>GST Total</span><span>₹{totalGst.toLocaleString()}</span></div>}
+                  </div>
+                );
+              })()}
             </div>
 
-            {bill.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{bill.discountType === 'PERCENT' ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100) : bill.discount}</span></div>}
+            {bill.discount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Discount</span>
+                <span className="text-destructive">
+                  −₹{bill.discountType === 'PERCENT'
+                    ? Math.round(
+                        bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0) * bill.discount / 100,
+                      )
+                    : bill.discount}
+                </span>
+              </div>
+            )}
             {bill.manualRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span></div>}
 
             <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
@@ -683,7 +1404,34 @@ const BillingPage = () => {
             </div>
           </div>
 
-          <div className="flex gap-3 mt-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
+            {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-semibold">Version to print:</span>
+                <select
+                  value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === 'latest') {
+                      setSelectedPrintVersion('latest');
+                    } else {
+                      const num = Number(val);
+                      setSelectedPrintVersion(Number.isFinite(num) ? num : 'latest');
+                    }
+                  }}
+                  className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                >
+                  <option value="latest">Latest (current)</option>
+                  {(bill as any).versions.map((v: any) => (
+                    <option key={v.version} value={String(v.version)}>
+                      v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex gap-3 w-full sm:w-auto">
             <Button onClick={async () => {
               const printedAt = new Date().toISOString();
               try {
@@ -696,10 +1444,20 @@ const BillingPage = () => {
               } catch {
                 // backend optional
               }
-              const ok = await directPrint(generateSalesBillPrintHTML(bill), { mode: "system" });
+
+      let billToPrint: BillData = bill;
+      if (selectedPrintVersion !== 'latest' && Array.isArray((bill as any).versions)) {
+        const versions = (bill as any).versions as any[];
+        const found = versions.find(v => v.version === selectedPrintVersion);
+        if (found && found.data) {
+          billToPrint = normalizeBillFromApi(found.data as any, fullConfigs, commodities) as BillData;
+        }
+      }
+
+      const ok = await directPrint(generateSalesBillPrintHTML(billToPrint), { mode: "system" });
               ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
             }}
-              className="flex-1 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
+              className="flex-1 sm:flex-none h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
               <Printer className="w-5 h-5 mr-2" /> Print Bill
             </Button>
             <Button
@@ -715,6 +1473,7 @@ const BillingPage = () => {
               variant="outline" className="h-12 rounded-xl px-6">
               Done
             </Button>
+            </div>
           </div>
         </div>
         {!isDesktop && <BottomNav />}
@@ -722,388 +1481,119 @@ const BillingPage = () => {
     );
   }
 
-  // ═══ BILL DETAIL SCREEN ═══
-  if (selectedBuyer && bill) {
-    const totalItems = bill.commodityGroups.reduce((s, g) => s + g.items.length, 0);
-
-    return (
-      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
-        {!isDesktop ? (
-        <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            {[...Array(6)].map((_, i) => (
-              <motion.div key={i} className="absolute w-1.5 h-1.5 bg-white/40 rounded-full"
-                style={{ left: `${10 + Math.random() * 80}%`, top: `${10 + Math.random() * 80}%` }}
-                animate={{ y: [-10, 10], opacity: [0.2, 0.6, 0.2] }}
-                transition={{ duration: 2 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-              />
-            ))}
-          </div>
-          <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-3">
-               <button
-                 onClick={() => {
-                   void (async () => {
-                     const ok = await confirmIfDirty();
-                     if (!ok) return;
+  // ═══ BILLING HOME: TABS + LISTS ═══
+  const handleClearBillEditor = () => {
                      setSelectedBuyer(null);
                      setBill(null);
-                   })();
-                 }}
-                aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-                <ArrowLeft className="w-5 h-5 text-white" />
-              </button>
-              <div className="flex-1">
-                <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Receipt className="w-5 h-5" /> Sales Bill
-                </h1>
-                <p className="text-white/70 text-xs">{bill.billNumber || 'New Bill'} · {totalItems} item(s)</p>
-              </div>
-              <button onClick={() => setShowPaymentHistory(!showPaymentHistory)}
-                className="px-2.5 py-1.5 rounded-xl bg-white/15 text-white/80 text-[10px] font-bold flex items-center gap-1">
-                <History className="w-3 h-3" /> History
-              </button>
-            </div>
+    setHasSavedOnce(false);
+  };
 
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <User className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                <p className="text-[9px] text-white/60 uppercase">Buyer</p>
-                <p className="text-[11px] font-semibold text-white truncate">{bill.buyerMark}</p>
-              </div>
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <Package className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                <p className="text-[9px] text-white/60 uppercase">Items</p>
-                <p className="text-[11px] font-semibold text-white">{totalItems}</p>
-              </div>
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <p className="text-base font-bold text-white/90 mb-0.5">₹</p>
-                <p className="text-[9px] text-white/60 uppercase">Total</p>
-                <p className="text-[11px] font-semibold text-white">₹{bill.grandTotal.toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        ) : (
-        <div className="px-8 py-5">
-          <div className="flex items-center gap-4 mb-4">
-            <Button
-              onClick={() => {
-                void (async () => {
-                  const ok = await confirmIfDirty();
-                  if (!ok) return;
-                  setSelectedBuyer(null);
+  const handleCreateNewBill = () => {
                   setBill(null);
-                })();
-              }}
-              variant="outline"
-              size="sm"
-              className="rounded-xl h-9"
-            >
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
-            </Button>
-            <div className="flex-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-indigo-500" /> Sales Bill — {bill.buyerMark}
-              </h2>
-              <p className="text-sm text-muted-foreground">{bill.billNumber || 'New Bill'} · {totalItems} item(s) · ₹{bill.grandTotal.toLocaleString()}</p>
-            </div>
-            <button onClick={() => setShowPaymentHistory(!showPaymentHistory)}
-              className="px-3 py-1.5 rounded-xl bg-muted/50 text-muted-foreground text-xs font-bold flex items-center gap-1.5 hover:bg-muted transition-all">
-              <History className="w-3.5 h-3.5" /> History
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-indigo-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Buyer</p>
-              <p className="text-lg font-black text-foreground">{bill.buyerName} ({bill.buyerMark})</p>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Items</p>
-              <p className="text-lg font-black text-foreground">{totalItems}</p>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-emerald-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Grand Total</p>
-              <p className="text-lg font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</p>
-            </div>
-          </div>
-        </div>
-        )}
+    setHasSavedOnce(false);
+    setEditLocked(false);
+    setBillingMainTab('create');
+  };
 
-        <div className="px-4 mt-4 space-y-3">
-          {/* Billing Name text box */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="glass-card rounded-2xl p-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Billing Name (appears on print) <span className="text-destructive">*</span></p>
-            <Input value={bill.billingName}
-              onChange={e => { setBill({ ...bill, billingName: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.billingName; return n; }); }}
-              className={cn("h-10 rounded-xl text-sm font-medium bg-muted/20 border-border/30", validationErrors.billingName && "border-destructive ring-1 ring-destructive/30")} />
-            {validationErrors.billingName && <p className="text-[10px] text-destructive mt-1">{validationErrors.billingName}</p>}
-          </motion.div>
+  const openBillFromList = (b: SalesBillDTO) => {
+    setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [] });
+    setBill(normalizeBillFromApi(b, fullConfigs, commodities));
+    setEditLocked(false);
+    setBillingMainTab('create');
+  };
 
-          {/* Global Brokerage & Other Charges — Apply to all */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-            className="glass-card rounded-2xl p-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Global Charges (Apply to All Items)</p>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <div>
-                <p className="text-[9px] text-muted-foreground mb-0.5">Brokerage</p>
-                <div className="flex gap-1">
-                  <button onClick={() => setBill({ ...bill, brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
-                    className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
-                    {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
-                  </button>
-                  <Input type="number" value={bill.brokerageValue || ''}
-                    onChange={e => { setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 }); setValidationErrors(prev => { const n = { ...prev }; delete n.brokerageValue; return n; }); }}
-                    className={cn("h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1", validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30")} />
-                </div>
-                {validationErrors.brokerageValue && <p className="text-[9px] text-destructive mt-0.5">{validationErrors.brokerageValue}</p>}
-              </div>
-              <div>
-                <p className="text-[9px] text-muted-foreground mb-0.5">Other Charges (₹)</p>
-                <Input type="number" value={bill.globalOtherCharges || ''}
-                  onChange={e => { setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 }); setValidationErrors(prev => { const n = { ...prev }; delete n.globalOtherCharges; return n; }); }}
-                  className={cn("h-8 rounded-lg text-xs text-center font-bold bg-muted/10", validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30")} />
-                {validationErrors.globalOtherCharges && <p className="text-[9px] text-destructive mt-0.5">{validationErrors.globalOtherCharges}</p>}
-              </div>
-            </div>
-            <Button onClick={applyGlobalCharges} size="sm"
-              className="w-full h-9 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-xs font-bold">
-              Apply to All Line Items
-            </Button>
-          </motion.div>
+  const tabHint = (code: string) => (isDesktop ? ` (${code})` : '');
 
-          {/* Per-commodity breakdown — REQ-BIL-004 */}
-          {bill.commodityGroups.map((group, gi) => (
-            <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + gi * 0.05 }}
-              className="glass-card rounded-2xl overflow-hidden">
-              <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
-                <div className="flex items-center justify-between flex-wrap gap-1">
-                  <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
-                  <div className="flex gap-1.5">
-                    {group.hsnCode && <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">HSN: {group.hsnCode}</span>}
-                    {(group.gstRate ?? 0) > 0 && <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">GST: {group.gstRate}%</span>}
-                  </div>
-                </div>
-              </div>
-              <div className="p-3 space-y-2">
-                {group.items.map((item, ii) => (
-                  <div key={ii} className="p-2.5 rounded-xl bg-muted/15 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-bold text-foreground">Bid #{item.bidNumber} · {item.lotName}</p>
-                        <p className="text-[10px] text-muted-foreground">{item.sellerName} · {item.quantity} bags · {item.weight.toFixed(0)}kg</p>
-                      </div>
-                      <p className="text-sm font-bold text-foreground">₹{item.amount.toLocaleString()}</p>
-                    </div>
-                    <div className={cn("grid gap-1 text-[9px]", (item.presetApplied ?? 0) > 0 ? 'grid-cols-5' : 'grid-cols-4')}>
-                      <div className="text-center p-1 rounded bg-muted/20">
-                        <p className="text-muted-foreground">Base</p>
-                        <p className="font-bold text-foreground">₹{item.baseRate}</p>
-                      </div>
-                      {(item.presetApplied ?? 0) > 0 && (
-                        <div className="text-center p-1 rounded bg-amber-100/50 dark:bg-amber-900/20">
-                          <p className="text-muted-foreground">Preset</p>
-                          <p className="font-bold text-amber-700 dark:text-amber-300">₹{item.presetApplied}</p>
-                        </div>
-                      )}
-                      <div className={cn("text-center p-1 rounded bg-muted/20", validationErrors[`items.${gi}.${ii}.brokerage`] && "ring-1 ring-destructive/40")}>
-                        <p className="text-muted-foreground">BRK</p>
-                        <Input type="number" value={item.brokerage || ''}
-                          onChange={e => { updateLineItem(gi, ii, 'brokerage', parseFloat(e.target.value) || 0); setValidationErrors(prev => { const n = { ...prev }; delete n[`items.${gi}.${ii}.brokerage`]; return n; }); }}
-                          className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
-                        {validationErrors[`items.${gi}.${ii}.brokerage`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.brokerage`]}</p>}
-                      </div>
-                      <div className={cn("text-center p-1 rounded bg-muted/20", validationErrors[`items.${gi}.${ii}.otherCharges`] && "ring-1 ring-destructive/40")}>
-                        <p className="text-muted-foreground">Other</p>
-                        <Input type="number" value={item.otherCharges || ''}
-                          onChange={e => { updateLineItem(gi, ii, 'otherCharges', parseFloat(e.target.value) || 0); setValidationErrors(prev => { const n = { ...prev }; delete n[`items.${gi}.${ii}.otherCharges`]; return n; }); }}
-                          className="h-5 text-[9px] text-center p-0 border-0 bg-transparent font-bold" />
-                        {validationErrors[`items.${gi}.${ii}.otherCharges`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.otherCharges`]}</p>}
-                      </div>
-                      <div className={cn("text-center p-1 rounded bg-primary/10", validationErrors[`items.${gi}.${ii}.newRate`] && "ring-1 ring-destructive/40")}>
-                        <p className="text-primary text-[8px]">New Rate</p>
-                        <p className={cn("font-bold", validationErrors[`items.${gi}.${ii}.newRate`] ? "text-destructive" : "text-primary")}>₹{item.newRate}</p>
-                        {validationErrors[`items.${gi}.${ii}.newRate`] && <p className="text-[7px] text-destructive">{validationErrors[`items.${gi}.${ii}.newRate`]}</p>}
-                      </div>
-                    </div>
-                    {(validationErrors[`items.${gi}.${ii}.quantity`] || validationErrors[`items.${gi}.${ii}.weight`]) && (
-                      <p className="text-[8px] text-destructive">{validationErrors[`items.${gi}.${ii}.quantity`] || validationErrors[`items.${gi}.${ii}.weight`]}</p>
-                    )}
-                  </div>
-                ))}
-                {/* Commodity subtotals */}
-                <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="font-bold text-foreground">₹{group.subtotal.toLocaleString()}</span>
-                  </div>
-                  {group.commissionPercent > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span>
-                      <span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span>
-                    </div>
-                  )}
-                  {group.userFeePercent > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span>
-                      <span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span>
-                    </div>
-                  )}
-                  {(group.gstRate ?? 0) > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">GST ({group.gstRate}%)</span>
-                      <span className="text-foreground">₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-
-          {/* Additions Panel */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className="glass-card rounded-2xl p-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Additions</p>
-            <div className="space-y-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-foreground flex-1">Buyer Coolie (Rate × Qty)</p>
-                  <Input type="number" value={bill.buyerCoolie || ''}
-                    onChange={e => { setBill(recalcGrandTotal({ ...bill, buyerCoolie: parseInt(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.buyerCoolie; return n; }); }}
-                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")} />
-                </div>
-                {validationErrors.buyerCoolie && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.buyerCoolie}</p>}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-foreground flex-1">Outbound Freight</p>
-                  <Input type="number" value={bill.outboundFreight || ''}
-                    onChange={e => { setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundFreight; return n; }); }}
-                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")} />
-                </div>
-                {validationErrors.outboundFreight && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundFreight}</p>}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
-                  <Input value={bill.outboundVehicle}
-                    onChange={e => { setBill({ ...bill, outboundVehicle: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundVehicle; return n; }); }}
-                    placeholder="MH-12-XX-1234"
-                    className={cn("h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")} />
-                </div>
-                {validationErrors.outboundVehicle && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundVehicle}</p>}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Discount & Round Off — REQ-BIL-009 */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-            className="glass-card rounded-2xl p-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Discount & Adjustments</p>
-            <div className="space-y-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-foreground flex-1">Discount</p>
-                  <button onClick={() => setBill({ ...bill, discountType: bill.discountType === 'PERCENT' ? 'AMOUNT' : 'PERCENT' })}
-                    className="px-2 py-1 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground">
-                    {bill.discountType === 'PERCENT' ? '%' : '₹'}
-                  </button>
-                  <Input type="number" value={bill.discount || ''}
-                    onChange={e => { setBill(recalcGrandTotal({ ...bill, discount: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.discount; return n; }); }}
-                    className={cn("h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")} />
-                </div>
-                {validationErrors.discount && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.discount}</p>}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-foreground flex-1">Manual Round Off</p>
-                  <Input type="number" value={bill.manualRoundOff || ''}
-                    onChange={e => { setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.manualRoundOff; return n; }); }}
-                    className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
-                    placeholder="±" />
-                </div>
-                {validationErrors.manualRoundOff && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.manualRoundOff}</p>}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Grand Total Footer — REQ-BIL-009 */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-            className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Commodity Totals</span>
-                <span className="font-bold text-foreground">
-                  ₹{bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0).toLocaleString()}
-                </span>
-              </div>
-              {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">+ Additions</span>
-                  <span className="text-foreground">₹{(bill.buyerCoolie + bill.outboundFreight).toLocaleString()}</span>
-                </div>
-              )}
-              {bill.discount > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">− Discount</span>
-                  <span className="text-destructive">
-                    −₹{bill.discountType === 'PERCENT'
-                      ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100).toLocaleString()
-                      : bill.discount.toLocaleString()}
-                  </span>
-                </div>
-              )}
-              {bill.manualRoundOff !== 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Round Off</span>
-                  <span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-lg border-t border-border/50 pt-2">
-                <span className="font-bold text-foreground">Grand Total</span>
-                <span className="font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
-              </div>
-              <p className="text-[9px] text-muted-foreground text-center">GT = Σ(Commodity) + Additions − Discount + Round Off</p>
-            </div>
-
-            {bill.pendingBalance > 0 && (
-              <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-400/20">
-                <div className="flex justify-between text-xs">
-                  <span className="text-amber-600 dark:text-amber-400 font-semibold">Pending Balance</span>
-                  <span className="font-bold text-amber-600 dark:text-amber-400">₹{bill.pendingBalance.toLocaleString()}</span>
-                </div>
-              </div>
-            )}
-
-            <Button onClick={saveBill}
-              className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-base shadow-lg">
-              <Save className="w-5 h-5 mr-2" /> Generate Bill & Print
-            </Button>
-          </motion.div>
-
-          {/* Payment History (toggle) */}
-          <AnimatePresence>
-            {showPaymentHistory && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                className="glass-card rounded-2xl p-3 overflow-hidden">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Payment History</p>
-                <p className="text-xs text-muted-foreground text-center py-4">No payments recorded yet</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-        {!isDesktop && <BottomNav />}
-      </div>
-    );
-  }
-
-  // ═══ BUYER LIST / BILL SEARCH ═══
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
       <UnsavedChangesDialog />
+
+      <Dialog open={!!restorePendingPhone} onOpenChange={open => { if (!open) setRestorePendingPhone(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore contact?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This phone exists on an inactive contact. Restore it to use again?
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestorePendingPhone(null)}>Cancel</Button>
+            <Button onClick={handleRestoreContactFromBilling} disabled={!canEditContact}>Restore</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AnimatePresence>
+        {contactSheetOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-end lg:items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={e => { if (e.target === e.currentTarget) closeContactSheet(); }}
+          >
+            <motion.div
+              initial={{ y: 400 }}
+              animate={{ y: 0 }}
+              exit={{ y: 400 }}
+              transition={{ type: 'spring', damping: 30 }}
+              className="w-full max-w-lg rounded-t-3xl lg:rounded-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl border border-border/30"
+              style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-10 h-1 bg-muted-foreground/20 rounded-full mx-auto mb-1 lg:hidden" />
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-bold text-foreground">Register Contact</h3>
+                <button type="button" onClick={closeContactSheet} className="w-8 h-8 rounded-full bg-muted flex items-center justify-center" aria-label="Close">
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Full Name *</label>
+                <Input placeholder="e.g., Ramesh Kumar" value={contactForm.name}
+                  onChange={e => setContactForm(p => ({ ...p, name: e.target.value }))}
+                  className={cn('h-12 rounded-xl', contactErrors.name && 'border-destructive')} />
+                {contactErrors.name && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{contactErrors.name}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Phone Number * <span className="text-emerald-500 font-normal">(Primary ID)</span></label>
+                <Input placeholder="e.g., 9876543210" value={contactForm.phone}
+                  onChange={e => setContactForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                  className={cn('h-12 rounded-xl', contactErrors.phone && 'border-destructive')}
+                  type="tel" maxLength={10} />
+                {contactErrors.phone && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{contactErrors.phone}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Mark <span className="text-muted-foreground/60 font-normal">(Short Code)</span></label>
+                <Input placeholder="e.g., VT, ML, AB" value={contactForm.mark}
+                  onChange={e => setContactForm(p => ({ ...p, mark: e.target.value.toUpperCase().slice(0, 4) }))}
+                  className={cn('h-12 rounded-xl', contactErrors.mark && 'border-destructive')} maxLength={4} />
+                {contactErrors.mark && <p className="text-xs text-destructive mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{contactErrors.mark}</p>}
+                {!contactErrors.mark && <p className="text-[10px] text-muted-foreground mt-1">Used for quick auto-complete in transaction screens</p>}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Address</label>
+                <Input placeholder="e.g., Village Pune, Market Yard" value={contactForm.address}
+                  onChange={e => setContactForm(p => ({ ...p, address: e.target.value }))}
+                  className="h-12 rounded-xl" />
+              </div>
+              <div className="flex items-center gap-2">
+                <input id="billing-enable-portal" type="checkbox" className="w-4 h-4 rounded border border-emerald-500" checked={contactForm.enablePortal} onChange={e => setContactForm(p => ({ ...p, enablePortal: e.target.checked }))} disabled />
+                <label htmlFor="billing-enable-portal" className="text-xs text-muted-foreground">Contact Portal login (managed from self-signup/profile in this version)</label>
+              </div>
+              <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 px-3 py-2 flex items-start gap-2">
+                <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+                <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact registered. A receivable ledger is created automatically.</p>
+              </div>
+              <Button onClick={submitBillingContactAdd}
+                className="w-full h-14 rounded-xl text-lg font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-xl shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-600">
+                Register Contact
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {!isDesktop ? (
       <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-[2rem] relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
@@ -1117,142 +1607,1026 @@ const BillingPage = () => {
           ))}
         </div>
         <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-3">
-            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+          <div className="flex items-start gap-2 mb-3">
+            <button type="button" onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0 mt-0.5">
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                <span className="text-xl font-black">₹</span> Billing (Sales Bill)
+                <span className="text-xl font-black">₹</span> Billing
               </h1>
-              <p className="text-white/70 text-xs mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
+              <p className="text-white/70 text-xs mt-0.5">Sales bill · {buyers.length} buyer{buyers.length !== 1 ? 's' : ''} with bids</p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0 items-end">
+              <Button type="button" size="sm" variant="secondary" className="h-9 rounded-xl bg-white/20 text-white border-0 hover:bg-white/30 shadow-none text-xs px-2.5"
+                onClick={() => void handleResync()} disabled={resyncing} aria-label="Resync billing data">
+                {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                <span className="ml-1 hidden sm:inline">Resync</span>
+              </Button>
+              <Button type="button" size="sm" variant="secondary" className="h-9 rounded-xl bg-white/20 text-white border-0 hover:bg-white/30 shadow-none text-xs px-2.5"
+                onClick={() => void openContactFromBilling()} aria-label="Create contact">
+                <UserPlus className="w-4 h-4" />
+                <span className="ml-1 hidden sm:inline">Contact</span>
+              </Button>
             </div>
           </div>
 
-          <div className="flex gap-2 mb-3">
-            <button onClick={() => setBillSearchMode('buyer')}
-              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
-                billSearchMode === 'buyer'
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
+            <button type="button" onClick={() => setBillingMainTab('create')}
+              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all text-left sm:text-center',
+                billingMainTab === 'create'
                   ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/70 hover:text-white')}>
-              <User className="w-4 h-4" /> New Bill
+                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              <Plus className="w-4 h-4 shrink-0 hidden sm:block" />
+              <span>Create New Bill{tabHint('Alt X')}</span>
             </button>
-            <button onClick={() => setBillSearchMode('bill')}
-              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
-                billSearchMode === 'bill'
+            <button type="button" onClick={() => setBillingMainTab('progress')}
+              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all',
+                billingMainTab === 'progress'
                   ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/70 hover:text-white')}>
-              <FileText className="w-4 h-4" /> Saved Bills
+                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              <Clock className="w-4 h-4 shrink-0 hidden sm:block" />
+              <span>Bill In Progress{tabHint('Alt Y')}</span>
+            </button>
+            <button type="button" onClick={() => setBillingMainTab('saved')}
+              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all',
+                billingMainTab === 'saved'
+                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              <FileText className="w-4 h-4 shrink-0 hidden sm:block" />
+              <span>Bills Saved{tabHint('Alt Z')}</span>
             </button>
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-            <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
-              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
-          </div>
+          {(billingMainTab === 'progress' || billingMainTab === 'saved') && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+              <input aria-label="Search bills" placeholder="Search mark, vehicle, bill #…"
+                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30" />
+            </div>
+          )}
         </div>
       </div>
       ) : (
-      <div className="px-8 py-5">
-        <div className="mb-4">
-          <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-            <span className="text-xl font-black text-indigo-500">₹</span> Billing (Sales Bill)
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers · Invoicing & bill generation</p>
+      <div className="px-4 sm:px-8 py-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <span className="text-xl font-black text-indigo-500">₹</span> Billing (Sales Bill)
+            </h2>
+            <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers with bids · Invoicing & generation</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end w-full lg:w-auto">
+            <Button type="button" variant="outline" size="sm" className="rounded-xl h-9 gap-2" onClick={() => void handleResync()} disabled={resyncing}>
+              {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Resync
+            </Button>
+            <Button type="button" size="sm" className="rounded-xl h-9 gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0" onClick={() => void openContactFromBilling()}>
+              <UserPlus className="w-4 h-4" />
+              Create contact
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap mb-4">
-          <div className="flex gap-2">
-            <button onClick={() => setBillSearchMode('buyer')}
-              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
-                billSearchMode === 'buyer' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
-              <User className="w-4 h-4" /> New Bill
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-4">
+          <div className="flex gap-2 flex-wrap">
+            <button type="button" onClick={() => setBillingMainTab('create')}
+              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
+                billingMainTab === 'create' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <Plus className="w-4 h-4" /> Create New Bill{tabHint('Alt X')}
             </button>
-            <button onClick={() => setBillSearchMode('bill')}
-              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
-                billSearchMode === 'bill' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
-              <FileText className="w-4 h-4" /> Saved Bills
+            <button type="button" onClick={() => setBillingMainTab('progress')}
+              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
+                billingMainTab === 'progress' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <Clock className="w-4 h-4" /> Bill In Progress{tabHint('Alt Y')}
+            </button>
+            <button type="button" onClick={() => setBillingMainTab('saved')}
+              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
+                billingMainTab === 'saved' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              <FileText className="w-4 h-4" /> Bills Saved{tabHint('Alt Z')}
             </button>
           </div>
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input aria-label="Search" placeholder={billSearchMode === 'buyer' ? 'Search buyer mark, name…' : 'Search bill #, mark, vehicle…'}
-              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
-          </div>
+          {(billingMainTab === 'progress' || billingMainTab === 'saved') && (
+            <div className="relative w-full min-w-0 lg:flex-1 lg:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input aria-label="Search bills" placeholder="Bill #, mark, vehicle…"
+                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
+            </div>
+          )}
         </div>
       </div>
       )}
 
       <div className="px-4 mt-4 space-y-2">
-        {billSearchMode === 'buyer' ? (
-          // New bill — buyer list
-          filteredBuyers.length === 0 ? (
-            <div className="glass-card rounded-2xl p-8 text-center">
-              <Receipt className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground font-medium">
-                {buyers.length === 0 ? 'No buyer purchases found' : 'No matching buyers'}
-              </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                {buyers.length === 0 ? 'Complete auctions first to generate bills' : 'Try a different search'}
-              </p>
-              {buyers.length === 0 && (
-                <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-xl">
-                  Go to Auctions
-                </Button>
+        {billingMainTab === 'create' && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-4 sm:p-5 space-y-4 overflow-visible relative z-30">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
+              <div ref={buyerSelectRef} className="relative">
+              <Input
+                value={buyerBidMarkInput}
+                onFocus={() => setShowBuyerSuggestions(true)}
+                onChange={e => {
+                  setBuyerBidMarkInput(e.target.value);
+                  setSelectedBuyerFromDropdown(null);
+                  setShowBuyerSuggestions(true);
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleGetBidsForMark();
+                  }
+                  if (e.key === 'Escape') setShowBuyerSuggestions(false);
+                }}
+                placeholder="Search buyer mark or name..."
+                className="h-11 sm:h-12 rounded-xl text-base font-medium bg-muted/20 border-border/30 pr-9"
+                autoCapitalize="characters"
+              />
+              <button
+                type="button"
+                onClick={() => setShowBuyerSuggestions(prev => !prev)}
+                className="absolute right-2 top-[2.15rem] h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted/40"
+                aria-label="Toggle buyer suggestions"
+              >
+                <ChevronDown className={cn('w-4 h-4 transition-transform', showBuyerSuggestions && 'rotate-180')} />
+              </button>
+              {showBuyerSuggestions && (
+                <div className="absolute z-50 top-full mt-1 w-full max-h-56 overflow-y-auto rounded-xl border border-border bg-background shadow-lg">
+                  {filteredBuyerOptions.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-muted-foreground">No buyers match your search.</p>
+                  ) : (
+                    filteredBuyerOptions.map(b => (
+                      <button
+                        type="button"
+                        key={`${b.buyerMark}-${b.buyerName}`}
+                        onClick={() => {
+                          setSelectedBuyerFromDropdown(b);
+                          setBuyerBidMarkInput(b.buyerMark || b.buyerName);
+                          setShowBuyerSuggestions(false);
+                        }}
+                        className={cn(
+                          'w-full text-left px-3 py-2.5 border-b border-border/40 last:border-b-0 hover:bg-muted/40 transition-colors',
+                          selectedBuyerFromDropdown?.buyerMark === b.buyerMark && selectedBuyerFromDropdown?.buyerName === b.buyerName && 'bg-primary/10',
+                        )}
+                      >
+                        <p className="text-xs font-semibold text-foreground">{b.buyerMark} - {b.buyerName}</p>
+                        <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
+                      </button>
+                    ))
+                  )}
+                </div>
               )}
             </div>
-          ) : (
-            filteredBuyers.map((buyer, i) => {
-              const totalQty = buyer.entries.reduce((s, e) => s + e.quantity, 0);
-              const totalAmount = buyer.entries.reduce((s, e) => s + (e.rate * e.quantity), 0);
-              const commodities = [...new Set(buyer.entries.map(e => e.commodityName))];
-              return (
-                <motion.button key={buyer.buyerMark + i}
-                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.03 }}
-                  onClick={() => generateBill(buyer)}
-                  className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all group">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shadow-md flex-shrink-0">
-                      <span className="text-white font-black text-sm">{buyer.buyerMark}</span>
-                    </div>
+              <Button type="button" onClick={handleGetBidsForMark} className="h-11 sm:h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-sm shadow-md sm:self-end">
+                Get Bid
+              </Button>
+              <Button type="button" onClick={handleSelectBidMode} variant="outline" className="h-11 sm:h-12 rounded-xl font-bold text-sm sm:self-end">
+                Select Bid
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Enter the same mark or name used on auction bids, then open the bill form. Use Resync if bids just finished weighing.
+            </p>
+            {selectBidBuyer && (
+              <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{selectBidBuyer.buyerName} ({selectBidBuyer.buyerMark})</p>
+                    <p className="text-xs text-muted-foreground">{selectBidBuyer.entries.length} bid(s) found</p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => { setSelectBidBuyer(null); setSelectedBidNumbers([]); }}
+                    variant="ghost"
+                    className="h-8 text-xs"
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                  {selectBidBuyer.entries.map((entry) => {
+                    const checked = selectedBidNumbers.includes(entry.bidNumber);
+                    return (
+                      <button
+                        type="button"
+                        key={`${entry.bidNumber}-${entry.lotId}`}
+                        onClick={() => toggleBidSelection(entry.bidNumber)}
+                        className={cn(
+                          "w-full text-left rounded-lg border p-2.5 transition-all",
+                          checked ? "border-primary/50 bg-primary/10" : "border-border/50 bg-background/50 hover:bg-muted/30",
+                        )}
+                      >
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onClick={e => e.stopPropagation()}
+                            onChange={() => toggleBidSelection(entry.bidNumber)}
+                            className="mt-0.5 h-4 w-4 rounded border-border"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-foreground">Bid #{entry.bidNumber} · {entry.lotName}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {entry.sellerName} · {entry.quantity} bags · {entry.weight.toFixed(0)}kg @ ₹{entry.rate}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleCreateBillFromSelected}
+                  disabled={selectedBidNumbers.length === 0}
+                  className="w-full h-10 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold disabled:opacity-50"
+                >
+                  Create Bill From Selected ({selectedBidNumbers.length})
+                </Button>
+              </div>
+            )}
+            {buyers.length === 0 && (
+              <div className="rounded-xl bg-muted/30 p-4 text-center space-y-2">
+                <p className="text-sm text-muted-foreground">No auction bids loaded yet.</p>
+                <Button type="button" onClick={() => navigate('/auctions')} variant="outline" className="rounded-xl">Go to Auctions</Button>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {bill && selectedBuyer && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+            <div className="glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex items-start gap-2 min-w-0">
+                  <Receipt className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" aria-hidden />
+                  <div className="min-w-0">
+                    <h3 className="text-sm sm:text-base font-bold text-foreground">
+                      Sales bill — {bill.buyerName} ({bill.buyerMark})
+                    </h3>
+                    <p className="text-[10px] sm:text-sm text-muted-foreground">
+                      {bill.billNumber || 'New Bill'} · {bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)} item(s) · ₹{bill.grandTotal.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <Button type="button" variant="outline" size="sm" className="rounded-xl h-9" onClick={handleClearBillEditor}>
+                Change buyer
+              </Button>
+            </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
+                  <User className="w-3.5 h-3.5 text-muted-foreground mx-auto mb-0.5" />
+                  <p className="text-[9px] text-muted-foreground uppercase">Buyer</p>
+                  <p className="text-[11px] sm:text-sm font-semibold text-foreground truncate">{bill.buyerMark}</p>
+                </div>
+                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
+                  <Package className="w-3.5 h-3.5 text-muted-foreground mx-auto mb-0.5" />
+                  <p className="text-[9px] text-muted-foreground uppercase">Items</p>
+                  <p className="text-[11px] sm:text-sm font-semibold text-foreground">{bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)}</p>
+                </div>
+                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">₹</p>
+                  <p className="text-[9px] text-muted-foreground uppercase">Total</p>
+                  <p className="text-[11px] sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              className="glass-card rounded-2xl p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="sm:flex-1 sm:max-w-xs">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                    Billing Name (appears on print) <span className="text-destructive">*</span>
+                  </p>
+                  <Input
+                    value={bill.billingName}
+                    onChange={e => {
+                      setBill({ ...bill, billingName: e.target.value });
+                      setValidationErrors(prev => {
+                        const n = { ...prev };
+                        delete n.billingName;
+                        return n;
+                      });
+                    }}
+                    className={cn(
+                      "h-9 rounded-xl text-sm font-medium bg-muted/20 border-border/30",
+                      validationErrors.billingName && "border-destructive ring-1 ring-destructive/30",
+                    )}
+                  />
+                  {validationErrors.billingName && (
+                    <p className="text-[10px] text-destructive mt-1">{validationErrors.billingName}</p>
+                  )}
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 sm:text-right">
+                    Global Charges (Apply to All Items)
+                  </p>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-foreground truncate">{buyer.buyerName}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                        <span>{totalQty} bags</span>
-                        <span>•</span>
-                        <span>{buyer.entries.length} bid(s)</span>
-                        <span>•</span>
-                        <span>{commodities.join(', ')}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBill({
+                              ...bill,
+                              brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                            })
+                          }
+                          className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground"
+                        >
+                          {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
+                        </button>
+                        <Input
+                          type="number"
+                          value={bill.brokerageValue || ""}
+                          onChange={e => {
+                            setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 });
+                            setValidationErrors(prev => {
+                              const n = { ...prev };
+                              delete n.brokerageValue;
+                              return n;
+                            });
+                          }}
+                          placeholder="Brokerage"
+                          className={cn(
+                            "h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
+                            validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30",
+                          )}
+                        />
                       </div>
+                      {validationErrors.brokerageValue && (
+                        <p className="text-[9px] text-destructive mt-0.5 text-right">
+                          {validationErrors.brokerageValue}
+                        </p>
+                      )}
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-bold text-foreground">₹{totalAmount.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted-foreground">est. total</p>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          value={bill.globalOtherCharges || ""}
+                          onChange={e => {
+                            setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 });
+                            setValidationErrors(prev => {
+                              const n = { ...prev };
+                              delete n.globalOtherCharges;
+                              return n;
+                            });
+                          }}
+                          placeholder="Other Charges (₹)"
+                          className={cn(
+                            "h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
+                            validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30",
+                          )}
+                        />
+                        <Button
+                          onClick={applyGlobalCharges}
+                          size="sm"
+                          type="button"
+                          className="h-8 px-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[11px] font-bold whitespace-nowrap"
+                        >
+                          Apply to All
+                        </Button>
+                      </div>
+                      {validationErrors.globalOtherCharges && (
+                        <p className="text-[9px] text-destructive mt-0.5 text-right">
+                          {validationErrors.globalOtherCharges}
+                        </p>
+                      )}
                     </div>
                   </div>
-                </motion.button>
-              );
-            })
+                </div>
+              </div>
+            </motion.div>
+
+            {bill.commodityGroups.map((group, gi) => (
+              <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 + gi * 0.05 }}
+                className="glass-card rounded-2xl overflow-hidden">
+                <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {group.hsnCode && (
+                        <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">
+                          HSN: {group.hsnCode}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-muted-foreground">Comm %</span>
+                        <Input
+                          type="number"
+                          value={group.commissionPercent}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            if (!bill) return;
+                            const updated = { ...bill };
+                            const g = { ...updated.commodityGroups[gi] };
+                            g.commissionPercent = val;
+                            g.commissionAmount = Math.round(g.subtotal * g.commissionPercent / 100);
+                            g.totalCharges = g.commissionAmount + g.userFeeAmount;
+                            updated.commodityGroups = [...updated.commodityGroups];
+                            updated.commodityGroups[gi] = g;
+                            setBill(recalcGrandTotal(updated));
+                          }}
+                          className="h-6 w-14 text-[10px] text-right px-1 py-0 rounded bg-white/80 border border-border/60"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-muted-foreground">User Fee %</span>
+                        <Input
+                          type="number"
+                          value={group.userFeePercent}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            if (!bill) return;
+                            const updated = { ...bill };
+                            const g = { ...updated.commodityGroups[gi] };
+                            g.userFeePercent = val;
+                            g.userFeeAmount = Math.round(g.subtotal * g.userFeePercent / 100);
+                            g.totalCharges = g.commissionAmount + g.userFeeAmount;
+                            updated.commodityGroups = [...updated.commodityGroups];
+                            updated.commodityGroups[gi] = g;
+                            setBill(recalcGrandTotal(updated));
+                          }}
+                          className="h-6 w-14 text-[10px] text-right px-1 py-0 rounded bg-white/80 border border-border/60"
+                        />
+                      </div>
+                      {(group.gstRate ?? 0) > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                          GST: {group.gstRate}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-3 space-y-2">
+                  {/* Table header for commodity items */}
+                  <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
+                    <span>Item</span>
+                    <span>Qty</span>
+                    <span>Weight (kg)</span>
+                    <span>Avg Wt (kg)</span>
+                    <span>Other Charges</span>
+                    <span>Brokerage (₹)</span>
+                    <span>Value</span>
+                    <span>Bid Rate (₹)</span>
+                    <span>New Rate (₹)</span>
+                    <span>Amount (₹)</span>
+                    <span>Action</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {group.items.map((item, ii) => {
+                      const avgWeight = item.quantity > 0 ? item.weight / item.quantity : 0;
+                      const baseValue = (item.weight * item.baseRate) / (group.divisor || 50 || 50);
+                      const bounds = commodityAvgWeightBounds[group.commodityName];
+                      const avgBelowMin = bounds != null && bounds.min > 0 && avgWeight < bounds.min;
+                      const avgAboveMax = bounds != null && bounds.max > 0 && avgWeight > bounds.max;
+                      const avgOutOfRange = avgBelowMin || avgAboveMax;
+                      return (
+                        <div
+                          key={ii}
+                          className="grid gap-1.5 text-[10px] md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2 py-1.5 text-center"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-semibold text-foreground truncate">
+                              {formatLotIdentifierForBillEntry(item)}
+                            </p>
+                          </div>
+
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.quantity || ""}
+                              onChange={e => {
+                                updateLineItem(gi, ii, "quantity", parseInt(e.target.value, 10) || 0);
+                                setValidationErrors(prev => {
+                                  const n = { ...prev };
+                                  delete n[`items.${gi}.${ii}.quantity`];
+                                  return n;
+                                });
+                              }}
+                              className={cn(
+                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                validationErrors[`items.${gi}.${ii}.quantity`] &&
+                                  "ring-1 ring-destructive/40 rounded",
+                              )}
+                            />
+                            {validationErrors[`items.${gi}.${ii}.quantity`] && (
+                              <p className="mt-0.5 text-[8px] text-destructive">
+                                {validationErrors[`items.${gi}.${ii}.quantity`]}
+                              </p>
+                            )}
+                          </div>
+
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.weight || ""}
+                              onChange={e => {
+                                updateLineItem(gi, ii, "weight", parseFloat(e.target.value) || 0);
+                                setValidationErrors(prev => {
+                                  const n = { ...prev };
+                                  delete n[`items.${gi}.${ii}.weight`];
+                                  return n;
+                                });
+                              }}
+                              className={cn(
+                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                (validationErrors[`items.${gi}.${ii}.weight`] || item.weight === 0) &&
+                                  "ring-1 ring-destructive/40 rounded",
+                              )}
+                            />
+                            {item.weight === 0 && (
+                              <p className="mt-0.5 text-[8px] text-destructive">Weight can&apos;t be zero.</p>
+                            )}
+                            {validationErrors[`items.${gi}.${ii}.weight`] && (
+                              <p className="mt-0.5 text-[8px] text-destructive">
+                                {validationErrors[`items.${gi}.${ii}.weight`]}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className={cn("text-foreground", avgOutOfRange && "text-amber-600 font-semibold")}>
+                            {avgWeight.toFixed(1)}
+                            {avgBelowMin && item.weight > 0 && (
+                              <p className="mt-0.5 text-[8px] text-amber-600">
+                                Avg weight below min ({bounds!.min}kg).
+                              </p>
+                            )}
+                            {avgAboveMax && item.weight > 0 && (
+                              <p className="mt-0.5 text-[8px] text-amber-600">
+                                Avg weight above max ({bounds!.max}kg).
+                              </p>
+                            )}
+                          </div>
+
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.otherCharges || ""}
+                              onChange={e => {
+                                updateLineItem(gi, ii, "otherCharges", parseFloat(e.target.value) || 0);
+                                setValidationErrors(prev => {
+                                  const n = { ...prev };
+                                  delete n[`items.${gi}.${ii}.otherCharges`];
+                                  return n;
+                                });
+                              }}
+                              className={cn(
+                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                validationErrors[`items.${gi}.${ii}.otherCharges`] &&
+                                  "ring-1 ring-destructive/40 rounded",
+                              )}
+                            />
+                            {validationErrors[`items.${gi}.${ii}.otherCharges`] && (
+                              <p className="text-[8px] text-destructive mt-0.5">
+                                {validationErrors[`items.${gi}.${ii}.otherCharges`]}
+                              </p>
+                            )}
+                          </div>
+
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.brokerage || ""}
+                              onChange={e => {
+                                updateLineItem(gi, ii, "brokerage", parseFloat(e.target.value) || 0);
+                                setValidationErrors(prev => {
+                                  const n = { ...prev };
+                                  delete n[`items.${gi}.${ii}.brokerage`];
+                                  return n;
+                                });
+                              }}
+                              className={cn(
+                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                validationErrors[`items.${gi}.${ii}.brokerage`] &&
+                                  "ring-1 ring-destructive/40 rounded",
+                              )}
+                            />
+                            {validationErrors[`items.${gi}.${ii}.brokerage`] && (
+                              <p className="text-[8px] text-destructive mt-0.5">
+                                {validationErrors[`items.${gi}.${ii}.brokerage`]}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="text-foreground font-semibold">
+                            ₹{baseValue.toFixed(2)}
+                          </div>
+
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.baseRate || ""}
+                              onChange={e => {
+                                updateLineItem(gi, ii, "baseRate", parseFloat(e.target.value) || 0);
+                              }}
+                              className="h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            />
+                          </div>
+
+                          <div className="text-primary font-semibold">
+                            ₹{item.newRate}
+                          </div>
+
+                          <div className="text-foreground font-bold">
+                            ₹{item.amount.toLocaleString()}
+                          </div>
+
+                          <div className="flex justify-center">
+                            <button
+                              type="button"
+                              onClick={() => removeLineItem(gi, ii)}
+                              className="inline-flex items-center justify-center rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
+                              aria-label="Remove line item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="font-bold text-foreground">₹{group.subtotal.toLocaleString()}</span>
+                      </div>
+                      {group.commissionPercent > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span>
+                          <span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {group.userFeePercent > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span>
+                          <span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {(group.gstRate ?? 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">GST ({group.gstRate}%)</span>
+                          <span className="text-foreground">
+                            ₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+              className="glass-card rounded-2xl p-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Additions</p>
+              <div className="space-y-2">
+                <div>
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 flex-1 min-w-0 sm:justify-start">
+                      <p className="text-[10px] text-muted-foreground whitespace-nowrap">Buyer Coolie</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-1 min-w-0 sm:justify-end">
+                      <Input
+                        type="number"
+                        value={buyerCoolieRate || ""}
+                        onChange={e => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          setBuyerCoolieRate(rate);
+                          if (!bill) return;
+                          const totalBags = bill.commodityGroups.reduce(
+                            (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
+                            0,
+                          );
+                          const total = rate > 0 && totalBags > 0 ? Math.round(rate * totalBags) : 0;
+                          setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
+                          setValidationErrors(prev => {
+                            const n = { ...prev };
+                          delete n.buyerCoolie;
+                          return n;
+                        });
+                      }}
+                        className={cn(
+                          "h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10",
+                          validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30",
+                        )}
+                        placeholder="Rate / bag (₹)"
+                      />
+                      <span className="h-8 px-2 inline-flex items-center justify-center rounded-lg bg-muted/10 text-xs font-bold text-foreground min-w-[3rem]">
+                        {bill.commodityGroups.reduce(
+                          (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
+                          0,
+                        )}
+                      </span>
+                      <Input
+                        type="number"
+                        value={bill.buyerCoolie || ""}
+                        onChange={e => {
+                          const total = parseInt(e.target.value, 10) || 0;
+                          if (!bill) return;
+                          setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
+                          setValidationErrors(prev => {
+                            const n = { ...prev };
+                          delete n.buyerCoolie;
+                          return n;
+                        });
+                      }}
+                        className={cn(
+                          "h-8 w-28 rounded-lg text-right text-xs font-bold bg-muted/10",
+                          validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30",
+                        )}
+                        placeholder="Total (₹)"
+                      />
+                    </div>
+                  </div>
+                  {validationErrors.buyerCoolie && (
+                    <p className="text-[9px] text-destructive text-right mt-0.5">
+                      {validationErrors.buyerCoolie}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-foreground flex-1">Outbound Freight</p>
+                    <Input type="number" value={bill.outboundFreight || ''}
+                      onChange={e => { setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value, 10) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundFreight; return n; }); }}
+                      className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")} />
+                  </div>
+                  {validationErrors.outboundFreight && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundFreight}</p>}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
+                    <Input value={bill.outboundVehicle}
+                      onChange={e => { setBill({ ...bill, outboundVehicle: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundVehicle; return n; }); }}
+                      placeholder="MH-12-XX-1234"
+                      className={cn("h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")} />
+                  </div>
+                  {validationErrors.outboundVehicle && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundVehicle}</p>}
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+              className="glass-card rounded-2xl p-3">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Discount & Adjustments</p>
+              <div className="space-y-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-foreground flex-1">Discount</p>
+                    <select
+                      value={bill.discountType}
+                      onChange={e => {
+                        const discountType = e.target.value === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
+                        setBill(recalcGrandTotal({ ...bill, discountType }));
+                      }}
+                      className="h-8 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground px-2"
+                    >
+                      <option value="AMOUNT">Amt (₹)</option>
+                      <option value="PERCENT">% (Percent)</option>
+                    </select>
+                    <Input
+                      type="number"
+                      value={bill.discount || ''}
+                      onChange={e => {
+                        const value = parseFloat(e.target.value) || 0;
+                        setBill(recalcGrandTotal({ ...bill, discount: value }));
+                        setValidationErrors(prev => {
+                          const n = { ...prev };
+                          delete n.discount;
+                          return n;
+                        });
+                      }}
+                      className={cn(
+                        "h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10",
+                        validationErrors.discount && "border-destructive ring-1 ring-destructive/30",
+                      )}
+                      placeholder={bill.discountType === 'PERCENT' ? "% value" : "₹ amount"}
+                    />
+                  </div>
+                  {validationErrors.discount && (
+                    <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.discount}</p>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-foreground flex-1">Token Advance</p>
+                    <Input
+                      type="number"
+                      value={bill.tokenAdvance ?? ''}
+                      onChange={e => {
+                        const value = parseFloat(e.target.value);
+                        setBill(recalcGrandTotal({ ...bill, tokenAdvance: Number.isNaN(value) ? 0 : value }));
+                      }}
+                      className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-foreground flex-1">Manual Round Off</p>
+                    <Input type="number" value={bill.manualRoundOff || ''}
+                      onChange={e => { setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.manualRoundOff; return n; }); }}
+                      className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
+                      placeholder="±" />
+                  </div>
+                  {validationErrors.manualRoundOff && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.manualRoundOff}</p>}
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+              className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Commodity Totals</span>
+                  <span className="font-bold text-foreground">
+                    ₹{bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0).toLocaleString()}
+                  </span>
+                </div>
+                {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">+ Additions</span>
+                    <span className="text-foreground">₹{(bill.buyerCoolie + bill.outboundFreight).toLocaleString()}</span>
+                  </div>
+                )}
+                {bill.discount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">− Discount</span>
+                    <span className="text-destructive">
+                      −₹{bill.discountType === 'PERCENT'
+                        ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100).toLocaleString()
+                        : bill.discount.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                {bill.manualRoundOff !== 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Round Off</span>
+                    <span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span>
+                  </div>
+                )}
+                {bill.tokenAdvance > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">− Token Advance</span>
+                    <span className="text-foreground">−₹{bill.tokenAdvance.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-lg border-t border-border/50 pt-2">
+                  <span className="font-bold text-foreground">Grand Total</span>
+                  <span className="font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
+                </div>
+              </div>
+              <p className="text-[9px] text-muted-foreground text-center mt-1.5">
+                GT = Σ(Commodity) + Additions − Discount + Round Off; Pending = GT − Token Advance
+              </p>
+
+              {bill.pendingBalance > 0 && (
+                <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-400/20">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-amber-600 dark:text-amber-400 font-semibold">Pending Balance</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">₹{bill.pendingBalance.toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 space-y-2">
+                <div className="flex flex-wrap gap-2 justify-between items-center">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl h-9 gap-1.5"
+                      onClick={() => setEditLocked(false)}
+                      disabled={!isBackendBillId(bill.billId)}
+                    >
+                      <Edit3 className="w-4 h-4" /> Edit (Alt+E)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="rounded-xl h-9 gap-1.5 bg-gradient-to-r from-indigo-500 to-blue-500 text-white border-0"
+                      onClick={() => void handleSaveDraft()}
+                    >
+                      <Save className="w-4 h-4" /> {bill.billId && isBackendBillId(bill.billId) ? 'Update (Alt+S)' : 'Save (Alt+S)'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl h-9 gap-1.5"
+                      onClick={() => void saveAndPreparePrint()}
+                      disabled={!hasSavedOnce}
+                    >
+                      <Printer className="w-4 h-4" /> Print (Alt+P)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl h-9 gap-1.5"
+                      onClick={handleCreateNewBill}
+                    >
+                      <Plus className="w-4 h-4" /> Create New (Alt+N)
+                    </Button>
+                  </div>
+                  {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="font-semibold">Version:</span>
+                      <select
+                        value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === 'latest') {
+                            setSelectedPrintVersion('latest');
+                          } else {
+                            const num = Number(val);
+                            setSelectedPrintVersion(Number.isFinite(num) ? num : 'latest');
+                          }
+                        }}
+                        className="h-8 rounded-md border border-border bg-background px-2 text-[10px]"
+                      >
+                        <option value="latest">Latest (current)</option>
+                        {(bill as any).versions.map((v: any) => (
+                          <option key={v.version} value={String(v.version)}>
+                            v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+
+          </motion.div>
+        )}
+
+
+        {billingMainTab === 'progress' && (
+          savedBillsLoading ? (
+            <div className="glass-card rounded-2xl p-8 flex justify-center text-muted-foreground">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+          ) : filteredInProgressBills.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <Clock className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">No bills in progress</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">Drafts without a bill number appear here</p>
+            </div>
+          ) : (
+            filteredInProgressBills.map((b: SalesBillDTO, i: number) => (
+              <motion.button type="button" key={String(b.billId)}
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                onClick={() => openBillFromList(b)}
+                className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md flex-shrink-0">
+                    <Clock className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{b.billingName || b.buyerName}</p>
+                    <p className="text-xs text-muted-foreground">{b.buyerMark} · In progress</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold text-foreground">₹{b.grandTotal?.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              </motion.button>
+            ))
           )
-        ) : (
-          // Saved bills search — REQ-BIL searchable
-          filteredBills.length === 0 ? (
+        )}
+
+        {billingMainTab === 'saved' && (
+          savedBillsLoading ? (
+            <div className="glass-card rounded-2xl p-8 flex justify-center text-muted-foreground">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+          ) : filteredSavedBillsOnly.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center">
               <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-sm text-muted-foreground font-medium">No saved bills found</p>
             </div>
           ) : (
-            filteredBills.map((b: any, i: number) => (
-              <motion.button key={b.billId}
+            filteredSavedBillsOnly.map((b: SalesBillDTO, i: number) => (
+              <motion.button type="button" key={String(b.billId)}
                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.03 }}
-                onClick={() => {
-                  setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [] });
-                  setBill(normalizeBillFromApi(b, fullConfigs, commodities));
-                }}
+                onClick={() => openBillFromList(b)}
                 className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center shadow-md flex-shrink-0">
@@ -1260,7 +2634,7 @@ const BillingPage = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-foreground">{b.billNumber}</p>
-                    <p className="text-xs text-muted-foreground">{b.billingName} ({b.buyerMark})</p>
+                    <p className="text-xs text-muted-foreground truncate">{b.billingName} ({b.buyerMark})</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-foreground">₹{b.grandTotal?.toLocaleString()}</p>

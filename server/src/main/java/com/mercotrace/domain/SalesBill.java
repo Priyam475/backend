@@ -38,8 +38,7 @@ public class SalesBill implements Serializable {
     @Column(name = "trader_id", nullable = false)
     private Long traderId;
 
-    @NotNull
-    @Column(name = "bill_number", nullable = false, length = 30)
+    @Column(name = "bill_number", length = 30)
     private String billNumber;
 
     @NotNull
@@ -80,6 +79,10 @@ public class SalesBill implements Serializable {
     @NotNull
     @Column(name = "manual_round_off", precision = 15, scale = 2, nullable = false)
     private BigDecimal manualRoundOff = BigDecimal.ZERO;
+
+    @NotNull
+    @Column(name = "token_advance", precision = 15, scale = 2, nullable = false)
+    private BigDecimal tokenAdvance = BigDecimal.ZERO;
 
     @NotNull
     @Column(name = "grand_total", precision = 15, scale = 2, nullable = false)
@@ -151,6 +154,8 @@ public class SalesBill implements Serializable {
     public void setDiscountType(String discountType) { this.discountType = discountType; }
     public BigDecimal getManualRoundOff() { return manualRoundOff; }
     public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
+    public BigDecimal getTokenAdvance() { return tokenAdvance; }
+    public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
     public BigDecimal getGrandTotal() { return grandTotal; }
     public void setGrandTotal(BigDecimal grandTotal) { this.grandTotal = grandTotal; }
     public String getBrokerageType() { return brokerageType; }

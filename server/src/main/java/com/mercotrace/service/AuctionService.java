@@ -1123,6 +1123,7 @@ public class AuctionService {
                 remainingSelfSale.setIsScribble(Boolean.FALSE);
                 remainingSelfSale.setPresetApplied(entry.getPresetMargin());
                 remainingSelfSale.setPresetType(entry.getPresetType());
+                remainingSelfSale.setTokenAdvance(BigDecimal.ZERO);
                 resultEntries.add(remainingSelfSale);
             }
         }
@@ -1267,6 +1268,7 @@ public class AuctionService {
         dto.setIsScribble(entry.getIsScribble());
         dto.setPresetApplied(entry.getPresetMargin());
         dto.setPresetType(entry.getPresetType());
+        dto.setTokenAdvance(entry.getTokenAdvance());
         return dto;
     }
 

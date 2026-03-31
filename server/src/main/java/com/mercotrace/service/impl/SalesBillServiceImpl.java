@@ -2,8 +2,20 @@ package com.mercotrace.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mercotrace.domain.*;
-import com.mercotrace.repository.*;
+import com.mercotrace.domain.BillNumberSequence;
+import com.mercotrace.domain.Commodity;
+import com.mercotrace.domain.SalesBill;
+import com.mercotrace.domain.SalesBillCommodityGroup;
+import com.mercotrace.domain.SalesBillLineItem;
+import com.mercotrace.domain.SalesBillVersion;
+import com.mercotrace.domain.Trader;
+import com.mercotrace.domain.Voucher;
+import com.mercotrace.repository.BillNumberSequenceRepository;
+import com.mercotrace.repository.CommodityConfigRepository;
+import com.mercotrace.repository.CommodityRepository;
+import com.mercotrace.repository.SalesBillRepository;
+import com.mercotrace.repository.TraderRepository;
+import com.mercotrace.repository.VoucherRepository;
 import com.mercotrace.service.SalesBillService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SalesBillDTOs.*;
@@ -35,6 +47,8 @@ public class SalesBillServiceImpl implements SalesBillService {
     private final TraderRepository traderRepository;
     private final BillNumberSequenceRepository billNumberSequenceRepository;
     private final VoucherRepository voucherRepository;
+    private final CommodityRepository commodityRepository;
+    private final CommodityConfigRepository commodityConfigRepository;
     private final ObjectMapper objectMapper;
 
     public SalesBillServiceImpl(
@@ -43,6 +57,8 @@ public class SalesBillServiceImpl implements SalesBillService {
         TraderRepository traderRepository,
         BillNumberSequenceRepository billNumberSequenceRepository,
         VoucherRepository voucherRepository,
+        CommodityRepository commodityRepository,
+        CommodityConfigRepository commodityConfigRepository,
         ObjectMapper objectMapper
     ) {
         this.traderContextService = traderContextService;
@@ -50,6 +66,8 @@ public class SalesBillServiceImpl implements SalesBillService {
         this.traderRepository = traderRepository;
         this.billNumberSequenceRepository = billNumberSequenceRepository;
         this.voucherRepository = voucherRepository;
+        this.commodityRepository = commodityRepository;
+        this.commodityConfigRepository = commodityConfigRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -82,13 +100,9 @@ public class SalesBillServiceImpl implements SalesBillService {
     @Override
     public SalesBillDTO create(SalesBillCreateOrUpdateRequest request) {
         Long traderId = traderContextService.getCurrentTraderId();
-        String prefix = getBillPrefix(traderId);
-        String billNumber = generateBillNumber(prefix);
-
         SalesBill bill = new SalesBill();
         mapRequestToEntity(request, bill);
         bill.setTraderId(traderId);
-        bill.setBillNumber(billNumber);
         bill = salesBillRepository.save(bill);
 
         createVouchersIfNeeded(traderId, bill.getId(), bill.getBuyerCoolie(), bill.getOutboundFreight());
@@ -124,12 +138,17 @@ public class SalesBillServiceImpl implements SalesBillService {
         mapRequestToEntity(request, bill);
         bill.setBillNumber(bill.getBillNumber() != null ? bill.getBillNumber() : request.getBillNumber());
         bill = salesBillRepository.save(bill);
+        // REQ-BIL-008: keep expense recovery vouchers reconciled with current bill fields
+        createVouchersIfNeeded(traderId, bill.getId(), bill.getBuyerCoolie(), bill.getOutboundFreight());
         return toDto(bill);
     }
 
-    private String getBillPrefix(Long traderId) {
-        return traderRepository.findById(traderId)
-            .map(t -> t.getBillPrefix() != null && !t.getBillPrefix().isBlank() ? t.getBillPrefix().trim() : DEFAULT_BILL_PREFIX)
+    private String getTraderFallbackPrefix(Long traderId) {
+        return traderRepository
+            .findById(traderId)
+            .map(Trader::getBillPrefix)
+            .filter(p -> p != null && !p.isBlank())
+            .map(String::trim)
             .orElse(DEFAULT_BILL_PREFIX);
     }
 
@@ -148,8 +167,112 @@ public class SalesBillServiceImpl implements SalesBillService {
         return key + "-" + String.format("%05d", next);
     }
 
+    /**
+     * Resolve bill prefix based on the bill's commodity groups and commodity config billPrefix values.
+     * If exactly one distinct non-blank commodity billPrefix is found, use it.
+     * Otherwise fall back to trader-level bill prefix.
+     */
+    private String resolveBillPrefixFromCommodities(SalesBill bill) {
+        Long traderId = bill.getTraderId();
+        if (traderId == null) {
+            traderId = traderContextService.getCurrentTraderId();
+        }
+        List<SalesBillCommodityGroup> groups = bill.getCommodityGroups();
+        if (groups == null || groups.isEmpty()) {
+            return getTraderFallbackPrefix(traderId);
+        }
+
+        // SRS (REQ-CNF-007) describes bill prefix rules based on commodity combinations.
+        // Best-effort implementation for common combinations:
+        // Onion => ON, Onion+Potato => OP, Dry Chili => DC, Onion+Dry Chili => OS
+        // For any other mix, fall back to config-prefix heuristic and then trader prefix.
+        boolean hasOnion = groups.stream()
+            .map(SalesBillCommodityGroup::getCommodityName)
+            .filter(n -> n != null)
+            .map(String::toLowerCase)
+            .anyMatch(n -> n.contains("onion"));
+        boolean hasPotato = groups.stream()
+            .map(SalesBillCommodityGroup::getCommodityName)
+            .filter(n -> n != null)
+            .map(String::toLowerCase)
+            .anyMatch(n -> n.contains("potato"));
+        boolean hasDryChili = groups.stream()
+            .map(SalesBillCommodityGroup::getCommodityName)
+            .filter(n -> n != null)
+            .map(String::toLowerCase)
+            .anyMatch(n ->
+                (n.contains("dry") && (n.contains("chili") || n.contains("chilli"))) ||
+                    n.contains("drychili") ||
+                    n.contains("drychilli")
+            );
+
+        String targetPrefixKey = null;
+        if (hasOnion && !hasPotato && !hasDryChili) {
+            targetPrefixKey = "ON";
+        } else if (hasOnion && hasPotato && !hasDryChili) {
+            targetPrefixKey = "OP";
+        } else if (!hasOnion && !hasPotato && hasDryChili) {
+            targetPrefixKey = "DC";
+        } else if (hasOnion && !hasPotato && hasDryChili) {
+            targetPrefixKey = "OS";
+        }
+        java.util.Set<String> prefixes = new java.util.LinkedHashSet<>();
+        for (SalesBillCommodityGroup g : groups) {
+            String commodityName = g.getCommodityName();
+            if (commodityName == null || commodityName.isBlank()) {
+                continue;
+            }
+            Commodity commodity = commodityRepository
+                .findOneByTraderIdAndCommodityNameIgnoreCase(traderId, commodityName.trim())
+                .orElse(null);
+            if (commodity == null) {
+                continue;
+            }
+            commodityConfigRepository
+                .findOneByCommodityId(commodity.getId())
+                .map(cc -> cc.getBillPrefix())
+                .filter(p -> p != null && !p.isBlank())
+                .map(String::trim)
+                .ifPresent(prefixes::add);
+        }
+        if (targetPrefixKey != null && !prefixes.isEmpty()) {
+            for (String p : prefixes) {
+                if (p != null && p.trim().equalsIgnoreCase(targetPrefixKey)) {
+                    return p.trim();
+                }
+            }
+        }
+        if (prefixes.size() == 1) {
+            return prefixes.iterator().next();
+        }
+        return getTraderFallbackPrefix(traderId);
+    }
+
+    @Override
+    public SalesBillDTO assignNumber(Long id) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        SalesBill bill = salesBillRepository
+            .findByIdWithGroupsAndVersions(id)
+            .orElseThrow(() -> new IllegalArgumentException("Sales bill not found: " + id));
+        if (!bill.getTraderId().equals(traderId)) {
+            throw new IllegalArgumentException("Sales bill not found: " + id);
+        }
+        if (bill.getBillNumber() != null && !bill.getBillNumber().isBlank()) {
+            return toDto(bill);
+        }
+        String prefix = resolveBillPrefixFromCommodities(bill);
+        String billNumber = generateBillNumber(prefix);
+        bill.setBillNumber(billNumber);
+        bill = salesBillRepository.save(bill);
+        return toDto(bill);
+    }
+
     private void createVouchersIfNeeded(Long traderId, Long billId, BigDecimal buyerCoolie, BigDecimal outboundFreight) {
         Instant now = Instant.now();
+        // Make voucher creation idempotent across bill updates.
+        voucherRepository.deleteByReferenceTypeAndReferenceId("BUYER_COOLIE", billId);
+        voucherRepository.deleteByReferenceTypeAndReferenceId("OUTBOUND_FREIGHT", billId);
+
         if (buyerCoolie != null && buyerCoolie.compareTo(BigDecimal.ZERO) > 0) {
             Voucher v = new Voucher();
             v.setTraderId(traderId);
@@ -182,6 +305,7 @@ public class SalesBillServiceImpl implements SalesBillService {
         bill.setOutboundVehicle(request.getOutboundVehicle());
         bill.setDiscount(nullToZero(request.getDiscount()));
         bill.setDiscountType(request.getDiscountType() != null ? request.getDiscountType() : "AMOUNT");
+        bill.setTokenAdvance(nullToZero(request.getTokenAdvance()));
         bill.setManualRoundOff(nullToZero(request.getManualRoundOff()));
         bill.setGrandTotal(request.getGrandTotal() != null ? request.getGrandTotal() : BigDecimal.ZERO);
         bill.setBrokerageType(request.getBrokerageType() != null ? request.getBrokerageType() : "AMOUNT");
@@ -236,6 +360,7 @@ public class SalesBillServiceImpl implements SalesBillService {
         dto.setOutboundVehicle(bill.getOutboundVehicle());
         dto.setDiscount(bill.getDiscount());
         dto.setDiscountType(bill.getDiscountType());
+        dto.setTokenAdvance(bill.getTokenAdvance());
         dto.setManualRoundOff(bill.getManualRoundOff());
         dto.setGrandTotal(bill.getGrandTotal());
         dto.setBrokerageType(bill.getBrokerageType());

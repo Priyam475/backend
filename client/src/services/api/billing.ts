@@ -50,6 +50,7 @@ export interface SalesBillDTO {
   outboundVehicle?: string;
   discount: number;
   discountType: 'PERCENT' | 'AMOUNT';
+  tokenAdvance: number;
   manualRoundOff: number;
   grandTotal: number;
   brokerageType: 'PERCENT' | 'AMOUNT';
@@ -73,6 +74,7 @@ export interface SalesBillCreateOrUpdateRequest {
   outboundVehicle?: string;
   discount?: number;
   discountType?: 'PERCENT' | 'AMOUNT';
+  tokenAdvance?: number;
   manualRoundOff?: number;
   brokerageType?: 'PERCENT' | 'AMOUNT';
   brokerageValue?: number;
@@ -185,5 +187,16 @@ export const billingApi = {
       body: JSON.stringify(payload),
     });
     return handleResponse<SalesBillDTO>(res, 'Failed to update sales bill');
+  },
+
+  /**
+   * Assign a bill number based on commodity combination and prefixes.
+   * If the bill already has a number, this is a no-op and returns the existing bill.
+   */
+  async assignNumber(id: string | number): Promise<SalesBillDTO> {
+    const res = await apiFetch(`${BASE}/${encodeURIComponent(String(id))}/assign-number`, {
+      method: 'POST',
+    });
+    return handleResponse<SalesBillDTO>(res, 'Failed to assign bill number');
   },
 };

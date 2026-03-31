@@ -97,6 +97,8 @@ export interface AuctionResultEntryDTO {
   isScribble?: boolean;
   presetApplied?: number;
   presetType?: PresetType;
+   /** Token advance collected at auction stage for this bid (₹). */
+  tokenAdvance?: number;
 }
 
 export interface AuctionResultDTO {

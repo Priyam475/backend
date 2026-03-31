@@ -120,6 +120,7 @@ public final class SalesBillDTOs {
         private String outboundVehicle;
         private BigDecimal discount;
         private String discountType; // PERCENT | AMOUNT
+        private BigDecimal tokenAdvance;
         private BigDecimal manualRoundOff;
         private BigDecimal grandTotal;
         private String brokerageType; // PERCENT | AMOUNT
@@ -152,6 +153,8 @@ public final class SalesBillDTOs {
         public void setDiscount(BigDecimal discount) { this.discount = discount; }
         public String getDiscountType() { return discountType; }
         public void setDiscountType(String discountType) { this.discountType = discountType; }
+        public BigDecimal getTokenAdvance() { return tokenAdvance; }
+        public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
         public BigDecimal getManualRoundOff() { return manualRoundOff; }
         public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
         public BigDecimal getGrandTotal() { return grandTotal; }
@@ -193,6 +196,7 @@ public final class SalesBillDTOs {
         private BigDecimal discount = BigDecimal.ZERO;
         @Pattern(regexp = "PERCENT|AMOUNT", message = "discountType must be PERCENT or AMOUNT")
         private String discountType = "AMOUNT";
+        private BigDecimal tokenAdvance = BigDecimal.ZERO;
         private BigDecimal manualRoundOff = BigDecimal.ZERO;
         @NotNull(message = "grandTotal is required")
         private BigDecimal grandTotal;
@@ -226,6 +230,8 @@ public final class SalesBillDTOs {
         public void setDiscount(BigDecimal discount) { this.discount = discount; }
         public String getDiscountType() { return discountType; }
         public void setDiscountType(String discountType) { this.discountType = discountType; }
+        public BigDecimal getTokenAdvance() { return tokenAdvance; }
+        public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
         public BigDecimal getManualRoundOff() { return manualRoundOff; }
         public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
         public BigDecimal getGrandTotal() { return grandTotal; }
