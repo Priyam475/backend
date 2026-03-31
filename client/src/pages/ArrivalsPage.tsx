@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
 import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail, ArrivalDetail } from '@/services/api/arrivals';
-import ArrivalStatusBadge, { getArrivalStatus, ALL_STATUSES, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
+import ArrivalStatusBadge, { getArrivalStatus, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import FreightDetailsCard from '@/components/arrivals/FreightDetailsCard';
 import SellerInfoCard from '@/components/arrivals/SellerInfoCard';
 import BuyerMarkSection from '@/components/arrivals/BuyerMarkSection';
@@ -734,7 +734,8 @@ const ArrivalsPage = () => {
   const [expandedDetailLoading, setExpandedDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [summaryMode, setSummaryMode] = useState<'arrivals' | 'sellers' | 'lots'>('arrivals');
-  type StatusFilter = 'ALL' | 'COMPLETED' | ArrivalStatus;
+  type StatusFilter = 'ALL' | ArrivalStatus;
+  const SUMMARY_STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'WEIGHED', 'AUCTIONED', 'SETTLED', 'PARTIALLY_COMPLETED'];
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [partialArrivals, setPartialArrivals] = useState<ArrivalSummary[]>([]);
   const [partialArrivalsLoading, setPartialArrivalsLoading] = useState(false);
@@ -1210,7 +1211,6 @@ const ArrivalsPage = () => {
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFilter, number> = {
       ALL: apiArrivals.length + partialArrivals.length,
-      COMPLETED: apiArrivals.length,
       PENDING: 0, WEIGHED: 0, AUCTIONED: 0, SETTLED: 0, PARTIALLY_COMPLETED: partialArrivals.length,
     };
     apiArrivals.forEach(a => {
@@ -1224,17 +1224,19 @@ const ArrivalsPage = () => {
     if (s === 'PARTIALLY_COMPLETED') return 'Partially Completed';
     return s.charAt(0) + s.slice(1).toLowerCase();
   };
-  const activeArrivalsLoading = statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivalsLoading : apiArrivalsLoading;
+  const activeArrivalsLoading =
+    statusFilter === 'ALL'
+      ? apiArrivalsLoading || partialArrivalsLoading
+      : statusFilter === 'PARTIALLY_COMPLETED'
+        ? partialArrivalsLoading
+        : apiArrivalsLoading;
 
-  const loadArrivalsFromApi = async () => {
+  const loadArrivalsFromApi = useCallback(async () => {
     setApiArrivalsLoading(true);
     setPartialArrivalsLoading(true);
     try {
-      const statusParam =
-        statusFilter === 'PENDING' || statusFilter === 'WEIGHED' || statusFilter === 'AUCTIONED' || statusFilter === 'SETTLED'
-          ? statusFilter
-          : undefined;
-      const list = await arrivalsApi.list(0, 100, statusParam, false);
+      // Always load full arrivals list so summary counts stay stable across filter changes.
+      const list = await arrivalsApi.list(0, 100, undefined, false);
       setApiArrivals(list);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load arrivals';
@@ -1245,7 +1247,7 @@ const ArrivalsPage = () => {
     }
     arrivalsApi.list(0, 100, undefined, true).then(setPartialArrivals).catch(() => setPartialArrivals([])).finally(() => setPartialArrivalsLoading(false));
     arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
-  };
+  }, []);
 
   useEffect(() => {
     contactApi.list({ scope: 'participants' }).then(setContacts);
@@ -1255,7 +1257,7 @@ const ArrivalsPage = () => {
 
   useEffect(() => {
     loadArrivalsFromApi();
-  }, [statusFilter]);
+  }, [loadArrivalsFromApi]);
 
   // Close broker dropdown on scroll or resize (same: close when any scroll happens so it doesn't stay stuck)
   useEffect(() => {
@@ -2131,11 +2133,22 @@ const ArrivalsPage = () => {
                     </div>
                     {summaryMode === 'arrivals' && (
                       <div className="flex flex-wrap items-center gap-2 mb-4 text-[11px] sm:overflow-x-auto sm:flex-nowrap sm:pb-1 sm:-mx-0.5 sm:px-0.5 [-webkit-overflow-scrolling:touch]">
-                        <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
-                        <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
-                        <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
-                        {ALL_STATUSES.map(s => (
-                          <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
+                        {SUMMARY_STATUS_FILTERS.map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatusFilter(s)}
+                            className={cn(
+                              'shrink-0 px-4 py-1.5 sm:py-1 rounded-full font-medium transition-colors min-h-[44px] sm:min-h-0',
+                              statusFilter === s
+                                ? s === 'PARTIALLY_COMPLETED'
+                                  ? 'bg-orange-500 text-white shadow-sm'
+                                  : 'bg-[#6075FF] text-white shadow-sm'
+                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700',
+                            )}
+                          >
+                            {s === 'ALL' ? 'All' : statusLabel(s)} ({statusCounts[s]})
+                          </button>
                         ))}
                       </div>
                     )}
@@ -3046,17 +3059,28 @@ const ArrivalsPage = () => {
             </div>
             {summaryMode === 'arrivals' && (
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 text-[11px]">
-                <button type="button" onClick={() => setStatusFilter('ALL')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'ALL' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>All ({statusCounts.ALL})</button>
-                <button type="button" onClick={() => setStatusFilter('COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'COMPLETED' ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Completed ({statusCounts.COMPLETED})</button>
-                <button type="button" onClick={() => setStatusFilter('PARTIALLY_COMPLETED')} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === 'PARTIALLY_COMPLETED' ? 'bg-orange-500 text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>Partially Completed ({statusCounts.PARTIALLY_COMPLETED})</button>
-                {ALL_STATUSES.map(s => (
-                  <button key={s} type="button" onClick={() => setStatusFilter(s)} className={cn('flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors', statusFilter === s ? 'bg-[#6075FF] text-white shadow-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700')}>{statusLabel(s)} ({statusCounts[s]})</button>
+                {SUMMARY_STATUS_FILTERS.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStatusFilter(s)}
+                    className={cn(
+                      'flex-shrink-0 px-4 py-1 rounded-full font-medium transition-colors',
+                      statusFilter === s
+                        ? s === 'PARTIALLY_COMPLETED'
+                          ? 'bg-orange-500 text-white shadow-sm'
+                          : 'bg-[#6075FF] text-white shadow-sm'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700',
+                    )}
+                  >
+                    {s === 'ALL' ? 'All' : statusLabel(s)} ({statusCounts[s]})
+                  </button>
                 ))}
               </div>
             )}
           </div>
           <div className="px-4 space-y-2.5">
-            {(statusFilter === 'PARTIALLY_COMPLETED' ? partialArrivalsLoading : apiArrivalsLoading) ? (
+            {activeArrivalsLoading ? (
               <div className="glass-card p-8 rounded-2xl text-center">
                 <p className="text-muted-foreground">Loading arrivals…</p>
               </div>
