@@ -767,9 +767,10 @@ const ArrivalsPage = () => {
   const isMultiSellerRef = useRef(isMultiSeller);
   const sellerCountRef = useRef(0);
 
-  // Seller search (replaces "instant blank seller" UX)
+  // Seller add panel (name + alias, with suggestions while typing name)
   const [sellerSearchOpen, setSellerSearchOpen] = useState(false);
-  const [sellerSearchTerm, setSellerSearchTerm] = useState('');
+  const [sellerDraftName, setSellerDraftName] = useState('');
+  const [sellerDraftMark, setSellerDraftMark] = useState('');
   const [sellerDropdown, setSellerDropdown] = useState(false);
   const sellerSearchWrapRef = useRef<HTMLDivElement>(null);
   const sellerSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1355,16 +1356,16 @@ const ArrivalsPage = () => {
     ).slice(0, 8);
   }, [brokerName, contacts]);
 
-  // Seller search suggestions (used by the "Add Seller" search panel).
+  // Seller suggestions for "Name" input in the add panel.
   const filteredContacts = useMemo(() => {
-    if (!sellerSearchTerm.trim()) return [];
-    const q = sellerSearchTerm.toLowerCase();
+    if (!sellerDraftName.trim()) return [];
+    const q = sellerDraftName.toLowerCase();
     return contacts.filter(c =>
       (c.name?.toLowerCase()?.includes(q)) ||
       (c.phone?.includes(q)) ||
       (c.mark?.toLowerCase()?.includes(q))
     ).slice(0, 5);
-  }, [sellerSearchTerm, contacts]);
+  }, [sellerDraftName, contacts]);
 
   const refreshSellerDropdownPos = useCallback(() => {
     const el = sellerSearchWrapRef.current;
@@ -1387,7 +1388,7 @@ const ArrivalsPage = () => {
    * Append an empty seller card immediately (free-text seller).
    * Used by the “Add Seller” button beside Submit/Update.
    */
-  const addSellerInstant = (sellerName?: string) => {
+  const addSellerInstant = (sellerName?: string, sellerMark?: string) => {
     if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
       toast.error('Single-seller arrival allows only one seller');
       return;
@@ -1400,7 +1401,7 @@ const ArrivalsPage = () => {
       seller_serial_number: null,
       seller_name: sellerName ?? '',
       seller_phone: '',
-      seller_mark: '',
+      seller_mark: sellerMark ?? '',
       lots: [],
     };
 
@@ -1438,14 +1439,16 @@ const ArrivalsPage = () => {
     setSellers(prev => [...prev, newSeller]);
     setSellerExpanded(prev => ({ ...prev, [newSellerId]: true }));
 
-    setSellerSearchTerm('');
+    setSellerDraftName('');
+    setSellerDraftMark('');
     setSellerDropdown(false);
     setSellerSearchOpen(false);
   };
 
-  const confirmAddSellerFromSearch = () => {
-    const term = sellerSearchTerm.trim();
-    if (!term) return;
+  const confirmAddSellerFromDraft = () => {
+    const name = sellerDraftName.trim();
+    const mark = sellerDraftMark.trim();
+    if (!name) return;
 
     if (!isMultiSellerRef.current && sellerCountRef.current >= 1) {
       toast.error('Single-seller arrival allows only one seller');
@@ -1453,8 +1456,9 @@ const ArrivalsPage = () => {
     }
 
     // Free-text seller creation (works even if the typed seller doesn't exist).
-    addSellerInstant(term);
-    setSellerSearchTerm('');
+    addSellerInstant(name, mark);
+    setSellerDraftName('');
+    setSellerDraftMark('');
     setSellerDropdown(false);
     setSellerSearchOpen(false);
   };
@@ -1465,7 +1469,8 @@ const ArrivalsPage = () => {
       return;
     }
 
-    setSellerSearchTerm('');
+    setSellerDraftName('');
+    setSellerDraftMark('');
     setSellerSearchOpen(true);
     setSellerDropdown(false);
   };
@@ -1795,7 +1800,8 @@ const ArrivalsPage = () => {
     setSellers([]);
     setSellerExpanded({});
     setSellerSearchOpen(false);
-    setSellerSearchTerm('');
+    setSellerDraftName('');
+    setSellerDraftMark('');
     setSellerDropdown(false);
     setIsMultiSeller(true);
     setEditingVehicleId(null);
@@ -1836,7 +1842,8 @@ const ArrivalsPage = () => {
 
   const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
     setSellerSearchOpen(false);
-    setSellerSearchTerm('');
+    setSellerDraftName('');
+    setSellerDraftMark('');
     setSellerDropdown(false);
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
@@ -2922,44 +2929,56 @@ const ArrivalsPage = () => {
                       </motion.div>
                     ); })}
 
-                    {/* Seller search panel (open-only UX) */}
+                    {/* Seller add panel (name + alias with suggestions) */}
                     {sellerSearchOpen && (
                       <div className="glass-card rounded-2xl p-5">
-                        <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Search className="w-3.5 h-3.5" /> Search seller
-                        </label>
-                        <div className="flex gap-3">
-                          <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                            <Input
-                              ref={sellerSearchInputRef}
-                              placeholder="Search by name, phone, or mark…"
-                              value={sellerSearchTerm}
-                              onChange={e => {
-                                setSellerSearchTerm(e.target.value);
-                                refreshSellerDropdownPos();
-                                setSellerDropdown(true);
-                              }}
-                              onFocus={() => {
-                                refreshSellerDropdownPos();
-                                setSellerDropdown(true);
-                              }}
-                              onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                              className="h-12 rounded-xl pl-10 text-sm"
-                            />
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3 items-end">
+                            <div ref={sellerSearchWrapRef} className="min-w-0">
+                              <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block">
+                                Seller Name
+                              </label>
+                              <Input
+                                ref={sellerSearchInputRef}
+                                placeholder="Type seller name..."
+                                value={sellerDraftName}
+                                onChange={e => {
+                                  setSellerDraftName(e.target.value);
+                                  refreshSellerDropdownPos();
+                                  setSellerDropdown(true);
+                                }}
+                                onFocus={() => {
+                                  refreshSellerDropdownPos();
+                                  setSellerDropdown(true);
+                                }}
+                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                                className="h-12 rounded-xl text-sm"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block">
+                                Alias
+                              </label>
+                              <Input
+                                placeholder="Enter alias (optional)"
+                                value={sellerDraftMark}
+                                onChange={(e) => setSellerDraftMark(e.target.value)}
+                                className="h-12 rounded-xl text-sm"
+                              />
+                            </div>
                           </div>
                           <Button
                             type="button"
                             size="sm"
-                            onClick={confirmAddSellerFromSearch}
-                            className="h-12 rounded-xl shrink-0 bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
-                            disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
+                            onClick={confirmAddSellerFromDraft}
+                            className="h-12 rounded-xl w-full bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
+                            disabled={!sellerDraftName.trim() || (!isMultiSeller && sellers.length >= 1)}
                           >
                             <Users className="w-4 h-4 mr-2" /> Add Seller
                           </Button>
                         </div>
-                        {sellerSearchTerm.trim() && filteredContacts.length === 0 && (
-                          <p className="text-xs text-muted-foreground text-center mt-2">Not found. Click Add Seller to create.</p>
+                        {sellerDraftName.trim() && filteredContacts.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center mt-2">No existing seller found. You can add this seller now.</p>
                         )}
                       </div>
                     )}
@@ -3824,44 +3843,56 @@ const ArrivalsPage = () => {
 
                     </> )}
 
-                    {/* Seller search panel (open-only UX) */}
+                    {/* Seller add panel (name + alias with suggestions) */}
                     {sellerSearchOpen && (
                       <div className="glass-card rounded-2xl p-5">
-                        <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block flex items-center gap-1.5">
-                          <Search className="w-3.5 h-3.5" /> Search seller
-                        </label>
-                        <div className="flex gap-3">
-                          <div ref={sellerSearchWrapRef} className="relative flex-1 min-w-0">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                            <Input
-                              ref={sellerSearchInputRef}
-                              placeholder="Search by name, phone, or mark…"
-                              value={sellerSearchTerm}
-                              onChange={e => {
-                                setSellerSearchTerm(e.target.value);
-                                refreshSellerDropdownPos();
-                                setSellerDropdown(true);
-                              }}
-                              onFocus={() => {
-                                refreshSellerDropdownPos();
-                                setSellerDropdown(true);
-                              }}
-                              onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
-                              className="h-12 rounded-xl pl-10 text-sm"
-                            />
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3 items-end">
+                            <div ref={sellerSearchWrapRef} className="min-w-0">
+                              <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block">
+                                Seller Name
+                              </label>
+                              <Input
+                                ref={sellerSearchInputRef}
+                                placeholder="Type seller name..."
+                                value={sellerDraftName}
+                                onChange={e => {
+                                  setSellerDraftName(e.target.value);
+                                  refreshSellerDropdownPos();
+                                  setSellerDropdown(true);
+                                }}
+                                onFocus={() => {
+                                  refreshSellerDropdownPos();
+                                  setSellerDropdown(true);
+                                }}
+                                onBlur={() => setTimeout(() => setSellerDropdown(false), 150)}
+                                className="h-12 rounded-xl text-sm"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <label className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 block">
+                                Alias
+                              </label>
+                              <Input
+                                placeholder="Enter alias (optional)"
+                                value={sellerDraftMark}
+                                onChange={(e) => setSellerDraftMark(e.target.value)}
+                                className="h-12 rounded-xl text-sm"
+                              />
+                            </div>
                           </div>
                           <Button
                             type="button"
                             size="sm"
-                            onClick={confirmAddSellerFromSearch}
-                            className="h-12 rounded-xl shrink-0 bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
-                            disabled={!sellerSearchTerm.trim() || (!isMultiSeller && sellers.length >= 1)}
+                            onClick={confirmAddSellerFromDraft}
+                            className="h-12 rounded-xl w-full bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
+                            disabled={!sellerDraftName.trim() || (!isMultiSeller && sellers.length >= 1)}
                           >
                             <Users className="w-4 h-4 mr-2" /> Add Seller
                           </Button>
                         </div>
-                        {sellerSearchTerm.trim() && filteredContacts.length === 0 && (
-                          <p className="text-xs text-muted-foreground text-center mt-2">Not found. Click Add Seller to create.</p>
+                        {sellerDraftName.trim() && filteredContacts.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center mt-2">No existing seller found. You can add this seller now.</p>
                         )}
                       </div>
                     )}
