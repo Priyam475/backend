@@ -633,29 +633,29 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
   }, [setScrollLeftFromPointerX]);
 
   return (
-    <div className="relative -mx-1 px-1 pb-[16px]">
+    <div className="relative -mx-1 px-1 pb-[16px] sm:pb-0">
       <div
         ref={scrollRef}
-        className="lot-fields-x-scroll overflow-x-scroll overflow-y-visible overscroll-x-contain no-scrollbar"
+        className="lot-fields-x-scroll overflow-x-auto md:overflow-x-hidden overflow-y-visible overscroll-x-contain no-scrollbar"
         onScroll={update}
       >
         <div ref={contentRef}>{children}</div>
       </div>
 
       {/* Horizontal thumb (volume-like) for the lot fields scroller */}
-      <div
-        ref={trackRef}
-        className="pointer-events-none absolute left-1 right-1 bottom-0 z-[2] h-[18px] flex items-center"
-        aria-hidden
-      >
+      {thumbMetrics.visible && (
         <div
-          className="relative w-full h-[6px] rounded-full"
-          style={{
-            backgroundColor: 'hsl(var(--card))',
-            boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.22)',
-          }}
+          ref={trackRef}
+          className="pointer-events-none absolute left-1 right-1 bottom-0 z-[2] h-[18px] flex items-center md:hidden"
+          aria-hidden
         >
-          {thumbMetrics.visible && (
+          <div
+            className="relative w-full h-[6px] rounded-full"
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.22)',
+            }}
+          >
             <div
               className="absolute top-1/2 -translate-y-1/2 rounded-full cursor-ew-resize select-none touch-none pointer-events-auto transition-[box-shadow,transform] duration-150 active:scale-[0.98]"
               style={{
@@ -673,13 +673,13 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
               aria-valuemin={0}
               aria-valuemax={1}
             />
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {hintRight && (
         <div
-          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5"
+          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5 md:hidden"
           aria-hidden
         >
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
@@ -2796,39 +2796,41 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <LotFieldsHorizontalScroll>
-                                  <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="min-w-0 flex-1">
+                                    <LotFieldsHorizontalScroll>
+                                      <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
-                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
+                                  <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
                                     />
                                     {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
                                   </div>
                                   {/* Bags */}
-                                  <div className="w-[7rem] sm:w-[8rem] flex-none">
+                                  <div className="w-[5.5rem] sm:w-[6rem] md:w-[5.5rem] lg:w-[7rem] xl:w-[8rem] flex-none">
                                     <Input
                                       type="number"
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
                                     />
                                     {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
                                   </div>
                                   {/* Commodity */}
-                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
+                                  <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
                                       {commodities.map((c: any) => (
@@ -2838,21 +2840,22 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
                                   </div>
                                   {/* Variant */}
-                                  <div className="w-[10rem] sm:w-[12rem] flex-none">
+                                  <div className="w-[7rem] sm:w-[7.5rem] md:w-[7rem] lg:w-[10rem] xl:w-[12rem] flex-none">
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
-                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
                                         <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
                                       ))}
                                     </select>
                                   </div>
+                                      </div>
+                                    </LotFieldsHorizontalScroll>
                                   </div>
-                                </LotFieldsHorizontalScroll>
-                                {/* Action buttons */}
-                                <div className="flex gap-2 justify-end pt-1">
+                                  {/* Action buttons */}
+                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-center">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -2865,13 +2868,14 @@ const ArrivalsPage = () => {
                                       variant: "",
                                       errors: {},
                                     })}
-                                    className="h-8 text-xs"
+                                    className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
                                   >
                                     Cancel
                                   </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs bg-blue-600 hover:bg-blue-700 text-white">
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
+                                  </div>
                                 </div>
                               </div>
                             </motion.div>
@@ -3669,39 +3673,41 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <LotFieldsHorizontalScroll>
-                                  <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="min-w-0 flex-1">
+                                    <LotFieldsHorizontalScroll>
+                                      <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
                                   {/* Lot Name */}
-                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
+                                  <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
                                     />
                                     {addLotForm.errors.lotName && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.lotName}</p>}
                                   </div>
                                   {/* Bags */}
-                                  <div className="w-[7rem] sm:w-[8rem] flex-none">
+                                  <div className="w-[5.5rem] sm:w-[6rem] md:w-[5.5rem] lg:w-[7rem] xl:w-[8rem] flex-none">
                                     <Input
                                       type="number"
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 text-sm rounded-lg", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                                      className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
                                     />
                                     {addLotForm.errors.bags && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.bags}</p>}
                                   </div>
                                   {/* Commodity */}
-                                  <div className="w-[12rem] sm:w-[14rem] flex-none">
+                                  <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
-                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
+                                      className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
                                       {commodities.map((c: any) => (
@@ -3711,21 +3717,22 @@ const ArrivalsPage = () => {
                                     {addLotForm.errors.commodity && <p className="text-[10px] text-red-500 mt-0.5">{addLotForm.errors.commodity}</p>}
                                   </div>
                                   {/* Variant */}
-                                  <div className="w-[10rem] sm:w-[12rem] flex-none">
+                                  <div className="w-[7rem] sm:w-[7.5rem] md:w-[7rem] lg:w-[10rem] xl:w-[12rem] flex-none">
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
-                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2"
+                                      className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
                                         <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
                                       ))}
                                     </select>
                                   </div>
+                                      </div>
+                                    </LotFieldsHorizontalScroll>
                                   </div>
-                                </LotFieldsHorizontalScroll>
-                                {/* Action buttons */}
-                                <div className="flex gap-2 justify-end pt-1">
+                                  {/* Action buttons */}
+                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-center">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -3738,13 +3745,14 @@ const ArrivalsPage = () => {
                                       variant: "",
                                       errors: {},
                                     })}
-                                    className="h-8 text-xs"
+                                    className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
                                   >
                                     Cancel
                                   </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs bg-blue-600 hover:bg-blue-700 text-white">
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
+                                  </div>
                                 </div>
                               </div>
                             </motion.div>
