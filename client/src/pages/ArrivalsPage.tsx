@@ -2118,7 +2118,7 @@ const ArrivalsPage = () => {
                 ) : (
                   <>
                     {/* Four summary cards — raghav: all blue icon #6075FF */}
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4 mb-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4 mb-4">
                       <div className="bg-white dark:bg-card border border-border/40 shadow-sm rounded-2xl p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-[#6075FF] flex items-center justify-center shadow-sm shadow-[#6075FF]/20">
                           <Truck className="w-5 h-5 text-white" />
@@ -3049,7 +3049,7 @@ const ArrivalsPage = () => {
               </div>
             </div>
           )}
-          <div className="px-4 mb-3 space-y-2">
+          <div className="px-4 mb-4 space-y-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
