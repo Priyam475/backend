@@ -2648,23 +2648,23 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
-                        <div className="p-3 sm:p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
-                          <div className="flex items-start gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
+                        <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
                             <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
-                                <>
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground break-words line-clamp-3">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
                                     {seller.seller_name}
                                   </p>
                                   {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground break-words line-clamp-2 mt-0.5">
-                                      {seller.seller_mark}
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                      ({seller.seller_mark})
                                     </p>
                                   )}
-                                </>
+                                </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
@@ -2700,26 +2700,24 @@ const ArrivalsPage = () => {
                               )}
                             </div>
                           </div>
-                          <div className="flex flex-row items-center justify-between gap-3 shrink-0 border-t border-border/30 pt-3 sm:border-0 sm:pt-0 sm:flex-col sm:items-end sm:justify-center sm:gap-2 sm:pl-2">
+                          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
                             <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
                               <span className="text-lg sm:text-xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                                className={cn(
-                                  "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
-                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                                )}
-                              >
-                                {expanded ? <ChevronUp className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" />}
-                              </button>
-                              <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
-                                <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" />}
+                            </button>
+                            <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
+                              <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                            </button>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
@@ -3561,23 +3559,23 @@ const ArrivalsPage = () => {
                       return (
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
-                        <div className="p-3 sm:p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
-                          <div className="flex items-start gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
+                        <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
                             <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
                               <span className="text-white text-xs font-bold">{seller.seller_mark || seller.seller_name?.charAt(0) || '?'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
-                                <>
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground break-words line-clamp-3">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
                                     {seller.seller_name}
                                   </p>
                                   {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground break-words line-clamp-2 mt-0.5">
-                                      {seller.seller_mark}
+                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+                                      ({seller.seller_mark})
                                     </p>
                                   )}
-                                </>
+                                </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0">
@@ -3613,26 +3611,24 @@ const ArrivalsPage = () => {
                               )}
                             </div>
                           </div>
-                          <div className="flex flex-row items-center justify-between gap-3 shrink-0 border-t border-border/30 pt-3 sm:border-0 sm:pt-0 sm:flex-col sm:items-end sm:justify-center sm:gap-2 sm:pl-2">
+                          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
                             <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
                               <span className="text-lg sm:text-xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
-                                aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
-                                className={cn(
-                                  "min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center transition-colors touch-manipulation",
-                                  expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
-                                )}
-                              >
-                                {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
-                              </button>
-                              <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSellerExpanded(prev => ({ ...prev, [seller.seller_vehicle_id]: !expanded }))}
+                              aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
+                              className={cn(
+                                "min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center transition-colors touch-manipulation",
+                                expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
+                              )}
+                            >
+                              {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+                            </button>
+                            <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                         <AnimatePresence initial={false}>
