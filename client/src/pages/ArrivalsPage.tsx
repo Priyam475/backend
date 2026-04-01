@@ -272,7 +272,6 @@ function LotsScrollPanel({
   scrollAffordanceHint?: string;
 }) {
   const outerRef = useRef<HTMLDivElement | null>(null);
-  const measureRef = useRef<HTMLDivElement | null>(null);
   const [hintBottom, setHintBottom] = useState(false);
   const [hintRight, setHintRight] = useState(false);
   const [thumbMetrics, setThumbMetrics] = useState<{ visible: boolean; top: number; height: number }>({
@@ -292,21 +291,16 @@ function LotsScrollPanel({
 
   const applyVerticalThumbPadding = useCallback(() => {
     const outer = outerRef.current;
-    const inner = measureRef.current;
-    if (!inner) return;
-    if (!ensureVerticalScrollThumbWhenShort) {
-      inner.style.minHeight = '';
-      return;
-    }
     if (!outer) return;
-    inner.style.minHeight = '';
+    if (!ensureVerticalScrollThumbWhenShort) return;
+    
     const och = outer.clientHeight;
     const osh = outer.scrollHeight;
     if (och <= 0) return;
     if (osh <= och + LOTS_SCROLL_EPS) {
       const bump = och + LOTS_SCROLL_MIN_OVERFLOW - osh;
       if (bump > 0) {
-        inner.style.minHeight = `${inner.scrollHeight + bump}px`;
+        outer.style.minHeight = `${outer.scrollHeight + bump}px`;
       }
     }
   }, [ensureVerticalScrollThumbWhenShort]);
@@ -377,11 +371,9 @@ function LotsScrollPanel({
 
   useEffect(() => {
     const outer = outerRef.current;
-    const inner = measureRef.current;
-    if (!outer || !inner) return;
+    if (!outer) return;
     runScrollMetrics();
     const ro = new ResizeObserver(() => runScrollMetrics());
-    ro.observe(inner);
     ro.observe(outer);
     outer.addEventListener('scroll', updateThumbMetrics, { passive: true });
     if (showEdgeHints) {
@@ -448,9 +440,7 @@ function LotsScrollPanel({
               : { scrollbarWidth: 'none', msOverflowStyle: 'none' }
           }
         >
-          <div ref={measureRef} className="space-y-2">
-            {children}
-          </div>
+          {children}
         </div>
         {thumbMetrics.visible && (
           <div
@@ -522,174 +512,13 @@ function LotsScrollPanel({
   );
 }
 
-/** Per-lot 4-column row: horizontal scroll lives here (not the outer lots panel), so we surface a visible bar + edge hint. */
+/**
+ * Keep this wrapper so markup call-sites stay unchanged.
+ * Horizontal + vertical scrolling is handled by the outer LotsScrollPanel
+ * to ensure sticky lot headers remain truly fixed while entries scroll.
+ */
 function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [hintRight, setHintRight] = useState(false);
-  const [thumbPressed, setThumbPressed] = useState(false);
-  const [thumbMetrics, setThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
-    visible: false,
-    left: 0,
-    width: 0,
-  });
-  const trackRef = useRef<HTMLDivElement>(null);
-
-  const setScrollLeftFromPointerX = useCallback((clientX: number) => {
-    const el = scrollRef.current;
-    const trackEl = trackRef.current;
-    if (!el || !trackEl) return;
-
-    const totalScrollableX = Math.max(0, el.scrollWidth - el.clientWidth);
-    if (totalScrollableX <= LOTS_SCROLL_EPS) return;
-
-    const insetPx = 4;
-    const available = Math.max(0, trackEl.clientWidth - insetPx * 2);
-    if (available <= 0) return;
-
-    const rect = trackEl.getBoundingClientRect();
-    const xInTrack = clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, (xInTrack - insetPx) / available));
-    el.scrollLeft = ratio * totalScrollableX;
-  }, []);
-
-  const update = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const hOverflow = el.scrollWidth > el.clientWidth + LOTS_SCROLL_EPS;
-    const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - LOTS_SCROLL_EPS;
-    setHintRight(hOverflow && notAtRight);
-
-    if (!hOverflow) {
-      setThumbMetrics({ visible: false, left: 0, width: 0 });
-      return;
-    }
-
-    const trackEl = trackRef.current;
-    if (!trackEl) {
-      // Show mobile indicator as soon as overflow exists; exact knob position updates once track mounts.
-      setThumbMetrics((prev) => ({ visible: true, left: prev.left, width: prev.width || 18 }));
-      return;
-    }
-
-    const totalScrollableX = Math.max(0, el.scrollWidth - el.clientWidth);
-    if (totalScrollableX <= LOTS_SCROLL_EPS) {
-      setThumbMetrics({ visible: false, left: 0, width: 0 });
-      return;
-    }
-
-    const insetPx = 4;
-    const available = Math.max(0, trackEl.clientWidth - insetPx * 2);
-    if (available <= 0) return;
-
-    const knobWidthPx = 18;
-    const thumbWidth = Math.min(available, knobWidthPx);
-
-    const ratio = el.scrollLeft / totalScrollableX;
-    const maxLeft = Math.max(0, available - thumbWidth);
-    const clampedRatio = Math.max(0, Math.min(1, ratio));
-    const left = insetPx + maxLeft * clampedRatio;
-
-    setThumbMetrics({ visible: true, left, width: thumbWidth });
-  }, []);
-
-  useLayoutEffect(() => {
-    update();
-  }, [update]);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    const inner = contentRef.current;
-    if (!el || !inner) return;
-    update();
-    const ro = new ResizeObserver(() => update());
-    ro.observe(inner);
-    ro.observe(el);
-    el.addEventListener('scroll', update, { passive: true });
-    return () => {
-      ro.disconnect();
-      el.removeEventListener('scroll', update);
-    };
-  }, [update]);
-
-  const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const el = scrollRef.current;
-    const trackEl = trackRef.current;
-    if (!el || !trackEl) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    setThumbPressed(true);
-    setScrollLeftFromPointerX(e.clientX);
-
-    const onMove = (ev: PointerEvent) => setScrollLeftFromPointerX(ev.clientX);
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      setThumbPressed(false);
-    };
-
-    window.addEventListener('pointermove', onMove, { passive: true });
-    window.addEventListener('pointerup', onUp, { passive: true });
-    window.addEventListener('pointercancel', onUp, { passive: true });
-  }, [setScrollLeftFromPointerX]);
-
-  return (
-    <div className="relative pb-[16px] sm:pb-0">
-      <div
-        ref={scrollRef}
-        className="lot-fields-x-scroll overflow-x-auto md:overflow-x-hidden overflow-y-visible overscroll-x-contain no-scrollbar"
-        onScroll={update}
-      >
-        <div ref={contentRef}>{children}</div>
-      </div>
-
-      {/* Horizontal thumb (volume-like) for the lot fields scroller */}
-      {thumbMetrics.visible && (
-        <div
-          ref={trackRef}
-          className="pointer-events-none absolute left-0 right-0 bottom-0 z-[2] h-[18px] flex items-center md:hidden"
-          aria-hidden
-        >
-          <div
-            className="relative w-full h-[6px] rounded-full"
-            style={{
-              backgroundColor: 'hsl(var(--card))',
-              boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.22)',
-            }}
-          >
-            <div
-              className="absolute top-1/2 -translate-y-1/2 rounded-full cursor-ew-resize select-none touch-none pointer-events-auto transition-[box-shadow,transform] duration-150 active:scale-[0.98]"
-              style={{
-                left: thumbMetrics.left,
-                width: thumbMetrics.width,
-                height: 12,
-                backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
-                boxShadow: thumbPressed
-                  ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 26px hsl(var(--foreground) / 0.26)'
-                  : 'inset 0 0 0 1px hsl(var(--foreground) / 0.45), 0 0 18px hsl(var(--foreground) / 0.18)',
-              }}
-              onPointerDown={onThumbPointerDown}
-              role="slider"
-              aria-label="Drag to scroll lots horizontally"
-              aria-valuemin={0}
-              aria-valuemax={1}
-            />
-          </div>
-        </div>
-      )}
-      {hintRight && (
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-9 items-center justify-end bg-gradient-to-l from-background from-25% via-background/80 to-transparent pr-0.5 md:hidden"
-          aria-hidden
-        >
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
-        </div>
-      )}
-    </div>
-  );
+  return <>{children}</>;
 }
 
 const ArrivalsPage = () => {
@@ -818,6 +647,25 @@ const ArrivalsPage = () => {
 
   const setLotsScrollRef = useCallback((sellerId: string) => (el: HTMLDivElement | null) => {
     lotsScrollRefs.current[sellerId] = el;
+  }, []);
+
+  const scrollSellerLotsToLatest = useCallback((sellerId: string) => {
+    const tryScroll = (attempt: number) => {
+      const el = lotsScrollRefs.current[sellerId];
+      if (!el) {
+        if (attempt < 5) {
+          requestAnimationFrame(() => tryScroll(attempt + 1));
+        }
+        return;
+      }
+
+      // Keep the lots panel itself in viewport so users can immediately see
+      // the newly added row instead of only scrolling internally.
+      el.scrollIntoView({ block: 'start', behavior: 'auto' });
+      el.scrollTop = el.scrollHeight;
+    };
+
+    tryScroll(0);
   }, []);
 
   const expandOnlySeller = useCallback((sellerId: string) => {
@@ -1694,9 +1542,7 @@ const ArrivalsPage = () => {
   useLayoutEffect(() => {
     const sellerId = pendingLotsScrollToEndSellerIdRef.current;
     if (!sellerId) return;
-    const el = lotsScrollRefs.current[sellerId];
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    scrollSellerLotsToLatest(sellerId);
     pendingLotsScrollToEndSellerIdRef.current = null;
 
     // Mobile fix: when "+ Add Lot" auto-focuses the new input, focus is applied
@@ -1722,7 +1568,7 @@ const ArrivalsPage = () => {
     window.setTimeout(tryBringActiveIntoView, 520);
     window.setTimeout(tryBringActiveIntoView, 900);
     window.setTimeout(tryBringActiveIntoView, 1300);
-  }, [sellers, sellerExpanded]);
+  }, [sellers, sellerExpanded, scrollSellerLotsToLatest]);
 
   // Scroll + focus the seller card input created by the “Add Seller” button.
   useLayoutEffect(() => {
@@ -2945,22 +2791,21 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Scroll to see all lots"
-                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x border-t border-border/30"
                               >
-                                <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
                                       <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
-                                        <thead>
-                                          <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
+                                        <thead className="sticky top-0 z-[3] bg-background">
+                                          <tr className="border-b border-border/20">
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3015,7 +2860,6 @@ const ArrivalsPage = () => {
                                       </table>
                                     </LotFieldsHorizontalScroll>
                                   )}
-                                </div>
                               </LotsScrollPanel>
                             </motion.div>
                           )}
@@ -3822,22 +3666,21 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Swipe here to scroll lots"
-                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden p-3 overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x"
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x border-t border-border/30"
                               >
-                                <div className="border-t border-border/30">
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
                                       <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
-                                        <thead>
-                                          <tr className="border-b border-border/20 bg-muted/20">
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
-                                            <th className="text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
+                                        <thead className="sticky top-0 z-[3] bg-background">
+                                          <tr className="border-b border-border/20">
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Lot Name</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Bags</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Commodity</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold hidden md:table-cell md:w-1/6">Variant</th>
+                                            <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3892,7 +3735,6 @@ const ArrivalsPage = () => {
                                       </table>
                                     </LotFieldsHorizontalScroll>
                                   )}
-                                </div>
                               </LotsScrollPanel>
                             </motion.div>
                           )}
