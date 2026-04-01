@@ -3076,7 +3076,7 @@ const ArrivalsPage = () => {
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
-                                      <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
+                                      <table className="w-[42rem] md:w-full text-sm sm:text-base table-fixed">
                                         <thead className="sticky top-0 z-[3] bg-background">
                                           <tr className="border-b border-border/20">
                                             <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
@@ -3100,17 +3100,17 @@ const ArrivalsPage = () => {
                                                   isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                                 )}
                                               >
-                                                <td className="py-2 px-3 align-middle text-center">
+                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
-                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2.5 py-1 text-sm sm:text-base font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2 px-3 align-middle text-center">
-                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
+                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-2.5 py-1 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-base sm:text-lg font-bold leading-none">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
@@ -3953,7 +3953,7 @@ const ArrivalsPage = () => {
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
                                   ) : (
                                     <LotFieldsHorizontalScroll>
-                                      <table className="w-[42rem] md:w-full text-xs sm:text-sm table-fixed">
+                                      <table className="w-[42rem] md:w-full text-sm sm:text-base table-fixed">
                                         <thead className="sticky top-0 z-[3] bg-background">
                                           <tr className="border-b border-border/20">
                                             <th className="bg-muted/95 backdrop-blur text-center py-2 px-3 text-muted-foreground font-semibold w-1/6">SL. NO</th>
@@ -3977,17 +3977,17 @@ const ArrivalsPage = () => {
                                                   isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                                 )}
                                               >
-                                                <td className="py-2 px-3 align-middle text-center">
+                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
-                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2.5 py-1 text-sm sm:text-base font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-xs">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2 px-3 align-middle text-center">
-                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-bold">
+                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-2.5 py-1 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-base sm:text-lg font-bold leading-none">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
