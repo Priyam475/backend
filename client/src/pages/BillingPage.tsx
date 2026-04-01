@@ -18,9 +18,10 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi } from '@/services/api';
+import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
+import type { AuctionEntryDTO, LotSummaryDTO } from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
@@ -457,6 +458,18 @@ const BillingPage = () => {
   const [replaceSelectedContact, setReplaceSelectedContact] = useState<Contact | null>(null);
   const [replaceForm, setReplaceForm] = useState({ mark: '', name: '', phone: '' });
   const [replaceErrors, setReplaceErrors] = useState<Record<string, string>>({});
+  const [showAddBidCard, setShowAddBidCard] = useState(false);
+  const [addBidLotSearch, setAddBidLotSearch] = useState('');
+  const [showAddBidLotDropdown, setShowAddBidLotDropdown] = useState(false);
+  const [addBidLotOptions, setAddBidLotOptions] = useState<LotSummaryDTO[]>([]);
+  const [addBidLotLoading, setAddBidLotLoading] = useState(false);
+  const [addBidSelectedLot, setAddBidSelectedLot] = useState<LotSummaryDTO | null>(null);
+  const [addBidRemainingQty, setAddBidRemainingQty] = useState<number>(0);
+  const [addBidQty, setAddBidQty] = useState('');
+  const [addBidBaseRate, setAddBidBaseRate] = useState('');
+  const [addBidExtraAmount, setAddBidExtraAmount] = useState('0');
+  const [addBidTokenAdvance, setAddBidTokenAdvance] = useState('0');
+  const [addBidSaving, setAddBidSaving] = useState(false);
 
   useEffect(() => {
     commodityApi.list().then(setCommodities);
@@ -472,6 +485,53 @@ const BillingPage = () => {
   useEffect(() => {
     weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
   }, []);
+
+  useEffect(() => {
+    if (!showAddBidCard) return;
+    let active = true;
+    setAddBidLotLoading(true);
+    void auctionApi
+      .listLots({ page: 0, size: 500 })
+      .then(list => {
+        if (!active) return;
+        setAddBidLotOptions(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAddBidLotOptions([]);
+      })
+      .finally(() => {
+        if (active) setAddBidLotLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [showAddBidCard]);
+
+  const getAddBidLotIdentifier = useCallback((lot: LotSummaryDTO): string => {
+    const lotQty = Number(lot.bag_count) || 0;
+    const lotName = lot.lot_name || String(lotQty);
+    const vTotal = Number(lot.vehicle_total_qty ?? lotQty) || lotQty;
+    const sTotal = Number(lot.seller_total_qty ?? lotQty) || lotQty;
+    return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+  }, []);
+
+  const filteredAddBidLots = useMemo(() => {
+    const q = addBidLotSearch.trim().toLowerCase();
+    if (!q) return addBidLotOptions.slice(0, 25);
+    return addBidLotOptions
+      .filter(lot => {
+        const identifier = getAddBidLotIdentifier(lot).toLowerCase();
+        return (
+          identifier.includes(q)
+          || (lot.lot_name || '').toLowerCase().includes(q)
+          || String(lot.lot_id || '').toLowerCase().includes(q)
+          || (lot.seller_name || '').toLowerCase().includes(q)
+          || (lot.vehicle_number || '').toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 25);
+  }, [addBidLotOptions, addBidLotSearch, getAddBidLotIdentifier]);
 
   // Load saved bills from backend
   const loadSavedBills = useCallback(async () => {
@@ -1234,6 +1294,156 @@ const BillingPage = () => {
     setSelectBidBuyer(null);
     setSelectedBidKeys([]);
   }, [autoSaveCurrentBillBeforeBuyerSwitch, generateBill, selectBidBuyer, selectedBidKeys, selectedBuyer]);
+
+  const resetAddBidForm = useCallback(() => {
+    setAddBidLotSearch('');
+    setShowAddBidLotDropdown(false);
+    setAddBidLotOptions([]);
+    setAddBidSelectedLot(null);
+    setAddBidRemainingQty(0);
+    setAddBidQty('');
+    setAddBidBaseRate('');
+    setAddBidExtraAmount('0');
+    setAddBidTokenAdvance('0');
+  }, []);
+
+  const appendBidForBuyer = useCallback((buyerKey: string, buyerName: string, buyerMark: string, buyerContactId: string | null, entry: BillEntry) => {
+    setBuyers(prev => {
+      const idx = prev.findIndex(
+        b => (b.buyerMark || '').toLowerCase() === buyerMark.toLowerCase() && (b.buyerName || '').toLowerCase() === buyerName.toLowerCase(),
+      );
+      if (idx < 0) {
+        return [...prev, { buyerName, buyerMark, buyerContactId, entries: [entry], tokenAdvanceTotal: Number(entry.tokenAdvance) || 0 }];
+      }
+      const next = [...prev];
+      const existing = next[idx];
+      next[idx] = {
+        ...existing,
+        entries: [...existing.entries, entry],
+        tokenAdvanceTotal: (existing.tokenAdvanceTotal || 0) + (Number(entry.tokenAdvance) || 0),
+      };
+      return next;
+    });
+    setSelectedBuyer(prev => {
+      if (!prev) return prev;
+      const key = `${(prev.buyerMark || '').toLowerCase()}::${(prev.buyerName || '').toLowerCase()}`;
+      if (key !== buyerKey) return prev;
+      return {
+        ...prev,
+        entries: [...prev.entries, entry],
+        tokenAdvanceTotal: (prev.tokenAdvanceTotal || 0) + (Number(entry.tokenAdvance) || 0),
+      };
+    });
+  }, []);
+
+  const handleAddBidToCurrentBuyer = useCallback(async () => {
+    if (!bill || !selectedBuyer) {
+      toast.error('Open a buyer bill first');
+      return;
+    }
+    if (!addBidSelectedLot) {
+      toast.error('Select lot mark');
+      return;
+    }
+    const qty = Number(addBidQty);
+    const rate = Number(addBidBaseRate);
+    const extra = Number(addBidExtraAmount || 0);
+    const tokenAdvance = Number(addBidTokenAdvance || 0);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Enter valid bid quantity');
+      return;
+    }
+    if (!Number.isFinite(rate) || rate <= 0) {
+      toast.error('Enter valid base rate');
+      return;
+    }
+    if (qty > addBidRemainingQty) {
+      toast.error(`Bid quantity cannot exceed remaining (${addBidRemainingQty})`);
+      return;
+    }
+    if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
+      toast.error('Enter valid extra/token values');
+      return;
+    }
+
+    const buyerIdNum =
+      selectedBuyer.buyerContactId && /^\d+$/.test(selectedBuyer.buyerContactId)
+        ? Number(selectedBuyer.buyerContactId)
+        : undefined;
+
+    try {
+      setAddBidSaving(true);
+      const session = await auctionApi.addBid(addBidSelectedLot.lot_id, {
+        buyer_id: buyerIdNum,
+        buyer_name: bill.buyerName,
+        buyer_mark: bill.buyerMark,
+        rate,
+        quantity: qty,
+        extra_rate: extra,
+        token_advance: tokenAdvance,
+      });
+      const ownEntries = (session.entries || []).filter(
+        e =>
+          (e.buyer_mark || '').trim().toLowerCase() === (bill.buyerMark || '').trim().toLowerCase()
+          && (e.buyer_name || '').trim().toLowerCase() === (bill.buyerName || '').trim().toLowerCase(),
+      );
+      const latest: AuctionEntryDTO | undefined = [...ownEntries].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
+      if (!latest) {
+        toast.error('Bid saved but failed to map in bill. Refresh billing data.');
+        return;
+      }
+      const ws = weighingSessions.find((s: any) => s.bid_number === latest.bid_number);
+      const newBillEntry: BillEntry = {
+        bidNumber: latest.bid_number,
+        lotId: String(addBidSelectedLot.lot_id),
+        lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
+        lotTotalQty: addBidSelectedLot.bag_count ?? latest.quantity,
+        sellerName: addBidSelectedLot.seller_name || 'Unknown',
+        commodityName: addBidSelectedLot.commodity_name || 'Unknown',
+        rate: Number(latest.bid_rate) || rate,
+        quantity: latest.quantity ?? qty,
+        weight: ws ? ws.net_weight : (latest.quantity ?? qty) * 50,
+        vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? latest.quantity ?? qty,
+        sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? latest.quantity ?? qty,
+        presetApplied: Number(latest.preset_margin) || 0,
+        isSelfSale: false,
+        tokenAdvance: Number(latest.token_advance ?? tokenAdvance) || 0,
+      };
+      const buyerKey = `${(bill.buyerMark || '').toLowerCase()}::${(bill.buyerName || '').toLowerCase()}`;
+      appendBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
+      const mergedBuyer: BuyerPurchase = {
+        buyerMark: bill.buyerMark,
+        buyerName: bill.buyerName,
+        buyerContactId: selectedBuyer.buyerContactId ?? null,
+        entries: [...selectedBuyer.entries, newBillEntry],
+        tokenAdvanceTotal: (selectedBuyer.tokenAdvanceTotal || 0) + (Number(newBillEntry.tokenAdvance) || 0),
+      };
+      generateBill(mergedBuyer);
+      await refetchAuctions();
+      setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+      resetAddBidForm();
+      setShowAddBidCard(false);
+      toast.success('Bid added and bill updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add bid');
+    } finally {
+      setAddBidSaving(false);
+    }
+  }, [
+    addBidBaseRate,
+    addBidExtraAmount,
+    addBidQty,
+    addBidRemainingQty,
+    addBidSelectedLot,
+    addBidTokenAdvance,
+    appendBidForBuyer,
+    bill,
+    generateBill,
+    resetAddBidForm,
+    refetchAuctions,
+    selectedBuyer,
+    weighingSessions,
+  ]);
 
   // Add a bid from another buyer into the current bill (cross-buyer aggregation).
 
@@ -2164,11 +2374,126 @@ const BillingPage = () => {
                   </div>
                 </div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-xl h-9"
+                onClick={() => {
+                  setShowAddBidCard(prev => {
+                    const next = !prev;
+                    if (!next) resetAddBidForm();
+                    return next;
+                  });
+                }}
+              >
+                Add Bid
+              </Button>
               <Button type="button" variant="outline" size="sm" className="rounded-xl h-9" onClick={() => void handleClearBillEditor()}>
                 Change buyer
               </Button>
             </div>
               </div>
+              {showAddBidCard && (
+                <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add Bid</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Lot Mark Search *</Label>
+                      <Input
+                        value={addBidLotSearch}
+                        onFocus={() => setShowAddBidLotDropdown(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
+                        }}
+                        onChange={e => {
+                          setAddBidLotSearch(e.target.value);
+                          setAddBidSelectedLot(null);
+                          setShowAddBidLotDropdown(true);
+                        }}
+                        placeholder="Search lot identifier / seller / vehicle"
+                        className="h-9 rounded-lg"
+                      />
+                      {addBidLotLoading && <p className="text-[11px] text-muted-foreground">Searching lots...</p>}
+                      {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
+                        <div className="max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background">
+                          {filteredAddBidLots.length === 0 && (
+                            <p className="px-2 py-2 text-[11px] text-muted-foreground">No auction lots found.</p>
+                          )}
+                          {filteredAddBidLots.map(lot => (
+                            <button
+                              key={lot.lot_id}
+                              type="button"
+                              className="w-full px-2 py-1.5 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40"
+                              onClick={async () => {
+                                setAddBidSelectedLot(lot);
+                                setAddBidLotSearch(getAddBidLotIdentifier(lot));
+                                setShowAddBidLotDropdown(false);
+                                try {
+                                  const session = await auctionApi.getOrStartSession(lot.lot_id);
+                                  setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+                                } catch {
+                                  setAddBidRemainingQty(0);
+                                }
+                              }}
+                            >
+                              <p className="text-xs font-semibold">{getAddBidLotIdentifier(lot)}</p>
+                              <p className="text-[11px] text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Buyer&apos;s Mark *</Label>
+                      <Input value={bill.buyerMark} disabled className="h-9 rounded-lg bg-muted/30" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Bid Quantity / Remaining *</Label>
+                      <Input
+                        type="number"
+                        value={addBidQty}
+                        onChange={e => setAddBidQty(e.target.value)}
+                        placeholder={`Remaining: ${addBidRemainingQty}`}
+                        className="h-9 rounded-lg"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Base Rate *</Label>
+                      <Input type="number" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className="h-9 rounded-lg" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Extra Amount (+/-)</Label>
+                      <Input type="number" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className="h-9 rounded-lg" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Token Advance (₹)</Label>
+                      <Input type="number" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className="h-9 rounded-lg" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      className="h-9 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white"
+                      onClick={() => void handleAddBidToCurrentBuyer()}
+                      disabled={addBidSaving}
+                    >
+                      {addBidSaving ? 'Saving...' : 'Save Bid'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl"
+                      onClick={() => {
+                        resetAddBidForm();
+                        setShowAddBidCard(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 <div className="rounded-xl border border-border/40 p-3">
                   <p className="text-[10px] text-primary font-semibold uppercase">Buyer</p>
@@ -2211,7 +2536,7 @@ const BillingPage = () => {
               </div>
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
-            <div className="glass-card rounded-2xl p-3 space-y-2">
+            <div className="glass-card rounded-2xl p-3 space-y-2 relative z-[70] overflow-visible">
               <div className="flex flex-wrap items-center gap-2">
                 <RadioGroup
                   value={replaceTarget}
@@ -2251,7 +2576,7 @@ const BillingPage = () => {
                     disabled={!bill}
                   />
                   {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && (
-                    <div className="absolute z-40 mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
+                    <div className="absolute z-[90] mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
                       {replaceSearchResults.map(c => (
                         <button
                           key={c.contact_id}
