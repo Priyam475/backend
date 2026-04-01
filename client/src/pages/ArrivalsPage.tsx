@@ -2195,6 +2195,33 @@ const ArrivalsPage = () => {
                 <Plus className="w-5 h-5 text-white" />
               </button>
             </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1 backdrop-blur">
+              <button
+                type="button"
+                onClick={() => {
+                  void tryCloseArrivalPanel(() => setShowAdd(false));
+                }}
+                className={cn(
+                  "h-9 rounded-lg text-xs font-semibold transition-colors",
+                  !showAdd ? "bg-white text-[#6075FF]" : "text-white/85 hover:text-white",
+                )}
+              >
+                Summary
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetForm();
+                  setShowAdd(true);
+                }}
+                className={cn(
+                  "h-9 rounded-lg text-xs font-semibold transition-colors",
+                  showAdd ? "bg-white text-[#6075FF]" : "text-white/85 hover:text-white",
+                )}
+              >
+                New Arrival
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2816,15 +2843,15 @@ const ArrivalsPage = () => {
                       <motion.div key={seller.seller_vehicle_id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
                         className="glass-card rounded-2xl overflow-x-hidden overflow-y-visible max-w-full">
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
-                          <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
-                            <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-[10px] font-bold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
+                          <div className="flex items-center gap-3 min-w-0 flex-1 sm:min-w-[12rem]">
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-base sm:text-lg font-extrabold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
                                   <div className="min-w-0 flex items-center">
-                                    <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
+                                    <p className="font-semibold text-lg sm:text-xl text-foreground truncate leading-tight">
                                       {seller.seller_name}
                                     </p>
                                   </div>
@@ -2834,7 +2861,7 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-11 w-full min-w-0 rounded-lg text-sm sm:text-base",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={20}
@@ -2866,7 +2893,7 @@ const ArrivalsPage = () => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
                                       className={cn(
-                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-11 w-full min-w-0 rounded-lg text-sm sm:text-base",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={100}
@@ -2879,7 +2906,7 @@ const ArrivalsPage = () => {
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
-                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        "h-11 sm:h-11 w-full min-w-0 rounded-lg text-sm sm:text-base",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
                                       maxLength={20}
@@ -2890,9 +2917,9 @@ const ArrivalsPage = () => {
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
-                            <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20">
-                              <span className="text-lg sm:text-xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
+                          <div className="flex items-center gap-2 shrink-0 sm:pl-2 self-center">
+                            <div className="px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 font-extrabold shadow-sm ring-1 ring-emerald-600/20 self-center">
+                              <span className="text-xl sm:text-2xl leading-none whitespace-nowrap tabular-nums">{sellerTotal}</span>
                             </div>
                             <button
                               type="button"
@@ -2915,14 +2942,14 @@ const ArrivalsPage = () => {
                               }}
                               aria-label={expanded ? 'Collapse seller lots' : 'Expand seller lots'}
                               className={cn(
-                                "min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
+                                "min-h-[44px] min-w-[44px] h-11 w-11 sm:h-10 sm:w-10 rounded-lg flex items-center justify-center transition-colors touch-manipulation",
                                 expanded ? "bg-muted/40 hover:bg-muted/50" : "bg-muted/20 hover:bg-muted/40"
                               )}
                             >
-                              {expanded ? <ChevronUp className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 sm:w-4 sm:h-4 text-muted-foreground" />}
+                              {expanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
                             </button>
-                            <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 h-11 w-11 sm:h-9 sm:w-9 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
-                              <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                            <button type="button" onClick={() => setPendingDelete({ kind: 'seller', idx: si, label: seller.seller_name || `Seller ${si + 1}` })} className="min-h-[44px] min-w-[44px] h-11 w-11 sm:h-10 sm:w-10 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors touch-manipulation">
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
