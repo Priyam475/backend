@@ -1146,6 +1146,15 @@ const ArrivalsPage = () => {
     if (isDynamic && contacts.some(c => c.mark && c.mark.toLowerCase() === markLower)) return 'This mark is already in use by a contact';
     return null;
   };
+  const hasIncompleteSellerDetails = useMemo(() => {
+    return sellers.some((s, sellerIdx) => {
+      const sellerName = (s.seller_name ?? '').trim();
+      if (!sellerName) return true;
+      if (isSellerNameInvalid(s)) return true;
+      if (isSellerMarkInvalid(s, sellerIdx)) return true;
+      return false;
+    });
+  }, [sellers, contacts]);
   const isLotNameInvalid = (l: LotEntry) => {
     const ln = (l.lot_name ?? '').trim();
     if (!ln) return false;
@@ -1421,6 +1430,10 @@ const ArrivalsPage = () => {
       toast.error('Single-seller arrival allows only one seller');
       return;
     }
+    if (hasIncompleteSellerDetails) {
+      toast.error('Complete existing seller details before adding a new seller');
+      return;
+    }
 
     const newSellerId = crypto.randomUUID();
     const newSeller: SellerEntry = {
@@ -1463,6 +1476,10 @@ const ArrivalsPage = () => {
   };
 
   const openSellerSearchPanel = () => {
+    if (hasIncompleteSellerDetails) {
+      toast.error('Complete existing seller details before adding a new seller');
+      return;
+    }
     addSellerInstant('', '');
     setActiveSellerSearch(null);
     setSellerDropdown(false);
@@ -3001,7 +3018,7 @@ const ArrivalsPage = () => {
                         type="button"
                         size="sm"
                         onClick={openSellerSearchPanel}
-                        disabled={!isMultiSeller && sellers.length >= 1}
+                        disabled={(!isMultiSeller && sellers.length >= 1) || hasIncompleteSellerDetails}
                         className="h-11 sm:h-12 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                       >
                         <Users className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -3886,7 +3903,7 @@ const ArrivalsPage = () => {
                           type="button"
                           size="sm"
                           onClick={openSellerSearchPanel}
-                          disabled={!isMultiSeller && sellers.length >= 1}
+                          disabled={(!isMultiSeller && sellers.length >= 1) || hasIncompleteSellerDetails}
                           className="h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF] shadow-md shadow-[#6075FF]/25 active:shadow-lg active:shadow-[#6075FF]/35 active:scale-[0.99] transition-all disabled:opacity-60 disabled:bg-[#6075FF] disabled:text-white"
                         >
                           <Users className="w-4 h-4 md:w-5 md:h-5" />
