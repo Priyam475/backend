@@ -624,6 +624,142 @@ function LotFieldsHorizontalScroll({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function AddLotHorizontalScrollPanel({ children }: { children: ReactNode }) {
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  const [hintRight, setHintRight] = useState(false);
+  const [thumbMetrics, setThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
+    visible: false,
+    left: 0,
+    width: 0,
+  });
+  const [thumbPressed, setThumbPressed] = useState(false);
+
+  const runMetrics = useCallback(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    const hasOverflow = totalScrollableX > LOTS_SCROLL_EPS;
+
+    setHintRight(hasOverflow && outer.scrollLeft < totalScrollableX - LOTS_SCROLL_EPS);
+    if (!hasOverflow) {
+      setThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+
+    const insetPx = 10;
+    const available = Math.max(0, outer.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+
+    const thumbWidth = Math.max(32, Math.min(available, Math.round(outer.clientWidth * 0.18)));
+    const maxLeft = Math.max(0, available - thumbWidth);
+    const ratio = outer.scrollLeft / totalScrollableX;
+    const left = insetPx + maxLeft * Math.max(0, Math.min(1, ratio));
+
+    setThumbMetrics({ visible: true, left, width: thumbWidth });
+  }, []);
+
+  useLayoutEffect(() => {
+    runMetrics();
+  }, [children, runMetrics]);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    runMetrics();
+    const ro = new ResizeObserver(() => runMetrics());
+    ro.observe(outer);
+    outer.addEventListener('scroll', runMetrics, { passive: true });
+    return () => {
+      ro.disconnect();
+      outer.removeEventListener('scroll', runMetrics);
+    };
+  }, [runMetrics]);
+
+  const setScrollLeftFromPointerX = useCallback((clientX: number) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    if (totalScrollableX <= LOTS_SCROLL_EPS) return;
+
+    const insetPx = 10;
+    const rect = outer.getBoundingClientRect();
+    const xInPanel = clientX - rect.left;
+    const available = Math.max(0, outer.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+
+    const ratio = Math.max(0, Math.min(1, (xInPanel - insetPx) / available));
+    outer.scrollLeft = ratio * totalScrollableX;
+  }, []);
+
+  const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setThumbPressed(true);
+    setScrollLeftFromPointerX(e.clientX);
+
+    const onMove = (ev: PointerEvent) => setScrollLeftFromPointerX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setThumbPressed(false);
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    window.addEventListener('pointercancel', onUp, { passive: true });
+  }, [setScrollLeftFromPointerX]);
+
+  return (
+    <div className="relative">
+      <div
+        ref={outerRef}
+        className="overflow-x-auto lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto pb-5"
+      >
+        {children}
+      </div>
+      {hintRight && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-10 items-center justify-end bg-gradient-to-l from-background from-35% via-background/75 to-transparent pr-1"
+          aria-hidden
+        >
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+      {thumbMetrics.visible && (
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-[18px] z-[4]">
+          <div
+            className="pointer-events-auto absolute left-2 right-2 bottom-0 h-[14px] rounded-full"
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+            }}
+          />
+          <div
+            className="pointer-events-auto absolute bottom-0 h-[14px] rounded-full border-2 cursor-ew-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
+            style={{
+              left: thumbMetrics.left,
+              width: thumbMetrics.width,
+              borderColor: thumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
+              backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+              boxShadow:
+                thumbPressed
+                  ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 22px hsl(var(--foreground) / 0.24)'
+                  : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 14px hsl(var(--foreground) / 0.16)',
+            }}
+            onPointerDown={onThumbPointerDown}
+            role="slider"
+            aria-label="Drag to scroll new lot fields horizontally"
+            aria-valuemin={0}
+            aria-valuemax={1}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 const ArrivalsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -762,10 +898,20 @@ const ArrivalsPage = () => {
         return;
       }
 
+      el.scrollTop = el.scrollHeight;
+      const lastRow = el.querySelector('tbody tr:last-child') as HTMLElement | null;
+      lastRow?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       // Keep the lots panel itself in viewport so users can immediately see
       // the newly added row instead of only scrolling internally.
-      el.scrollIntoView({ block: 'start', behavior: 'auto' });
-      el.scrollTop = el.scrollHeight;
+      el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+
+      const panel = newArrivalPanelScrollRef.current;
+      if (panel && panel.contains(el)) {
+        const panelRect = panel.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const nextTop = panel.scrollTop + (elRect.top - panelRect.top) - 12;
+        panel.scrollTo({ top: Math.max(0, nextTop), behavior: 'auto' });
+      }
     };
 
     tryScroll(0);
@@ -2791,7 +2937,7 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="overflow-x-auto lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto pb-1">
+                                <AddLotHorizontalScrollPanel>
                                   <div className="min-w-max flex flex-nowrap items-start gap-2">
                                     <div className="min-w-0 flex-1">
                                     <LotFieldsHorizontalScroll>
@@ -2873,7 +3019,7 @@ const ArrivalsPage = () => {
                                     </Button>
                                     </div>
                                   </div>
-                                </div>
+                                </AddLotHorizontalScrollPanel>
                               </div>
                             </motion.div>
                           )}
@@ -3669,7 +3815,7 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="overflow-x-auto lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto pb-1">
+                                <AddLotHorizontalScrollPanel>
                                   <div className="min-w-max flex flex-nowrap items-start gap-2">
                                     <div className="min-w-0 flex-1">
                                     <LotFieldsHorizontalScroll>
@@ -3751,7 +3897,7 @@ const ArrivalsPage = () => {
                                     </Button>
                                     </div>
                                   </div>
-                                </div>
+                                </AddLotHorizontalScrollPanel>
                               </div>
                             </motion.div>
                           )}
