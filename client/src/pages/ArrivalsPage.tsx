@@ -1475,14 +1475,25 @@ const ArrivalsPage = () => {
     setSellerDropdown(false);
   };
 
+  const collapseOpenSellerSectionsBeforeAdd = () => {
+    setSellerExpanded(
+      sellers.reduce<Record<string, boolean>>((acc, entry) => {
+        acc[entry.seller_vehicle_id] = false;
+        return acc;
+      }, {})
+    );
+    setAddLotForm(null);
+    setActiveSellerSearch(null);
+    setSellerDropdown(false);
+  };
+
   const openSellerSearchPanel = () => {
     if (hasIncompleteSellerDetails) {
       toast.error('Complete existing seller details before adding a new seller');
       return;
     }
+    collapseOpenSellerSectionsBeforeAdd();
     addSellerInstant('', '');
-    setActiveSellerSearch(null);
-    setSellerDropdown(false);
   };
 
   const updateSellerNameWithSuggestions = (
