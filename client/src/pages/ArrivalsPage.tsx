@@ -280,6 +280,12 @@ function LotsScrollPanel({
     height: 0,
   });
   const [thumbPressed, setThumbPressed] = useState(false);
+  const [horizontalThumbMetrics, setHorizontalThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
+    visible: false,
+    left: 0,
+    width: 0,
+  });
+  const [horizontalThumbPressed, setHorizontalThumbPressed] = useState(false);
 
   const mergedRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -337,6 +343,31 @@ function LotsScrollPanel({
     setThumbMetrics({ visible: true, top, height: thumbHeight });
   }, [ensureVerticalScrollThumbWhenShort]);
 
+  const updateHorizontalThumbMetrics = useCallback(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    const clientW = outer.clientWidth;
+    if (clientW <= 0) return;
+
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    if (totalScrollableX <= LOTS_SCROLL_EPS) {
+      setHorizontalThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+
+    const insetPx = 10;
+    const available = Math.max(0, clientW - insetPx * 2);
+    if (available <= 0) return;
+
+    const thumbWidth = Math.max(32, Math.min(available, Math.round(clientW * 0.18)));
+    const maxLeft = Math.max(0, available - thumbWidth);
+    const ratio = outer.scrollLeft / totalScrollableX;
+    const left = insetPx + maxLeft * Math.max(0, Math.min(1, ratio));
+
+    setHorizontalThumbMetrics({ visible: true, left, width: thumbWidth });
+  }, []);
+
   const updateHints = useCallback(() => {
     const el = outerRef.current;
     if (!el || !showEdgeHints) {
@@ -356,7 +387,8 @@ function LotsScrollPanel({
     applyVerticalThumbPadding();
     updateHints();
     updateThumbMetrics();
-  }, [applyVerticalThumbPadding, updateHints, updateThumbMetrics]);
+    updateHorizontalThumbMetrics();
+  }, [applyVerticalThumbPadding, updateHints, updateThumbMetrics, updateHorizontalThumbMetrics]);
 
   const scrollByStep = useCallback((dir: 'up' | 'down') => {
     const el = outerRef.current;
@@ -376,15 +408,17 @@ function LotsScrollPanel({
     const ro = new ResizeObserver(() => runScrollMetrics());
     ro.observe(outer);
     outer.addEventListener('scroll', updateThumbMetrics, { passive: true });
+    outer.addEventListener('scroll', updateHorizontalThumbMetrics, { passive: true });
     if (showEdgeHints) {
       outer.addEventListener('scroll', updateHints, { passive: true });
     }
     return () => {
       ro.disconnect();
       outer.removeEventListener('scroll', updateThumbMetrics);
+      outer.removeEventListener('scroll', updateHorizontalThumbMetrics);
       outer.removeEventListener('scroll', updateHints);
     };
-  }, [runScrollMetrics, updateHints, updateThumbMetrics, showEdgeHints, sellerId]);
+  }, [runScrollMetrics, updateHints, updateThumbMetrics, updateHorizontalThumbMetrics, showEdgeHints, sellerId]);
 
   const setScrollTopFromPointerY = useCallback((clientY: number) => {
     const outer = outerRef.current;
@@ -428,12 +462,52 @@ function LotsScrollPanel({
     window.addEventListener('pointercancel', onUp, { passive: true });
   }, [setScrollTopFromPointerY]);
 
+  const setScrollLeftFromPointerX = useCallback((clientX: number) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    if (totalScrollableX <= LOTS_SCROLL_EPS) return;
+
+    const insetPx = 10;
+    const rect = outer.getBoundingClientRect();
+    const xInPanel = clientX - rect.left;
+    const available = Math.max(0, outer.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+
+    const ratio = Math.max(0, Math.min(1, (xInPanel - insetPx) / available));
+    outer.scrollLeft = ratio * totalScrollableX;
+  }, []);
+
+  const onHorizontalThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    setHorizontalThumbPressed(true);
+    setScrollLeftFromPointerX(e.clientX);
+
+    const onMove = (ev: PointerEvent) => setScrollLeftFromPointerX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setHorizontalThumbPressed(false);
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    window.addEventListener('pointercancel', onUp, { passive: true });
+  }, [setScrollLeftFromPointerX]);
+
   return (
     <>
       <div className="relative">
         <div
           ref={mergedRef}
-          className={cn('lots-scroll-panel', 'no-scrollbar', className)}
+          className={cn('lots-scroll-panel', 'lg:no-scrollbar', className)}
           style={
             showEdgeHints
               ? { WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }
@@ -494,6 +568,35 @@ function LotsScrollPanel({
             aria-hidden
           >
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+          </div>
+        )}
+        {horizontalThumbMetrics.visible && (
+          <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-[18px] z-[4]">
+            <div
+              className="pointer-events-auto absolute left-2 right-2 bottom-0 h-[14px] rounded-full"
+              style={{
+                backgroundColor: 'hsl(var(--card))',
+                boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+              }}
+            />
+            <div
+              className="pointer-events-auto absolute bottom-0 h-[14px] rounded-full border-2 cursor-ew-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
+              style={{
+                left: horizontalThumbMetrics.left,
+                width: horizontalThumbMetrics.width,
+                borderColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
+                backgroundColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+                boxShadow:
+                  horizontalThumbPressed
+                    ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 22px hsl(var(--foreground) / 0.24)'
+                    : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 14px hsl(var(--foreground) / 0.16)',
+              }}
+              onPointerDown={onHorizontalThumbPointerDown}
+              role="slider"
+              aria-label="Drag to scroll lots horizontally"
+              aria-valuemin={0}
+              aria-valuemax={1}
+            />
           </div>
         )}
       </div>
@@ -2688,10 +2791,11 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                  <div className="min-w-0 flex-1">
+                                <div className="overflow-x-auto lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto pb-1">
+                                  <div className="min-w-max flex flex-nowrap items-start gap-2">
+                                    <div className="min-w-0 flex-1">
                                     <LotFieldsHorizontalScroll>
-                                      <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                      <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto">
                                   {/* Lot Name */}
                                   <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
@@ -2745,28 +2849,29 @@ const ArrivalsPage = () => {
                                   </div>
                                       </div>
                                     </LotFieldsHorizontalScroll>
-                                  </div>
-                                  {/* Action buttons */}
-                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setAddLotForm({
-                                      sellerId: seller.seller_vehicle_id,
-                                      lotName: "",
-                                      bags: "",
-                                      commodityName: commodities[0]?.commodity_name || "",
-                                      variant: "",
-                                      errors: {},
-                                    })}
-                                    className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
-                                  >
-                                    Cancel
-                                  </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
-                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
-                                  </Button>
+                                    </div>
+                                    {/* Action buttons */}
+                                    <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start pl-1">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setAddLotForm({
+                                        sellerId: seller.seller_vehicle_id,
+                                        lotName: "",
+                                        bags: "",
+                                        commodityName: commodities[0]?.commodity_name || "",
+                                        variant: "",
+                                        errors: {},
+                                      })}
+                                      className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
+                                      {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                    </Button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -2791,7 +2896,7 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Scroll to see all lots"
-                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x border-t border-border/30"
+                                className="min-h-[12rem] max-h-[min(32rem,58dvh)] overflow-y-auto overflow-x-auto lg:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-auto border-t border-border/30"
                               >
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
@@ -3564,10 +3669,11 @@ const ArrivalsPage = () => {
                             >
                               <div className="p-3 border-t border-border/30 space-y-2 bg-muted/10">
                                 <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                  <div className="min-w-0 flex-1">
+                                <div className="overflow-x-auto lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto pb-1">
+                                  <div className="min-w-max flex flex-nowrap items-start gap-2">
+                                    <div className="min-w-0 flex-1">
                                     <LotFieldsHorizontalScroll>
-                                      <div className="flex flex-nowrap items-start gap-2 overflow-y-visible [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                      <div className="flex flex-nowrap items-start gap-2 overflow-x-auto overflow-y-visible lot-fields-x-scroll [-webkit-overflow-scrolling:touch] touch-auto">
                                   {/* Lot Name */}
                                   <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
@@ -3621,28 +3727,29 @@ const ArrivalsPage = () => {
                                   </div>
                                       </div>
                                     </LotFieldsHorizontalScroll>
-                                  </div>
-                                  {/* Action buttons */}
-                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setAddLotForm({
-                                      sellerId: seller.seller_vehicle_id,
-                                      lotName: "",
-                                      bags: "",
-                                      commodityName: commodities[0]?.commodity_name || "",
-                                      variant: "",
-                                      errors: {},
-                                    })}
-                                    className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
-                                  >
-                                    Cancel
-                                  </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
-                                    {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
-                                  </Button>
+                                    </div>
+                                    {/* Action buttons */}
+                                    <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start pl-1">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setAddLotForm({
+                                        sellerId: seller.seller_vehicle_id,
+                                        lotName: "",
+                                        bags: "",
+                                        commodityName: commodities[0]?.commodity_name || "",
+                                        variant: "",
+                                        errors: {},
+                                      })}
+                                      className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs"
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
+                                      {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                    </Button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -3666,7 +3773,7 @@ const ArrivalsPage = () => {
                                 contentLayoutKey={seller.lots.length}
                                 showScrollAffordanceFooter={seller.lots.length > 0}
                                 scrollAffordanceHint="Swipe here to scroll lots"
-                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto md:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-pan-x border-t border-border/30"
+                                className="min-h-[11rem] max-h-[min(28rem,52dvh)] overflow-y-auto overflow-x-auto lg:overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch] touch-auto border-t border-border/30"
                               >
                                   {seller.lots.length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-3 italic px-3">No lots added yet.</p>
