@@ -111,6 +111,15 @@ public final class SalesBillDTOs {
         private String billNumber;
         private String buyerName;
         private String buyerMark;
+        private String buyerContactId;
+        private String buyerPhone;
+        private String buyerAddress;
+        private Boolean buyerAsBroker;
+        private String brokerName;
+        private String brokerMark;
+        private String brokerContactId;
+        private String brokerPhone;
+        private String brokerAddress;
         private String billingName;
         private String billDate; // ISO-8601
         @Valid
@@ -137,6 +146,24 @@ public final class SalesBillDTOs {
         public void setBuyerName(String buyerName) { this.buyerName = buyerName; }
         public String getBuyerMark() { return buyerMark; }
         public void setBuyerMark(String buyerMark) { this.buyerMark = buyerMark; }
+        public String getBuyerContactId() { return buyerContactId; }
+        public void setBuyerContactId(String buyerContactId) { this.buyerContactId = buyerContactId; }
+        public String getBuyerPhone() { return buyerPhone; }
+        public void setBuyerPhone(String buyerPhone) { this.buyerPhone = buyerPhone; }
+        public String getBuyerAddress() { return buyerAddress; }
+        public void setBuyerAddress(String buyerAddress) { this.buyerAddress = buyerAddress; }
+        public Boolean getBuyerAsBroker() { return buyerAsBroker; }
+        public void setBuyerAsBroker(Boolean buyerAsBroker) { this.buyerAsBroker = buyerAsBroker; }
+        public String getBrokerName() { return brokerName; }
+        public void setBrokerName(String brokerName) { this.brokerName = brokerName; }
+        public String getBrokerMark() { return brokerMark; }
+        public void setBrokerMark(String brokerMark) { this.brokerMark = brokerMark; }
+        public String getBrokerContactId() { return brokerContactId; }
+        public void setBrokerContactId(String brokerContactId) { this.brokerContactId = brokerContactId; }
+        public String getBrokerPhone() { return brokerPhone; }
+        public void setBrokerPhone(String brokerPhone) { this.brokerPhone = brokerPhone; }
+        public String getBrokerAddress() { return brokerAddress; }
+        public void setBrokerAddress(String brokerAddress) { this.brokerAddress = brokerAddress; }
         public String getBillingName() { return billingName; }
         public void setBillingName(String billingName) { this.billingName = billingName; }
         public String getBillDate() { return billDate; }
@@ -181,6 +208,21 @@ public final class SalesBillDTOs {
         @NotBlank(message = "buyerMark is required")
         @Size(max = 100)
         private String buyerMark;
+        private String buyerContactId;
+        @Size(max = 20)
+        private String buyerPhone;
+        @Size(max = 500)
+        private String buyerAddress;
+        private Boolean buyerAsBroker = false;
+        @Size(max = 255)
+        private String brokerName;
+        @Size(max = 100)
+        private String brokerMark;
+        private String brokerContactId;
+        @Size(max = 20)
+        private String brokerPhone;
+        @Size(max = 500)
+        private String brokerAddress;
         @NotBlank(message = "billingName is required")
         @Size(max = 255)
         private String billingName;
@@ -214,6 +256,24 @@ public final class SalesBillDTOs {
         public void setBuyerName(String buyerName) { this.buyerName = buyerName; }
         public String getBuyerMark() { return buyerMark; }
         public void setBuyerMark(String buyerMark) { this.buyerMark = buyerMark; }
+        public String getBuyerContactId() { return buyerContactId; }
+        public void setBuyerContactId(String buyerContactId) { this.buyerContactId = buyerContactId; }
+        public String getBuyerPhone() { return buyerPhone; }
+        public void setBuyerPhone(String buyerPhone) { this.buyerPhone = buyerPhone; }
+        public String getBuyerAddress() { return buyerAddress; }
+        public void setBuyerAddress(String buyerAddress) { this.buyerAddress = buyerAddress; }
+        public Boolean getBuyerAsBroker() { return buyerAsBroker; }
+        public void setBuyerAsBroker(Boolean buyerAsBroker) { this.buyerAsBroker = buyerAsBroker; }
+        public String getBrokerName() { return brokerName; }
+        public void setBrokerName(String brokerName) { this.brokerName = brokerName; }
+        public String getBrokerMark() { return brokerMark; }
+        public void setBrokerMark(String brokerMark) { this.brokerMark = brokerMark; }
+        public String getBrokerContactId() { return brokerContactId; }
+        public void setBrokerContactId(String brokerContactId) { this.brokerContactId = brokerContactId; }
+        public String getBrokerPhone() { return brokerPhone; }
+        public void setBrokerPhone(String brokerPhone) { this.brokerPhone = brokerPhone; }
+        public String getBrokerAddress() { return brokerAddress; }
+        public void setBrokerAddress(String brokerAddress) { this.brokerAddress = brokerAddress; }
         public String getBillingName() { return billingName; }
         public void setBillingName(String billingName) { this.billingName = billingName; }
         public String getBillDate() { return billDate; }

@@ -91,6 +91,15 @@ interface BillData {
   billNumber: string;
   buyerName: string;
   buyerMark: string;
+  buyerContactId: string | null;
+  buyerPhone: string;
+  buyerAddress: string;
+  buyerAsBroker: boolean;
+  brokerName: string;
+  brokerMark: string;
+  brokerContactId: string | null;
+  brokerPhone: string;
+  brokerAddress: string;
   billingName: string;
   billDate: string;
   commodityGroups: CommodityGroup[];
@@ -195,7 +204,20 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     }),
   }));
   const tokenAdvance = Number((b as any).tokenAdvance) || 0;
-  return { ...b, tokenAdvance, commodityGroups: groups };
+  return {
+    ...b,
+    buyerContactId: (b as any).buyerContactId ?? null,
+    buyerPhone: (b as any).buyerPhone ?? '',
+    buyerAddress: (b as any).buyerAddress ?? '',
+    buyerAsBroker: Boolean((b as any).buyerAsBroker),
+    brokerName: (b as any).brokerName ?? '',
+    brokerMark: (b as any).brokerMark ?? '',
+    brokerContactId: (b as any).brokerContactId ?? null,
+    brokerPhone: (b as any).brokerPhone ?? '',
+    brokerAddress: (b as any).brokerAddress ?? '',
+    tokenAdvance,
+    commodityGroups: groups,
+  };
 }
 
 // ── Validation ────────────────────────────────────────────
@@ -361,6 +383,13 @@ const BillingPage = () => {
   const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
   const [contactsRegistry, setContactsRegistry] = useState<Contact[]>([]);
   const [restorePendingPhone, setRestorePendingPhone] = useState<string | null>(null);
+  const [replaceTarget, setReplaceTarget] = useState<'BUYER' | 'BROKER'>('BUYER');
+  const [replaceMarkInput, setReplaceMarkInput] = useState('');
+  const [replaceSearchResults, setReplaceSearchResults] = useState<Contact[]>([]);
+  const [replaceSearchLoading, setReplaceSearchLoading] = useState(false);
+  const [replaceSelectedContact, setReplaceSelectedContact] = useState<Contact | null>(null);
+  const [replaceForm, setReplaceForm] = useState({ mark: '', name: '', phone: '' });
+  const [replaceErrors, setReplaceErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     commodityApi.list().then(setCommodities);
@@ -549,6 +578,142 @@ const BillingPage = () => {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to restore contact');
     }
+  };
+
+  const clearReplacementInline = () => {
+    setReplaceMarkInput('');
+    setReplaceSearchResults([]);
+    setReplaceSearchLoading(false);
+    setReplaceSelectedContact(null);
+    setReplaceForm({ mark: '', name: '', phone: '' });
+    setReplaceErrors({});
+  };
+
+  useEffect(() => {
+    const q = replaceMarkInput.trim();
+    const selectedKey = (replaceSelectedContact?.mark || replaceSelectedContact?.name || '').trim().toUpperCase();
+    if (replaceSelectedContact && selectedKey && selectedKey === q.toUpperCase()) {
+      setReplaceSearchResults([]);
+      setReplaceSearchLoading(false);
+      return;
+    }
+    if (!q) {
+      setReplaceSearchResults([]);
+      setReplaceSearchLoading(false);
+      return;
+    }
+    let active = true;
+    setReplaceSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      void contactApi.search(q)
+        .then(results => {
+          if (!active) return;
+          setReplaceSearchResults(Array.isArray(results) ? results.slice(0, 10) : []);
+        })
+        .catch(() => {
+          if (!active) return;
+          setReplaceSearchResults([]);
+        })
+        .finally(() => {
+          if (active) setReplaceSearchLoading(false);
+        });
+    }, 220);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [replaceMarkInput, replaceSelectedContact]);
+
+  const pickReplacementContact = (contact: Contact) => {
+    setReplaceSelectedContact(contact);
+    setReplaceForm({
+      mark: (contact.mark ?? '').toUpperCase(),
+      name: contact.name ?? '',
+      phone: contact.phone ?? '',
+    });
+    setReplaceMarkInput(contact.mark || contact.name || '');
+    setReplaceSearchResults([]);
+    setReplaceSearchLoading(false);
+    setReplaceErrors({});
+  };
+
+  const validateReplacementForm = (): boolean => {
+    const errs: Record<string, string> = {};
+    const trimmedMark = replaceForm.mark.trim().toUpperCase();
+    const trimmedName = replaceForm.name.trim();
+    const trimmedPhone = replaceForm.phone.trim();
+    if (!trimmedMark) errs.mark = 'Mark is required';
+    if (!trimmedName) errs.name = 'Name is required';
+    if (!trimmedPhone) errs.phone = 'Phone number is required';
+    else if (!/^[6-9]\d{9}$/.test(trimmedPhone)) errs.phone = 'Enter a valid 10-digit mobile number';
+    setReplaceErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const applyReplacementContact = (contact: Contact) => {
+    const nextName = contact.name?.trim() || '';
+    const nextMark = (contact.mark?.trim() || nextName.slice(0, 4)).toUpperCase();
+    if (replaceTarget === 'BUYER') {
+      setSelectedBuyer(prev => (prev ? { ...prev, buyerName: nextName, buyerMark: nextMark, buyerContactId: contact.contact_id } : prev));
+      setBuyerBidMarkInput(nextMark || nextName);
+    }
+    setBill(prev => {
+      if (!prev) return prev;
+      if (replaceTarget === 'BROKER') {
+        return {
+          ...prev,
+          brokerName: nextName,
+          brokerMark: nextMark,
+          brokerContactId: contact.contact_id,
+          brokerPhone: contact.phone ?? '',
+          brokerAddress: contact.address ?? '',
+          buyerAsBroker: false,
+        };
+      }
+      return {
+        ...prev,
+        buyerName: nextName,
+        buyerMark: nextMark,
+        buyerContactId: contact.contact_id,
+        buyerPhone: contact.phone ?? '',
+        buyerAddress: contact.address ?? '',
+        billingName: nextName,
+      };
+    });
+  };
+
+  const submitReplacement = async () => {
+    let resolved: Contact | null = replaceSelectedContact;
+    if (!resolved) {
+      if (!canCreateContact) {
+        toast.error('You do not have permission to create contacts.');
+        return;
+      }
+      if (!validateReplacementForm()) return;
+      try {
+        resolved = await contactApi.create({
+          name: replaceForm.name.trim(),
+          phone: replaceForm.phone.trim(),
+          mark: replaceForm.mark.trim().toUpperCase(),
+          trader_id: '',
+        });
+      } catch (err) {
+        if (err instanceof ContactApiError && err.errorKey === 'markexists') {
+          setReplaceErrors(prev => ({ ...prev, mark: err.message }));
+          return;
+        }
+        if (err instanceof ContactApiError && err.errorKey === 'phoneexistsinactive') {
+          setReplaceErrors(prev => ({ ...prev, phone: 'Phone exists on inactive contact. Restore from Contacts module first.' }));
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : 'Failed to create contact');
+        return;
+      }
+    }
+    if (!resolved) return;
+    applyReplacementContact(resolved);
+    clearReplacementInline();
+    toast.success(`${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'} replaced for this bill.`);
   };
 
   // Load buyer data from completed auctions (arrivals from API; weighing from API)
@@ -846,6 +1011,15 @@ const BillingPage = () => {
       billNumber: '', // Generated on print (per SRS)
       buyerName: buyer.buyerName,
       buyerMark: buyer.buyerMark,
+      buyerContactId: buyer.buyerContactId ?? null,
+      buyerPhone: '',
+      buyerAddress: '',
+      buyerAsBroker: false,
+      brokerName: '',
+      brokerMark: '',
+      brokerContactId: null,
+      brokerPhone: '',
+      brokerAddress: '',
       billingName: buyer.buyerName,
       billDate: new Date().toISOString(),
       commodityGroups,
@@ -1146,6 +1320,15 @@ const BillingPage = () => {
     const payload = {
       buyerName: bill.buyerName,
       buyerMark: bill.buyerMark,
+      buyerContactId: bill.buyerContactId,
+      buyerPhone: bill.buyerPhone ?? '',
+      buyerAddress: bill.buyerAddress ?? '',
+      buyerAsBroker: !!bill.buyerAsBroker,
+      brokerName: bill.buyerAsBroker ? '' : (bill.brokerName ?? ''),
+      brokerMark: bill.buyerAsBroker ? '' : (bill.brokerMark ?? ''),
+      brokerContactId: bill.buyerAsBroker ? null : (bill.brokerContactId ?? null),
+      brokerPhone: bill.buyerAsBroker ? '' : (bill.brokerPhone ?? ''),
+      brokerAddress: bill.buyerAsBroker ? '' : (bill.brokerAddress ?? ''),
       billingName: bill.billingName,
       billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
       // Backend DTO does not accept frontend-only fields (`divisor`, `sellerOtherCharges`).
@@ -1314,15 +1497,7 @@ const BillingPage = () => {
 
   // ═══ PRINT PREVIEW ═══
   if (showPrint && bill) {
-    let activePrintBill: BillData = bill;
-    if (selectedPrintVersion !== 'latest' && Array.isArray((bill as any).versions)) {
-      const versions = (bill as any).versions as any[];
-      const found = versions.find(v => v.version === selectedPrintVersion);
-      const versionPayload = found?.data ?? found?.billData ?? found?.snapshot ?? null;
-      if (versionPayload) {
-        activePrintBill = normalizeBillFromApi(versionPayload as any, fullConfigs, commodities) as BillData;
-      }
-    }
+    const activePrintBill: BillData = bill;
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
         <UnsavedChangesDialog />
@@ -1461,36 +1636,7 @@ const BillingPage = () => {
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
-            {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-semibold">Version to print:</span>
-                <select
-                  value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
-                  onChange={e => {
-                    const val = e.target.value;
-                    if (val === 'latest') {
-                      setSelectedPrintVersion('latest');
-                    } else {
-                      const num = Number(val);
-                      setSelectedPrintVersion(Number.isFinite(num) ? num : 'latest');
-                    }
-                  }}
-                  className="h-8 rounded-md border border-border bg-background px-2 text-xs"
-                >
-                  <option value="latest">Latest (current)</option>
-                  {(bill as any).versions.map((v: any) => (
-                    <option key={v.version} value={String(v.version)}>
-                      v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                    </option>
-                  ))}
-                </select>
-                {selectedPrintVersion !== 'latest' && (
-                  <span className="text-[11px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
-                )}
-              </div>
-            )}
-
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
             <div className="flex gap-3 w-full sm:w-auto">
             <Button onClick={async () => {
               const printedAt = new Date().toISOString();
@@ -1503,10 +1649,6 @@ const BillingPage = () => {
                 });
               } catch {
                 // backend optional
-              }
-              if (selectedPrintVersion !== 'latest' && activePrintBill === bill) {
-                toast.error(`Version v${selectedPrintVersion} data not found.`);
-                return;
               }
       const ok = await directPrint(generateSalesBillPrintHTML(activePrintBill), { mode: "system" });
               ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
@@ -1558,7 +1700,13 @@ const BillingPage = () => {
   };
 
   const openBillFromList = (b: SalesBillDTO) => {
-    setSelectedBuyer({ buyerMark: b.buyerMark, buyerName: b.buyerName, buyerContactId: null, entries: [], tokenAdvanceTotal: 0 });
+    setSelectedBuyer({
+      buyerMark: b.buyerMark,
+      buyerName: b.buyerName,
+      buyerContactId: b.buyerContactId ?? null,
+      entries: [],
+      tokenAdvanceTotal: 0,
+    });
     setBill(normalizeBillFromApi(b, fullConfigs, commodities));
     setHasSavedOnce(isBackendBillId(String(b.billId)));
     setSelectedPrintVersion('latest');
@@ -1810,7 +1958,7 @@ const BillingPage = () => {
               <button
                 type="button"
                 onClick={() => setShowBuyerSuggestions(prev => !prev)}
-                className="absolute right-2 top-[2.15rem] h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted/40"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted/40"
                 aria-label="Toggle buyer suggestions"
               >
                 <ChevronDown className={cn('w-4 h-4 transition-transform', showBuyerSuggestions && 'rotate-180')} />
@@ -1941,12 +2089,27 @@ const BillingPage = () => {
               </Button>
             </div>
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:gap-4">
-                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
-                  <User className="w-3.5 h-3.5 text-muted-foreground mx-auto mb-0.5" />
-                  <p className="text-[9px] text-muted-foreground uppercase">Buyer</p>
-                  <p className="text-[11px] sm:text-sm font-semibold text-foreground truncate">{bill.buyerMark}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                <div className="rounded-xl border border-border/40 p-3">
+                  <p className="text-[10px] text-primary font-semibold uppercase">Buyer</p>
+                  <p className="text-sm sm:text-base font-bold text-foreground truncate">{bill.buyerName || '—'}</p>
+                  <p className="text-xs text-muted-foreground">{bill.buyerPhone || 'No phone'}</p>
+                  <p className="text-xs text-muted-foreground truncate">{bill.buyerAddress || 'No address'}</p>
                 </div>
+                <div className="rounded-xl border border-border/40 p-3">
+                  <p className="text-[10px] text-primary font-semibold uppercase">Broker</p>
+                  <p className="text-sm sm:text-base font-bold text-foreground truncate">
+                    {bill.buyerAsBroker ? (bill.buyerName || 'Not selected') : (bill.brokerName || 'Not selected')}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {bill.buyerAsBroker ? (bill.buyerPhone || 'No phone') : (bill.brokerPhone || 'No phone')}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {bill.buyerAsBroker ? (bill.buyerAddress || 'No address') : (bill.brokerAddress || 'No address')}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
                 <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
                   <Package className="w-3.5 h-3.5 text-muted-foreground mx-auto mb-0.5" />
                   <p className="text-[9px] text-muted-foreground uppercase">Items</p>
@@ -1958,6 +2121,122 @@ const BillingPage = () => {
                   <p className="text-[11px] sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</p>
                 </div>
               </div>
+            </div>
+            <div className="space-y-2 rounded-xl border border-border/50 bg-muted/10 p-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-[170px_1fr_auto_auto_auto] gap-2 items-start">
+                <select
+                  value={replaceTarget}
+                  onChange={e => {
+                    setReplaceTarget(e.target.value === 'BROKER' ? 'BROKER' : 'BUYER');
+                    clearReplacementInline();
+                  }}
+                  className="h-10 w-full rounded-xl border border-border/40 bg-background px-3 text-sm font-medium"
+                  disabled={!bill}
+                >
+                  <option value="BUYER">Buyer</option>
+                  <option value="BROKER">Broker</option>
+                </select>
+                <div className="relative">
+                  <Input
+                    value={replaceMarkInput}
+                    onChange={e => {
+                      const value = e.target.value.toUpperCase();
+                      setReplaceMarkInput(value);
+                      setReplaceSelectedContact(null);
+                      setReplaceForm(prev => ({ ...prev, mark: value }));
+                    }}
+                    placeholder="Enter Mark"
+                    className={cn('h-10 rounded-xl', replaceErrors.mark && 'border-destructive')}
+                    disabled={!bill}
+                  />
+                  {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && (
+                    <div className="absolute z-40 mt-1 max-h-44 w-full overflow-y-auto rounded-xl border border-border bg-background shadow-lg">
+                      {replaceSearchResults.map(c => (
+                        <button
+                          key={c.contact_id}
+                          type="button"
+                          onClick={() => pickReplacementContact(c)}
+                          className={cn(
+                            'w-full border-b border-border/30 px-3 py-2 text-left last:border-b-0 hover:bg-muted/40',
+                            replaceSelectedContact?.contact_id === c.contact_id && 'bg-primary/10',
+                          )}
+                        >
+                          <p className="text-xs font-semibold">{(c.mark || 'NO MARK').toUpperCase()} - {c.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{c.phone || 'No phone'}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <Button type="button" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => void submitReplacement()} disabled={!bill}>
+                  Update
+                </Button>
+                <Button type="button" variant="outline" className="h-10 rounded-xl px-4" onClick={clearReplacementInline}>
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl px-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white"
+                  onClick={() => void submitReplacement()}
+                  disabled={!bill}
+                >
+                  Update {replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}
+                </Button>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border border-border"
+                  checked={!!bill?.buyerAsBroker}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    if (!bill) return;
+                    if (!checked) {
+                      setBill({ ...bill, buyerAsBroker: false });
+                      return;
+                    }
+                    setBill({
+                      ...bill,
+                      buyerAsBroker: true,
+                      brokerName: bill.buyerName,
+                      brokerMark: bill.buyerMark,
+                      brokerContactId: bill.buyerContactId,
+                      brokerPhone: bill.buyerPhone,
+                      brokerAddress: bill.buyerAddress,
+                    });
+                  }}
+                  disabled={!bill}
+                />
+                Use buyer as broker
+              </label>
+              {replaceErrors.mark && <p className="text-[11px] text-destructive">{replaceErrors.mark}</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                <Input
+                  value={replaceForm.name}
+                  onChange={e => {
+                    setReplaceSelectedContact(null);
+                    setReplaceForm(prev => ({ ...prev, name: e.target.value }));
+                  }}
+                  placeholder="Enter Name"
+                  className={cn('h-10 rounded-xl', replaceErrors.name && 'border-destructive')}
+                  disabled={!bill}
+                />
+                <Input
+                  value={replaceForm.phone}
+                  onChange={e => {
+                    setReplaceSelectedContact(null);
+                    setReplaceForm(prev => ({ ...prev, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
+                  }}
+                  placeholder="Enter Phone Number"
+                  className={cn('h-10 rounded-xl', replaceErrors.phone && 'border-destructive')}
+                  disabled={!bill}
+                />
+                <Button type="button" variant="secondary" className="h-10 rounded-xl px-6" onClick={() => void submitReplacement()} disabled={!bill}>
+                  Save
+                </Button>
+              </div>
+              {replaceErrors.name && <p className="text-[11px] text-destructive">{replaceErrors.name}</p>}
+              {replaceErrors.phone && <p className="text-[11px] text-destructive">{replaceErrors.phone}</p>}
             </div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}

@@ -298,6 +298,15 @@ public class SalesBillServiceImpl implements SalesBillService {
     private void mapRequestToEntity(SalesBillCreateOrUpdateRequest request, SalesBill bill) {
         bill.setBuyerName(request.getBuyerName());
         bill.setBuyerMark(request.getBuyerMark());
+        bill.setBuyerContactId(parseLongOrNull(request.getBuyerContactId()));
+        bill.setBuyerPhone(request.getBuyerPhone());
+        bill.setBuyerAddress(request.getBuyerAddress());
+        bill.setBuyerAsBroker(Boolean.TRUE.equals(request.getBuyerAsBroker()));
+        bill.setBrokerName(request.getBrokerName());
+        bill.setBrokerMark(request.getBrokerMark());
+        bill.setBrokerContactId(parseLongOrNull(request.getBrokerContactId()));
+        bill.setBrokerPhone(request.getBrokerPhone());
+        bill.setBrokerAddress(request.getBrokerAddress());
         bill.setBillingName(request.getBillingName());
         bill.setBillDate(parseInstant(request.getBillDate()));
         bill.setBuyerCoolie(nullToZero(request.getBuyerCoolie()));
@@ -353,6 +362,15 @@ public class SalesBillServiceImpl implements SalesBillService {
         dto.setBillNumber(bill.getBillNumber());
         dto.setBuyerName(bill.getBuyerName());
         dto.setBuyerMark(bill.getBuyerMark());
+        dto.setBuyerContactId(bill.getBuyerContactId() != null ? String.valueOf(bill.getBuyerContactId()) : null);
+        dto.setBuyerPhone(bill.getBuyerPhone());
+        dto.setBuyerAddress(bill.getBuyerAddress());
+        dto.setBuyerAsBroker(Boolean.TRUE.equals(bill.getBuyerAsBroker()));
+        dto.setBrokerName(bill.getBrokerName());
+        dto.setBrokerMark(bill.getBrokerMark());
+        dto.setBrokerContactId(bill.getBrokerContactId() != null ? String.valueOf(bill.getBrokerContactId()) : null);
+        dto.setBrokerPhone(bill.getBrokerPhone());
+        dto.setBrokerAddress(bill.getBrokerAddress());
         dto.setBillingName(bill.getBillingName());
         dto.setBillDate(bill.getBillDate() != null ? bill.getBillDate().toString() : null);
         dto.setBuyerCoolie(bill.getBuyerCoolie());
@@ -429,6 +447,15 @@ public class SalesBillServiceImpl implements SalesBillService {
             return Instant.parse(s);
         } catch (DateTimeParseException e) {
             return Instant.now();
+        }
+    }
+
+    private static Long parseLongOrNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 }
