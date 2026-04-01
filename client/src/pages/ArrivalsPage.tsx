@@ -813,6 +813,7 @@ const ArrivalsPage = () => {
   }, []);
 
   const [freightRate, setFreightRate] = useState('');
+  const [freightKgs, setFreightKgs] = useState('1');
   const [noRental, setNoRental] = useState(false);
   const [advancePaid, setAdvancePaid] = useState('');
   const [brokerName, setBrokerName] = useState('');
@@ -940,6 +941,43 @@ const ArrivalsPage = () => {
     tryScroll(0);
   }, []);
 
+  const ensureLastThreeLotsVisible = useCallback((sellerId: string) => {
+    const tryEnsure = (attempt: number) => {
+      const el = lotsScrollRefs.current[sellerId];
+      if (!el) {
+        if (attempt < 6) requestAnimationFrame(() => tryEnsure(attempt + 1));
+        return;
+      }
+
+      const vp = window.visualViewport;
+      const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
+      if (!isKeyboardLikelyOpen) {
+        if (attempt < 6) window.setTimeout(() => tryEnsure(attempt + 1), 100);
+        return;
+      }
+
+      const rows = Array.from(el.querySelectorAll('tbody tr')) as HTMLElement[];
+      if (rows.length === 0) return;
+
+      const anchorRow = rows[Math.max(0, rows.length - 3)];
+      anchorRow?.scrollIntoView({ block: 'start', inline: 'nearest' });
+      const lastRow = rows[rows.length - 1];
+      lastRow?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+
+    tryEnsure(0);
+  }, []);
+
+  const handleLotEntryFieldFocus = useCallback((sellerId: string) => {
+    ensureLastThreeLotsVisible(sellerId);
+    requestAnimationFrame(() => ensureLastThreeLotsVisible(sellerId));
+    window.setTimeout(() => ensureLastThreeLotsVisible(sellerId), 120);
+    window.setTimeout(() => ensureLastThreeLotsVisible(sellerId), 280);
+    window.setTimeout(() => ensureLastThreeLotsVisible(sellerId), 520);
+    window.setTimeout(() => ensureLastThreeLotsVisible(sellerId), 900);
+    window.setTimeout(() => ensureLastThreeLotsVisible(sellerId), 1300);
+  }, [ensureLastThreeLotsVisible]);
+
   const expandOnlySeller = useCallback((sellerId: string) => {
     setSellerExpanded(
       sellers.reduce<Record<string, boolean>>((acc, entry) => {
@@ -1005,6 +1043,7 @@ const ArrivalsPage = () => {
         deductedWeight,
         freightMethod,
         freightRate,
+        freightKgs,
         noRental,
         advancePaid,
         brokerName,
@@ -1031,6 +1070,7 @@ const ArrivalsPage = () => {
       deductedWeight.trim(),
       freightMethod !== 'BY_WEIGHT' ? 'changedFreightMethod' : '',
       freightRate.trim(),
+      freightKgs.trim() !== '1' ? freightKgs.trim() : '',
       noRental ? 'noRental' : '',
       advancePaid.trim(),
       brokerName.trim(),
@@ -1054,6 +1094,7 @@ const ArrivalsPage = () => {
     deductedWeight,
     freightMethod,
     freightRate,
+    freightKgs,
     noRental,
     advancePaid,
     brokerName,
@@ -1074,7 +1115,13 @@ const ArrivalsPage = () => {
     deducted_weight: parseFloat(deductedWeight) || 0,
     freight_method: freightMethod,
     freight_mode: freightMethod,
-    freight_rate: parseFloat(freightRate) || 0,
+    freight_rate: (() => {
+      const rate = parseFloat(freightRate) || 0;
+      if (freightMethod !== 'BY_WEIGHT') return rate;
+      const kgs = parseFloat(freightKgs) || 0;
+      if (kgs <= 0) return 0;
+      return rate / kgs;
+    })(),
     no_rental: noRental,
     advance_paid: parseFloat(advancePaid) || 0,
     broker_name: brokerName || undefined,
@@ -1100,7 +1147,7 @@ const ArrivalsPage = () => {
         })),
       };
     }),
-  }), [isMultiSeller, vehicleNumber, loadedWeight, emptyWeight, deductedWeight, freightMethod, freightRate, noRental, advancePaid, brokerName, brokerContactId, narration, godown, gatepassNumber, origin, sellers]);
+  }), [isMultiSeller, vehicleNumber, loadedWeight, emptyWeight, deductedWeight, freightMethod, freightRate, freightKgs, noRental, advancePaid, brokerName, brokerContactId, narration, godown, gatepassNumber, origin, sellers]);
 
   const handlePartialSave = useCallback(async (): Promise<boolean> => {
     try {
@@ -1241,6 +1288,14 @@ const ArrivalsPage = () => {
     return fr < 0 || fr > 100000;
   }, [noRental, freightRate]);
 
+  const isFreightKgsInvalid = useMemo(() => {
+    if (noRental || freightMethod !== 'BY_WEIGHT') return false;
+    if (!freightKgs || !freightKgs.trim()) return false;
+    const kgs = parseFloat(freightKgs);
+    if (Number.isNaN(kgs)) return true;
+    return kgs <= 0 || kgs > 100000;
+  }, [noRental, freightMethod, freightKgs]);
+
   const isAdvancePaidInvalid = useMemo(() => {
     if (!advancePaid || !advancePaid.trim()) return false;
     const ap = parseFloat(advancePaid) || 0;
@@ -1327,7 +1382,7 @@ const ArrivalsPage = () => {
 
   const isFormInvalid = useMemo(() => {
     if (isVehicleNumberInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
-        isGodownInvalid || isGatepassNumberInvalid || isBrokerNameInvalid || isFreightRateInvalid || isAdvancePaidInvalid) return true;
+        isGodownInvalid || isGatepassNumberInvalid || isBrokerNameInvalid || isFreightRateInvalid || isFreightKgsInvalid || isAdvancePaidInvalid) return true;
     for (let i = 0; i < sellers.length; i++) {
       const s = sellers[i];
       if (isSellerNameInvalid(s) || isSellerMarkInvalid(s, i)) return true;
@@ -1337,7 +1392,7 @@ const ArrivalsPage = () => {
       }
     }
     return false;
-  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isAdvancePaidInvalid, sellers, contacts, lotNameCountsBySellerId, isLotNameDuplicateInvalid, isSellerMarkInvalid]);
+  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isFreightKgsInvalid, isAdvancePaidInvalid, sellers, contacts, lotNameCountsBySellerId, isLotNameDuplicateInvalid, isSellerMarkInvalid]);
 
   // Summary stats for four cards (mobile-first, same as raghav-style UI)
   const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
@@ -1493,7 +1548,11 @@ const ArrivalsPage = () => {
     if (noRental) return 0;
     const rate = parseFloat(freightRate) || 0;
     switch (freightMethod) {
-      case 'BY_WEIGHT': return finalBillableWeight * rate;
+      case 'BY_WEIGHT': {
+        const kgs = parseFloat(freightKgs) || 0;
+        if (kgs <= 0) return 0;
+        return (finalBillableWeight * rate) / kgs;
+      }
       case 'BY_COUNT': {
         const totalBags = sellers.reduce((s, sel) => s + sel.lots.reduce((ls, l) => ls + l.quantity, 0), 0);
         return totalBags * rate;
@@ -1502,7 +1561,7 @@ const ArrivalsPage = () => {
       case 'DIVIDE_BY_WEIGHT': return rate; // Distributed proportionally later (REQ-ARR-002)
       default: return 0;
     }
-  }, [freightMethod, freightRate, noRental, finalBillableWeight, sellers]);
+  }, [freightMethod, freightRate, freightKgs, noRental, finalBillableWeight, sellers]);
 
   // Broker: filter contacts by name, phone, or mark (same as seller search)
   const filteredBrokers = useMemo(() => {
@@ -1984,6 +2043,7 @@ const ArrivalsPage = () => {
     setDeductedWeight('');
     setFreightMethod('BY_WEIGHT');
     setFreightRate('');
+    setFreightKgs('1');
     setNoRental(false);
     setAdvancePaid('');
     setBrokerName('');
@@ -2051,6 +2111,7 @@ const ArrivalsPage = () => {
       setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
       setFreightMethod((detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT');
       setFreightRate(detail?.freightRate != null ? String(detail.freightRate) : '');
+      setFreightKgs('1');
       setNoRental(Boolean(detail?.noRental));
       setAdvancePaid(detail?.advancePaid != null ? String(detail.advancePaid) : '');
       setGodown(detail?.godown ?? '');
@@ -2098,6 +2159,7 @@ const ArrivalsPage = () => {
         deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
         freightMethod: (detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT',
         freightRate: detail?.freightRate != null ? String(detail.freightRate) : '',
+        freightKgs: '1',
         noRental: Boolean(detail?.noRental),
         advancePaid: detail?.advancePaid != null ? String(detail.advancePaid) : '',
         brokerName: detail?.brokerName ?? '',
@@ -2148,7 +2210,7 @@ const ArrivalsPage = () => {
         deducted_weight: deductedWeight ? parseFloat(deductedWeight) : undefined,
         freight_method: freightMethod,
         freight_mode: freightMethod,
-        freight_rate: freightRate ? parseFloat(freightRate) : undefined,
+        freight_rate: base.freight_rate,
         no_rental: noRental,
         advance_paid: advancePaid ? parseFloat(advancePaid) : undefined,
         partially_completed: false,
@@ -2797,24 +2859,39 @@ const ArrivalsPage = () => {
                           );
                         })}
                       </RadioGroup>
-                      <div className="flex items-center gap-2 sm:gap-3 mb-3">
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-2 sm:gap-3">
                         <button onClick={() => setNoRental(!noRental)}
                           className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner flex-shrink-0",
                             noRental ? 'bg-gradient-to-r from-red-500 to-rose-500 shadow-red-500/30' : 'bg-slate-300 dark:bg-slate-600')}>
                           <motion.div className="w-6 h-6 rounded-full bg-white shadow-md absolute top-1" animate={{ x: noRental ? 28 : 4 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }} />
                         </button>
                         <span className="text-xs sm:text-sm text-foreground font-medium">No Rental</span>
+                        </div>
+                        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 px-3 py-2 text-right border border-blue-200/50 dark:border-blue-800/30">
+                          <p className="text-[9px] sm:text-[10px] text-blue-600 dark:text-blue-400 font-semibold">Net Weight</p>
+                          <p className="text-sm sm:text-base font-bold text-foreground">{finalBillableWeight}<span className="ml-1 text-[10px] sm:text-xs font-normal text-muted-foreground">kg</span></p>
+                        </div>
                       </div>
                       {!noRental && (
                         <>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-3">
-                            <div>
+                            <div className={cn(freightMethod === 'BY_WEIGHT' ? '' : 'sm:col-span-2')}>
                               <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
                                 Rate {isFreightRateInvalid && '⚠ 0–100,000'}
                               </label>
                               <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
                                 className={cn("h-11 rounded-xl text-sm font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
                             </div>
+                            {freightMethod === 'BY_WEIGHT' && (
+                              <div>
+                                <label className={cn("text-[10px] mb-1 block", isFreightKgsInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                  Kgs {isFreightKgsInvalid && '⚠ > 0'}
+                                </label>
+                                <Input type="number" placeholder="1" value={freightKgs} onChange={e => setFreightKgs(e.target.value)}
+                                  className={cn("h-11 rounded-xl text-sm font-medium", isFreightKgsInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0.01} max={100000} step="0.01" />
+                              </div>
+                            )}
                             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-2 sm:p-3 text-center border border-amber-200/50 dark:border-amber-800/30 flex flex-col justify-center">
                               <p className="text-[9px] sm:text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
                               <p className="text-lg font-bold text-foreground">₹{freightTotal.toLocaleString()}</p>
@@ -2999,6 +3076,7 @@ const ArrivalsPage = () => {
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
@@ -3012,6 +3090,7 @@ const ArrivalsPage = () => {
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
@@ -3023,6 +3102,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
@@ -3037,6 +3117,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
@@ -3679,22 +3760,39 @@ const ArrivalsPage = () => {
                           );
                         })}
                       </RadioGroup>
-                      <div className="flex items-center gap-2 sm:gap-3 mb-3">
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-2 sm:gap-3">
                         <button onClick={() => setNoRental(!noRental)}
                           className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner flex-shrink-0",
                             noRental ? 'bg-gradient-to-r from-red-500 to-rose-500 shadow-red-500/30' : 'bg-slate-300 dark:bg-slate-600')}>
                           <motion.div className="w-6 h-6 rounded-full bg-white shadow-md absolute top-1" animate={{ x: noRental ? 28 : 4 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }} />
                         </button>
                         <span className="text-xs sm:text-sm text-foreground font-medium">No Rental</span>
+                        </div>
+                        <div className="rounded-xl bg-blue-50 dark:bg-blue-950/20 px-3 py-2 text-right border border-blue-200/50 dark:border-blue-800/30">
+                          <p className="text-[9px] sm:text-[10px] text-blue-600 dark:text-blue-400 font-semibold">Net Weight</p>
+                          <p className="text-sm sm:text-base font-bold text-foreground">{finalBillableWeight}<span className="ml-1 text-[10px] sm:text-xs font-normal text-muted-foreground">kg</span></p>
+                        </div>
                       </div>
                       {!noRental && (
                         <>
-                          <div className="mb-3">
-                            <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
-                              Rate {isFreightRateInvalid && '⚠ 0–100k'}
-                            </label>
-                            <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
-                              className={cn("h-12 rounded-xl text-base font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-3">
+                            <div className={cn(freightMethod === 'BY_WEIGHT' ? '' : 'sm:col-span-2')}>
+                              <label className={cn("text-[10px] mb-1 block", isFreightRateInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                Rate {isFreightRateInvalid && '⚠ 0–100k'}
+                              </label>
+                              <Input type="number" placeholder="0" value={freightRate} onChange={e => setFreightRate(e.target.value)}
+                                className={cn("h-12 rounded-xl text-base font-medium", isFreightRateInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0} max={100000} step="0.01" />
+                            </div>
+                            {freightMethod === 'BY_WEIGHT' && (
+                              <div>
+                                <label className={cn("text-[10px] mb-1 block", isFreightKgsInvalid ? "text-red-500 font-bold" : "text-muted-foreground")}>
+                                  Kgs {isFreightKgsInvalid && '⚠ > 0'}
+                                </label>
+                                <Input type="number" placeholder="1" value={freightKgs} onChange={e => setFreightKgs(e.target.value)}
+                                  className={cn("h-12 rounded-xl text-base font-medium", isFreightKgsInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} min={0.01} max={100000} step="0.01" />
+                              </div>
+                            )}
                           </div>
                           <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3 text-center border border-amber-200/50 dark:border-amber-800/30 mb-3">
                             <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Total Rental</p>
@@ -3877,6 +3975,7 @@ const ArrivalsPage = () => {
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.lotName && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       maxLength={50}
                                       autoFocus
@@ -3890,6 +3989,7 @@ const ArrivalsPage = () => {
                                       placeholder="Bags"
                                       value={addLotForm.bags}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 text-sm rounded-lg focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.bags && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
                                       min={1}
                                       max={100000}
@@ -3901,6 +4001,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className={cn("h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]", addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30")}
                                     >
                                       <option value="" disabled>Select Commodity</option>
@@ -3915,6 +4016,7 @@ const ArrivalsPage = () => {
                                     <select
                                       value={addLotForm.variant}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, variant: e.target.value } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
                                       className="h-10 sm:h-9 w-full rounded-lg bg-background border border-input text-sm px-2 focus:outline-none focus:ring-0 focus:border-primary focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)]"
                                     >
                                       {VARIANT_OPTIONS.map(opt => (
