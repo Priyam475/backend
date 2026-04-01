@@ -31,6 +31,7 @@ import { directPrint } from '@/utils/printTemplates';
 import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
 
 // ── Types ─────────────────────────────────────────────────
+
 interface BuyerPurchase {
   buyerMark: string;
   buyerName: string;
@@ -84,6 +85,10 @@ interface BillLineItem {
   lotName: string;
   /** Original lot bag count at auction lot level. */
   lotTotalQty?: number;
+  /** Total bags for the whole vehicle (all sellers on same vehicle). */
+  vehicleTotalQty?: number;
+  /** Total bags for this seller on the vehicle (all lots of that seller). */
+  sellerVehicleQty?: number;
   sellerName: string;
   quantity: number;
   weight: number;
