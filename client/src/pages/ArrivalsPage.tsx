@@ -533,17 +533,17 @@ function LotsScrollPanel({
 
             {/* Thumb capsule */}
             <div
-              className="absolute left-0 right-0 rounded-full border-2 cursor-ns-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
+              className="absolute left-1/2 w-[32px] -translate-x-1/2 rounded-full border-2 cursor-ns-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
               style={{
                 top: thumbMetrics.top,
                 height: thumbMetrics.height,
-                borderColor: thumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
-                backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+                borderColor: thumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
+                backgroundColor: thumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
                 // "Gooey/glow" look: crisp inner border + soft outer glow
                 boxShadow:
                   thumbPressed
-                    ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 26px hsl(var(--foreground) / 0.26)'
-                    : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 18px hsl(var(--foreground) / 0.18)',
+                    ? 'inset 0 0 0 1px hsl(0 0% 100% / 0.4), 0 0 26px hsl(229 100% 69% / 0.35)'
+                    : 'inset 0 0 0 1px hsl(0 0% 100% / 0.3), 0 0 18px hsl(229 100% 69% / 0.25)',
               }}
               onPointerDown={onThumbPointerDown}
               role="slider"
@@ -551,6 +551,29 @@ function LotsScrollPanel({
               aria-valuemin={0}
               aria-valuemax={1}
             >
+              {/* Visual-only motif to mirror the requested icon style. */}
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+                <span
+                  className="block h-[8px] w-[8px] rotate-45 border-t-2 border-l-2"
+                  style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                />
+                <span
+                  className="grid h-[10px] w-[10px] place-items-center rounded-full"
+                  style={{ backgroundColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                >
+                  <span
+                    className="block h-[2px] w-[2px] rounded-full"
+                    style={{ backgroundColor: 'hsl(229 100% 69%)' }}
+                  />
+                </span>
+                <span
+                  className="block h-[8px] w-[8px] rotate-[225deg] border-t-2 border-l-2"
+                  style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                />
+              </div>
             </div>
           </div>
         )}
@@ -3042,7 +3065,7 @@ const ArrivalsPage = () => {
                                     >
                                       Cancel
                                     </Button>
-                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
+                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF]">
                                       {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                     </Button>
                                     </div>
@@ -3100,17 +3123,17 @@ const ArrivalsPage = () => {
                                                   isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                                 )}
                                               >
-                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
+                                                <td className="py-1 px-2.5 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
-                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2.5 py-1 text-sm sm:text-base font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
-                                                    <span className="text-muted-foreground font-mono text-xs">—</span>
+                                                    <span className="text-muted-foreground font-mono text-[9px] sm:text-[10px]">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
-                                                  <span className="inline-flex max-w-none whitespace-nowrap px-2.5 py-1 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-base sm:text-lg font-bold leading-none">
+                                                <td className="py-1 px-2.5 align-middle text-center">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-xs font-bold leading-none">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
@@ -3920,7 +3943,7 @@ const ArrivalsPage = () => {
                                     >
                                       Cancel
                                     </Button>
-                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
+                                    <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF]">
                                       {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                     </Button>
                                     </div>
@@ -3977,17 +4000,17 @@ const ArrivalsPage = () => {
                                                   isBeingEdited ? "bg-blue-50 dark:bg-blue-950/20" : "hover:bg-muted/20"
                                                 )}
                                               >
-                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
+                                                <td className="py-1 px-2.5 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
-                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-2.5 py-1 text-sm sm:text-base font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
+                                                    <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
                                                       {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
                                                     </span>
                                                   ) : (
-                                                    <span className="text-muted-foreground font-mono text-xs">—</span>
+                                                    <span className="text-muted-foreground font-mono text-[9px] sm:text-[10px]">—</span>
                                                   )}
                                                 </td>
-                                                <td className="py-2.5 sm:py-3 px-3 align-middle text-center">
-                                                  <span className="inline-flex max-w-none whitespace-nowrap px-2.5 py-1 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-base sm:text-lg font-bold leading-none">
+                                                <td className="py-1 px-2.5 align-middle text-center">
+                                                  <span className="inline-flex max-w-none whitespace-nowrap px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] sm:text-xs font-bold leading-none">
                                                     {lot.lot_name || "-"}
                                                   </span>
                                                 </td>
