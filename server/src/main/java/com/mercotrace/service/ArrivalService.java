@@ -182,6 +182,7 @@ public class ArrivalService {
                 );
                 contactService.ensureTraderUsesPortalContact(traderId, contactId);
                 sellerInVehicle.setContactId(contactId);
+                sellerInVehicle.setSellerMark(sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null);
             } else {
                 sellerInVehicle.setContactId(null);
                 sellerInVehicle.setSellerName(sellerDTO.getSellerName() != null ? sellerDTO.getSellerName().trim() : null);
@@ -457,7 +458,9 @@ public class ArrivalService {
             if (siv.getContactId() != null) {
                 sellerFull.setSellerName(contactNameById.getOrDefault(siv.getContactId(), ""));
                 sellerFull.setSellerPhone(contactPhoneById.getOrDefault(siv.getContactId(), ""));
-                sellerFull.setSellerMark(contactMarkById.getOrDefault(siv.getContactId(), ""));
+                // prefer per-arrival mark override stored on seller row; fall back to the contact's global mark
+                String sivMark = siv.getSellerMark();
+                sellerFull.setSellerMark(sivMark != null && !sivMark.isBlank() ? sivMark : contactMarkById.getOrDefault(siv.getContactId(), ""));
             } else {
                 sellerFull.setSellerName(siv.getSellerName() != null ? siv.getSellerName() : "");
                 sellerFull.setSellerPhone(siv.getSellerPhone() != null ? siv.getSellerPhone() : "");
@@ -600,6 +603,7 @@ public class ArrivalService {
                         new IllegalArgumentException("Seller contact not found: " + contactId));
                     contactService.ensureTraderUsesPortalContact(traderId, contactId);
                     siv.setContactId(contactId);
+                    siv.setSellerMark(sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null);
                 } else {
                     String phone = sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null;
                     if (!isStillPartial && phone != null && !phone.isEmpty()) {

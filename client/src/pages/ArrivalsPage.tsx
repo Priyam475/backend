@@ -2686,15 +2686,25 @@ const ArrivalsPage = () => {
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
-                                    {seller.seller_name}
-                                  </p>
-                                  {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                                      ({seller.seller_mark})
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
+                                  <div className="min-w-0 flex items-center">
+                                    <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
+                                      {seller.seller_name}
                                     </p>
-                                  )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <Input
+                                      placeholder="Mark / alias (optional, 2–50)"
+                                      value={seller.seller_mark}
+                                      onChange={e => updateSeller(si, { seller_mark: e.target.value })}
+                                      className={cn(
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={50}
+                                    />
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
@@ -3554,15 +3564,25 @@ const ArrivalsPage = () => {
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
-                                    {seller.seller_name}
-                                  </p>
-                                  {seller.seller_mark && (
-                                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                                      ({seller.seller_mark})
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
+                                  <div className="min-w-0 flex items-center">
+                                    <p className="font-semibold text-xs sm:text-sm text-foreground truncate">
+                                      {seller.seller_name}
                                     </p>
-                                  )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <Input
+                                      placeholder="Mark / alias (optional, 2–50)"
+                                      value={seller.seller_mark}
+                                      onChange={e => updateSeller(si, { seller_mark: e.target.value })}
+                                      className={cn(
+                                        "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
+                                        isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
+                                      )}
+                                      maxLength={50}
+                                    />
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 min-w-0">
