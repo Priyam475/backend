@@ -2013,6 +2013,7 @@ const ArrivalsPage = () => {
   const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
     setActiveSellerSearch(null);
     setSellerDropdown(false);
+    setAddLotForm(null);
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
@@ -2056,7 +2057,7 @@ const ArrivalsPage = () => {
       setSellers(mappedSellers);
       setSellerExpanded(
         mappedSellers.reduce<Record<string, boolean>>((acc, s) => {
-          acc[s.seller_vehicle_id] = true; // default expanded in edit flow too
+          acc[s.seller_vehicle_id] = false; // keep seller cards collapsed on edit open
           return acc;
         }, {})
       );
