@@ -29,6 +29,8 @@ public final class SalesBillDTOs {
         private BigDecimal otherCharges;
         private BigDecimal newRate;
         private BigDecimal amount;
+        /** Token advance from auction for this bid/lot (₹). */
+        private BigDecimal tokenAdvance = BigDecimal.ZERO;
 
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
@@ -52,6 +54,8 @@ public final class SalesBillDTOs {
         public void setNewRate(BigDecimal newRate) { this.newRate = newRate; }
         public BigDecimal getAmount() { return amount; }
         public void setAmount(BigDecimal amount) { this.amount = amount; }
+        public BigDecimal getTokenAdvance() { return tokenAdvance; }
+        public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
     }
 
     /** Commodity group (CommodityGroup). */

@@ -350,6 +350,7 @@ public class SalesBillServiceImpl implements SalesBillService {
                 item.setOtherCharges(nullToZero(it.getOtherCharges()));
                 item.setNewRate(it.getNewRate() != null ? it.getNewRate() : BigDecimal.ZERO);
                 item.setAmount(it.getAmount() != null ? it.getAmount() : BigDecimal.ZERO);
+                item.setTokenAdvance(nullToZero(it.getTokenAdvance()));
                 item.setSortOrder(io++);
                 group.getItems().add(item);
             }
@@ -412,6 +413,7 @@ public class SalesBillServiceImpl implements SalesBillService {
                 idto.setOtherCharges(it.getOtherCharges());
                 idto.setNewRate(it.getNewRate());
                 idto.setAmount(it.getAmount());
+                idto.setTokenAdvance(it.getTokenAdvance());
                 items.add(idto);
             }
             gdto.setItems(items);

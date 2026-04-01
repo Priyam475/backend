@@ -1,15 +1,17 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Receipt, Search, User, Package, Truck, Hash,
+  ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
   Percent, FileText, ChevronDown, ChevronUp,
-  RefreshCw, UserPlus, AlertCircle, BookOpen, X, Loader2, Clock,
+  AlertCircle, BookOpen, X, Loader2, Clock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import BottomNav from '@/components/BottomNav';
@@ -42,6 +44,8 @@ interface BillEntry {
   bidNumber: number;
   lotId: string;
   lotName: string;
+  /** Original lot bag count at auction lot level (same for all buyers in this lot). */
+  lotTotalQty?: number;
   sellerName: string;
   commodityName: string;
   rate: number;
@@ -55,6 +59,10 @@ interface BillEntry {
   isSelfSale: boolean;
   /** Token advance collected at auction stage for this bid (₹). */
   tokenAdvance?: number;
+}
+
+function getBidSelectionKey(entry: Pick<BillEntry, 'bidNumber' | 'lotId'>): string {
+  return `${entry.bidNumber}::${entry.lotId}`;
 }
 
 interface CommodityGroup {
@@ -74,6 +82,8 @@ interface CommodityGroup {
 interface BillLineItem {
   bidNumber: number;
   lotName: string;
+  /** Original lot bag count at auction lot level. */
+  lotTotalQty?: number;
   sellerName: string;
   quantity: number;
   weight: number;
@@ -84,6 +94,8 @@ interface BillLineItem {
   sellerOtherCharges: number; // Other (dynamic, appliesTo=SELLER) - read-only for settlement deductions
   newRate: number; // REQ-BIL-002: NR = B + P + BRK + Other
   amount: number;
+  /** Token advance for this bid/lot from auction (₹). Bill total = sum of lines. */
+  tokenAdvance?: number;
 }
 
 interface BillData {
@@ -124,13 +136,21 @@ function isBackendBillId(billId: string): boolean {
   return /^\d+$/.test(billId);
 }
 
+/** Sum of per-line token advances (auction bid tokens). */
+function sumLineTokenAdvances(b: { commodityGroups: CommodityGroup[] }): number {
+  return b.commodityGroups.reduce(
+    (s, g) => s + g.items.reduce((ss, i) => ss + (Number(i.tokenAdvance) || 0), 0),
+    0,
+  );
+}
+
 /** Lot identifier for billing rows: Vehicle QTY / Seller QTY / Lot Name - Lot QTY. */
 function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): string {
-  const qty = (entry as any).quantity ?? 0;
-  const vTotal = (entry as any).vehicleTotalQty ?? qty;
-  const sTotal = (entry as any).sellerVehicleQty ?? qty;
-  const lotName = (entry as any).lotName || String(qty || '');
-  const lotQty = qty;
+  const lotQty = (entry as any).lotTotalQty ?? (entry as any).quantity ?? 0;
+  const lotName = (entry as any).lotName || String(lotQty || '');
+  // Use auction-lot identifier strictly at lot level (not buyer/vehicle split totals).
+  const vTotal = lotQty;
+  const sTotal = lotQty;
   return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
 }
 
@@ -200,10 +220,30 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
         }
       });
 
-      return { ...item, presetApplied, sellerOtherCharges };
+      const tok = Number(item.tokenAdvance) || 0;
+      return { ...item, presetApplied, sellerOtherCharges, tokenAdvance: tok };
     }),
   }));
-  const tokenAdvance = Number((b as any).tokenAdvance) || 0;
+
+  let migratedGroups = groups.map((g: any) => ({ ...g, items: g.items.map((it: any) => ({ ...it })) }));
+  let lineTokenSum = 0;
+  migratedGroups.forEach((g: any) => {
+    g.items.forEach((it: any) => {
+      lineTokenSum += Number(it.tokenAdvance) || 0;
+    });
+  });
+  const headerToken = Number((b as any).tokenAdvance) || 0;
+  // Legacy bills: only header token was stored; allocate to first line so per-lot editing works after save.
+  if (lineTokenSum === 0 && headerToken > 0) {
+    for (const g of migratedGroups) {
+      if (g.items.length > 0) {
+        g.items[0] = { ...g.items[0], tokenAdvance: headerToken };
+        break;
+      }
+    }
+  }
+  const tokenAdvance = sumLineTokenAdvances({ commodityGroups: migratedGroups });
+
   return {
     ...b,
     buyerContactId: (b as any).buyerContactId ?? null,
@@ -216,7 +256,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     brokerPhone: (b as any).brokerPhone ?? '',
     brokerAddress: (b as any).brokerAddress ?? '',
     tokenAdvance,
-    commodityGroups: groups,
+    commodityGroups: migratedGroups,
   };
 }
 
@@ -342,10 +382,12 @@ const BillingPage = () => {
   const [billingMainTab, setBillingMainTab] = useState<BillingMainTab>('create');
   const [buyerBidMarkInput, setBuyerBidMarkInput] = useState('');
   const [selectBidBuyer, setSelectBidBuyer] = useState<BuyerPurchase | null>(null);
-  const [selectedBidNumbers, setSelectedBidNumbers] = useState<number[]>([]);
+  const [selectedBidKeys, setSelectedBidKeys] = useState<string[]>([]);
   const [selectedBuyerFromDropdown, setSelectedBuyerFromDropdown] = useState<BuyerPurchase | null>(null);
   const [showBuyerSuggestions, setShowBuyerSuggestions] = useState(false);
   const buyerSelectRef = useRef<HTMLDivElement | null>(null);
+  const summaryTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const summarySnapTimerRef = useRef<number | null>(null);
   const [resyncing, setResyncing] = useState(false);
   const [savedBills, setSavedBills] = useState<SalesBillDTO[]>([]);
   const [savedBillsLoading, setSavedBillsLoading] = useState(false);
@@ -354,6 +396,26 @@ const BillingPage = () => {
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [buyerCoolieRate, setBuyerCoolieRate] = useState<number>(0);
+  const [collapsedCommodityIndexes, setCollapsedCommodityIndexes] = useState<number[]>([]);
+  const SUMMARY_COMMODITY_COL_WIDTH = 150;
+
+  const handleSummaryTableScroll = useCallback(() => {
+    const el = summaryTableScrollRef.current;
+    if (!el) return;
+    if (summarySnapTimerRef.current != null) {
+      window.clearTimeout(summarySnapTimerRef.current);
+    }
+    summarySnapTimerRef.current = window.setTimeout(() => {
+      const snappedLeft = Math.round(el.scrollLeft / SUMMARY_COMMODITY_COL_WIDTH) * SUMMARY_COMMODITY_COL_WIDTH;
+      el.scrollTo({ left: snappedLeft, behavior: 'smooth' });
+    }, 90);
+  }, []);
+
+  const toggleCommodityCollapse = useCallback((idx: number) => {
+    setCollapsedCommodityIndexes(prev =>
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx],
+    );
+  }, []);
 
   const { auctionResults: auctionData, refetch: refetchAuctions } = useAuctionResults();
 
@@ -394,6 +456,12 @@ const BillingPage = () => {
   useEffect(() => {
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setFullConfigs);
+  }, []);
+
+  useEffect(() => () => {
+    if (summarySnapTimerRef.current != null) {
+      window.clearTimeout(summarySnapTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -514,11 +582,9 @@ const BillingPage = () => {
   const validateBillingContactForm = (): boolean => {
     const errs: Record<string, string> = {};
     if (!contactForm.name.trim()) errs.name = 'Name is required';
-    if (!contactForm.phone.trim()) {
-      errs.phone = 'Phone number is required';
-    } else if (!/^[6-9]\d{9}$/.test(contactForm.phone.trim())) {
+    if (contactForm.phone.trim() && !/^[6-9]\d{9}$/.test(contactForm.phone.trim())) {
       errs.phone = 'Enter a valid 10-digit mobile number';
-    } else if (contactsRegistry.some(c => c.phone === contactForm.phone.trim())) {
+    } else if (contactForm.phone.trim() && contactsRegistry.some(c => c.phone === contactForm.phone.trim())) {
       errs.phone = 'This phone number is already registered';
     }
     if (contactForm.mark.trim()) {
@@ -644,8 +710,7 @@ const BillingPage = () => {
     const trimmedPhone = replaceForm.phone.trim();
     if (!trimmedMark) errs.mark = 'Mark is required';
     if (!trimmedName) errs.name = 'Name is required';
-    if (!trimmedPhone) errs.phone = 'Phone number is required';
-    else if (!/^[6-9]\d{9}$/.test(trimmedPhone)) errs.phone = 'Enter a valid 10-digit mobile number';
+    if (trimmedPhone && !/^[6-9]\d{9}$/.test(trimmedPhone)) errs.phone = 'Enter a valid 10-digit mobile number';
     setReplaceErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -683,6 +748,7 @@ const BillingPage = () => {
   };
 
   const submitReplacement = async () => {
+    const hadExistingSelection = !!replaceSelectedContact;
     let resolved: Contact | null = replaceSelectedContact;
     if (!resolved) {
       if (!canCreateContact) {
@@ -713,12 +779,14 @@ const BillingPage = () => {
     if (!resolved) return;
     applyReplacementContact(resolved);
     clearReplacementInline();
-    toast.success(`${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'} replaced for this bill.`);
+    const role = replaceTarget === 'BROKER' ? 'Broker' : 'Buyer';
+    toast.success(hadExistingSelection ? `${role} updated for this bill.` : `${role} added to this bill.`);
   };
 
   // Load buyer data from completed auctions (arrivals from API; weighing from API)
   useEffect(() => {
     const buyerMap = new Map<string, BuyerPurchase>();
+    const lotTotalsByLotId = new Map<string, number>();
 
     // Compute vehicle & seller totals (same logic as Auctions/Logistics)
     const vehicleTotals = new Map<string, number>();
@@ -726,6 +794,14 @@ const BillingPage = () => {
     auctionData.forEach((auction: any) => {
       const vKey = auction.vehicleNumber || '';
       const sKey = `${vKey}||${auction.sellerName || ''}`;
+      const lotKey = String(auction.lotId ?? '');
+      const lotTotal = (auction.entries || []).reduce((s: number, e: any) => {
+        if (e.isSelfSale) return s;
+        return s + (Number(e.quantity) || 0);
+      }, 0);
+      if (!lotTotalsByLotId.has(lotKey)) {
+        lotTotalsByLotId.set(lotKey, lotTotal);
+      }
       (auction.entries || []).forEach((entry: any) => {
         if (entry.isSelfSale) return;
         const qty = Number(entry.quantity) || 0;
@@ -778,6 +854,7 @@ const BillingPage = () => {
           bidNumber: entry.bidNumber,
           lotId: auction.lotId,
           lotName,
+          lotTotalQty: lotTotalsByLotId.get(String(auction.lotId ?? '')) ?? entry.quantity,
           sellerName,
           commodityName,
           rate: entry.rate,
@@ -837,9 +914,9 @@ const BillingPage = () => {
       discountAmount = Math.round(subtotalSum * b.discount / 100);
     }
     const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
-    const tokenAdvance = b.tokenAdvance ?? 0;
+    const tokenAdvance = sumLineTokenAdvances(b);
     const pendingBalance = grandTotal - tokenAdvance;
-    return { ...b, commodityGroups, grandTotal, pendingBalance };
+    return { ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance };
   }, []);
 
   // Generate Bill (commodity config from API)
@@ -979,6 +1056,7 @@ const BillingPage = () => {
       group.items.push({
         bidNumber: entry.bidNumber,
         lotName: entry.lotName,
+        lotTotalQty: (entry as any).lotTotalQty ?? entry.quantity,
         sellerName: entry.sellerName,
         quantity: entry.quantity,
         weight: entry.weight,
@@ -987,8 +1065,11 @@ const BillingPage = () => {
         brokerage,
         otherCharges,
         sellerOtherCharges,
+        vehicleTotalQty: (entry as any).vehicleTotalQty,
+        sellerVehicleQty: (entry as any).sellerVehicleQty,
         newRate,
         amount: (entry.weight * newRate) / group.divisor,
+        tokenAdvance: Number(entry.tokenAdvance) || 0,
       });
     });
     
@@ -1028,7 +1109,7 @@ const BillingPage = () => {
       outboundVehicle: '',
       discount: 0,
       discountType: 'AMOUNT',
-      tokenAdvance: buyer.tokenAdvanceTotal ?? 0,
+      tokenAdvance: 0,
       manualRoundOff: 0,
       grandTotal: subtotalSum,
       brokerageType: 'AMOUNT',
@@ -1106,7 +1187,7 @@ const BillingPage = () => {
     }
     setShowBuyerSuggestions(false);
     setSelectBidBuyer(null);
-    setSelectedBidNumbers([]);
+    setSelectedBidKeys([]);
     generateBill(buyer);
   }, [autoSaveCurrentBillBeforeBuyerSwitch, findBuyerByInput, generateBill, selectedBuyer]);
 
@@ -1115,25 +1196,26 @@ const BillingPage = () => {
     if (!buyer) return;
     setShowBuyerSuggestions(false);
     setSelectBidBuyer(buyer);
-    setSelectedBidNumbers([]);
+    setSelectedBidKeys([]);
     toast.success(`Loaded ${buyer.entries.length} bids. Select required bids to create bill.`);
   }, [findBuyerByInput]);
 
-  const toggleBidSelection = (bidNumber: number) => {
-    setSelectedBidNumbers(prev =>
-      prev.includes(bidNumber) ? prev.filter(b => b !== bidNumber) : [...prev, bidNumber],
+  const toggleBidSelection = (entry: Pick<BillEntry, 'bidNumber' | 'lotId'>) => {
+    const key = getBidSelectionKey(entry);
+    setSelectedBidKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key],
     );
   };
 
   const handleCreateBillFromSelected = useCallback(async () => {
     if (!selectBidBuyer) return;
-    if (selectedBidNumbers.length === 0) {
-      toast.error('Select at least one bid to create bill');
+    if (selectedBidKeys.length === 0) {
+      toast.error('Select at least one lot to create bill');
       return;
     }
-    const selectedEntries = selectBidBuyer.entries.filter(e => selectedBidNumbers.includes(e.bidNumber));
+    const selectedEntries = selectBidBuyer.entries.filter(e => selectedBidKeys.includes(getBidSelectionKey(e)));
     if (selectedEntries.length === 0) {
-      toast.error('Selected bids are not available');
+      toast.error('Selected lots are not available');
       return;
     }
     const switchingBuyer =
@@ -1145,19 +1227,30 @@ const BillingPage = () => {
     }
     generateBill({ ...selectBidBuyer, entries: selectedEntries });
     setSelectBidBuyer(null);
-    setSelectedBidNumbers([]);
-  }, [autoSaveCurrentBillBeforeBuyerSwitch, generateBill, selectBidBuyer, selectedBidNumbers, selectedBuyer]);
+    setSelectedBidKeys([]);
+  }, [autoSaveCurrentBillBeforeBuyerSwitch, generateBill, selectBidBuyer, selectedBidKeys, selectedBuyer]);
 
   // Add a bid from another buyer into the current bill (cross-buyer aggregation).
 
-  // Update numeric fields on a line item (quantity, weight, bid rate, brokerage, other charges)
+  // Update numeric fields on a line item (quantity, weight, bid rate, brokerage, other charges, token)
   const updateLineItem = (
     commIdx: number,
     itemIdx: number,
-    field: 'quantity' | 'weight' | 'baseRate' | 'brokerage' | 'otherCharges',
+    field: 'quantity' | 'weight' | 'baseRate' | 'brokerage' | 'otherCharges' | 'tokenAdvance',
     value: number,
   ) => {
     if (!bill) return;
+    if (field === 'tokenAdvance') {
+      const updated = { ...bill };
+      const group = { ...updated.commodityGroups[commIdx] };
+      const item = { ...group.items[itemIdx], tokenAdvance: value };
+      group.items = [...group.items];
+      group.items[itemIdx] = item;
+      updated.commodityGroups = [...updated.commodityGroups];
+      updated.commodityGroups[commIdx] = group;
+      setBill(recalcGrandTotal(updated));
+      return;
+    }
     const updated = { ...bill };
     const group = { ...updated.commodityGroups[commIdx] };
     const item = { ...group.items[itemIdx] };
@@ -1335,7 +1428,13 @@ const BillingPage = () => {
       commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, ...g }: any) => ({
         ...g,
         items: (g.items ?? []).map((it: any) => {
-          const { sellerOtherCharges: _soc, ...restIt } = it;
+          const {
+            sellerOtherCharges: _soc,
+            lotTotalQty: _ltq,
+            vehicleTotalQty: _vtq,
+            sellerVehicleQty: _svq,
+            ...restIt
+          } = it;
           return restIt;
         }),
       })),
@@ -1344,6 +1443,7 @@ const BillingPage = () => {
       outboundVehicle: bill.outboundVehicle ?? '',
       discount: bill.discount ?? 0,
       discountType: bill.discountType ?? 'AMOUNT',
+      tokenAdvance: sumLineTokenAdvances(bill),
       manualRoundOff: bill.manualRoundOff ?? 0,
       grandTotal: bill.grandTotal,
       brokerageType: bill.brokerageType ?? 'AMOUNT',
@@ -1401,12 +1501,7 @@ const BillingPage = () => {
     // Assign bill number on save (completed bill), idempotent if already numbered.
     const assigned = await billingApi.assignNumber(result.billId);
     const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
-    // Preserve frontend-only/transient fields that backend does not store.
-    const merged: BillData = {
-      ...normalized,
-      tokenAdvance: bill.tokenAdvance,
-    };
-    setBill(merged);
+    setBill(recalcGrandTotal(normalized));
     setHasSavedOnce(true);
     toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
     loadSavedBills();
@@ -1420,11 +1515,7 @@ const BillingPage = () => {
     try {
       const assigned = await billingApi.assignNumber(result.billId);
       const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
-      const merged: BillData = {
-        ...normalized,
-        tokenAdvance: bill.tokenAdvance,
-      };
-      setBill(merged);
+      setBill(recalcGrandTotal(normalized));
       setHasSavedOnce(true);
       toast.success(`Bill ${assigned.billNumber} ready for print.`);
       setShowPrint(true);
@@ -1549,9 +1640,14 @@ const BillingPage = () => {
               <div key={gi} className="border-b border-dashed border-border pb-2">
                 <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}{(group.gstRate ?? 0) > 0 && ` · GST: ${group.gstRate}%`}</p>
                 {group.items.map((item, ii) => (
-                  <div key={ii} className="flex justify-between text-[10px]">
-                    <span className="text-foreground">{item.quantity}×{item.weight.toFixed(0)}kg @₹{item.newRate}</span>
-                    <span className="font-bold text-foreground">₹{item.amount.toLocaleString()}</span>
+                  <div key={ii} className="flex justify-between text-[10px] gap-2">
+                    <span className="text-foreground min-w-0">
+                      {item.quantity}×{item.weight.toFixed(0)}kg @₹{item.newRate}
+                      {(item.tokenAdvance ?? 0) > 0 && (
+                        <span className="text-muted-foreground"> · Tok ₹{item.tokenAdvance}</span>
+                      )}
+                    </span>
+                    <span className="font-bold text-foreground shrink-0">₹{item.amount.toLocaleString()}</span>
                   </div>
                 ))}
                 <div className="mt-1 pt-1 border-t border-dotted border-border/50 space-y-0.5">
@@ -1687,7 +1783,7 @@ const BillingPage = () => {
     setSelectedBuyerFromDropdown(null);
     setShowBuyerSuggestions(false);
     setSelectBidBuyer(null);
-    setSelectedBidNumbers([]);
+    setSelectedBidKeys([]);
     setHasSavedOnce(false);
   };
 
@@ -1707,7 +1803,7 @@ const BillingPage = () => {
       entries: [],
       tokenAdvanceTotal: 0,
     });
-    setBill(normalizeBillFromApi(b, fullConfigs, commodities));
+    setBill(recalcGrandTotal(normalizeBillFromApi(b, fullConfigs, commodities) as BillData));
     setHasSavedOnce(isBackendBillId(String(b.billId)));
     setSelectedPrintVersion('latest');
     setEditLocked(false);
@@ -1829,18 +1925,7 @@ const BillingPage = () => {
               </h1>
               <p className="text-white/70 text-xs mt-0.5">Sales bill · {buyers.length} buyer{buyers.length !== 1 ? 's' : ''} with bids</p>
             </div>
-            <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0 items-end">
-              <Button type="button" size="sm" variant="secondary" className="h-9 rounded-xl bg-white/20 text-white border-0 hover:bg-white/30 shadow-none text-xs px-2.5"
-                onClick={() => void handleResync()} disabled={resyncing} aria-label="Resync billing data">
-                {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                <span className="ml-1 hidden sm:inline">Resync</span>
-              </Button>
-              <Button type="button" size="sm" variant="secondary" className="h-9 rounded-xl bg-white/20 text-white border-0 hover:bg-white/30 shadow-none text-xs px-2.5"
-                onClick={() => void openContactFromBilling()} aria-label="Create contact">
-                <UserPlus className="w-4 h-4" />
-                <span className="ml-1 hidden sm:inline">Contact</span>
-              </Button>
-            </div>
+            <div className="flex-shrink-0" />
           </div>
 
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
@@ -1889,16 +1974,7 @@ const BillingPage = () => {
             </h2>
             <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers with bids · Invoicing & generation</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end w-full lg:w-auto">
-            <Button type="button" variant="outline" size="sm" className="rounded-xl h-9 gap-2" onClick={() => void handleResync()} disabled={resyncing}>
-              {resyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Resync
-            </Button>
-            <Button type="button" size="sm" className="rounded-xl h-9 gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0" onClick={() => void openContactFromBilling()}>
-              <UserPlus className="w-4 h-4" />
-              Create contact
-            </Button>
-          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end w-full lg:w-auto" />
         </div>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-4">
@@ -1998,7 +2074,7 @@ const BillingPage = () => {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Enter the same mark or name used on auction bids, then open the bill form. Use Resync if bids just finished weighing.
+              Enter the same mark or name used on auction bids, then open the bill form.
             </p>
             {selectBidBuyer && (
               <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-3">
@@ -2010,7 +2086,7 @@ const BillingPage = () => {
                   <Button
                     type="button"
                     size="sm"
-                    onClick={() => { setSelectBidBuyer(null); setSelectedBidNumbers([]); }}
+                    onClick={() => { setSelectBidBuyer(null); setSelectedBidKeys([]); }}
                     variant="ghost"
                     className="h-8 text-xs"
                   >
@@ -2019,12 +2095,12 @@ const BillingPage = () => {
                 </div>
                 <div className="max-h-64 overflow-y-auto space-y-1.5">
                   {selectBidBuyer.entries.map((entry) => {
-                    const checked = selectedBidNumbers.includes(entry.bidNumber);
+                    const checked = selectedBidKeys.includes(getBidSelectionKey(entry));
                     return (
                       <button
                         type="button"
                         key={`${entry.bidNumber}-${entry.lotId}`}
-                        onClick={() => toggleBidSelection(entry.bidNumber)}
+                        onClick={() => toggleBidSelection(entry)}
                         className={cn(
                           "w-full text-left rounded-lg border p-2.5 transition-all",
                           checked ? "border-primary/50 bg-primary/10" : "border-border/50 bg-background/50 hover:bg-muted/30",
@@ -2035,13 +2111,12 @@ const BillingPage = () => {
                             type="checkbox"
                             checked={checked}
                             onClick={e => e.stopPropagation()}
-                            onChange={() => toggleBidSelection(entry.bidNumber)}
+                            onChange={() => toggleBidSelection(entry)}
                             className="mt-0.5 h-4 w-4 rounded border-border"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-foreground">Bid #{entry.bidNumber} · {entry.lotName}</p>
-                            <p className="text-[11px] text-muted-foreground truncate">
-                              {entry.sellerName} · {entry.quantity} bags · {entry.weight.toFixed(0)}kg @ ₹{entry.rate}
+                            <p className="text-xs font-semibold text-foreground truncate">
+                              {formatLotIdentifierForBillEntry(entry)}
                             </p>
                           </div>
                         </div>
@@ -2052,10 +2127,10 @@ const BillingPage = () => {
                 <Button
                   type="button"
                   onClick={() => void handleCreateBillFromSelected()}
-                  disabled={selectedBidNumbers.length === 0}
+                  disabled={selectedBidKeys.length === 0}
                   className="w-full h-10 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold disabled:opacity-50"
                 >
-                  Create Bill From Selected ({selectedBidNumbers.length})
+                  Create Bill From Selected ({selectedBidKeys.length})
                 </Button>
               </div>
             )}
@@ -2109,34 +2184,55 @@ const BillingPage = () => {
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:gap-4">
-                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
-                  <Package className="w-3.5 h-3.5 text-muted-foreground mx-auto mb-0.5" />
-                  <p className="text-[9px] text-muted-foreground uppercase">Items</p>
-                  <p className="text-[11px] sm:text-sm font-semibold text-foreground">{bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border/30 bg-muted/30 dark:bg-muted/15 px-2 py-1.5 min-h-0">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[8px] text-muted-foreground uppercase leading-none tracking-wide">Items</p>
+                    <p className="text-xs font-semibold text-foreground tabular-nums leading-tight mt-0.5">
+                      {bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)}
+                    </p>
+                  </div>
+                  <Package className="w-3.5 h-3.5 text-muted-foreground shrink-0" aria-hidden />
                 </div>
-                <div className="rounded-xl bg-muted/30 dark:bg-muted/15 p-2 sm:p-3 text-center border border-border/30">
-                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">₹</p>
-                  <p className="text-[9px] text-muted-foreground uppercase">Total</p>
-                  <p className="text-[11px] sm:text-sm font-semibold text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</p>
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border/30 bg-muted/30 dark:bg-muted/15 px-2 py-1.5 min-h-0">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[8px] text-muted-foreground uppercase leading-none tracking-wide">Total</p>
+                    <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums leading-tight mt-0.5 truncate">
+                      ₹{bill.grandTotal.toLocaleString()}
+                    </p>
+                  </div>
+                  <IndianRupee className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden />
                 </div>
               </div>
             </div>
-            <div className="space-y-2 rounded-xl border border-border/50 bg-muted/10 p-2.5">
-              <div className="grid grid-cols-1 sm:grid-cols-[170px_1fr_auto_auto_auto] gap-2 items-start">
-                <select
+            {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
+            <div className="glass-card rounded-2xl p-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <RadioGroup
                   value={replaceTarget}
-                  onChange={e => {
-                    setReplaceTarget(e.target.value === 'BROKER' ? 'BROKER' : 'BUYER');
-                    clearReplacementInline();
+                  onValueChange={v => {
+                    if (v === 'BUYER' || v === 'BROKER') {
+                      setReplaceTarget(v);
+                      clearReplacementInline();
+                    }
                   }}
-                  className="h-10 w-full rounded-xl border border-border/40 bg-background px-3 text-sm font-medium"
+                  className="flex flex-row flex-wrap gap-x-3 gap-y-1 min-h-9 shrink-0 items-center rounded-xl border border-border/30 bg-muted/20 px-2.5 py-1.5"
                   disabled={!bill}
                 >
-                  <option value="BUYER">Buyer</option>
-                  <option value="BROKER">Broker</option>
-                </select>
-                <div className="relative">
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="BUYER" id="billing-replace-target-buyer" disabled={!bill} />
+                    <Label htmlFor="billing-replace-target-buyer" className="cursor-pointer text-sm font-medium whitespace-nowrap">
+                      Buyer
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="BROKER" id="billing-replace-target-broker" disabled={!bill} />
+                    <Label htmlFor="billing-replace-target-broker" className="cursor-pointer text-sm font-medium whitespace-nowrap">
+                      Broker
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <div className="relative min-w-[7rem] flex-1 basis-0 max-w-none">
                   <Input
                     value={replaceMarkInput}
                     onChange={e => {
@@ -2145,12 +2241,12 @@ const BillingPage = () => {
                       setReplaceSelectedContact(null);
                       setReplaceForm(prev => ({ ...prev, mark: value }));
                     }}
-                    placeholder="Enter Mark"
-                    className={cn('h-10 rounded-xl', replaceErrors.mark && 'border-destructive')}
+                    placeholder="Mark"
+                    className={cn('h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium', replaceErrors.mark && 'border-destructive')}
                     disabled={!bill}
                   />
                   {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && (
-                    <div className="absolute z-40 mt-1 max-h-44 w-full overflow-y-auto rounded-xl border border-border bg-background shadow-lg">
+                    <div className="absolute z-40 mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
                       {replaceSearchResults.map(c => (
                         <button
                           key={c.contact_id}
@@ -2168,75 +2264,83 @@ const BillingPage = () => {
                     </div>
                   )}
                 </div>
-                <Button type="button" variant="secondary" className="h-10 rounded-xl px-4" onClick={() => void submitReplacement()} disabled={!bill}>
-                  Update
-                </Button>
-                <Button type="button" variant="outline" className="h-10 rounded-xl px-4" onClick={clearReplacementInline}>
-                  Clear
-                </Button>
-                <Button
-                  type="button"
-                  className="h-10 rounded-xl px-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white"
-                  onClick={() => void submitReplacement()}
-                  disabled={!bill}
-                >
-                  Update {replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}
-                </Button>
-              </div>
-              <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border border-border"
-                  checked={!!bill?.buyerAsBroker}
-                  onChange={e => {
-                    const checked = e.target.checked;
-                    if (!bill) return;
-                    if (!checked) {
-                      setBill({ ...bill, buyerAsBroker: false });
-                      return;
-                    }
-                    setBill({
-                      ...bill,
-                      buyerAsBroker: true,
-                      brokerName: bill.buyerName,
-                      brokerMark: bill.buyerMark,
-                      brokerContactId: bill.buyerContactId,
-                      brokerPhone: bill.buyerPhone,
-                      brokerAddress: bill.buyerAddress,
-                    });
-                  }}
-                  disabled={!bill}
-                />
-                Use buyer as broker
-              </label>
-              {replaceErrors.mark && <p className="text-[11px] text-destructive">{replaceErrors.mark}</p>}
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
-                <Input
-                  value={replaceForm.name}
-                  onChange={e => {
-                    setReplaceSelectedContact(null);
-                    setReplaceForm(prev => ({ ...prev, name: e.target.value }));
-                  }}
-                  placeholder="Enter Name"
-                  className={cn('h-10 rounded-xl', replaceErrors.name && 'border-destructive')}
-                  disabled={!bill}
-                />
                 <Input
                   value={replaceForm.phone}
                   onChange={e => {
                     setReplaceSelectedContact(null);
                     setReplaceForm(prev => ({ ...prev, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
                   }}
-                  placeholder="Enter Phone Number"
-                  className={cn('h-10 rounded-xl', replaceErrors.phone && 'border-destructive')}
+                  placeholder="Mobile"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  className={cn('h-9 w-[9.25rem] shrink-0 rounded-lg bg-muted/10 border-border/30 text-sm font-medium sm:w-40', replaceErrors.phone && 'border-destructive')}
                   disabled={!bill}
                 />
-                <Button type="button" variant="secondary" className="h-10 rounded-xl px-6" onClick={() => void submitReplacement()} disabled={!bill}>
-                  Save
+                <Input
+                  value={replaceForm.name}
+                  onChange={e => {
+                    setReplaceSelectedContact(null);
+                    setReplaceForm(prev => ({ ...prev, name: e.target.value }));
+                  }}
+                  placeholder="Name"
+                  className={cn(
+                    'h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium min-w-[5.5rem] flex-1 basis-[5.5rem] max-w-[14rem]',
+                    replaceErrors.name && 'border-destructive',
+                  )}
+                  disabled={!bill}
+                />
+                <Button
+                  type="button"
+                  className="h-9 rounded-xl px-3 sm:px-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white whitespace-nowrap shrink-0 text-xs sm:text-sm"
+                  onClick={() => void submitReplacement()}
+                  disabled={
+                    !bill || (!replaceSelectedContact && !canCreateContact)
+                  }
+                  title={
+                    !replaceSelectedContact && !canCreateContact
+                      ? 'You do not have permission to create contacts.'
+                      : undefined
+                  }
+                >
+                  {replaceSelectedContact
+                    ? `Update ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`
+                    : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
                 </Button>
+                <Button type="button" variant="outline" className="h-9 rounded-xl px-3 shrink-0" onClick={clearReplacementInline}>
+                  Clear
+                </Button>
+                <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border border-border"
+                    checked={!!bill?.buyerAsBroker}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      if (!bill) return;
+                      if (!checked) {
+                        setBill({ ...bill, buyerAsBroker: false });
+                        return;
+                      }
+                      setBill({
+                        ...bill,
+                        buyerAsBroker: true,
+                        brokerName: bill.buyerName,
+                        brokerMark: bill.buyerMark,
+                        brokerContactId: bill.buyerContactId,
+                        brokerPhone: bill.buyerPhone,
+                        brokerAddress: bill.buyerAddress,
+                      });
+                    }}
+                    disabled={!bill}
+                  />
+                  Use buyer as broker
+                </label>
               </div>
-              {replaceErrors.name && <p className="text-[11px] text-destructive">{replaceErrors.name}</p>}
-              {replaceErrors.phone && <p className="text-[11px] text-destructive">{replaceErrors.phone}</p>}
+              {(replaceErrors.mark || replaceErrors.name || replaceErrors.phone) && (
+                <p className="text-[11px] text-destructive">
+                  {[replaceErrors.mark, replaceErrors.name, replaceErrors.phone].filter(Boolean).join(' · ')}
+                </p>
+              )}
             </div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -2272,6 +2376,9 @@ const BillingPage = () => {
                   </p>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
+                        BROKERAGE
+                      </p>
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -2311,6 +2418,9 @@ const BillingPage = () => {
                     </div>
 
                     <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
+                        OTHER CHARGES
+                      </p>
                       <div className="flex items-center gap-1">
                         <Input
                           type="number"
@@ -2353,55 +2463,32 @@ const BillingPage = () => {
               <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 + gi * 0.05 }}
                 className="glass-card rounded-2xl overflow-hidden">
+                {(() => {
+                  const isCollapsed = collapsedCommodityIndexes.includes(gi);
+                  return (
+                    <>
                 <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
                     <div className="flex flex-wrap gap-1.5 items-center">
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-[9px] font-bold text-emerald-700 dark:text-emerald-200">
+                        Gross: ₹{group.subtotal.toLocaleString()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleCommodityCollapse(gi)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-border/50 bg-background/80 hover:bg-muted/40 text-[10px] font-semibold text-foreground transition-colors"
+                        aria-label={isCollapsed ? 'Expand commodity details' : 'Collapse commodity details'}
+                        aria-expanded={!isCollapsed}
+                      >
+                        {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                        {isCollapsed ? 'Expand' : 'Collapse'}
+                      </button>
                       {group.hsnCode && (
                         <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">
                           HSN: {group.hsnCode}
                         </span>
                       )}
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] text-muted-foreground">Comm %</span>
-                        <Input
-                          type="number"
-                          value={group.commissionPercent}
-                          onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            if (!bill) return;
-                            const updated = { ...bill };
-                            const g = { ...updated.commodityGroups[gi] };
-                            g.commissionPercent = val;
-                            g.commissionAmount = Math.round(g.subtotal * g.commissionPercent / 100);
-                            g.totalCharges = g.commissionAmount + g.userFeeAmount;
-                            updated.commodityGroups = [...updated.commodityGroups];
-                            updated.commodityGroups[gi] = g;
-                            setBill(recalcGrandTotal(updated));
-                          }}
-                          className="h-6 w-14 text-[10px] text-right px-1 py-0 rounded bg-white/80 border border-border/60"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] text-muted-foreground">User Fee %</span>
-                        <Input
-                          type="number"
-                          value={group.userFeePercent}
-                          onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            if (!bill) return;
-                            const updated = { ...bill };
-                            const g = { ...updated.commodityGroups[gi] };
-                            g.userFeePercent = val;
-                            g.userFeeAmount = Math.round(g.subtotal * g.userFeePercent / 100);
-                            g.totalCharges = g.commissionAmount + g.userFeeAmount;
-                            updated.commodityGroups = [...updated.commodityGroups];
-                            updated.commodityGroups[gi] = g;
-                            setBill(recalcGrandTotal(updated));
-                          }}
-                          className="h-6 w-14 text-[10px] text-right px-1 py-0 rounded bg-white/80 border border-border/60"
-                        />
-                      </div>
                       {(group.gstRate ?? 0) > 0 && (
                         <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">
                           GST: {group.gstRate}%
@@ -2410,15 +2497,17 @@ const BillingPage = () => {
                     </div>
                   </div>
                 </div>
+                {!isCollapsed && (
                 <div className="p-3 space-y-2">
                   {/* Table header for commodity items */}
-                  <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
+                  <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
                     <span>Item</span>
                     <span>Qty</span>
                     <span>Weight (kg)</span>
                     <span>Avg Wt (kg)</span>
                     <span>Other Charges</span>
                     <span>Brokerage (₹)</span>
+                    <span>Token (₹)</span>
                     <span>Value</span>
                     <span>Bid Rate (₹)</span>
                     <span>New Rate (₹)</span>
@@ -2437,7 +2526,7 @@ const BillingPage = () => {
                       return (
                         <div
                           key={ii}
-                          className="grid gap-1.5 text-[10px] md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2 py-1.5 text-center"
+                          className="grid gap-1.5 text-[10px] md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2 py-1.5 text-center"
                         >
                           <div className="min-w-0">
                             <p className="text-[11px] font-semibold text-foreground truncate">
@@ -2562,6 +2651,18 @@ const BillingPage = () => {
                             )}
                           </div>
 
+                          <div>
+                            <Input
+                              type="number"
+                              value={item.tokenAdvance ?? ''}
+                              onChange={e => {
+                                updateLineItem(gi, ii, 'tokenAdvance', parseFloat(e.target.value) || 0);
+                              }}
+                              className="h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              title="Token advance from auction for this bid/lot"
+                            />
+                          </div>
+
                           <div className="text-foreground font-semibold">
                             ₹{baseValue.toFixed(2)}
                           </div>
@@ -2599,272 +2700,339 @@ const BillingPage = () => {
                       );
                     })}
 
-                    <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(9,minmax(80px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-lg border-t border-border/40 pt-2 px-1 text-[11px] font-bold text-center">
-                      <div />
-                      <div className="text-foreground">
+                    <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
+                      <div className="text-left text-white">Total</div>
+                      <div className="text-white">
                         {group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString()}
                       </div>
-                      <div className="text-foreground">
+                      <div className="text-white">
                         {group.items.reduce((s, i) => s + (Number(i.weight) || 0), 0).toLocaleString()}
                       </div>
                       <div />
                       <div />
                       <div />
+                      <div className="text-white">
+                        ₹{group.items.reduce((s, i) => s + (Number(i.tokenAdvance) || 0), 0).toLocaleString()}
+                      </div>
                       <div />
                       <div />
                       <div />
-                      <div className="text-foreground">
+                      <div className="text-white">
                         ₹{group.items.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
                       </div>
                       <div />
                     </div>
 
                     <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Subtotal</span>
-                        <span className="font-bold text-foreground">₹{group.subtotal.toLocaleString()}</span>
-                      </div>
-                      {group.commissionPercent > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span>
-                          <span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {group.userFeePercent > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span>
-                          <span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {(group.gstRate ?? 0) > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">GST ({group.gstRate}%)</span>
-                          <span className="text-foreground">
-                            ₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}
-                          </span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
+                )}
+                {isCollapsed && (
+                  <div className="px-3 py-2 bg-muted/10 border-t border-border/20">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground font-medium">Items: {group.items.length}</span>
+                      <span className="text-foreground font-semibold">
+                        Subtotal/Gross: ₹{group.subtotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                    </>
+                  );
+                })()}
               </motion.div>
             ))}
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-              className="glass-card rounded-2xl p-3">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Additions</p>
-              <div className="space-y-2">
-                <div>
-                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2 flex-1 min-w-0 sm:justify-start">
-                      <p className="text-[10px] text-muted-foreground whitespace-nowrap">Buyer Coolie</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-1 min-w-0 sm:justify-end">
-                      <Input
-                        type="number"
-                        value={buyerCoolieRate || ""}
-                        onChange={e => {
-                          const rate = parseFloat(e.target.value) || 0;
-                          setBuyerCoolieRate(rate);
-                          if (!bill) return;
-                          const totalBags = bill.commodityGroups.reduce(
-                            (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
-                            0,
-                          );
-                          const total = rate > 0 && totalBags > 0 ? Math.round(rate * totalBags) : 0;
-                          setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
-                          setValidationErrors(prev => {
-                            const n = { ...prev };
-                          delete n.buyerCoolie;
-                          return n;
-                        });
-                      }}
-                        className={cn(
-                          "h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10",
-                          validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30",
-                        )}
-                        placeholder="Rate / bag (₹)"
-                      />
-                      <span className="h-8 px-2 inline-flex items-center justify-center rounded-lg bg-muted/10 text-xs font-bold text-foreground min-w-[3rem]">
-                        {bill.commodityGroups.reduce(
-                          (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
-                          0,
-                        )}
-                      </span>
-                      <Input
-                        type="number"
-                        value={bill.buyerCoolie || ""}
-                        onChange={e => {
-                          const total = parseInt(e.target.value, 10) || 0;
-                          if (!bill) return;
-                          setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
-                          setValidationErrors(prev => {
-                            const n = { ...prev };
-                          delete n.buyerCoolie;
-                          return n;
-                        });
-                      }}
-                        className={cn(
-                          "h-8 w-28 rounded-lg text-right text-xs font-bold bg-muted/10",
-                          validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30",
-                        )}
-                        placeholder="Total (₹)"
-                      />
-                    </div>
-                  </div>
-                  {validationErrors.buyerCoolie && (
-                    <p className="text-[9px] text-destructive text-right mt-0.5">
-                      {validationErrors.buyerCoolie}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-foreground flex-1">Outbound Freight</p>
-                    <Input type="number" value={bill.outboundFreight || ''}
-                      onChange={e => { setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value, 10) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundFreight; return n; }); }}
-                      className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")} />
-                  </div>
-                  {validationErrors.outboundFreight && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundFreight}</p>}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-foreground flex-1">Outbound Vehicle #</p>
-                    <Input value={bill.outboundVehicle}
-                      onChange={e => { setBill({ ...bill, outboundVehicle: e.target.value }); setValidationErrors(prev => { const n = { ...prev }; delete n.outboundVehicle; return n; }); }}
-                      placeholder="MH-12-XX-1234"
-                      className={cn("h-8 w-32 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")} />
-                  </div>
-                  {validationErrors.outboundVehicle && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.outboundVehicle}</p>}
-                </div>
-              </div>
-            </motion.div>
+              className="glass-card rounded-2xl p-3 sm:p-4 space-y-3">
+              <p className="text-[11px] font-bold text-foreground uppercase tracking-wider">
+                Bill Summary
+              </p>
+              <div
+                ref={summaryTableScrollRef}
+                onScroll={handleSummaryTableScroll}
+                className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm"
+              >
+                <table className="w-full min-w-[1100px] text-[11px] leading-tight border-separate border-spacing-0">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="sticky top-0 left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide bg-gradient-to-r from-background to-muted/70 dark:from-slate-900 dark:to-slate-800 border-r border-border/70 min-w-[180px]">Activity</th>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <th key={`${g.commodityName}-${gi}`} className="sticky top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide min-w-[150px] border-l border-border/50 dark:border-border/70 bg-muted/30 dark:bg-slate-800/60">
+                          {g.commodityName || `Commodity ${gi + 1}`}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t border-border/40 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Gross Amt</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td key={`gross-${gi}`} className="px-2 py-1.5 text-foreground font-semibold border-l border-border/30">₹{g.subtotal.toLocaleString()}</td>
+                      ))}
+                    </tr>
 
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-              className="glass-card rounded-2xl p-3">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Discount & Adjustments</p>
-              <div className="space-y-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-foreground flex-1">Discount</p>
-                    <select
-                      value={bill.discountType}
-                      onChange={e => {
-                        const discountType = e.target.value === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
-                        setBill(recalcGrandTotal({ ...bill, discountType }));
-                      }}
-                      className="h-8 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground px-2"
-                    >
-                      <option value="AMOUNT">Amt (₹)</option>
-                      <option value="PERCENT">% (Percent)</option>
-                    </select>
-                    <Input
-                      type="number"
-                      value={bill.discount || ''}
-                      onChange={e => {
-                        const value = parseFloat(e.target.value) || 0;
-                        setBill(recalcGrandTotal({ ...bill, discount: value }));
-                        setValidationErrors(prev => {
-                          const n = { ...prev };
-                          delete n.discount;
-                          return n;
-                        });
-                      }}
-                      className={cn(
-                        "h-8 w-20 rounded-lg text-right text-xs font-bold bg-muted/10",
-                        validationErrors.discount && "border-destructive ring-1 ring-destructive/30",
-                      )}
-                      placeholder={bill.discountType === 'PERCENT' ? "% value" : "₹ amount"}
-                    />
-                  </div>
-                  {validationErrors.discount && (
-                    <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.discount}</p>
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-foreground flex-1">Token Advance</p>
-                    <Input
-                      type="number"
-                      value={bill.tokenAdvance ?? ''}
-                      onChange={e => {
-                        const value = parseFloat(e.target.value);
-                        setBill(recalcGrandTotal({ ...bill, tokenAdvance: Number.isNaN(value) ? 0 : value }));
-                      }}
-                      className="h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-foreground flex-1">Manual Round Off</p>
-                    <Input type="number" value={bill.manualRoundOff || ''}
-                      onChange={e => { setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 })); setValidationErrors(prev => { const n = { ...prev }; delete n.manualRoundOff; return n; }); }}
-                      className={cn("h-8 w-24 rounded-lg text-right text-xs font-bold bg-muted/10", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
-                      placeholder="±" />
-                  </div>
-                  {validationErrors.manualRoundOff && <p className="text-[9px] text-destructive text-right mt-0.5">{validationErrors.manualRoundOff}</p>}
-                </div>
+                    <tr className="border-t border-border/40 bg-violet-500/15 dark:bg-violet-500/25">
+                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-violet-800 dark:text-violet-200">
+                        Commodity Additional Expenses
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Commission</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td key={`com-${gi}`} className="px-2 py-1.5 border-l border-border/30">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              value={g.commissionPercent}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value) || 0;
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.commissionPercent = val;
+                                cg.commissionAmount = Math.round(cg.subtotal * cg.commissionPercent / 100);
+                                cg.totalCharges = cg.commissionAmount + cg.userFeeAmount;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className="h-6 w-14 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.commissionAmount || 0).toLocaleString()}</span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">GST</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td key={`gst-${gi}`} className="px-2 py-1.5 border-l border-border/30">₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}</td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">User Fee</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td key={`uf-${gi}`} className="px-2 py-1.5 border-l border-border/30">
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              value={g.userFeePercent}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value) || 0;
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.userFeePercent = val;
+                                cg.userFeeAmount = Math.round(cg.subtotal * cg.userFeePercent / 100);
+                                cg.totalCharges = cg.commissionAmount + cg.userFeeAmount;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className="h-6 w-14 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.userFeeAmount || 0).toLocaleString()}</span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+
+                    <tr className="border-t border-border/40 bg-indigo-500/15 dark:bg-indigo-500/25">
+                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-indigo-800 dark:text-indigo-200">
+                        Freight Charges
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Outbound Freight</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] text-muted-foreground">Rate / Value</span>
+                          <Input
+                            type="number"
+                            value={bill.outboundFreight || ''}
+                            onChange={e => {
+                              setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value, 10) || 0 }));
+                              setValidationErrors(prev => {
+                                const n = { ...prev };
+                                delete n.outboundFreight;
+                                return n;
+                              });
+                            }}
+                            className={cn("h-6 w-24 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
+                          />
+                          {validationErrors.outboundFreight && <span className="text-[10px] text-destructive">{validationErrors.outboundFreight}</span>}
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Outbound Vehicle #</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <Input
+                          value={bill.outboundVehicle}
+                          onChange={e => {
+                            setBill({ ...bill, outboundVehicle: e.target.value });
+                            setValidationErrors(prev => {
+                              const n = { ...prev };
+                              delete n.outboundVehicle;
+                              return n;
+                            });
+                          }}
+                          placeholder="AP03 CK 4323"
+                          className={cn("h-6 w-36 rounded text-left text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")}
+                        />
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Coolie Charge</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Input
+                            type="number"
+                            value={buyerCoolieRate || ""}
+                            onChange={e => {
+                              const rate = parseFloat(e.target.value) || 0;
+                              setBuyerCoolieRate(rate);
+                              const totalBags = bill.commodityGroups.reduce(
+                                (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
+                                0,
+                              );
+                              const total = rate > 0 && totalBags > 0 ? Math.round(rate * totalBags) : 0;
+                              setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
+                              setValidationErrors(prev => {
+                                const n = { ...prev };
+                                delete n.buyerCoolie;
+                                return n;
+                              });
+                            }}
+                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
+                            placeholder="Rate"
+                          />
+                          <span className="h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[3rem]">
+                            {bill.commodityGroups.reduce((s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0), 0)}
+                          </span>
+                          <Input
+                            type="number"
+                            value={bill.buyerCoolie || ""}
+                            onChange={e => {
+                              const total = parseInt(e.target.value, 10) || 0;
+                              setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
+                              setValidationErrors(prev => {
+                                const n = { ...prev };
+                                delete n.buyerCoolie;
+                                return n;
+                              });
+                            }}
+                            className={cn("h-6 w-24 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
+                            placeholder="Amount"
+                          />
+                          {validationErrors.buyerCoolie && <span className="text-[10px] text-destructive">{validationErrors.buyerCoolie}</span>}
+                        </div>
+                      </td>
+                    </tr>
+
+                    <tr className="border-t border-border/40 bg-amber-500/15 dark:bg-amber-500/25">
+                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                        Discount & Adjustments
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Discount</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <select
+                            value={bill.discountType}
+                            onChange={e => {
+                              const discountType = e.target.value === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
+                              setBill(recalcGrandTotal({ ...bill, discountType }));
+                            }}
+                            className="h-6 rounded bg-background border border-border text-[10px] font-bold text-foreground px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                          >
+                            <option value="PERCENT">%</option>
+                            <option value="AMOUNT">Amt</option>
+                          </select>
+                          <Input
+                            type="number"
+                            value={bill.discount || ''}
+                            onChange={e => {
+                              const value = parseFloat(e.target.value) || 0;
+                              setBill(recalcGrandTotal({ ...bill, discount: value }));
+                              setValidationErrors(prev => {
+                                const n = { ...prev };
+                                delete n.discount;
+                                return n;
+                              });
+                            }}
+                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")}
+                            placeholder={bill.discountType === 'PERCENT' ? '%' : 'Amt'}
+                          />
+                          {validationErrors.discount && <span className="text-[10px] text-destructive">{validationErrors.discount}</span>}
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Round Off</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] text-muted-foreground">{bill.manualRoundOff >= 0 ? 'Plus' : 'Minus'}</span>
+                          <Input
+                            type="number"
+                            value={bill.manualRoundOff || ''}
+                            onChange={e => {
+                              setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 }));
+                              setValidationErrors(prev => {
+                                const n = { ...prev };
+                                delete n.manualRoundOff;
+                                return n;
+                              });
+                            }}
+                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
+                            placeholder="Value"
+                          />
+                          {validationErrors.manualRoundOff && <span className="text-[10px] text-destructive">{validationErrors.manualRoundOff}</span>}
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Overall Rate</td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const commodityTotal = (g.subtotal || 0) + (g.totalCharges || 0);
+                        const overall = commodityTotal + bill.buyerCoolie + bill.outboundFreight - (bill.discountType === 'PERCENT'
+                          ? Math.round(
+                            bill.commodityGroups.reduce((s, cg) => s + (cg.subtotal || 0) + (cg.totalCharges || 0), 0) * (bill.discount || 0) / 100,
+                          )
+                          : (bill.discount || 0)) + bill.manualRoundOff;
+                        return <td key={`overall-${gi}`} className="px-2 py-1.5 text-[11px] text-muted-foreground border-l border-border/30">₹{overall.toLocaleString()}</td>;
+                      })}
+                    </tr>
+                    <tr className="border-t border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 text-white">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 min-w-[180px]">Grand Total / Pending Balance to pay</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide opacity-80">Grand Total</p>
+                            <p className="font-extrabold text-sm">₹{bill.grandTotal.toLocaleString()}</p>
+                          </div>
+                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide opacity-80">Pending Balance</p>
+                            <p className="font-extrabold text-sm">₹{bill.pendingBalance.toLocaleString()}</p>
+                          </div>
+                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide opacity-80">Token Advance</p>
+                            <p className="font-extrabold text-sm">₹{sumLineTokenAdvances(bill).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Commodity Totals</span>
-                  <span className="font-bold text-foreground">
-                    ₹{bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0).toLocaleString()}
-                  </span>
-                </div>
-                {(bill.buyerCoolie > 0 || bill.outboundFreight > 0) && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">+ Additions</span>
-                    <span className="text-foreground">₹{(bill.buyerCoolie + bill.outboundFreight).toLocaleString()}</span>
-                  </div>
-                )}
-                {bill.discount > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">− Discount</span>
-                    <span className="text-destructive">
-                      −₹{bill.discountType === 'PERCENT'
-                        ? Math.round(bill.commodityGroups.reduce((s, g) => s + g.subtotal, 0) * bill.discount / 100).toLocaleString()
-                        : bill.discount.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-                {bill.manualRoundOff !== 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Round Off</span>
-                    <span className="text-foreground">{bill.manualRoundOff > 0 ? '+' : ''}₹{bill.manualRoundOff}</span>
-                  </div>
-                )}
-                {bill.tokenAdvance > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">− Token Advance</span>
-                    <span className="text-foreground">−₹{bill.tokenAdvance.toLocaleString()}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-lg border-t border-border/50 pt-2">
-                  <span className="font-bold text-foreground">Grand Total</span>
-                  <span className="font-black text-emerald-600 dark:text-emerald-400">₹{bill.grandTotal.toLocaleString()}</span>
-                </div>
-              </div>
-              <p className="text-[9px] text-muted-foreground text-center mt-1.5">
-                GT = Σ(Commodity) + Additions − Discount + Round Off; Pending = GT − Token Advance
-              </p>
-
-              {bill.pendingBalance > 0 && (
-                <div className="mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-400/20">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-amber-600 dark:text-amber-400 font-semibold">Pending Balance</span>
-                    <span className="font-bold text-amber-600 dark:text-amber-400">₹{bill.pendingBalance.toLocaleString()}</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-4 space-y-2">
+              <div className="mt-1 space-y-2">
                 <div className="flex flex-wrap gap-2 justify-between items-center">
                   <div className="flex flex-wrap gap-2">
                     <Button

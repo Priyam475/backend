@@ -13,6 +13,8 @@ export interface BillLineItemDTO {
   otherCharges?: number;
   newRate: number;
   amount: number;
+  /** Token advance from auction for this bid/lot (₹). */
+  tokenAdvance?: number;
 }
 
 /** Commodity group (backend CommodityGroupDTO). */

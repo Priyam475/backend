@@ -83,5 +83,6 @@
     <include file="config/liquibase/changelog/20260326140000_trader_preset_enabled_global_presets.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260330180000_sales_bill_bill_number_nullable.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260401120000_sales_bill_token_advance.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260401130000_sales_bill_line_item_token_advance.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260401140000_sales_bill_buyer_broker_details.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

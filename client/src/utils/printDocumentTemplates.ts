@@ -35,10 +35,11 @@ export interface BillPrintData {
     gstRate?: number;
     commissionPercent: number;
     userFeePercent: number;
-    items: { quantity: number; weight: number; newRate: number; amount: number }[];
+    items: { quantity: number; weight: number; newRate: number; amount: number; tokenAdvance?: number }[];
     subtotal: number;
     commissionAmount: number;
     userFeeAmount: number;
+    totalCharges?: number;
   }[];
   buyerCoolie: number;
   outboundFreight: number;
@@ -69,7 +70,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
       <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${group.gstRate}%` : ''}</p>
       ${group.items.map((item) => `
         <div class="row" style="font-size:10px">
-          <span>${item.quantity}×${item.weight.toFixed(0)}kg @₹${item.newRate}</span>
+          <span>${item.quantity}×${item.weight.toFixed(0)}kg @₹${item.newRate}${(item.tokenAdvance ?? 0) > 0 ? ` · Tok ₹${item.tokenAdvance}` : ''}</span>
           <span class="bold">₹${item.amount.toLocaleString()}</span>
         </div>
       `).join('')}

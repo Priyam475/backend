@@ -67,6 +67,11 @@ public class SalesBillLineItem implements Serializable {
     @Column(name = "amount", precision = 15, scale = 2, nullable = false)
     private BigDecimal amount;
 
+    /** Token advance collected at auction for this bid/lot (₹). */
+    @NotNull
+    @Column(name = "token_advance", precision = 15, scale = 2, nullable = false)
+    private BigDecimal tokenAdvance = BigDecimal.ZERO;
+
     @NotNull
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
@@ -95,6 +100,8 @@ public class SalesBillLineItem implements Serializable {
     public void setNewRate(BigDecimal newRate) { this.newRate = newRate; }
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }
+    public BigDecimal getTokenAdvance() { return tokenAdvance; }
+    public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
     public Integer getSortOrder() { return sortOrder; }
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
 
