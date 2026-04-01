@@ -1009,6 +1009,7 @@ const ArrivalsPage = () => {
         await arrivalsApi.create(buildPartialPayload());
       }
       await loadArrivalsFromApi();
+      await loadContactsFromApi();
       resetForm();
       toast.success('Partial arrival saved');
       return true;
@@ -1278,6 +1279,15 @@ const ArrivalsPage = () => {
     }
     arrivalsApi.list(0, 100, undefined, true).then(setPartialArrivals).catch(() => setPartialArrivals([])).finally(() => setPartialArrivalsLoading(false));
     arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
+  }, []);
+
+  const loadContactsFromApi = useCallback(async () => {
+    try {
+      const loaded = await contactApi.list({ scope: 'participants' });
+      setContacts(loaded);
+    } catch (err) {
+      console.error('Failed to reload contacts:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -1804,6 +1814,7 @@ const ArrivalsPage = () => {
         partially_completed: !shouldComplete,
       });
       await loadArrivalsFromApi();
+      await loadContactsFromApi();
       resetForm();
       setShowAdd(false);
       setDesktopTab('summary');
@@ -2014,6 +2025,7 @@ const ArrivalsPage = () => {
         }) : undefined,
       });
       await loadArrivalsFromApi();
+      await loadContactsFromApi();
       setEditingVehicleId(null);
       resetForm();
       setShowAdd(false);
@@ -2694,16 +2706,16 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="min-w-0">
                                     <Input
-                                      placeholder="Mark / alias (optional, 2–50)"
+                                      placeholder="Mark / alias (optional, 2–20)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
                                         "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
-                                      maxLength={50}
+                                      maxLength={20}
                                     />
-                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–20 if set'}</p>}
                                   </div>
                                 </div>
                               ) : (
@@ -2739,16 +2751,16 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="min-w-0">
                                     <Input
-                                      placeholder="Mark / alias (optional, 2–50)"
+                                      placeholder="Mark / alias (optional, 2–20)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
                                         "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
-                                      maxLength={50}
+                                      maxLength={20}
                                     />
-                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–20 if set'}</p>}
                                   </div>
                                 </div>
                               )}
@@ -3572,16 +3584,16 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="min-w-0">
                                     <Input
-                                      placeholder="Mark / alias (optional, 2–50)"
+                                      placeholder="Mark / alias (optional, 2–20)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
                                         "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
-                                      maxLength={50}
+                                      maxLength={20}
                                     />
-                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–20 if set'}</p>}
                                   </div>
                                 </div>
                               ) : (
@@ -3617,16 +3629,16 @@ const ArrivalsPage = () => {
                                   </div>
                                   <div className="min-w-0">
                                     <Input
-                                      placeholder="Mark / alias (optional, 2–50)"
+                                      placeholder="Mark / alias (optional, 2–20)"
                                       value={seller.seller_mark}
                                       onChange={e => updateSeller(si, { seller_mark: e.target.value })}
                                       className={cn(
                                         "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerMarkInvalid(seller, si) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
                                       )}
-                                      maxLength={50}
+                                      maxLength={20}
                                     />
-                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–50 if set'}</p>}
+                                    {isSellerMarkInvalid(seller, si) && <p className="text-[9px] text-red-500 mt-0.5">{getSellerMarkError(seller, si) ?? '2–20 if set'}</p>}
                                   </div>
                                 </div>
                               )}

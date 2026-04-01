@@ -177,12 +177,14 @@ public class ArrivalService {
             sellerInVehicle.setVehicleId(vehicle.getId());
             Long contactId = sellerDTO.getContactId();
             if (contactId != null) {
-                contactRepository.findById(contactId).orElseThrow(() ->
+                Contact contact = contactRepository.findById(contactId).orElseThrow(() ->
                     new IllegalArgumentException("Seller contact not found: " + contactId)
                 );
                 contactService.ensureTraderUsesPortalContact(traderId, contactId);
                 sellerInVehicle.setContactId(contactId);
-                sellerInVehicle.setSellerMark(sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null);
+                String incomingMark = sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null;
+                sellerInVehicle.setSellerMark(incomingMark);
+                propagateMarkToContact(contact, incomingMark, traderId);
             } else {
                 sellerInVehicle.setContactId(null);
                 sellerInVehicle.setSellerName(sellerDTO.getSellerName() != null ? sellerDTO.getSellerName().trim() : null);
@@ -599,11 +601,13 @@ public class ArrivalService {
                 siv.setVehicleId(vehicleId);
                 Long contactId = sellerDTO.getContactId();
                 if (contactId != null) {
-                    contactRepository.findById(contactId).orElseThrow(() ->
+                    Contact contact = contactRepository.findById(contactId).orElseThrow(() ->
                         new IllegalArgumentException("Seller contact not found: " + contactId));
                     contactService.ensureTraderUsesPortalContact(traderId, contactId);
                     siv.setContactId(contactId);
-                    siv.setSellerMark(sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null);
+                    String incomingMark = sellerDTO.getSellerMark() != null && !sellerDTO.getSellerMark().isBlank() ? sellerDTO.getSellerMark().trim() : null;
+                    siv.setSellerMark(incomingMark);
+                    propagateMarkToContact(contact, incomingMark, traderId);
                 } else {
                     String phone = sellerDTO.getSellerPhone() != null ? sellerDTO.getSellerPhone().trim() : null;
                     if (!isStillPartial && phone != null && !phone.isEmpty()) {
@@ -1070,6 +1074,49 @@ public class ArrivalService {
                 }
             }
         }
+    }
+
+    /**
+     * Propagate per-arrival mark override to Contact.mark for global use.
+     * Throws IllegalArgumentException if mark cannot be saved (conflict, length).
+     */
+    private void propagateMarkToContact(Contact contact, String mark, Long traderId) {
+        if (mark == null || mark.isBlank()) return;
+        String trimmed = mark.trim();
+        
+        // Validate length against Contact.mark column (varchar 20)
+        if (trimmed.length() > 20) {
+            throw new IllegalArgumentException(
+                "Mark/alias must be 20 characters or less to save globally. Current: " + trimmed.length() + " chars"
+            );
+        }
+        
+        // Skip if already set to same value (case-insensitive)
+        String current = contact.getMark() != null ? contact.getMark().trim() : "";
+        if (trimmed.equalsIgnoreCase(current)) return;
+        
+        // Check conflicts with other trader contacts
+        boolean conflictsTrader = contactRepository
+            .findOneByTraderIdAndMarkIgnoreCaseAndIdNot(traderId, trimmed, contact.getId())
+            .isPresent();
+        if (conflictsTrader) {
+            throw new IllegalArgumentException(
+                "This mark is already in use by another contact. Please choose a unique mark."
+            );
+        }
+        
+        // Check conflicts with global self-registered contacts
+        boolean conflictsGlobal = contactRepository
+            .findOneByMarkAndTraderIdIsNull(trimmed)
+            .isPresent();
+        if (conflictsGlobal) {
+            throw new IllegalArgumentException(
+                "This mark is already in use by a registered contact. Please choose a unique mark."
+            );
+        }
+        
+        contact.setMark(trimmed);
+        contactRepository.save(contact);
     }
 
     private Long resolveTraderId() {
