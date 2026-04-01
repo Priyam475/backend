@@ -2890,7 +2890,7 @@ const ArrivalsPage = () => {
                                     </LotFieldsHorizontalScroll>
                                   </div>
                                   {/* Action buttons */}
-                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-center">
+                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -2907,7 +2907,7 @@ const ArrivalsPage = () => {
                                   >
                                     Cancel
                                   </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                   </div>
@@ -2990,10 +2990,10 @@ const ArrivalsPage = () => {
                                                         e.stopPropagation();
                                                         setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) });
                                                       }}
-                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
+                                                      className="w-9 h-9 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
-                                                      <Trash2 className="w-3 h-3" />
+                                                      <Trash2 className="w-4 h-4 sm:w-4 sm:h-4" />
                                                     </button>
                                                   </div>
                                                 </td>
@@ -3768,7 +3768,7 @@ const ArrivalsPage = () => {
                                     </LotFieldsHorizontalScroll>
                                   </div>
                                   {/* Action buttons */}
-                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-center">
+                                  <div className="flex flex-nowrap items-center gap-2 justify-end sm:self-start">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -3785,7 +3785,7 @@ const ArrivalsPage = () => {
                                   >
                                     Cancel
                                   </Button>
-                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-8 sm:h-9 shrink-0 whitespace-nowrap text-xs bg-blue-600 hover:bg-blue-700 text-white">
+                                  <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white">
                                     {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
                                   </Button>
                                   </div>
@@ -3867,10 +3867,10 @@ const ArrivalsPage = () => {
                                                         e.stopPropagation();
                                                         setPendingDelete({ kind: "lot", sellerIdx: si, lotIdx: li, label: lot.lot_name || "Lot " + (li + 1) });
                                                       }}
-                                                      className="w-8 h-8 sm:w-6 sm:h-6 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
+                                                      className="w-9 h-9 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors flex-shrink-0"
                                                       aria-label="Delete lot"
                                                     >
-                                                      <Trash2 className="w-3 h-3" />
+                                                      <Trash2 className="w-4 h-4 sm:w-4 sm:h-4" />
                                                     </button>
                                                   </div>
                                                 </td>
