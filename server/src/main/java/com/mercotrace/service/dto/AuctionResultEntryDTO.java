@@ -14,6 +14,10 @@ public class AuctionResultEntryDTO implements Serializable {
     @JsonProperty("bidNumber")
     private Integer bidNumber;
 
+    /** Primary key of {@code auction_entry}; used by Billing to sync buyer changes. */
+    @JsonProperty("auctionEntryId")
+    private Long auctionEntryId;
+
     @JsonProperty("buyerId")
     private Long buyerId;
 
@@ -53,6 +57,14 @@ public class AuctionResultEntryDTO implements Serializable {
 
     public void setBidNumber(Integer bidNumber) {
         this.bidNumber = bidNumber;
+    }
+
+    public Long getAuctionEntryId() {
+        return auctionEntryId;
+    }
+
+    public void setAuctionEntryId(Long auctionEntryId) {
+        this.auctionEntryId = auctionEntryId;
     }
 
     public Long getBuyerId() {

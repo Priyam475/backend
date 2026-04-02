@@ -21,6 +21,10 @@ public final class SalesBillDTOs {
         private Long id;
         private Integer bidNumber;
         private String lotName;
+        @Size(max = 64)
+        private String lotId;
+        private Long auctionEntryId;
+        private Long selfSaleUnitId;
         private String sellerName;
         private Integer quantity;
         private BigDecimal weight;
@@ -38,6 +42,12 @@ public final class SalesBillDTOs {
         public void setBidNumber(Integer bidNumber) { this.bidNumber = bidNumber; }
         public String getLotName() { return lotName; }
         public void setLotName(String lotName) { this.lotName = lotName; }
+        public String getLotId() { return lotId; }
+        public void setLotId(String lotId) { this.lotId = lotId; }
+        public Long getAuctionEntryId() { return auctionEntryId; }
+        public void setAuctionEntryId(Long auctionEntryId) { this.auctionEntryId = auctionEntryId; }
+        public Long getSelfSaleUnitId() { return selfSaleUnitId; }
+        public void setSelfSaleUnitId(Long selfSaleUnitId) { this.selfSaleUnitId = selfSaleUnitId; }
         public String getSellerName() { return sellerName; }
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
         public Integer getQuantity() { return quantity; }

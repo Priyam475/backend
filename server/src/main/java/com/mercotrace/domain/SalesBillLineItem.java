@@ -36,6 +36,17 @@ public class SalesBillLineItem implements Serializable {
     @Column(name = "lot_name", length = 150)
     private String lotName;
 
+    /** Auction lot id (string); optional for legacy rows. */
+    @Column(name = "lot_id", length = 64)
+    private String lotId;
+
+    /** {@link com.mercotrace.domain.AuctionEntry} id for billing ↔ auction sync. */
+    @Column(name = "auction_entry_id")
+    private Long auctionEntryId;
+
+    @Column(name = "self_sale_unit_id")
+    private Long selfSaleUnitId;
+
     @Column(name = "seller_name", length = 255)
     private String sellerName;
 
@@ -84,6 +95,12 @@ public class SalesBillLineItem implements Serializable {
     public void setBidNumber(Integer bidNumber) { this.bidNumber = bidNumber; }
     public String getLotName() { return lotName; }
     public void setLotName(String lotName) { this.lotName = lotName; }
+    public String getLotId() { return lotId; }
+    public void setLotId(String lotId) { this.lotId = lotId; }
+    public Long getAuctionEntryId() { return auctionEntryId; }
+    public void setAuctionEntryId(Long auctionEntryId) { this.auctionEntryId = auctionEntryId; }
+    public Long getSelfSaleUnitId() { return selfSaleUnitId; }
+    public void setSelfSaleUnitId(Long selfSaleUnitId) { this.selfSaleUnitId = selfSaleUnitId; }
     public String getSellerName() { return sellerName; }
     public void setSellerName(String sellerName) { this.sellerName = sellerName; }
     public Integer getQuantity() { return quantity; }

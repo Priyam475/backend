@@ -5,6 +5,10 @@ export interface BillLineItemDTO {
   id?: number;
   bidNumber: number;
   lotName?: string;
+  /** Auction lot id; stored for matching bids across bills. */
+  lotId?: string | null;
+  auctionEntryId?: number | null;
+  selfSaleUnitId?: number | null;
   sellerName?: string;
   quantity: number;
   weight: number;

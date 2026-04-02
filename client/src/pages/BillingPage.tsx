@@ -21,7 +21,7 @@ import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
-import type { AuctionEntryDTO, LotSummaryDTO } from '@/services/api/auction';
+import type { AuctionBidUpdateRequest, AuctionEntryDTO, AuctionResultDTO, LotSummaryDTO } from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
@@ -30,6 +30,38 @@ import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import { directPrint } from '@/utils/printTemplates';
 import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
+
+/**
+ * Billing buttons/tabs match ArrivalsPage.tsx:
+ * - Outline: `variant="outline"` + `rounded-xl` (+ height), same as e.g. "Show completed arrivals" / Add seller.
+ * - Primary: `bg-[#6075FF] text-white shadow-lg hover:bg-[#5060e8]` (mobile "New Arrival" FAB pattern).
+ */
+const arrOutlineLg = 'rounded-xl h-11 sm:h-12 font-bold text-sm';
+const arrOutlineMd = 'rounded-xl h-9 text-sm font-semibold';
+const arrOutlineTall = 'rounded-xl h-12 text-sm font-semibold';
+const arrOutlineSm = 'rounded-xl h-8 text-xs font-semibold';
+const arrSolid =
+  'rounded-xl font-bold bg-[#6075FF] text-white shadow-lg hover:bg-[#5060e8] hover:text-white border-transparent';
+const arrSolidLg = cn(arrSolid, 'h-11 sm:h-12 px-4 text-sm');
+const arrSolidMd = cn(arrSolid, 'h-9 px-3 text-sm');
+const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
+const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
+const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
+const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
+
+/** Desktop main tabs: same as Arrivals Summary / New Arrival (underline + #6075FF bar). */
+const arrDeskTabBtn = (active: boolean) =>
+  cn(
+    'relative px-5 py-3 text-sm font-semibold transition-all flex items-center gap-2 shrink-0',
+    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+  );
+
+/** Mobile header tabs: pill style like Arrivals summary chips (`bg-[#6075FF]` when active). */
+const arrMobTabPill = (active: boolean) =>
+  cn(
+    'shrink-0 min-w-[9.5rem] px-4 py-2 rounded-full text-xs font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm',
+    active ? 'bg-[#6075FF] text-white' : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white',
+  );
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -46,6 +78,10 @@ interface BillEntry {
   bidNumber: number;
   lotId: string;
   lotName: string;
+  /** {@link AuctionEntryDTO.auction_entry_id} for PATCH / billing ↔ auction sync. */
+  auctionEntryId?: number | null;
+  /** When set, use self-sale bid PATCH path. */
+  selfSaleUnitId?: number | null;
   /** Original lot bag count at auction lot level (same for all buyers in this lot). */
   lotTotalQty?: number;
   sellerName: string;
@@ -67,6 +103,64 @@ function getBidSelectionKey(entry: Pick<BillEntry, 'bidNumber' | 'lotId'>): stri
   return `${entry.bidNumber}::${entry.lotId}`;
 }
 
+function normalizeLotNameKey(name: string): string {
+  return (name || '').trim().toLowerCase();
+}
+
+/**
+ * Line keys already used on another sales bill (draft in progress or numbered).
+ * Excludes the bill currently open for edit so its own lines stay available.
+ */
+function collectReservedBidKeysFromSalesBills(
+  bills: SalesBillDTO[],
+  excludeBackendBillId: string | null,
+): Set<string> {
+  const set = new Set<string>();
+  for (const b of bills) {
+    if (excludeBackendBillId && String(b.billId) === excludeBackendBillId) continue;
+    for (const g of b.commodityGroups || []) {
+      for (const it of g.items || []) {
+        const bid = Number(it.bidNumber);
+        if (!Number.isFinite(bid)) continue;
+        const lotId = (it.lotId != null && String(it.lotId).trim() !== '' ? String(it.lotId).trim() : '');
+        if (lotId) {
+          set.add(`${bid}::${lotId}`);
+        } else {
+          set.add(`legacy::${bid}::${normalizeLotNameKey(it.lotName || '')}`);
+        }
+      }
+    }
+  }
+  return set;
+}
+
+function isBillEntryReservedOnOtherSalesBill(entry: BillEntry, reserved: Set<string>): boolean {
+  const bid = entry.bidNumber;
+  const lotId = String(entry.lotId || '').trim();
+  if (lotId && reserved.has(`${bid}::${lotId}`)) return true;
+  return reserved.has(`legacy::${bid}::${normalizeLotNameKey(entry.lotName)}`);
+}
+
+function resolveAuctionEntryIdFromResults(
+  item: { bidNumber: number; lotId?: string },
+  auctions: AuctionResultDTO[],
+): number | null {
+  const lotId = String(item.lotId || '').trim();
+  const bidNum = Number(item.bidNumber);
+  if (!lotId || !Number.isFinite(bidNum)) return null;
+  for (const a of auctions || []) {
+    if (String(a.lotId) !== lotId) continue;
+    const hit = (a.entries || []).find(e => Number(e.bidNumber) === bidNum);
+    if (hit?.auctionEntryId != null && Number.isFinite(Number(hit.auctionEntryId))) return Number(hit.auctionEntryId);
+  }
+  return null;
+}
+
+function resolveSelfSaleUnitIdFromResults(lotId: string, auctions: AuctionResultDTO[]): number | null {
+  const a = (auctions || []).find(x => String(x.lotId) === String(lotId));
+  return a?.selfSaleUnitId != null ? Number(a.selfSaleUnitId) : null;
+}
+
 interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
@@ -84,6 +178,10 @@ interface CommodityGroup {
 interface BillLineItem {
   bidNumber: number;
   lotName: string;
+  /** Auction lot id (matches BillEntry.lotId). */
+  lotId?: string;
+  auctionEntryId?: number | null;
+  selfSaleUnitId?: number | null;
   /** Original lot bag count at auction lot level. */
   lotTotalQty?: number;
   /** Total bags for the whole vehicle (all sellers on same vehicle). */
@@ -859,6 +957,32 @@ const BillingPage = () => {
     clearReplacementInline();
     const role = replaceTarget === 'BROKER' ? 'Broker' : 'Buyer';
     toast.success(hadExistingSelection ? `${role} updated for this bill.` : `${role} added to this bill.`);
+
+    if (replaceTarget === 'BUYER' && bill) {
+      const nextName = resolved.name?.trim() || '';
+      const nextMark = (resolved.mark?.trim() || nextName.slice(0, 4)).toUpperCase();
+      const patched: BillData = {
+        ...bill,
+        buyerName: nextName,
+        buyerMark: nextMark,
+        buyerContactId: resolved.contact_id ?? null,
+        buyerPhone: resolved.phone ?? '',
+        buyerAddress: resolved.address ?? '',
+        billingName: nextName || bill.billingName,
+      };
+      void (async () => {
+        try {
+          if (patched.commodityGroups.some(g => (g.items?.length ?? 0) > 0)) {
+            await syncAuctionEntriesToBillBuyer(patched);
+          }
+          await refetchAuctions();
+        } catch {
+          toast.warning(
+            'Buyer updated on the bill, but some auction bids could not be reassigned. Save the bill to retry, or fix in Sales Pad.',
+          );
+        }
+      })();
+    }
   };
 
   // Load buyer data from completed auctions (arrivals from API; weighing from API)
@@ -930,8 +1054,10 @@ const BillingPage = () => {
 
         buyerEntry.entries.push({
           bidNumber: entry.bidNumber,
-          lotId: auction.lotId,
+          lotId: String(auction.lotId ?? ''),
           lotName,
+          auctionEntryId: entry.auctionEntryId ?? null,
+          selfSaleUnitId: auction.selfSaleUnitId != null ? Number(auction.selfSaleUnitId) : null,
           lotTotalQty: lotTotalsByLotId.get(String(auction.lotId ?? '')) ?? entry.quantity,
           sellerName,
           commodityName,
@@ -941,7 +1067,7 @@ const BillingPage = () => {
           vehicleTotalQty: vehicleTotals.get(vKey) ?? entry.quantity,
           sellerVehicleQty: vehicleSellerTotals.get(sKey) ?? entry.quantity,
           presetApplied: entry.presetApplied || 0,
-          isSelfSale: false,
+          isSelfSale: Boolean(entry.isSelfSale),
           tokenAdvance,
         });
       });
@@ -949,6 +1075,47 @@ const BillingPage = () => {
 
     setBuyers(Array.from(buyerMap.values()));
   }, [auctionData, weighingSessions, arrivalDetails]);
+
+  const excludeBillIdForReservation = bill && isBackendBillId(bill.billId) ? bill.billId : null;
+  const reservedBidKeysOnOtherBills = useMemo(
+    () => collectReservedBidKeysFromSalesBills(savedBills, excludeBillIdForReservation),
+    [savedBills, excludeBillIdForReservation],
+  );
+
+  const buyersForBilling = useMemo(
+    () =>
+      buyers
+        .map(b => {
+          const entries = b.entries.filter(e => !isBillEntryReservedOnOtherSalesBill(e, reservedBidKeysOnOtherBills));
+          const tokenAdvanceTotal = entries.reduce((s, e) => s + (Number(e.tokenAdvance) || 0), 0);
+          return { ...b, entries, tokenAdvanceTotal };
+        })
+        .filter(b => b.entries.length > 0),
+    [buyers, reservedBidKeysOnOtherBills],
+  );
+
+  useEffect(() => {
+    if (!selectedBuyerFromDropdown) return;
+    const still = buyersForBilling.some(
+      b =>
+        (b.buyerMark || '').toLowerCase() === (selectedBuyerFromDropdown.buyerMark || '').toLowerCase()
+        && (b.buyerName || '').toLowerCase() === (selectedBuyerFromDropdown.buyerName || '').toLowerCase(),
+    );
+    if (!still) setSelectedBuyerFromDropdown(null);
+  }, [buyersForBilling, selectedBuyerFromDropdown]);
+
+  useEffect(() => {
+    if (!selectBidBuyer) return;
+    const still = buyersForBilling.some(
+      b =>
+        (b.buyerMark || '').toLowerCase() === (selectBidBuyer.buyerMark || '').toLowerCase()
+        && (b.buyerName || '').toLowerCase() === (selectBidBuyer.buyerName || '').toLowerCase(),
+    );
+    if (!still) {
+      setSelectBidBuyer(null);
+      setSelectedBidKeys([]);
+    }
+  }, [buyersForBilling, selectBidBuyer]);
 
   // Keep buyerCoolieRate in sync with current bill & total bags (approx rate per bag).
   useEffect(() => {
@@ -1134,6 +1301,9 @@ const BillingPage = () => {
       group.items.push({
         bidNumber: entry.bidNumber,
         lotName: entry.lotName,
+        lotId: String(entry.lotId ?? ''),
+        auctionEntryId: entry.auctionEntryId ?? null,
+        selfSaleUnitId: entry.selfSaleUnitId ?? null,
         lotTotalQty: (entry as any).lotTotalQty ?? entry.quantity,
         sellerName: entry.sellerName,
         quantity: entry.quantity,
@@ -1196,9 +1366,55 @@ const BillingPage = () => {
       pendingBalance: subtotalSum,
       versions: [],
     };
-    setBill(recalcGrandTotal(initialBill));
+    const finalBill = recalcGrandTotal(initialBill);
+    setBill(finalBill);
     setEditLocked(false);
+    return finalBill;
   }, [commodities, fullConfigs, recalcGrandTotal]);
+
+  const billingBuyerPatchBody = useCallback((billData: BillData): AuctionBidUpdateRequest => {
+    const buyerIdNum =
+      billData.buyerContactId && /^\d+$/.test(String(billData.buyerContactId))
+        ? Number(billData.buyerContactId)
+        : null;
+    return {
+      billing_reassign_buyer: true,
+      buyer_name: (billData.billingName || billData.buyerName || '').trim(),
+      buyer_mark: (billData.buyerMark || '').trim(),
+      buyer_id: buyerIdNum,
+    };
+  }, []);
+
+  const syncAuctionEntriesToBillBuyer = useCallback(
+    async (billData: BillData, options?: { lineFilter?: (item: BillLineItem) => boolean }) => {
+      const filter = options?.lineFilter ?? (() => true);
+      const body = billingBuyerPatchBody(billData);
+      const auctions: AuctionResultDTO[] = Array.isArray(auctionData) ? (auctionData as AuctionResultDTO[]) : [];
+      for (const g of billData.commodityGroups || []) {
+        for (const rawItem of g.items || []) {
+          const item = rawItem as BillLineItem;
+          if (!filter(item)) continue;
+          const entryId =
+            item.auctionEntryId != null && Number.isFinite(Number(item.auctionEntryId))
+              ? Number(item.auctionEntryId)
+              : resolveAuctionEntryIdFromResults(item, auctions);
+          if (entryId == null) continue;
+          const lotId = String(item.lotId || '').trim();
+          if (!lotId) continue;
+          const selfSaleUnitId =
+            item.selfSaleUnitId != null && Number.isFinite(Number(item.selfSaleUnitId))
+              ? Number(item.selfSaleUnitId)
+              : resolveSelfSaleUnitIdFromResults(lotId, auctions);
+          if (selfSaleUnitId != null) {
+            await auctionApi.updateSelfSaleBid(selfSaleUnitId, entryId, body);
+          } else {
+            await auctionApi.updateBid(lotId, entryId, body);
+          }
+        }
+      }
+    },
+    [auctionData, billingBuyerPatchBody],
+  );
 
   const findBuyerByInput = useCallback((): BuyerPurchase | null => {
     if (selectedBuyerFromDropdown) {
@@ -1215,7 +1431,7 @@ const BillingPage = () => {
       return null;
     }
     const q = raw.toLowerCase();
-    const exactBuyer = buyers.find(
+    const exactBuyer = buyersForBilling.find(
       b =>
         (b.buyerMark?.trim().toLowerCase() === q)
         || (b.buyerName?.trim().toLowerCase() === q),
@@ -1228,7 +1444,7 @@ const BillingPage = () => {
       return exactBuyer;
     }
 
-    const partial = buyers.filter(
+    const partial = buyersForBilling.filter(
       b =>
         b.buyerMark?.toLowerCase().includes(q)
         || b.buyerName?.toLowerCase().includes(q),
@@ -1247,11 +1463,11 @@ const BillingPage = () => {
     }
 
     if (partial.length === 0) {
-      toast.error('No buyer or bids found for this mark. Check completed auctions and weighing.');
+      toast.error('No buyer with unbilled bids found for this mark. Check auctions, weighing, or bills in progress / saved.');
       return null;
     }
     return null;
-  }, [buyerBidMarkInput, buyers, selectedBuyerFromDropdown]);
+  }, [buyerBidMarkInput, buyersForBilling, selectedBuyerFromDropdown]);
 
   const handleGetBidsForMark = useCallback(async () => {
     const buyer = findBuyerByInput();
@@ -1388,17 +1604,18 @@ const BillingPage = () => {
       setAddBidSaving(true);
       const session = await auctionApi.addBid(addBidSelectedLot.lot_id, {
         buyer_id: buyerIdNum,
-        buyer_name: bill.buyerName,
-        buyer_mark: bill.buyerMark,
+        buyer_name: (bill.billingName || bill.buyerName || '').trim(),
+        buyer_mark: (bill.buyerMark || '').trim(),
         rate,
         quantity: qty,
         extra_rate: extra,
         token_advance: tokenAdvance,
       });
+      const billBuyerNameNorm = (bill.billingName || bill.buyerName || '').trim().toLowerCase();
       const ownEntries = (session.entries || []).filter(
         e =>
           (e.buyer_mark || '').trim().toLowerCase() === (bill.buyerMark || '').trim().toLowerCase()
-          && (e.buyer_name || '').trim().toLowerCase() === (bill.buyerName || '').trim().toLowerCase(),
+          && (e.buyer_name || '').trim().toLowerCase() === billBuyerNameNorm,
       );
       const latest: AuctionEntryDTO | undefined = [...ownEntries].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
       if (!latest) {
@@ -1409,6 +1626,8 @@ const BillingPage = () => {
       const newBillEntry: BillEntry = {
         bidNumber: latest.bid_number,
         lotId: String(addBidSelectedLot.lot_id),
+        auctionEntryId: latest.auction_entry_id ?? null,
+        selfSaleUnitId: null,
         lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
         lotTotalQty: addBidSelectedLot.bag_count ?? latest.quantity,
         sellerName: addBidSelectedLot.seller_name || 'Unknown',
@@ -1502,11 +1721,34 @@ const BillingPage = () => {
           : b,
       ),
     );
-    generateBill(mergedBuyer);
+    const finalBill = generateBill(mergedBuyer);
+    const addedKeys = new Set(toAdd.map(e => getBidSelectionKey(e)));
+    if (finalBill) {
+      void (async () => {
+        try {
+          await syncAuctionEntriesToBillBuyer(finalBill, {
+            lineFilter: it => addedKeys.has(`${it.bidNumber}::${String(it.lotId ?? '').trim()}`),
+          });
+          await refetchAuctions();
+        } catch {
+          toast.warning(
+            'Lots added to the bill, but auction buyer update failed for some bids. Save the bill to retry sync.',
+          );
+        }
+      })();
+    }
     setSearchBidDialogOpen(false);
     setSearchBidSelectedKeys([]);
     toast.success(`${toAdd.length} lot(s) added into current bill`);
-  }, [bill, generateBill, searchBidSelectedKeys, searchBidSourceBuyer, selectedBuyer]);
+  }, [
+    bill,
+    generateBill,
+    refetchAuctions,
+    searchBidSelectedKeys,
+    searchBidSourceBuyer,
+    selectedBuyer,
+    syncAuctionEntriesToBillBuyer,
+  ]);
 
   const searchBidBuyerOptions = useMemo(() => {
     if (!bill) return [];
@@ -1514,7 +1756,7 @@ const BillingPage = () => {
     const isSameBuyer = (b: BuyerPurchase) =>
       (b.buyerMark || '').toLowerCase() === (bill.buyerMark || '').toLowerCase()
       && (b.buyerName || '').toLowerCase() === (bill.buyerName || '').toLowerCase();
-    const candidates = buyers.filter(b => !isSameBuyer(b));
+    const candidates = buyersForBilling.filter(b => !isSameBuyer(b));
     if (!q) return candidates.slice(0, 12);
     return candidates
       .filter(
@@ -1523,7 +1765,7 @@ const BillingPage = () => {
           || (b.buyerName || '').toLowerCase().includes(q),
       )
       .slice(0, 12);
-  }, [bill, buyers, searchBidInput]);
+  }, [bill, buyersForBilling, searchBidInput]);
 
   useEffect(() => {
     const onPointerDown = (e: MouseEvent) => {
@@ -1775,6 +2017,18 @@ const BillingPage = () => {
       const result = isUpdate
         ? await billingApi.update(bill!.billId, payload)
         : await billingApi.create(payload);
+      try {
+        const norm = normalizeBillFromApi(result, fullConfigs, commodities) as BillData;
+        if (norm.commodityGroups.some(g => (g.items?.length ?? 0) > 0)) {
+          await syncAuctionEntriesToBillBuyer(norm);
+        }
+      } catch (syncErr) {
+        console.warn(syncErr);
+        toast.warning(
+          'Bill saved, but some auction bids could not be updated to match this buyer. Refresh billing data or check Sales Pad.',
+        );
+      }
+      await refetchAuctions();
       return result;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save bill');
@@ -1834,15 +2088,15 @@ const BillingPage = () => {
 
   const filteredBuyerOptions = useMemo(() => {
     const q = buyerBidMarkInput.trim().toLowerCase();
-    if (!q) return buyers.slice(0, 12);
-    return buyers
+    if (!q) return buyersForBilling.slice(0, 12);
+    return buyersForBilling
       .filter(
         b =>
           b.buyerMark?.toLowerCase().includes(q)
           || b.buyerName?.toLowerCase().includes(q),
       )
       .slice(0, 12);
-  }, [buyers, buyerBidMarkInput]);
+  }, [buyersForBilling, buyerBidMarkInput]);
 
   useEffect(() => {
     const onPointerDown = (e: MouseEvent) => {
@@ -1915,8 +2169,8 @@ const BillingPage = () => {
         </div>
         ) : (
         <div className="px-8 py-5 flex items-center gap-4">
-          <Button onClick={() => setShowPrint(false)} variant="outline" size="sm" className="rounded-xl h-9">
-            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+          <Button onClick={() => setShowPrint(false)} variant="outline" className={cn(arrOutlineMd, 'gap-1.5')}>
+            <ArrowLeft className="w-4 h-4" /> Back
           </Button>
           <div>
             <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -2040,7 +2294,9 @@ const BillingPage = () => {
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
             <div className="flex gap-3 w-full sm:w-auto">
-            <Button onClick={async () => {
+            <Button
+              variant="default"
+              onClick={async () => {
               const printedAt = new Date().toISOString();
               try {
                 await printLogApi.create({
@@ -2055,8 +2311,8 @@ const BillingPage = () => {
       const ok = await directPrint(generateSalesBillPrintHTML(activePrintBill), { mode: "system" });
               ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
             }}
-              className="flex-1 sm:flex-none h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold shadow-lg">
-              <Printer className="w-5 h-5 mr-2" /> Print Bill
+              className={cn(arrSolidTall, 'flex-1 sm:flex-none gap-2')}>
+              <Printer className="w-5 h-5" /> Print Bill
             </Button>
             <Button
               onClick={() => {
@@ -2068,7 +2324,8 @@ const BillingPage = () => {
                   setSelectedBuyer(null);
                 })();
               }}
-              variant="outline" className="h-12 rounded-xl px-6">
+              variant="outline"
+              className={arrOutlineTall}>
               Done
             </Button>
             </div>
@@ -2131,8 +2388,8 @@ const BillingPage = () => {
             This phone exists on an inactive contact. Restore it to use again?
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRestorePendingPhone(null)}>Cancel</Button>
-            <Button onClick={handleRestoreContactFromBilling} disabled={!canEditContact}>Restore</Button>
+            <Button variant="outline" onClick={() => setRestorePendingPhone(null)} className={arrOutlineMd}>Cancel</Button>
+            <Button variant="default" onClick={handleRestoreContactFromBilling} disabled={!canEditContact} className={arrSolidMd}>Restore</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2195,8 +2452,13 @@ const BillingPage = () => {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSearchBidDialogOpen(false)}>Cancel</Button>
-            <Button onClick={addSearchedBidsToCurrentBill} disabled={searchBidSelectedKeys.length === 0}>
+            <Button variant="outline" onClick={() => setSearchBidDialogOpen(false)} className={arrOutlineMd}>Cancel</Button>
+            <Button
+              variant="default"
+              onClick={addSearchedBidsToCurrentBill}
+              disabled={searchBidSelectedKeys.length === 0}
+              className={arrSolidMd}
+            >
               Add Selected ({searchBidSelectedKeys.length})
             </Button>
           </DialogFooter>
@@ -2265,8 +2527,7 @@ const BillingPage = () => {
                 <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                 <p className="text-xs text-emerald-700 dark:text-emerald-400">Contact registered. A receivable ledger is created automatically.</p>
               </div>
-              <Button onClick={submitBillingContactAdd}
-                className="w-full h-14 rounded-xl text-lg font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-xl shadow-emerald-500/20 hover:from-emerald-600 hover:to-teal-600">
+              <Button variant="default" onClick={submitBillingContactAdd} className={arrSolidWide14}>
                 Register Contact
               </Button>
             </motion.div>
@@ -2295,33 +2556,24 @@ const BillingPage = () => {
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <span className="text-xl font-black">₹</span> Billing
               </h1>
-              <p className="text-white/70 text-xs mt-0.5">Sales bill · {buyers.length} buyer{buyers.length !== 1 ? 's' : ''} with bids</p>
+              <p className="text-white/70 text-xs mt-0.5">Sales bill · {buyersForBilling.length} buyer{buyersForBilling.length !== 1 ? 's' : ''} with unbilled bids</p>
             </div>
             <div className="flex-shrink-0" />
           </div>
 
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
             <button type="button" onClick={() => setBillingMainTab('create')}
-              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all text-left sm:text-center',
-                billingMainTab === 'create'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              className={arrMobTabPill(billingMainTab === 'create')}>
               <Plus className="w-4 h-4 shrink-0 hidden sm:block" />
               <span>Create New Bill{tabHint('Alt X')}</span>
             </button>
             <button type="button" onClick={() => setBillingMainTab('progress')}
-              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all',
-                billingMainTab === 'progress'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              className={arrMobTabPill(billingMainTab === 'progress')}>
               <Clock className="w-4 h-4 shrink-0 hidden sm:block" />
               <span>Bill In Progress{tabHint('Alt Y')}</span>
             </button>
             <button type="button" onClick={() => setBillingMainTab('saved')}
-              className={cn('shrink-0 min-w-[10rem] py-2.5 px-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 transition-all',
-                billingMainTab === 'saved'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/80 hover:text-white')}>
+              className={arrMobTabPill(billingMainTab === 'saved')}>
               <FileText className="w-4 h-4 shrink-0 hidden sm:block" />
               <span>Bills Saved{tabHint('Alt Z')}</span>
             </button>
@@ -2344,27 +2596,30 @@ const BillingPage = () => {
             <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
               <span className="text-xl font-black text-indigo-500">₹</span> Billing (Sales Bill)
             </h2>
-            <p className="text-sm text-muted-foreground mt-0.5">{buyers.length} buyers with bids · Invoicing & generation</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{buyersForBilling.length} buyers with unbilled bids · Invoicing & generation</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 lg:justify-end w-full lg:w-auto" />
         </div>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-4">
-          <div className="flex gap-2 flex-wrap">
-            <button type="button" onClick={() => setBillingMainTab('create')}
-              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
-                billingMainTab === 'create' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+          <div className="flex items-center gap-1 border-b border-border/40 w-full lg:w-auto overflow-x-auto">
+            <button type="button" onClick={() => setBillingMainTab('create')} className={arrDeskTabBtn(billingMainTab === 'create')}>
               <Plus className="w-4 h-4" /> Create New Bill{tabHint('Alt X')}
+              {billingMainTab === 'create' && (
+                <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+              )}
             </button>
-            <button type="button" onClick={() => setBillingMainTab('progress')}
-              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
-                billingMainTab === 'progress' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+            <button type="button" onClick={() => setBillingMainTab('progress')} className={arrDeskTabBtn(billingMainTab === 'progress')}>
               <Clock className="w-4 h-4" /> Bill In Progress{tabHint('Alt Y')}
+              {billingMainTab === 'progress' && (
+                <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+              )}
             </button>
-            <button type="button" onClick={() => setBillingMainTab('saved')}
-              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all',
-                billingMainTab === 'saved' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+            <button type="button" onClick={() => setBillingMainTab('saved')} className={arrDeskTabBtn(billingMainTab === 'saved')}>
               <FileText className="w-4 h-4" /> Bills Saved{tabHint('Alt Z')}
+              {billingMainTab === 'saved' && (
+                <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+              )}
             </button>
           </div>
           {(billingMainTab === 'progress' || billingMainTab === 'saved') && (
@@ -2372,7 +2627,7 @@ const BillingPage = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input aria-label="Search bills" placeholder="Bill #, mark, vehicle…"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
+                className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]" />
             </div>
           )}
         </div>
@@ -2438,10 +2693,10 @@ const BillingPage = () => {
                 </div>
               )}
             </div>
-              <Button type="button" onClick={() => void handleGetBidsForMark()} className="h-11 sm:h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-bold text-sm shadow-md sm:self-end">
+              <Button type="button" variant="default" onClick={() => void handleGetBidsForMark()} className={cn(arrSolidLg, 'sm:self-end')}>
                 Get Bid
               </Button>
-              <Button type="button" onClick={handleSelectBidMode} variant="outline" className="h-11 sm:h-12 rounded-xl font-bold text-sm sm:self-end">
+              <Button type="button" variant="outline" onClick={handleSelectBidMode} className={cn(arrOutlineLg, 'sm:self-end')}>
                 Select Bid
               </Button>
             </div>
@@ -2457,10 +2712,9 @@ const BillingPage = () => {
                   </div>
                   <Button
                     type="button"
-                    size="sm"
+                    variant="outline"
                     onClick={() => { setSelectBidBuyer(null); setSelectedBidKeys([]); }}
-                    variant="ghost"
-                    className="h-8 text-xs"
+                    className={arrOutlineSm}
                   >
                     Clear
                   </Button>
@@ -2498,18 +2752,19 @@ const BillingPage = () => {
                 </div>
                 <Button
                   type="button"
+                  variant="default"
                   onClick={() => void handleCreateBillFromSelected()}
                   disabled={selectedBidKeys.length === 0}
-                  className="w-full h-10 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-semibold disabled:opacity-50"
+                  className={arrSolidWide10}
                 >
                   Create Bill From Selected ({selectedBidKeys.length})
                 </Button>
               </div>
             )}
-            {buyers.length === 0 && (
+            {buyersForBilling.length === 0 && (
               <div className="rounded-xl bg-muted/30 p-4 text-center space-y-2">
                 <p className="text-sm text-muted-foreground">No auction bids loaded yet.</p>
-                <Button type="button" onClick={() => navigate('/auctions')} variant="outline" className="rounded-xl">Go to Auctions</Button>
+                <Button type="button" variant="outline" onClick={() => navigate('/auctions')} className={arrOutlineMd}>Go to Auctions</Button>
               </div>
             )}
           </motion.div>
@@ -2530,161 +2785,12 @@ const BillingPage = () => {
                     </p>
                   </div>
                 </div>
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
-              <div ref={searchBidBuyerSelectRef} className="relative w-44">
-                <Input
-                  ref={searchBidInputRef}
-                  value={searchBidInput}
-                  onFocus={() => setShowSearchBidBuyerSuggestions(true)}
-                  onChange={e => {
-                    setSearchBidInput(e.target.value);
-                    setShowSearchBidBuyerSuggestions(true);
-                  }}
-                  aria-label="Search Bid"
-                  title={`Search Bid${tabHint('Alt L')}`}
-                  placeholder="Search Bid"
-                  className="h-9 rounded-xl text-xs"
-                />
-                {showSearchBidBuyerSuggestions && (
-                  <div className="absolute z-[95] top-full mt-1 w-full max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
-                    {searchBidBuyerOptions.length === 0 ? (
-                      <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
-                    ) : (
-                      searchBidBuyerOptions.map(b => (
-                        <button
-                          key={`${b.buyerMark}-${b.buyerName}`}
-                          type="button"
-                          onClick={() => openSearchBidDialogForBuyer(b)}
-                          className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"
-                        >
-                          <p className="text-xs font-semibold">{b.buyerMark} - {b.buyerName}</p>
-                          <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-xl h-9"
-                onClick={() => {
-                  setShowAddBidCard(prev => {
-                    const next = !prev;
-                    if (!next) resetAddBidForm();
-                    return next;
-                  });
-                }}
-              >
-                Add Bid
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="rounded-xl h-9" onClick={() => void handleClearBillEditor()}>
-                Change buyer
-              </Button>
-            </div>
-              </div>
-              {showAddBidCard && (
-                <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add Bid</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Lot Mark Search *</Label>
-                      <Input
-                        value={addBidLotSearch}
-                        onFocus={() => setShowAddBidLotDropdown(true)}
-                        onBlur={() => {
-                          window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
-                        }}
-                        onChange={e => {
-                          setAddBidLotSearch(e.target.value);
-                          setAddBidSelectedLot(null);
-                          setShowAddBidLotDropdown(true);
-                        }}
-                        placeholder="Search lot identifier / seller / vehicle"
-                        className="h-9 rounded-lg"
-                      />
-                      {addBidLotLoading && <p className="text-[11px] text-muted-foreground">Searching lots...</p>}
-                      {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
-                        <div className="max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background">
-                          {filteredAddBidLots.length === 0 && (
-                            <p className="px-2 py-2 text-[11px] text-muted-foreground">No auction lots found.</p>
-                          )}
-                          {filteredAddBidLots.map(lot => (
-                            <button
-                              key={lot.lot_id}
-                              type="button"
-                              className="w-full px-2 py-1.5 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40"
-                              onClick={async () => {
-                                setAddBidSelectedLot(lot);
-                                setAddBidLotSearch(getAddBidLotIdentifier(lot));
-                                setShowAddBidLotDropdown(false);
-                                try {
-                                  const session = await auctionApi.getOrStartSession(lot.lot_id);
-                                  setAddBidRemainingQty(Number(session.remaining_bags) || 0);
-                                } catch {
-                                  setAddBidRemainingQty(0);
-                                }
-                              }}
-                            >
-                              <p className="text-xs font-semibold">{getAddBidLotIdentifier(lot)}</p>
-                              <p className="text-[11px] text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Buyer&apos;s Mark *</Label>
-                      <Input value={bill.buyerMark} disabled className="h-9 rounded-lg bg-muted/30" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Bid Quantity / Remaining *</Label>
-                      <Input
-                        type="number"
-                        value={addBidQty}
-                        onChange={e => setAddBidQty(e.target.value)}
-                        placeholder={`Remaining: ${addBidRemainingQty}`}
-                        className="h-9 rounded-lg"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Base Rate *</Label>
-                      <Input type="number" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className="h-9 rounded-lg" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Extra Amount (+/-)</Label>
-                      <Input type="number" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className="h-9 rounded-lg" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Token Advance (₹)</Label>
-                      <Input type="number" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className="h-9 rounded-lg" />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      className="h-9 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white"
-                      onClick={() => void handleAddBidToCurrentBuyer()}
-                      disabled={addBidSaving}
-                    >
-                      {addBidSaving ? 'Saving...' : 'Save Bid'}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-xl"
-                      onClick={() => {
-                        resetAddBidForm();
-                        setShowAddBidCard(false);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <Button type="button" variant="outline" className={arrOutlineMd} onClick={() => void handleClearBillEditor()}>
+                    Change buyer
+                  </Button>
                 </div>
-              )}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 <div className="rounded-xl border border-border/40 p-3">
                   <p className="text-[10px] text-primary font-semibold uppercase">Buyer</p>
@@ -2725,6 +2831,164 @@ const BillingPage = () => {
                   <IndianRupee className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden />
                 </div>
               </div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible relative z-[80]">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block">Search Bid</Label>
+                  <div ref={searchBidBuyerSelectRef} className="relative w-full sm:w-48">
+                    <Input
+                      ref={searchBidInputRef}
+                      value={searchBidInput}
+                      onFocus={() => setShowSearchBidBuyerSuggestions(true)}
+                      onChange={e => {
+                        setSearchBidInput(e.target.value);
+                        setShowSearchBidBuyerSuggestions(true);
+                      }}
+                      aria-label="Search Bid"
+                      title={`Search Bid${tabHint('Alt L')}`}
+                      placeholder="Search Bid"
+                      className="h-9 rounded-xl text-xs"
+                    />
+                    {showSearchBidBuyerSuggestions && (
+                      <div className="absolute z-[95] top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
+                        {searchBidBuyerOptions.length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
+                        ) : (
+                          searchBidBuyerOptions.map(b => (
+                            <button
+                              key={`${b.buyerMark}-${b.buyerName}`}
+                              type="button"
+                              onClick={() => openSearchBidDialogForBuyer(b)}
+                              className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"
+                            >
+                              <p className="text-xs font-semibold">{b.buyerMark} - {b.buyerName}</p>
+                              <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(arrOutlineMd, 'shrink-0', showAddBidCard && 'ring-2 ring-[#6075FF] ring-offset-2 ring-offset-background')}
+                  onClick={() => {
+                    setShowAddBidCard(prev => {
+                      const next = !prev;
+                      if (!next) resetAddBidForm();
+                      return next;
+                    });
+                  }}
+                >
+                  {showAddBidCard ? 'Hide Add Bid' : 'Add Bid'}
+                </Button>
+              </div>
+              {showAddBidCard && (
+                <div className="rounded-xl border border-border/60 bg-muted/10 p-2 sm:p-3 space-y-2">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Add Bid</p>
+                  <div className="flex flex-wrap items-end gap-x-2 gap-y-2">
+                    <div className="relative space-y-0.5 min-w-[10rem] flex-1 basis-[min(100%,14rem)]">
+                      <Label className="text-[10px]">Lot Mark Search *</Label>
+                      <Input
+                        value={addBidLotSearch}
+                        onFocus={() => setShowAddBidLotDropdown(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
+                        }}
+                        onChange={e => {
+                          setAddBidLotSearch(e.target.value);
+                          setAddBidSelectedLot(null);
+                          setShowAddBidLotDropdown(true);
+                        }}
+                        placeholder="Lot identifier"
+                        className="h-8 rounded-lg text-xs px-2"
+                      />
+                      {addBidLotLoading && <p className="text-[10px] text-muted-foreground">Loading lots…</p>}
+                      {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
+                        <div className="absolute z-[96] left-0 right-0 top-full mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
+                          {filteredAddBidLots.length === 0 && (
+                            <p className="px-2 py-2 text-[10px] text-muted-foreground">No auction lots found.</p>
+                          )}
+                          {filteredAddBidLots.map(lot => (
+                            <button
+                              key={lot.lot_id}
+                              type="button"
+                              className="w-full px-2 py-1.5 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40"
+                              onClick={async () => {
+                                setAddBidSelectedLot(lot);
+                                setAddBidLotSearch(getAddBidLotIdentifier(lot));
+                                setShowAddBidLotDropdown(false);
+                                try {
+                                  const session = await auctionApi.getOrStartSession(lot.lot_id);
+                                  setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+                                } catch {
+                                  setAddBidRemainingQty(0);
+                                }
+                              }}
+                            >
+                              <p className="text-[11px] font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                              <p className="text-[10px] text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-0.5 w-[4.25rem] shrink-0">
+                      <Label className="text-[10px]">Buyer *</Label>
+                      <Input value={bill.buyerMark} disabled className="h-8 rounded-lg bg-muted/30 text-xs px-1.5" title={bill.buyerMark} />
+                    </div>
+                    <div className="space-y-0.5 w-[3.5rem] sm:w-16 shrink-0">
+                      <Label className="text-[10px]">Qty *</Label>
+                      <Input
+                        type="number"
+                        value={addBidQty}
+                        onChange={e => setAddBidQty(e.target.value)}
+                        placeholder={String(addBidRemainingQty)}
+                        className="h-8 rounded-lg text-xs px-1.5"
+                        title={`Remaining bags: ${addBidRemainingQty}`}
+                      />
+                    </div>
+                    <div className="space-y-0.5 w-[4.25rem] sm:w-[4.5rem] shrink-0">
+                      <Label className="text-[10px]">Base *</Label>
+                      <Input type="number" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                    </div>
+                    <div className="space-y-0.5 w-[3.25rem] sm:w-14 shrink-0">
+                      <Label className="text-[10px]">Extra</Label>
+                      <Input type="number" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                    </div>
+                    <div className="space-y-0.5 w-[3.75rem] sm:w-16 shrink-0">
+                      <Label className="text-[10px]">Token</Label>
+                      <Input type="number" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="default"
+                      className={arrSolidSm}
+                      onClick={() => void handleAddBidToCurrentBuyer()}
+                      disabled={addBidSaving}
+                    >
+                      {addBidSaving ? 'Saving...' : 'Save Bid'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={arrOutlineSm}
+                      onClick={() => {
+                        resetAddBidForm();
+                        setShowAddBidCard(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
             <div className="glass-card rounded-2xl p-3 space-y-2 relative z-[70] overflow-visible">
@@ -2812,7 +3076,8 @@ const BillingPage = () => {
                 />
                 <Button
                   type="button"
-                  className="h-9 rounded-xl px-3 sm:px-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white whitespace-nowrap shrink-0 text-xs sm:text-sm"
+                  variant="default"
+                  className={cn(arrSolidMd, 'whitespace-nowrap shrink-0')}
                   onClick={() => void submitReplacement()}
                   disabled={
                     !bill || (!replaceSelectedContact && !canCreateContact)
@@ -2827,7 +3092,7 @@ const BillingPage = () => {
                     ? `Update ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`
                     : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
                 </Button>
-                <Button type="button" variant="outline" className="h-9 rounded-xl px-3 shrink-0" onClick={clearReplacementInline}>
+                <Button type="button" variant="outline" className={cn(arrOutlineMd, 'shrink-0')} onClick={clearReplacementInline}>
                   Clear
                 </Button>
                 <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
@@ -2961,10 +3226,10 @@ const BillingPage = () => {
                           )}
                         />
                         <Button
-                          onClick={applyGlobalCharges}
-                          size="sm"
                           type="button"
-                          className="h-8 px-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-500 text-white text-[11px] font-bold whitespace-nowrap"
+                          variant="outline"
+                          onClick={applyGlobalCharges}
+                          className={cn(arrOutlineSm, 'whitespace-nowrap')}
                         >
                           Apply to All
                         </Button>
@@ -3278,31 +3543,54 @@ const BillingPage = () => {
                 <table className="w-full min-w-[1100px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
                     <tr className="bg-muted/50">
-                      <th className="sticky top-0 left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide bg-gradient-to-r from-background to-muted/70 dark:from-slate-900 dark:to-slate-800 border-r border-border/70 min-w-[180px]">Activity</th>
+                      <th className="sticky top-0 left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide whitespace-normal bg-muted/50 dark:bg-slate-800/60 border-b border-border/50 border-r border-border/70 min-w-[145px] max-w-[145px] w-[145px]">Activity</th>
                       {bill.commodityGroups.map((g, gi) => (
-                        <th key={`${g.commodityName}-${gi}`} className="sticky top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide min-w-[150px] border-l border-border/50 dark:border-border/70 bg-muted/30 dark:bg-slate-800/60">
+                        <th
+                          key={`${g.commodityName}-${gi}`}
+                          className={cn(
+                            'sticky top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground dark:text-neutral-900 uppercase tracking-wide min-w-[150px] border-b border-border/50 border-l border-border/50 dark:border-border/70 bg-muted/50 dark:bg-slate-800/60',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
                           {g.commodityName || `Commodity ${gi + 1}`}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-t border-border/40 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Gross Amt</td>
+                    <tr>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground whitespace-normal bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]">Gross Amt</td>
                       {bill.commodityGroups.map((g, gi) => (
-                        <td key={`gross-${gi}`} className="px-2 py-1.5 text-foreground font-semibold border-l border-border/30">₹{g.subtotal.toLocaleString()}</td>
+                        <td
+                          key={`gross-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 text-foreground dark:text-neutral-900 font-semibold border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          ₹{g.subtotal.toLocaleString()}
+                        </td>
                       ))}
                     </tr>
 
-                    <tr className="border-t border-border/40 bg-violet-500/15 dark:bg-violet-500/25">
-                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-violet-800 dark:text-violet-200">
+                    <tr>
+                      <td
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                      >
                         Commodity Additional Expenses
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Commission</td>
+                    <tr>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Commission</td>
                       {bill.commodityGroups.map((g, gi) => (
-                        <td key={`com-${gi}`} className="px-2 py-1.5 border-l border-border/30">
+                        <td
+                          key={`com-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
                           <div className="flex items-center gap-1">
                             <Input
                               type="number"
@@ -3326,16 +3614,30 @@ const BillingPage = () => {
                         </td>
                       ))}
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">GST</td>
+                    <tr>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">GST</td>
                       {bill.commodityGroups.map((g, gi) => (
-                        <td key={`gst-${gi}`} className="px-2 py-1.5 border-l border-border/30">₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}</td>
+                        <td
+                          key={`gst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          ₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}
+                        </td>
                       ))}
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">User Fee</td>
+                    <tr>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">User Fee</td>
                       {bill.commodityGroups.map((g, gi) => (
-                        <td key={`uf-${gi}`} className="px-2 py-1.5 border-l border-border/30">
+                        <td
+                          key={`uf-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
                           <div className="flex items-center gap-1">
                             <Input
                               type="number"
@@ -3360,14 +3662,17 @@ const BillingPage = () => {
                       ))}
                     </tr>
 
-                    <tr className="border-t border-border/40 bg-indigo-500/15 dark:bg-indigo-500/25">
-                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-indigo-800 dark:text-indigo-200">
+                    <tr className="border-t border-border/40">
+                      <td
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                      >
                         Freight Charges
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Outbound Freight</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Freight</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] text-muted-foreground">Rate / Value</span>
                           <Input
@@ -3387,9 +3692,9 @@ const BillingPage = () => {
                         </div>
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Outbound Vehicle #</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Vehicle #</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70">
                         <Input
                           value={bill.outboundVehicle}
                           onChange={e => {
@@ -3405,9 +3710,9 @@ const BillingPage = () => {
                         />
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Coolie Charge</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Coolie Charge</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Input
                             type="number"
@@ -3453,14 +3758,17 @@ const BillingPage = () => {
                       </td>
                     </tr>
 
-                    <tr className="border-t border-border/40 bg-amber-500/15 dark:bg-amber-500/25">
-                      <td colSpan={bill.commodityGroups.length + 1} className="px-3 py-2 font-extrabold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                    <tr className="border-t border-border/40">
+                      <td
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                      >
                         Discount & Adjustments
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Discount</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Discount</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <select
                             value={bill.discountType}
@@ -3492,9 +3800,9 @@ const BillingPage = () => {
                         </div>
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Round Off</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Round Off</td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] text-muted-foreground">{bill.manualRoundOff >= 0 ? 'Plus' : 'Minus'}</span>
                           <Input
@@ -3515,8 +3823,8 @@ const BillingPage = () => {
                         </div>
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30 odd:bg-background even:bg-muted/10 dark:even:bg-slate-800/25">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 min-w-[180px]">Overall Rate</td>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Overall Rate</td>
                       {bill.commodityGroups.map((g, gi) => {
                         const commodityTotal = (g.subtotal || 0) + (g.totalCharges || 0);
                         const overall = commodityTotal + bill.buyerCoolie + bill.outboundFreight - (bill.discountType === 'PERCENT'
@@ -3524,23 +3832,25 @@ const BillingPage = () => {
                             bill.commodityGroups.reduce((s, cg) => s + (cg.subtotal || 0) + (cg.totalCharges || 0), 0) * (bill.discount || 0) / 100,
                           )
                           : (bill.discount || 0)) + bill.manualRoundOff;
-                        return <td key={`overall-${gi}`} className="px-2 py-1.5 text-[11px] text-muted-foreground border-l border-border/30">₹{overall.toLocaleString()}</td>;
+                        return <td key={`overall-${gi}`} className="px-2 py-1.5 text-[11px] text-muted-foreground dark:text-neutral-600 border-l border-border/30 bg-white">₹{overall.toLocaleString()}</td>;
                       })}
                     </tr>
-                    <tr className="border-t border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 text-white">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 min-w-[180px]">Grand Total / Pending Balance to pay</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5">
+                    <tr className="border-t border-violet-500/40">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-white bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 whitespace-normal min-w-[145px] max-w-[145px] w-[145px] border-r border-white/25">
+                        Grand Total / Pending Balance to pay
+                      </td>
+                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-r border-border/30 dark:border-border/70">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide opacity-80">Grand Total</p>
+                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Grand Total</p>
                             <p className="font-extrabold text-sm">₹{bill.grandTotal.toLocaleString()}</p>
                           </div>
-                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide opacity-80">Pending Balance</p>
+                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Pending Balance</p>
                             <p className="font-extrabold text-sm">₹{bill.pendingBalance.toLocaleString()}</p>
                           </div>
-                          <div className="rounded-lg bg-white/20 border border-white/30 px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide opacity-80">Token Advance</p>
+                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Token Advance</p>
                             <p className="font-extrabold text-sm">₹{sumLineTokenAdvances(bill).toLocaleString()}</p>
                           </div>
                         </div>
@@ -3559,8 +3869,7 @@ const BillingPage = () => {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      className="rounded-xl h-9 gap-1.5"
+                      className={cn(arrOutlineMd, 'gap-1.5')}
                       onClick={() => setEditLocked(false)}
                       disabled={!isBackendBillId(bill.billId)}
                     >
@@ -3568,8 +3877,8 @@ const BillingPage = () => {
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
-                      className="rounded-xl h-9 gap-1.5 bg-gradient-to-r from-indigo-500 to-blue-500 text-white border-0"
+                      variant="default"
+                      className={cn(arrSolidMd, 'gap-1.5')}
                       onClick={() => void handleSaveDraft()}
                     >
                       <Save className="w-4 h-4" /> {bill.billId && isBackendBillId(bill.billId) ? 'Update (Alt+S)' : 'Save (Alt+S)'}
@@ -3577,8 +3886,7 @@ const BillingPage = () => {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      className="rounded-xl h-9 gap-1.5"
+                      className={cn(arrOutlineMd, 'gap-1.5')}
                       onClick={() => void saveAndPreparePrint()}
                       disabled={!hasSavedOnce}
                     >
@@ -3587,8 +3895,7 @@ const BillingPage = () => {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      className="rounded-xl h-9 gap-1.5"
+                      className={cn(arrOutlineMd, 'gap-1.5')}
                       onClick={handleCreateNewBill}
                     >
                       <Plus className="w-4 h-4" /> Create New (Alt+N)

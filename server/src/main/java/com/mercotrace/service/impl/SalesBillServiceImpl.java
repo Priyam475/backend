@@ -342,6 +342,10 @@ public class SalesBillServiceImpl implements SalesBillService {
                 item.setCommodityGroup(group);
                 item.setBidNumber(it.getBidNumber() != null ? it.getBidNumber() : 0);
                 item.setLotName(it.getLotName());
+                String lotId = it.getLotId();
+                item.setLotId(lotId != null && !lotId.isBlank() ? lotId.trim() : null);
+                item.setAuctionEntryId(it.getAuctionEntryId());
+                item.setSelfSaleUnitId(it.getSelfSaleUnitId());
                 item.setSellerName(it.getSellerName());
                 item.setQuantity(it.getQuantity() != null ? it.getQuantity() : 0);
                 item.setWeight(it.getWeight() != null ? it.getWeight() : BigDecimal.ZERO);
@@ -405,6 +409,9 @@ public class SalesBillServiceImpl implements SalesBillService {
                 idto.setId(it.getId());
                 idto.setBidNumber(it.getBidNumber());
                 idto.setLotName(it.getLotName());
+                idto.setLotId(it.getLotId());
+                idto.setAuctionEntryId(it.getAuctionEntryId());
+                idto.setSelfSaleUnitId(it.getSelfSaleUnitId());
                 idto.setSellerName(it.getSellerName());
                 idto.setQuantity(it.getQuantity());
                 idto.setWeight(it.getWeight());
