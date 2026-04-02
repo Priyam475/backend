@@ -245,6 +245,179 @@ function sessionEntryToSaleEntry(e: AuctionEntryDTO): SaleEntry {
   };
 }
 
+const AUCTION_SCROLL_EPS = 2;
+
+function AuctionsGridScrollPanel({
+  className,
+  children,
+  contentLayoutKey,
+  autoScrollToBottomKey,
+}: {
+  className?: string;
+  children: React.ReactNode;
+  contentLayoutKey: number;
+  autoScrollToBottomKey: number;
+}) {
+  const outerRef = useRef<HTMLDivElement | null>(null);
+  const [hintBottom, setHintBottom] = useState(false);
+  const [hintRight, setHintRight] = useState(false);
+  const [horizontalThumbMetrics, setHorizontalThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
+    visible: false,
+    left: 0,
+    width: 0,
+  });
+  const [horizontalThumbPressed, setHorizontalThumbPressed] = useState(false);
+
+  const updateHorizontalThumbMetrics = useCallback(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    if (totalScrollableX <= AUCTION_SCROLL_EPS) {
+      setHorizontalThumbMetrics({ visible: false, left: 0, width: 0 });
+      return;
+    }
+    const insetPx = 10;
+    const available = Math.max(0, outer.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+    const thumbWidth = Math.max(32, Math.min(available, Math.round(outer.clientWidth * 0.18)));
+    const maxLeft = Math.max(0, available - thumbWidth);
+    const ratio = outer.scrollLeft / totalScrollableX;
+    const left = insetPx + maxLeft * Math.max(0, Math.min(1, ratio));
+    setHorizontalThumbMetrics({ visible: true, left, width: thumbWidth });
+  }, []);
+
+  const updateHints = useCallback(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const vOverflow = el.scrollHeight > el.clientHeight + AUCTION_SCROLL_EPS;
+    const hOverflow = el.scrollWidth > el.clientWidth + AUCTION_SCROLL_EPS;
+    const notAtBottom = el.scrollTop < el.scrollHeight - el.clientHeight - AUCTION_SCROLL_EPS;
+    const notAtRight = el.scrollLeft < el.scrollWidth - el.clientWidth - AUCTION_SCROLL_EPS;
+    setHintBottom(vOverflow && notAtBottom);
+    setHintRight(hOverflow && notAtRight);
+  }, []);
+
+  const runMetrics = useCallback(() => {
+    updateHints();
+    updateHorizontalThumbMetrics();
+  }, [updateHints, updateHorizontalThumbMetrics]);
+
+  useLayoutEffect(() => {
+    runMetrics();
+  }, [runMetrics, contentLayoutKey]);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    runMetrics();
+    const ro = new ResizeObserver(() => runMetrics());
+    ro.observe(outer);
+    outer.addEventListener('scroll', runMetrics, { passive: true });
+    return () => {
+      ro.disconnect();
+      outer.removeEventListener('scroll', runMetrics);
+    };
+  }, [runMetrics]);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer || autoScrollToBottomKey <= 0) return;
+    outer.scrollTo({ top: outer.scrollHeight, behavior: 'smooth' });
+    const rafId = window.requestAnimationFrame(() => {
+      outer.scrollTo({ top: outer.scrollHeight, behavior: 'smooth' });
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [autoScrollToBottomKey]);
+
+  const setScrollLeftFromPointerX = useCallback((clientX: number) => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const totalScrollableX = Math.max(0, outer.scrollWidth - outer.clientWidth);
+    if (totalScrollableX <= AUCTION_SCROLL_EPS) return;
+    const insetPx = 10;
+    const rect = outer.getBoundingClientRect();
+    const xInPanel = clientX - rect.left;
+    const available = Math.max(0, outer.clientWidth - insetPx * 2);
+    if (available <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (xInPanel - insetPx) / available));
+    outer.scrollLeft = ratio * totalScrollableX;
+  }, []);
+
+  const onHorizontalThumbPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setHorizontalThumbPressed(true);
+    setScrollLeftFromPointerX(e.clientX);
+    const onMove = (ev: PointerEvent) => setScrollLeftFromPointerX(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setHorizontalThumbPressed(false);
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    window.addEventListener('pointercancel', onUp, { passive: true });
+  }, [setScrollLeftFromPointerX]);
+
+  return (
+    <div className="relative">
+      <div
+        ref={outerRef}
+        className={cn('auctions-grid-scroll-panel lot-fields-x-scroll overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5', className)}
+        style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        {children}
+      </div>
+      {hintBottom && (
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] flex h-11 items-end justify-center bg-gradient-to-t from-background from-40% via-background/75 to-transparent pb-1.5"
+          aria-hidden
+        >
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+      {hintRight && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 z-[1] flex w-10 items-center justify-end bg-gradient-to-l from-background from-35% via-background/75 to-transparent pr-1"
+          aria-hidden
+        >
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/80" strokeWidth={2.5} />
+        </div>
+      )}
+      {horizontalThumbMetrics.visible && (
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-[18px] z-[4]">
+          <div
+            className="pointer-events-auto absolute left-2 right-2 bottom-0 h-[14px] rounded-full"
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              boxShadow: 'inset 0 0 0 1px hsl(var(--foreground) / 0.28)',
+            }}
+          />
+          <div
+            className="pointer-events-auto absolute bottom-0 h-[14px] rounded-full border-2 cursor-ew-resize select-none touch-none z-[6] transition-[box-shadow,transform] duration-150 active:scale-[0.99]"
+            style={{
+              left: horizontalThumbMetrics.left,
+              width: horizontalThumbMetrics.width,
+              borderColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
+              backgroundColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+              boxShadow:
+                horizontalThumbPressed
+                  ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 22px hsl(var(--foreground) / 0.24)'
+                  : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 14px hsl(var(--foreground) / 0.16)',
+            }}
+            onPointerDown={onHorizontalThumbPointerDown}
+            role="slider"
+            aria-label="Drag to scroll auction grid horizontally"
+            aria-valuemin={0}
+            aria-valuemax={1}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 const AuctionsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -367,6 +540,8 @@ const AuctionsPage = () => {
   const dragStartScroll = useRef(0);
   const didDragContactRef = useRef(false);
   const didDragMarkRef = useRef(false);
+  const pendingBidAutoScrollRef = useRef(false);
+  const [autoScrollKey, setAutoScrollKey] = useState(0);
 
   const makeScrollHandlers = useCallback((
     ref: React.RefObject<HTMLDivElement | null>,
@@ -690,6 +865,12 @@ const AuctionsPage = () => {
     if (entries.length === 0) return 0;
     return Math.trunc(entries[entries.length - 1]?.rate ?? 0);
   }, [entries]);
+  useEffect(() => {
+    if (!pendingBidAutoScrollRef.current) return;
+    pendingBidAutoScrollRef.current = false;
+    setAutoScrollKey((prev) => prev + 1);
+  }, [entries.length]);
+
   const getBidRateFromInput = useCallback((rawRate: string) => {
     const parsed = parseInt(rawRate, 10);
     if (!Number.isFinite(parsed)) return 0;
@@ -886,6 +1067,7 @@ const AuctionsPage = () => {
       allow_lot_increase: allow,
     };
     try {
+      pendingBidAutoScrollRef.current = true;
       const session = await addBidForCurrentSelection(body);
       applyAuctionSession(session);
       void loadTemporaryBuyerMarks();
@@ -898,6 +1080,7 @@ const AuctionsPage = () => {
       setAddBidRetryAllowIncrease(false);
       userClearedRateRef.current = false;
     } catch (err: unknown) {
+      pendingBidAutoScrollRef.current = false;
       const isConflict = err && typeof err === 'object' && (err as { isConflict?: boolean }).isConflict === true;
       if (isConflict) {
         setAddBidRetryAllowIncrease(true);
@@ -923,6 +1106,7 @@ const AuctionsPage = () => {
       try {
         await deleteBidForCurrentSelection(Number(existingEntry.id));
         const mergedQty = existingEntry.quantity + newQty;
+        pendingBidAutoScrollRef.current = true;
         const session = await addBidForCurrentSelection({
           buyer_name: duplicateMarkDialog.buyerName,
           buyer_mark: duplicateMarkDialog.mark,
@@ -946,6 +1130,7 @@ const AuctionsPage = () => {
         setSelectedBuyer(null);
         userClearedRateRef.current = false;
       } catch (e) {
+        pendingBidAutoScrollRef.current = false;
         toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
       }
     } else {
@@ -2576,35 +2761,26 @@ const AuctionsPage = () => {
               <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
             </div>
           ) : (
-            <div
-              className={cn(
-                'glass-card rounded-2xl h-auto min-h-0',
-                entries.length > 5 ? 'overflow-hidden' : 'overflow-visible'
-              )}
-            >
-              <div
+            <div className="glass-card rounded-2xl h-auto min-h-0 overflow-hidden">
+              <AuctionsGridScrollPanel
                 className={cn(
-                  'overflow-x-auto h-auto min-h-0 pb-4',
                   entries.length > 5
-                    ? 'max-h-[min(42vh,17rem)] overflow-y-auto overscroll-y-contain sm:max-h-[min(48vh,19rem)] md:max-h-[min(52vh,21rem)] touch-pan-y'
-                    : 'overflow-y-visible'
+                    ? 'max-h-[min(42vh,17rem)] sm:max-h-[min(48vh,19rem)] md:max-h-[min(52vh,21rem)]'
+                    : 'max-h-[min(52vh,21rem)]'
                 )}
-                style={
-                  entries.length > 5
-                    ? { scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch' as const }
-                    : undefined
-                }
+                contentLayoutKey={entries.length}
+                autoScrollToBottomKey={autoScrollKey}
               >
-                <table className={cn("w-full text-left border-collapse", showPresetMargin ? "min-w-[380px]" : "min-w-[320px]")}>
-                  <thead>
-                    <tr className="border-b border-border/50 bg-muted/30 sticky top-0 z-10">
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Mark / Buyer</th>
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Rate</th>
+                <table className={cn("w-[42rem] md:w-full text-sm sm:text-base table-fixed border-collapse", showPresetMargin ? "min-w-[480px]" : "min-w-[420px]")}>
+                  <thead className="sticky top-0 z-[3] bg-background">
+                    <tr className="border-b border-border/50 bg-muted/95 backdrop-blur">
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-left", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Mark / Buyer</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Rate</th>
                       {showPresetMargin && (
-                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Preset</th>
+                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Preset</th>
                       )}
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Qty</th>
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-2.5 text-xs" : "px-2 py-1.5 text-[10px]")}>Action</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Qty</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2627,7 +2803,7 @@ const AuctionsPage = () => {
                             editingBidId === entry.id && "bg-primary/5 ring-1 ring-inset ring-primary/35"
                           )}
                         >
-                          <td className={cn("px-3 py-2", isDesktop ? "" : "px-2 py-1.5")}>
+                          <td className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[10px]")}>
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={cn("font-medium text-foreground truncate max-w-[120px]", isDesktop ? "text-sm" : "text-xs")} title={entry.buyerName}>
                                 {normalizeScribbleBuyerName(entry.buyerName, entry.isScribble)}
@@ -2638,7 +2814,7 @@ const AuctionsPage = () => {
                               )}
                             </div>
                           </td>
-                          <td className={cn("align-top font-semibold text-foreground", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
+                          <td className={cn("align-middle text-center font-semibold text-foreground", isDesktop ? "px-3 py-[12px] text-sm" : "px-2 py-[10px] text-xs")}>
                             <div>₹{entry.rate}</div>
                             {showPresetMargin && (
                               <div className="text-[10px] font-medium text-muted-foreground">
@@ -2649,8 +2825,8 @@ const AuctionsPage = () => {
                           {showPresetMargin && (
                             <td
                               className={cn(
-                                "align-top font-medium tabular-nums",
-                                isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs",
+                                "align-middle text-center font-medium tabular-nums",
+                                isDesktop ? "px-3 py-[12px] text-sm" : "px-2 py-[10px] text-xs",
                                 entry.presetApplied > 0 && "text-success",
                                 entry.presetApplied < 0 && "text-destructive"
                               )}
@@ -2658,10 +2834,10 @@ const AuctionsPage = () => {
                               {formatPresetMarginCell(entry.presetApplied)}
                             </td>
                           )}
-                          <td className={cn("text-muted-foreground", isDesktop ? "px-3 py-2 text-sm" : "px-2 py-1.5 text-xs")}>
+                          <td className={cn("align-middle text-center text-muted-foreground", isDesktop ? "px-3 py-[12px] text-sm" : "px-2 py-[10px] text-xs")}>
                             {entry.quantity}
                           </td>
-                          <td className={cn("text-right", isDesktop ? "px-3 py-2" : "px-2 py-1.5")}>
+                          <td className={cn("text-right", isDesktop ? "px-3 py-[12px]" : "px-2 py-[10px]")}>
                             <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
@@ -2707,7 +2883,7 @@ const AuctionsPage = () => {
                               transition={{ duration: 0.15 }}
                               className="border-b border-border/30 bg-muted/10"
                             >
-                              <td colSpan={showPresetMargin ? 5 : 4} className={cn("px-3 py-2", isDesktop ? "" : "px-2 py-1.5")}>
+                              <td colSpan={showPresetMargin ? 5 : 4} className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[10px]")}>
                                 <div className="flex items-center gap-2">
                                   <span className="text-[10px] text-muted-foreground whitespace-nowrap">Token ₹</span>
                                   <Input
@@ -2728,7 +2904,7 @@ const AuctionsPage = () => {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </AuctionsGridScrollPanel>
             </div>
           )}
         </motion.div>
