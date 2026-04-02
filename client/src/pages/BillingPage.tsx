@@ -59,7 +59,7 @@ const arrDeskTabBtn = (active: boolean) =>
 /** Mobile header tabs: pill style like Arrivals summary chips (`bg-[#6075FF]` when active). */
 const arrMobTabPill = (active: boolean) =>
   cn(
-    'shrink-0 min-w-[9.5rem] px-4 py-2 rounded-full text-xs font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm',
+    'shrink-0 min-w-[9rem] sm:min-w-[10.5rem] px-3 sm:px-4 py-2.5 sm:py-2 rounded-full min-h-10 text-xs sm:text-sm font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm leading-none',
     active ? 'bg-[#6075FF] text-white' : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white',
   );
 
@@ -3286,7 +3286,7 @@ const BillingPage = () => {
                 {!isCollapsed && (
                 <div className="p-3 space-y-2">
                   {/* Table header for commodity items */}
-                  <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
+                  <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
                     <span>Item</span>
                     <span>Qty</span>
                     <span>Weight (kg)</span>
@@ -3312,15 +3312,17 @@ const BillingPage = () => {
                       return (
                         <div
                           key={ii}
-                          className="grid gap-1.5 text-[10px] md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2 py-1.5 text-center"
+                      className="grid grid-cols-1 gap-1.5 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2 py-1.5 text-left lg:text-center"
                         >
                           <div className="min-w-0">
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Item</p>
                             <p className="text-[11px] font-semibold text-foreground truncate">
                               {formatLotIdentifierForBillEntry(item)}
                             </p>
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Qty</p>
                             <Input
                               type="number"
                               value={item.quantity || ""}
@@ -3333,19 +3335,20 @@ const BillingPage = () => {
                                 });
                               }}
                               className={cn(
-                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
                                 validationErrors[`items.${gi}.${ii}.quantity`] &&
                                   "ring-1 ring-destructive/40 rounded",
                               )}
                             />
                             {validationErrors[`items.${gi}.${ii}.quantity`] && (
-                              <p className="mt-0.5 text-[8px] text-destructive">
+                              <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">
                                 {validationErrors[`items.${gi}.${ii}.quantity`]}
                               </p>
                             )}
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Weight (kg)</p>
                             <Input
                               type="number"
                               value={item.weight || ""}
@@ -3358,22 +3361,23 @@ const BillingPage = () => {
                                 });
                               }}
                               className={cn(
-                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
                                 (validationErrors[`items.${gi}.${ii}.weight`] || item.weight === 0) &&
                                   "ring-1 ring-destructive/40 rounded",
                               )}
                             />
                             {item.weight === 0 && (
-                              <p className="mt-0.5 text-[8px] text-destructive">Weight can&apos;t be zero.</p>
+                              <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">Weight can&apos;t be zero.</p>
                             )}
                             {validationErrors[`items.${gi}.${ii}.weight`] && (
-                              <p className="mt-0.5 text-[8px] text-destructive">
+                              <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">
                                 {validationErrors[`items.${gi}.${ii}.weight`]}
                               </p>
                             )}
                           </div>
 
                           <div className={cn("text-foreground", avgOutOfRange && "text-amber-600 font-semibold")}>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Avg Wt (kg)</p>
                             {avgWeight.toFixed(1)}
                             {avgBelowMin && item.weight > 0 && (
                               <p className="mt-0.5 text-[8px] text-amber-600">
@@ -3388,6 +3392,7 @@ const BillingPage = () => {
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Other Charges</p>
                             <Input
                               type="number"
                               value={item.otherCharges || ""}
@@ -3400,19 +3405,20 @@ const BillingPage = () => {
                                 });
                               }}
                               className={cn(
-                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
                                 validationErrors[`items.${gi}.${ii}.otherCharges`] &&
                                   "ring-1 ring-destructive/40 rounded",
                               )}
                             />
                             {validationErrors[`items.${gi}.${ii}.otherCharges`] && (
-                              <p className="text-[8px] text-destructive mt-0.5">
+                              <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5">
                                 {validationErrors[`items.${gi}.${ii}.otherCharges`]}
                               </p>
                             )}
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Brokerage (₹)</p>
                             <Input
                               type="number"
                               value={item.brokerage || ""}
@@ -3425,68 +3431,74 @@ const BillingPage = () => {
                                 });
                               }}
                               className={cn(
-                                "h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
                                 validationErrors[`items.${gi}.${ii}.brokerage`] &&
                                   "ring-1 ring-destructive/40 rounded",
                               )}
                             />
                             {validationErrors[`items.${gi}.${ii}.brokerage`] && (
-                              <p className="text-[8px] text-destructive mt-0.5">
+                              <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5">
                                 {validationErrors[`items.${gi}.${ii}.brokerage`]}
                               </p>
                             )}
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Token (₹)</p>
                             <Input
                               type="number"
                               value={item.tokenAdvance ?? ''}
                               onChange={e => {
                                 updateLineItem(gi, ii, 'tokenAdvance', parseFloat(e.target.value) || 0);
                               }}
-                              className="h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className="h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                               title="Token advance from auction for this bid/lot"
                             />
                           </div>
 
                           <div className="text-foreground font-semibold">
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Value</p>
                             ₹{baseValue.toFixed(2)}
                           </div>
 
                           <div>
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Bid Rate (₹)</p>
                             <Input
                               type="number"
                               value={item.baseRate || ""}
                               onChange={e => {
                                 updateLineItem(gi, ii, "baseRate", parseFloat(e.target.value) || 0);
                               }}
-                              className="h-6 text-[10px] text-right px-1 py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className="h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                             />
                           </div>
 
                           <div className="text-primary font-semibold">
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">New Rate (₹)</p>
                             ₹{item.newRate}
                           </div>
 
                           <div className="text-foreground font-bold">
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Amount (₹)</p>
                             ₹{item.amount.toLocaleString()}
                           </div>
 
-                          <div className="flex justify-center">
+                          <div className="flex flex-col items-center gap-1 lg:flex-row lg:items-center lg:justify-center">
+                            <p className="lg:hidden text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Action</p>
                             <button
                               type="button"
                               onClick={() => removeLineItem(gi, ii)}
-                              className="inline-flex items-center justify-center rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
+                              className="inline-flex items-center justify-center rounded-lg p-2 lg:p-1.5 text-destructive hover:bg-destructive/10"
                               aria-label="Remove line item"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
                             </button>
                           </div>
                         </div>
                       );
                     })}
 
-                    <div className="hidden md:grid md:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
+                    <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
                       <div className="text-left text-white">Total</div>
                       <div className="text-white">
                         {group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString()}
@@ -3543,12 +3555,12 @@ const BillingPage = () => {
                 <table className="w-full min-w-[1100px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
                     <tr className="bg-muted/50">
-                      <th className="sticky top-0 left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide whitespace-normal bg-muted/50 dark:bg-slate-800/60 border-b border-border/50 border-r border-border/70 min-w-[145px] max-w-[145px] w-[145px]">Activity</th>
+                      <th className="lg:sticky lg:top-0 lg:left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide whitespace-normal bg-muted/50 dark:bg-slate-800/60 border-b border-border/50 border-r border-border/70 min-w-[145px] max-w-[145px] w-[145px]">Activity</th>
                       {bill.commodityGroups.map((g, gi) => (
                         <th
                           key={`${g.commodityName}-${gi}`}
                           className={cn(
-                            'sticky top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground dark:text-neutral-900 uppercase tracking-wide min-w-[150px] border-b border-border/50 border-l border-border/50 dark:border-border/70 bg-muted/50 dark:bg-slate-800/60',
+                            'lg:sticky lg:top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground dark:text-neutral-900 uppercase tracking-wide min-w-[150px] border-b border-border/50 border-l border-border/50 dark:border-border/70 bg-muted/50 dark:bg-slate-800/60',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
@@ -3559,7 +3571,7 @@ const BillingPage = () => {
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground whitespace-normal bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]">Gross Amt</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground whitespace-normal bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]">Gross Amt</td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`gross-${gi}`}
@@ -3575,20 +3587,20 @@ const BillingPage = () => {
 
                     <tr>
                       <td
-                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
+                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Commodity Additional Expenses
                       </td>
                       <td
                         colSpan={bill.commodityGroups.length}
-                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
                         style={{ left: 145 }}
                       >
                         {'\u00a0'}
                       </td>
                     </tr>
                     <tr>
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Commission</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Commission</td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`com-${gi}`}
@@ -3612,7 +3624,7 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className="h-6 w-14 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className="h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.commissionAmount || 0).toLocaleString()}</span>
@@ -3621,7 +3633,7 @@ const BillingPage = () => {
                       ))}
                     </tr>
                     <tr>
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">GST</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">GST</td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`gst-${gi}`}
@@ -3635,7 +3647,7 @@ const BillingPage = () => {
                       ))}
                     </tr>
                     <tr>
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">User Fee</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">User Fee</td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`uf-${gi}`}
@@ -3659,7 +3671,7 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className="h-6 w-14 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className="h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.userFeeAmount || 0).toLocaleString()}</span>
@@ -3670,20 +3682,20 @@ const BillingPage = () => {
 
                     <tr>
                       <td
-                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
+                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Freight Charges
                       </td>
                       <td
                         colSpan={bill.commodityGroups.length}
-                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
                         style={{ left: 145 }}
                       >
                         {'\u00a0'}
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Freight</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Freight</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] text-muted-foreground">Rate / Value</span>
@@ -3698,14 +3710,14 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-6 w-24 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
                           />
                           {validationErrors.outboundFreight && <span className="text-[10px] text-destructive">{validationErrors.outboundFreight}</span>}
                         </div>
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Vehicle #</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Vehicle #</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70">
                         <Input
                           value={bill.outboundVehicle}
@@ -3718,12 +3730,12 @@ const BillingPage = () => {
                             });
                           }}
                           placeholder="AP03 CK 4323"
-                          className={cn("h-6 w-36 rounded text-left text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")}
+                          className={cn("h-10 w-40 lg:h-6 lg:w-36 rounded text-left text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")}
                         />
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Coolie Charge</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Coolie Charge</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Input
@@ -3744,10 +3756,10 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
                             placeholder="Rate"
                           />
-                          <span className="h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[3rem]">
+                          <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[3rem]">
                             {bill.commodityGroups.reduce((s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0), 0)}
                           </span>
                           <Input
@@ -3762,7 +3774,7 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-6 w-24 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
                             placeholder="Amount"
                           />
                           {validationErrors.buyerCoolie && <span className="text-[10px] text-destructive">{validationErrors.buyerCoolie}</span>}
@@ -3772,20 +3784,20 @@ const BillingPage = () => {
 
                     <tr>
                       <td
-                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
+                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Discount & Adjustments
                       </td>
                       <td
                         colSpan={bill.commodityGroups.length}
-                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
                         style={{ left: 145 }}
                       >
                         {'\u00a0'}
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Discount</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Discount</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <select
@@ -3794,7 +3806,7 @@ const BillingPage = () => {
                               const discountType = e.target.value === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
                               setBill(recalcGrandTotal({ ...bill, discountType }));
                             }}
-                            className="h-6 rounded bg-background border border-border text-[10px] font-bold text-foreground px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            className="h-10 lg:h-6 rounded bg-background border border-border text-[11px] lg:text-[10px] font-bold text-foreground px-3 lg:px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
                           >
                             <option value="PERCENT">%</option>
                             <option value="AMOUNT">Amt</option>
@@ -3811,7 +3823,7 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")}
                             placeholder={bill.discountType === 'PERCENT' ? '%' : 'Amt'}
                           />
                           {validationErrors.discount && <span className="text-[10px] text-destructive">{validationErrors.discount}</span>}
@@ -3819,7 +3831,7 @@ const BillingPage = () => {
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Round Off</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Round Off</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[11px] text-muted-foreground">{bill.manualRoundOff >= 0 ? 'Plus' : 'Minus'}</span>
@@ -3834,7 +3846,7 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-6 w-20 rounded text-right text-[10px] px-1 py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
                             placeholder="Value"
                           />
                           {validationErrors.manualRoundOff && <span className="text-[10px] text-destructive">{validationErrors.manualRoundOff}</span>}
@@ -3842,7 +3854,7 @@ const BillingPage = () => {
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Overall Rate</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Overall Rate</td>
                       {bill.commodityGroups.map((g, gi) => {
                         const commodityTotal = (g.subtotal || 0) + (g.totalCharges || 0);
                         const overall = commodityTotal + bill.buyerCoolie + bill.outboundFreight - (bill.discountType === 'PERCENT'
@@ -3854,7 +3866,7 @@ const BillingPage = () => {
                       })}
                     </tr>
                     <tr className="border-t border-violet-500/40">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 font-semibold text-white bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 whitespace-normal min-w-[145px] max-w-[145px] w-[145px] border-r border-white/25">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-white bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 whitespace-normal min-w-[145px] max-w-[145px] w-[145px] border-r border-white/25">
                         Grand Total / Pending Balance to pay
                       </td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-r border-border/30 dark:border-border/70">
