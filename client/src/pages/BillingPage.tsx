@@ -3575,10 +3575,16 @@ const BillingPage = () => {
 
                     <tr>
                       <td
-                        colSpan={bill.commodityGroups.length + 1}
-                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Commodity Additional Expenses
+                      </td>
+                      <td
+                        colSpan={bill.commodityGroups.length}
+                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        style={{ left: 145 }}
+                      >
+                        {'\u00a0'}
                       </td>
                     </tr>
                     <tr>
@@ -3662,12 +3668,18 @@ const BillingPage = () => {
                       ))}
                     </tr>
 
-                    <tr className="border-t border-border/40">
+                    <tr>
                       <td
-                        colSpan={bill.commodityGroups.length + 1}
-                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Freight Charges
+                      </td>
+                      <td
+                        colSpan={bill.commodityGroups.length}
+                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        style={{ left: 145 }}
+                      >
+                        {'\u00a0'}
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
@@ -3758,12 +3770,18 @@ const BillingPage = () => {
                       </td>
                     </tr>
 
-                    <tr className="border-t border-border/40">
+                    <tr>
                       <td
-                        colSpan={bill.commodityGroups.length + 1}
-                        className="px-3 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 dark:border-border/70 border-r border-border/50 dark:border-border/70"
+                        className="sticky left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
                       >
                         Discount & Adjustments
+                      </td>
+                      <td
+                        colSpan={bill.commodityGroups.length}
+                        className="sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
+                        style={{ left: 145 }}
+                      >
+                        {'\u00a0'}
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
