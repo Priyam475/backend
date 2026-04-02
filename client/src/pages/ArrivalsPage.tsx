@@ -3196,7 +3196,7 @@ const ArrivalsPage = () => {
                                       Cancel
                                     </Button>
                                     <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF]">
-                                      {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                      {addLotForm.editingLotId ? "Update" : "Save Lot"}
                                     </Button>
                                     </div>
                                   </div>
@@ -4084,7 +4084,7 @@ const ArrivalsPage = () => {
                                       Cancel
                                     </Button>
                                     <Button type="button" size="sm" onClick={() => saveFormLot(si)} className="h-10 sm:h-10 px-4 shrink-0 whitespace-nowrap text-sm font-semibold bg-[#6075FF] hover:bg-[#5060e8] text-white border border-[#6075FF]">
-                                      {addLotForm.editingLotId ? "Update Lot" : "Save Lot"}
+                                      {addLotForm.editingLotId ? "Update" : "Save Lot"}
                                     </Button>
                                     </div>
                                   </div>
