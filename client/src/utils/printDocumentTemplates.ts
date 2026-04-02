@@ -34,18 +34,19 @@ export interface BillPrintData {
     hsnCode?: string;
     gstRate?: number;
     commissionPercent: number;
+    commissionAmount: number;
     userFeePercent: number;
+    userFeeAmount: number;
+    coolieAmount?: number;
+    weighmanChargeAmount?: number;
+    discount?: number;
+    discountType?: 'PERCENT' | 'AMOUNT';
+    manualRoundOff?: number;
     items: { quantity: number; weight: number; newRate: number; amount: number; tokenAdvance?: number }[];
     subtotal: number;
-    commissionAmount: number;
-    userFeeAmount: number;
     totalCharges?: number;
   }[];
-  buyerCoolie: number;
   outboundFreight: number;
-  discount: number;
-  discountType: 'PERCENT' | 'AMOUNT';
-  manualRoundOff: number;
   grandTotal: number;
 }
 

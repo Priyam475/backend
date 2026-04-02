@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -168,6 +169,13 @@ interface CommodityGroup {
   divisor: number;
   commissionPercent: number;
   userFeePercent: number;
+  coolieRate: number; // Per-commodity coolie rate
+  coolieAmount: number; // Per-commodity coolie amount (rate * qty)
+  weighmanChargeRate: number; // Per-commodity weighman charge rate
+  weighmanChargeAmount: number; // Per-commodity weighman charge amount (rate * qty)
+  discount: number; // Per-commodity discount amount or percentage
+  discountType: 'PERCENT' | 'AMOUNT'; // Per-commodity discount type
+  manualRoundOff: number; // Per-commodity manual round off
   items: BillLineItem[];
   subtotal: number;
   commissionAmount: number;
@@ -219,14 +227,10 @@ interface BillData {
   billingName: string;
   billDate: string;
   commodityGroups: CommodityGroup[];
-  buyerCoolie: number;
   outboundFreight: number;
   outboundVehicle: string;
-  discount: number;
-  discountType: 'PERCENT' | 'AMOUNT';
   /** Total token advance to deduct from payable (₹). */
   tokenAdvance: number;
-  manualRoundOff: number;
   grandTotal: number;
   brokerageType: 'PERCENT' | 'AMOUNT';
   brokerageValue: number;
@@ -402,11 +406,31 @@ function validateBill(b: BillData): { isValid: boolean; errors: ValidationErrors
     errors.globalOtherCharges = 'Cannot exceed ₹1,00,000';
   }
 
-  if (!Number.isFinite(b.buyerCoolie) || b.buyerCoolie < 0) {
-    errors.buyerCoolie = 'Must be a positive number';
-  } else if (b.buyerCoolie > 100000) {
-    errors.buyerCoolie = 'Cannot exceed ₹1,00,000';
-  }
+  // Validate per-commodity coolie charges
+  b.commodityGroups.forEach((g, gi) => {
+    if (!Number.isFinite(g.coolieAmount) || g.coolieAmount < 0) {
+      errors[`coolie-${gi}`] = 'Must be a positive number';
+    } else if (g.coolieAmount > 100000) {
+      errors[`coolie-${gi}`] = 'Cannot exceed ₹1,00,000';
+    }
+    if (!Number.isFinite(g.weighmanChargeAmount) || g.weighmanChargeAmount < 0) {
+      errors[`weighman-${gi}`] = 'Must be a positive number';
+    } else if (g.weighmanChargeAmount > 100000) {
+      errors[`weighman-${gi}`] = 'Cannot exceed ₹1,00,000';
+    }
+    if (!Number.isFinite(g.discount) || g.discount < 0) {
+      errors[`discount-${gi}`] = 'Must be a positive number';
+    } else if (g.discountType === 'PERCENT' && g.discount > 100) {
+      errors[`discount-${gi}`] = 'Percent cannot exceed 100';
+    } else if (g.discountType === 'AMOUNT' && g.discount > 100000) {
+      errors[`discount-${gi}`] = 'Cannot exceed ₹1,00,000';
+    }
+    if (!Number.isFinite(g.manualRoundOff)) {
+      errors[`roundoff-${gi}`] = 'Must be a valid number';
+    } else if (Math.abs(g.manualRoundOff) > 100000) {
+      errors[`roundoff-${gi}`] = 'Cannot exceed ±₹1,00,000';
+    }
+  });
 
   if (!Number.isFinite(b.outboundFreight) || b.outboundFreight < 0) {
     errors.outboundFreight = 'Must be a positive number';
@@ -414,19 +438,6 @@ function validateBill(b: BillData): { isValid: boolean; errors: ValidationErrors
     errors.outboundFreight = 'Cannot exceed ₹1,00,000';
   }
 
-  if (!Number.isFinite(b.discount) || b.discount < 0) {
-    errors.discount = 'Must be a positive number';
-  } else if (b.discountType === 'PERCENT' && b.discount > 100) {
-    errors.discount = 'Percent cannot exceed 100';
-  } else if (b.discountType === 'AMOUNT' && b.discount > 100000) {
-    errors.discount = 'Cannot exceed ₹1,00,000';
-  }
-
-  if (!Number.isFinite(b.manualRoundOff)) {
-    errors.manualRoundOff = 'Must be a valid number';
-  } else if (Math.abs(b.manualRoundOff) > 100000) {
-    errors.manualRoundOff = 'Cannot exceed ±₹1,00,000';
-  }
 
   b.commodityGroups.forEach((group, gi) => {
     group.items.forEach((item, ii) => {
@@ -499,7 +510,6 @@ const BillingPage = () => {
   const [fullConfigs, setFullConfigs] = useState<FullCommodityConfigDto[]>([]);
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
-  const [buyerCoolieRate, setBuyerCoolieRate] = useState<number>(0);
   const [collapsedCommodityIndexes, setCollapsedCommodityIndexes] = useState<number[]>([]);
   const SUMMARY_COMMODITY_COL_WIDTH = 150;
 
@@ -1117,23 +1127,6 @@ const BillingPage = () => {
     }
   }, [buyersForBilling, selectBidBuyer]);
 
-  // Keep buyerCoolieRate in sync with current bill & total bags (approx rate per bag).
-  useEffect(() => {
-    if (!bill) {
-      setBuyerCoolieRate(0);
-      return;
-    }
-    const totalBags = bill.commodityGroups.reduce(
-      (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
-      0,
-    );
-    if (totalBags > 0 && bill.buyerCoolie > 0) {
-      setBuyerCoolieRate(bill.buyerCoolie / totalBags);
-    } else {
-      setBuyerCoolieRate(0);
-    }
-  }, [bill]);
-
   const calculateGroupCharges = (group: CommodityGroup) => {
     const commissionAmount = Math.round(group.subtotal * (group.commissionPercent || 0) / 100);
     const userFeeAmount = Math.round(group.subtotal * (group.userFeePercent || 0) / 100);
@@ -1142,7 +1135,7 @@ const BillingPage = () => {
     return { commissionAmount, userFeeAmount, totalCharges };
   };
 
-  // Recalculate grand total (includes GST from commodity config)
+  // Recalculate grand total (includes per-commodity discount and round-off)
   const recalcGrandTotal = useCallback((b: BillData): BillData => {
     const commodityGroups = b.commodityGroups.map(group => {
       const next = { ...group };
@@ -1152,13 +1145,23 @@ const BillingPage = () => {
       next.totalCharges = charges.totalCharges;
       return next;
     });
-    const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
-    const additions = b.buyerCoolie + b.outboundFreight;
-    let discountAmount = b.discount;
-    if (b.discountType === 'PERCENT') {
-      discountAmount = Math.round(subtotalSum * b.discount / 100);
-    }
-    const grandTotal = subtotalSum + additions - discountAmount + b.manualRoundOff;
+    
+    // Calculate per-commodity totals: Subtotal + Commission + UserFee + Coolie + Weighman + GST - Discount + RoundOff
+    let grandTotal = 0;
+    commodityGroups.forEach(group => {
+      const subtotalWithCharges = group.subtotal + group.totalCharges;
+      const additionsSum = (group.coolieAmount || 0) + (group.weighmanChargeAmount || 0);
+      let discountAmount = group.discount || 0;
+      if (group.discountType === 'PERCENT') {
+        discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+      }
+      const commodityTotal = subtotalWithCharges + additionsSum - discountAmount + (group.manualRoundOff || 0);
+      grandTotal += commodityTotal;
+    });
+    
+    // Add outbound freight charges (bill-level only)
+    grandTotal += b.outboundFreight || 0;
+    
     const tokenAdvance = sumLineTokenAdvances(b);
     const pendingBalance = grandTotal - tokenAdvance;
     return { ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance };
@@ -1281,6 +1284,13 @@ const BillingPage = () => {
           divisor,
           commissionPercent: config?.commissionPercent || 0,
           userFeePercent: config?.userFeePercent || 0,
+          coolieRate: 0,
+          coolieAmount: 0,
+          weighmanChargeRate: 0,
+          weighmanChargeAmount: 0,
+          discount: 0,
+          discountType: 'AMOUNT' as const,
+          manualRoundOff: 0,
           items: [],
           subtotal: 0,
           commissionAmount: 0,
@@ -1331,10 +1341,19 @@ const BillingPage = () => {
       group.totalCharges = group.commissionAmount + group.userFeeAmount;
     });
     
-    const commodityGroups = Array.from(commodityMap.values());
+    const commodityGroups = Array.from(commodityMap.values()).map(g => ({
+      ...g,
+      coolieRate: 0,
+      coolieAmount: 0,
+      weighmanChargeRate: 0,
+      weighmanChargeAmount: 0,
+      discount: 0,
+      discountType: 'AMOUNT' as const,
+      manualRoundOff: 0,
+    }));
     const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
     
-    // REQ-BIL-009: GT = Σ(Commodity Totals) + Additions - Discount + Manual Round OFF
+    // REQ-BIL-009: GT = Σ(Commodity Totals with per-commodity additions/discounts/round-off) + Outbound Freight
     const initialBill: BillData = {
       billId: crypto.randomUUID(),
       billNumber: '', // Generated on print (per SRS)
@@ -1352,13 +1371,9 @@ const BillingPage = () => {
       billingName: buyer.buyerName,
       billDate: new Date().toISOString(),
       commodityGroups,
-      buyerCoolie: 0,
       outboundFreight: 0,
       outboundVehicle: '',
-      discount: 0,
-      discountType: 'AMOUNT',
       tokenAdvance: 0,
-      manualRoundOff: 0,
       grandTotal: subtotalSum,
       brokerageType: 'AMOUNT',
       brokerageValue: 0,
@@ -1972,8 +1987,9 @@ const BillingPage = () => {
       brokerAddress: bill.buyerAsBroker ? '' : (bill.brokerAddress ?? ''),
       billingName: bill.billingName,
       billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
-      // Backend DTO does not accept frontend-only fields (`divisor`, `sellerOtherCharges`).
-      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, ...g }: any) => ({
+      // Backend DTO excludes frontend-only fields (`divisor`, `coolieRate`, `coolieAmount`, `weighmanChargeRate`, `weighmanChargeAmount`).
+      // Per-commodity discount and round-off are now in commodityGroups, not at bill level.
+      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, coolieRate: _cr, coolieAmount: _ca, weighmanChargeRate: _wcr, weighmanChargeAmount: _wca, ...g }: any) => ({
         ...g,
         items: (g.items ?? []).map((it: any) => {
           const {
@@ -1986,17 +2002,12 @@ const BillingPage = () => {
           return restIt;
         }),
       })),
-      buyerCoolie: bill.buyerCoolie ?? 0,
       outboundFreight: bill.outboundFreight ?? 0,
       outboundVehicle: bill.outboundVehicle ?? '',
-      discount: bill.discount ?? 0,
-      discountType: bill.discountType ?? 'AMOUNT',
       tokenAdvance: sumLineTokenAdvances(bill),
-      manualRoundOff: bill.manualRoundOff ?? 0,
       grandTotal: bill.grandTotal,
       brokerageType: bill.brokerageType ?? 'AMOUNT',
       brokerageValue: bill.brokerageValue ?? 0,
-      globalOtherCharges: bill.globalOtherCharges ?? 0,
       pendingBalance: bill.pendingBalance ?? bill.grandTotal,
     };
     const canCreate = can('Billing', 'Create');
@@ -2220,13 +2231,18 @@ const BillingPage = () => {
             ))}
 
             {/* Additions */}
-            {(activePrintBill.buyerCoolie > 0 || activePrintBill.outboundFreight > 0) && (
+            {(() => {
+              const totalCoolie = activePrintBill.commodityGroups.reduce((s, g) => s + (g.coolieAmount || 0), 0);
+              const totalWeighman = activePrintBill.commodityGroups.reduce((s, g) => s + (g.weighmanChargeAmount || 0), 0);
+              return (totalCoolie > 0 || totalWeighman > 0 || activePrintBill.outboundFreight > 0) && (
               <div className="border-b border-dashed border-border pb-2">
                 <p className="font-bold text-foreground mb-1">ADDITIONS</p>
-                {activePrintBill.buyerCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Buyer Coolie</span><span className="text-foreground">₹{activePrintBill.buyerCoolie.toLocaleString()}</span></div>}
+                {totalCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Coolie Charge</span><span className="text-foreground">₹{totalCoolie.toLocaleString()}</span></div>}
+                {totalWeighman > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Weighman Charge</span><span className="text-foreground">₹{totalWeighman.toLocaleString()}</span></div>}
                 {activePrintBill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{activePrintBill.outboundFreight.toLocaleString()}</span></div>}
               </div>
-            )}
+            );
+            })()} 
 
             {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
             <div className="border-b border-dashed border-border pb-2">
@@ -2263,19 +2279,25 @@ const BillingPage = () => {
               })()}
             </div>
 
-            {activePrintBill.discount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Discount</span>
-                <span className="text-destructive">
-                  −₹{activePrintBill.discountType === 'PERCENT'
-                    ? Math.round(
-                        activePrintBill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0) * activePrintBill.discount / 100,
-                      )
-                    : activePrintBill.discount}
-                </span>
-              </div>
-            )}
-            {activePrintBill.manualRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{activePrintBill.manualRoundOff > 0 ? '+' : ''}₹{activePrintBill.manualRoundOff}</span></div>}
+            {/* Discount & Adjustments (now per-commodity) */}
+            {(() => {
+              const totalDiscount = activePrintBill.commodityGroups.reduce((s, g) => {
+                let discountAmount = g.discount || 0;
+                if (g.discountType === 'PERCENT') {
+                  const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
+                  discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                }
+                return s + discountAmount;
+              }, 0);
+              const totalRoundOff = activePrintBill.commodityGroups.reduce((s, g) => s + (g.manualRoundOff || 0), 0);
+              return (totalDiscount > 0 || totalRoundOff !== 0) && (
+                <div className="border-b border-dashed border-border pb-2">
+                  <p className="font-bold text-foreground mb-1">DISCOUNT & ADJUSTMENTS</p>
+                  {totalDiscount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{totalDiscount.toLocaleString()}</span></div>}
+                  {totalRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{totalRoundOff > 0 ? '+' : ''}₹{totalRoundOff}</span></div>}
+                </div>
+              );
+            })()}
 
             <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
               <span className="font-bold text-foreground">GRAND TOTAL</span>
@@ -3554,17 +3576,18 @@ const BillingPage = () => {
               >
                 <table className="w-full min-w-[1100px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
-                    <tr className="bg-muted/50">
-                      <th className="lg:sticky lg:top-0 lg:left-0 z-30 text-left px-2 py-2 font-extrabold text-foreground uppercase tracking-wide whitespace-normal bg-muted/50 dark:bg-slate-800/60 border-b border-border/50 border-r border-border/70 min-w-[145px] max-w-[145px] w-[145px]">Activity</th>
+                    <tr className="bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-700 dark:to-slate-700 shadow-sm">
+                      <th className="lg:sticky lg:top-0 lg:left-0 z-30 text-center px-3 py-3 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest whitespace-normal bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 border-b border-border/40 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px] shadow-sm">📋 Activity</th>
                       {bill.commodityGroups.map((g, gi) => (
                         <th
                           key={`${g.commodityName}-${gi}`}
                           className={cn(
-                            'lg:sticky lg:top-0 z-20 text-left px-2 py-2 font-extrabold text-foreground dark:text-neutral-900 uppercase tracking-wide min-w-[150px] border-b border-border/50 border-l border-border/50 dark:border-border/70 bg-muted/50 dark:bg-slate-800/60',
+                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest min-w-[150px] border-b border-border/40 border-l border-border/50 dark:border-border/70 bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 shadow-sm',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          {g.commodityName || `Commodity ${gi + 1}`}
+                          <span className="text-xs font-bold text-blue-600 dark:text-blue-300">📦</span>
+                          <div>{g.commodityName || `Commodity ${gi + 1}`}</div>
                         </th>
                       ))}
                     </tr>
@@ -3587,16 +3610,10 @@ const BillingPage = () => {
 
                     <tr>
                       <td
-                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="lg:sticky lg:left-0 z-50 px-3 py-3 font-extrabold uppercase tracking-wider text-center whitespace-normal text-violet-800 dark:text-violet-200 bg-violet-500/20 dark:bg-violet-500/30 border-t-2 border-b-2 border-violet-500/50 dark:border-violet-400/40 shadow-sm"
                       >
-                        Commodity Additional Expenses
-                      </td>
-                      <td
-                        colSpan={bill.commodityGroups.length}
-                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-violet-500/15 dark:bg-violet-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
-                        style={{ left: 145 }}
-                      >
-                        {'\u00a0'}
+                        💎 Commodity Additional Expenses
                       </td>
                     </tr>
                     <tr>
@@ -3613,8 +3630,9 @@ const BillingPage = () => {
                             <Input
                               type="number"
                               value={g.commissionPercent}
+                              min="0"
                               onChange={e => {
-                                const val = parseFloat(e.target.value) || 0;
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
                                 cg.commissionPercent = val;
@@ -3633,20 +3651,6 @@ const BillingPage = () => {
                       ))}
                     </tr>
                     <tr>
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">GST</td>
-                      {bill.commodityGroups.map((g, gi) => (
-                        <td
-                          key={`gst-${gi}`}
-                          className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900',
-                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
-                          )}
-                        >
-                          ₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
                       <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">User Fee</td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
@@ -3660,8 +3664,9 @@ const BillingPage = () => {
                             <Input
                               type="number"
                               value={g.userFeePercent}
+                              min="0"
                               onChange={e => {
-                                const val = parseFloat(e.target.value) || 0;
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
                                 cg.userFeePercent = val;
@@ -3680,25 +3685,240 @@ const BillingPage = () => {
                       ))}
                     </tr>
 
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Coolie Charge</td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const qty = g.items.reduce((s, i) => s + (i.quantity || 0), 0);
+                        return (
+                          <td
+                            key={`coolie-${gi}`}
+                            className={cn(
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            )}
+                          >
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={g.coolieRate || ""}
+                                onChange={e => {
+                                  const rate = parseFloat(e.target.value) || 0;
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.coolieRate = rate;
+                                  cg.coolieAmount = rate > 0 && qty > 0 ? Math.round(rate * qty) : 0;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                  setValidationErrors(prev => {
+                                    const n = { ...prev };
+                                    delete n[`coolie-${gi}`];
+                                    return n;
+                                  });
+                                }}
+                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors[`coolie-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                placeholder="Rate"
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">x</span>
+                              <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
+                                {qty}
+                              </span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.coolieAmount || 0).toLocaleString()}</span>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Weighman Charge</td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const qty = g.items.reduce((s, i) => s + (i.quantity || 0), 0);
+                        return (
+                          <td
+                            key={`weighman-${gi}`}
+                            className={cn(
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            )}
+                          >
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                value={g.weighmanChargeRate || ""}
+                                onChange={e => {
+                                  const rate = parseFloat(e.target.value) || 0;
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.weighmanChargeRate = rate;
+                                  cg.weighmanChargeAmount = rate > 0 && qty > 0 ? Math.round(rate * qty) : 0;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                  setValidationErrors(prev => {
+                                    const n = { ...prev };
+                                    delete n[`weighman-${gi}`];
+                                    return n;
+                                  });
+                                }}
+                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors[`weighman-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                placeholder="Rate"
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">x</span>
+                              <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
+                                {qty}
+                              </span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.weighmanChargeAmount || 0).toLocaleString()}</span>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">GST</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`gst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          ₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}
+                        </td>
+                      ))}
+                    </tr>
+
                     <tr>
                       <td
-                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="lg:sticky lg:left-0 z-50 px-3 py-3 font-extrabold uppercase tracking-wider text-center whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/20 dark:bg-amber-500/30 border-t-2 border-b-2 border-amber-500/50 dark:border-amber-400/40 shadow-sm"
                       >
-                        Freight Charges
+                        📊 Discount & Adjustment
                       </td>
+                    </tr>
+
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Discount</td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
+                        let discountAmount = g.discount || 0;
+                        if (g.discountType === 'PERCENT') {
+                          discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                        }
+                        return (
+                          <td
+                            key={`discount-${gi}`}
+                            className={cn(
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            )}
+                          >
+                            <div className="flex items-center gap-1">
+                              <Select value={g.discountType || 'AMOUNT'} onValueChange={(value: any) => {
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.discountType = value;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}>
+                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                  <SelectValue placeholder="%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERCENT">%</SelectItem>
+                                  <SelectItem value="AMOUNT">₹</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                type="number"
+                                value={g.discount || ""}
+                                min="0"
+                                onChange={e => {
+                                  const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.discount = val;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className="h-10 w-20 lg:h-6 lg:w-16 rounded text-right text-[10px] lg:text-[9px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                                placeholder="0"
+                              />
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{discountAmount.toLocaleString()}</span>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Round Off</td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`roundoff-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <Input
+                            type="number"
+                            value={g.manualRoundOff || ""}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value) || 0;
+                              const updated = { ...bill };
+                              const cg = { ...updated.commodityGroups[gi] };
+                              cg.manualRoundOff = val;
+                              updated.commodityGroups = [...updated.commodityGroups];
+                              updated.commodityGroups[gi] = cg;
+                              setBill(recalcGrandTotal(updated));
+                            }}
+                            className="h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            placeholder="0"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+
+                    <tr className="border-t border-border/30">
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Overall Rate</td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
+                        let discountAmount = g.discount || 0;
+                        if (g.discountType === 'PERCENT') {
+                          discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                        }
+                        const totalAmount = subtotalWithCharges - discountAmount + (g.manualRoundOff || 0);
+                        return (
+                          <td
+                            key={`overallrate-${gi}`}
+                            className={cn(
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500 font-bold',
+                              gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            )}
+                          >
+                            ₹{totalAmount.toLocaleString()}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    <tr>
                       <td
-                        colSpan={bill.commodityGroups.length}
-                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-indigo-500/15 dark:bg-indigo-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
-                        style={{ left: 145 }}
+                        colSpan={bill.commodityGroups.length + 1}
+                        className="lg:sticky lg:left-0 z-50 px-3 py-3 font-extrabold uppercase tracking-wider text-center whitespace-normal text-indigo-800 dark:text-indigo-200 bg-indigo-500/20 dark:bg-indigo-500/30 border-t-2 border-b-2 border-indigo-500/50 dark:border-indigo-400/40 shadow-sm"
                       >
-                        {'\u00a0'}
+                        🚚 Freight Charges
                       </td>
                     </tr>
                     <tr className="border-t border-border/30">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Freight</td>
+                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Outbound Freight (Rate/Value)</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[11px] text-muted-foreground">Rate / Value</span>
                           <Input
                             type="number"
                             value={bill.outboundFreight || ''}
@@ -3734,154 +3954,24 @@ const BillingPage = () => {
                         />
                       </td>
                     </tr>
-                    <tr className="border-t border-border/30">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Coolie Charge</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Input
-                            type="number"
-                            value={buyerCoolieRate || ""}
-                            onChange={e => {
-                              const rate = parseFloat(e.target.value) || 0;
-                              setBuyerCoolieRate(rate);
-                              const totalBags = bill.commodityGroups.reduce(
-                                (s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0),
-                                0,
-                              );
-                              const total = rate > 0 && totalBags > 0 ? Math.round(rate * totalBags) : 0;
-                              setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
-                              setValidationErrors(prev => {
-                                const n = { ...prev };
-                                delete n.buyerCoolie;
-                                return n;
-                              });
-                            }}
-                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
-                            placeholder="Rate"
-                          />
-                          <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[3rem]">
-                            {bill.commodityGroups.reduce((s, g) => s + g.items.reduce((ss, i) => ss + (i.quantity || 0), 0), 0)}
-                          </span>
-                          <Input
-                            type="number"
-                            value={bill.buyerCoolie || ""}
-                            onChange={e => {
-                              const total = parseInt(e.target.value, 10) || 0;
-                              setBill(recalcGrandTotal({ ...bill, buyerCoolie: total }));
-                              setValidationErrors(prev => {
-                                const n = { ...prev };
-                                delete n.buyerCoolie;
-                                return n;
-                              });
-                            }}
-                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.buyerCoolie && "border-destructive ring-1 ring-destructive/30")}
-                            placeholder="Amount"
-                          />
-                          {validationErrors.buyerCoolie && <span className="text-[10px] text-destructive">{validationErrors.buyerCoolie}</span>}
-                        </div>
-                      </td>
-                    </tr>
 
-                    <tr>
-                      <td
-                        className="lg:sticky lg:left-0 z-50 px-2 py-2 font-extrabold uppercase tracking-wide text-left whitespace-normal text-amber-800 dark:text-amber-200 bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-r border-border/50 min-w-[145px] max-w-[145px] w-[145px]"
-                      >
-                        Discount & Adjustments
+                    <tr className="border-t-2 border-violet-500/60">
+                      <td className="lg:sticky lg:left-0 z-20 px-3 py-2.5 font-extrabold text-white bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 dark:from-violet-700 dark:via-purple-700 dark:to-indigo-700 whitespace-normal min-w-[145px] max-w-[145px] w-[145px] border-r border-white/30 shadow-lg text-center uppercase tracking-wider text-sm">
+                        💰 Final Summary
                       </td>
-                      <td
-                        colSpan={bill.commodityGroups.length}
-                        className="lg:sticky z-40 px-3 py-2 font-extrabold uppercase tracking-wide whitespace-normal bg-amber-500/15 dark:bg-amber-500/25 border-t border-border/40 border-b border-border/30 border-l border-border/50 border-r border-border/70 dark:border-border/70"
-                        style={{ left: 145 }}
-                      >
-                        {'\u00a0'}
-                      </td>
-                    </tr>
-                    <tr className="border-t border-border/30">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Discount</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <select
-                            value={bill.discountType}
-                            onChange={e => {
-                              const discountType = e.target.value === 'PERCENT' ? 'PERCENT' : 'AMOUNT';
-                              setBill(recalcGrandTotal({ ...bill, discountType }));
-                            }}
-                            className="h-10 lg:h-6 rounded bg-background border border-border text-[11px] lg:text-[10px] font-bold text-foreground px-3 lg:px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
-                          >
-                            <option value="PERCENT">%</option>
-                            <option value="AMOUNT">Amt</option>
-                          </select>
-                          <Input
-                            type="number"
-                            value={bill.discount || ''}
-                            onChange={e => {
-                              const value = parseFloat(e.target.value) || 0;
-                              setBill(recalcGrandTotal({ ...bill, discount: value }));
-                              setValidationErrors(prev => {
-                                const n = { ...prev };
-                                delete n.discount;
-                                return n;
-                              });
-                            }}
-                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.discount && "border-destructive ring-1 ring-destructive/30")}
-                            placeholder={bill.discountType === 'PERCENT' ? '%' : 'Amt'}
-                          />
-                          {validationErrors.discount && <span className="text-[10px] text-destructive">{validationErrors.discount}</span>}
-                        </div>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-border/30">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-b border-border/30 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Round Off</td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[11px] text-muted-foreground">{bill.manualRoundOff >= 0 ? 'Plus' : 'Minus'}</span>
-                          <Input
-                            type="number"
-                            value={bill.manualRoundOff || ''}
-                            onChange={e => {
-                              setBill(recalcGrandTotal({ ...bill, manualRoundOff: parseFloat(e.target.value) || 0 }));
-                              setValidationErrors(prev => {
-                                const n = { ...prev };
-                                delete n.manualRoundOff;
-                                return n;
-                              });
-                            }}
-                            className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.manualRoundOff && "border-destructive ring-1 ring-destructive/30")}
-                            placeholder="Value"
-                          />
-                          {validationErrors.manualRoundOff && <span className="text-[10px] text-destructive">{validationErrors.manualRoundOff}</span>}
-                        </div>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-border/30">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[145px] max-w-[145px] w-[145px]">Overall Rate</td>
-                      {bill.commodityGroups.map((g, gi) => {
-                        const commodityTotal = (g.subtotal || 0) + (g.totalCharges || 0);
-                        const overall = commodityTotal + bill.buyerCoolie + bill.outboundFreight - (bill.discountType === 'PERCENT'
-                          ? Math.round(
-                            bill.commodityGroups.reduce((s, cg) => s + (cg.subtotal || 0) + (cg.totalCharges || 0), 0) * (bill.discount || 0) / 100,
-                          )
-                          : (bill.discount || 0)) + bill.manualRoundOff;
-                        return <td key={`overall-${gi}`} className="px-2 py-1.5 text-[11px] text-muted-foreground dark:text-neutral-600 border-l border-border/30 bg-white">₹{overall.toLocaleString()}</td>;
-                      })}
-                    </tr>
-                    <tr className="border-t border-violet-500/40">
-                      <td className="lg:sticky lg:left-0 z-20 px-2 py-1.5 font-semibold text-white bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 whitespace-normal min-w-[145px] max-w-[145px] w-[145px] border-r border-white/25">
-                        Grand Total / Pending Balance to pay
-                      </td>
-                      <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-r border-border/30 dark:border-border/70">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Grand Total</p>
-                            <p className="font-extrabold text-sm">₹{bill.grandTotal.toLocaleString()}</p>
+                      <td colSpan={bill.commodityGroups.length} className="px-3 py-2.5 bg-gradient-to-b from-violet-50 to-indigo-50 dark:from-violet-900/20 dark:to-indigo-900/20 border-l border-violet-500/30 border-r border-violet-500/30 dark:border-indigo-500/30 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-violet-500/40 dark:border-violet-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700 dark:text-violet-300">💵 Grand Total</p>
+                            <p className="font-extrabold text-lg text-violet-900 dark:text-violet-100 mt-1">₹{bill.grandTotal.toLocaleString()}</p>
                           </div>
-                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Pending Balance</p>
-                            <p className="font-extrabold text-sm">₹{bill.pendingBalance.toLocaleString()}</p>
+                          <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-indigo-500/40 dark:border-indigo-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-700 dark:text-indigo-300">📊 Pending Balance</p>
+                            <p className="font-extrabold text-lg text-indigo-900 dark:text-indigo-100 mt-1">₹{bill.pendingBalance.toLocaleString()}</p>
                           </div>
-                          <div className="rounded-lg bg-muted/40 dark:bg-muted/30 border border-border px-2 py-1">
-                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground dark:text-neutral-600">Token Advance</p>
-                            <p className="font-extrabold text-sm">₹{sumLineTokenAdvances(bill).toLocaleString()}</p>
+                          <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-emerald-500/40 dark:border-emerald-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">🎟️ Token Advance</p>
+                            <p className="font-extrabold text-lg text-emerald-900 dark:text-emerald-100 mt-1">₹{sumLineTokenAdvances(bill).toLocaleString()}</p>
                           </div>
                         </div>
                       </td>

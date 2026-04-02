@@ -105,7 +105,11 @@ public class SalesBillServiceImpl implements SalesBillService {
         bill.setTraderId(traderId);
         bill = salesBillRepository.save(bill);
 
-        createVouchersIfNeeded(traderId, bill.getId(), bill.getBuyerCoolie(), bill.getOutboundFreight());
+        // Compute total coolie from per-commodity values
+        BigDecimal totalCoolie = bill.getCommodityGroups().stream()
+            .map(g -> g.getCoolieAmount() != null ? g.getCoolieAmount() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        createVouchersIfNeeded(traderId, bill.getId(), totalCoolie, bill.getOutboundFreight());
         return toDto(bill);
     }
 
@@ -139,7 +143,11 @@ public class SalesBillServiceImpl implements SalesBillService {
         bill.setBillNumber(bill.getBillNumber() != null ? bill.getBillNumber() : request.getBillNumber());
         bill = salesBillRepository.save(bill);
         // REQ-BIL-008: keep expense recovery vouchers reconciled with current bill fields
-        createVouchersIfNeeded(traderId, bill.getId(), bill.getBuyerCoolie(), bill.getOutboundFreight());
+        // Compute total coolie from per-commodity values
+        BigDecimal totalCoolie = bill.getCommodityGroups().stream()
+            .map(g -> g.getCoolieAmount() != null ? g.getCoolieAmount() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        createVouchersIfNeeded(traderId, bill.getId(), totalCoolie, bill.getOutboundFreight());
         return toDto(bill);
     }
 
@@ -309,13 +317,9 @@ public class SalesBillServiceImpl implements SalesBillService {
         bill.setBrokerAddress(request.getBrokerAddress());
         bill.setBillingName(request.getBillingName());
         bill.setBillDate(parseInstant(request.getBillDate()));
-        bill.setBuyerCoolie(nullToZero(request.getBuyerCoolie()));
         bill.setOutboundFreight(nullToZero(request.getOutboundFreight()));
         bill.setOutboundVehicle(request.getOutboundVehicle());
-        bill.setDiscount(nullToZero(request.getDiscount()));
-        bill.setDiscountType(request.getDiscountType() != null ? request.getDiscountType() : "AMOUNT");
         bill.setTokenAdvance(nullToZero(request.getTokenAdvance()));
-        bill.setManualRoundOff(nullToZero(request.getManualRoundOff()));
         bill.setGrandTotal(request.getGrandTotal() != null ? request.getGrandTotal() : BigDecimal.ZERO);
         bill.setBrokerageType(request.getBrokerageType() != null ? request.getBrokerageType() : "AMOUNT");
         bill.setBrokerageValue(nullToZero(request.getBrokerageValue()));
@@ -334,6 +338,16 @@ public class SalesBillServiceImpl implements SalesBillService {
             group.setCommissionAmount(nullToZero(g.getCommissionAmount()));
             group.setUserFeeAmount(nullToZero(g.getUserFeeAmount()));
             group.setTotalCharges(nullToZero(g.getTotalCharges()));
+            // Per-commodity coolie charge
+            group.setCoolieRate(nullToZero(g.getCoolieRate()));
+            group.setCoolieAmount(nullToZero(g.getCoolieAmount()));
+            // Per-commodity weighman charge
+            group.setWeighmanChargeRate(nullToZero(g.getWeighmanChargeRate()));
+            group.setWeighmanChargeAmount(nullToZero(g.getWeighmanChargeAmount()));
+            // Per-commodity discount and round-off
+            group.setDiscount(nullToZero(g.getDiscount()));
+            group.setDiscountType(g.getDiscountType() != null ? g.getDiscountType() : "AMOUNT");
+            group.setManualRoundOff(nullToZero(g.getManualRoundOff()));
             group.setSortOrder(go++);
             bill.getCommodityGroups().add(group);
             int io = 0;
@@ -378,13 +392,9 @@ public class SalesBillServiceImpl implements SalesBillService {
         dto.setBrokerAddress(bill.getBrokerAddress());
         dto.setBillingName(bill.getBillingName());
         dto.setBillDate(bill.getBillDate() != null ? bill.getBillDate().toString() : null);
-        dto.setBuyerCoolie(bill.getBuyerCoolie());
         dto.setOutboundFreight(bill.getOutboundFreight());
         dto.setOutboundVehicle(bill.getOutboundVehicle());
-        dto.setDiscount(bill.getDiscount());
-        dto.setDiscountType(bill.getDiscountType());
         dto.setTokenAdvance(bill.getTokenAdvance());
-        dto.setManualRoundOff(bill.getManualRoundOff());
         dto.setGrandTotal(bill.getGrandTotal());
         dto.setBrokerageType(bill.getBrokerageType());
         dto.setBrokerageValue(bill.getBrokerageValue());
@@ -403,6 +413,16 @@ public class SalesBillServiceImpl implements SalesBillService {
             gdto.setCommissionAmount(g.getCommissionAmount());
             gdto.setUserFeeAmount(g.getUserFeeAmount());
             gdto.setTotalCharges(g.getTotalCharges());
+            // Per-commodity coolie charge
+            gdto.setCoolieRate(g.getCoolieRate());
+            gdto.setCoolieAmount(g.getCoolieAmount());
+            // Per-commodity weighman charge
+            gdto.setWeighmanChargeRate(g.getWeighmanChargeRate());
+            gdto.setWeighmanChargeAmount(g.getWeighmanChargeAmount());
+            // Per-commodity discount and round-off
+            gdto.setDiscount(g.getDiscount());
+            gdto.setDiscountType(g.getDiscountType());
+            gdto.setManualRoundOff(g.getManualRoundOff());
             List<BillLineItemDTO> items = new ArrayList<>();
             for (SalesBillLineItem it : g.getItems()) {
                 BillLineItemDTO idto = new BillLineItemDTO();

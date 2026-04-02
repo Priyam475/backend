@@ -86,7 +86,6 @@ class SalesBillServiceImplTest {
         req.setBillingName("Buyer One");
         req.setBillDate(Instant.parse("2026-03-16T05:41:11.352Z").toString());
         req.setGrandTotal(BigDecimal.valueOf(1000));
-        req.setBuyerCoolie(BigDecimal.valueOf(50));
         req.setOutboundFreight(BigDecimal.valueOf(75));
 
         BillLineItemDTO item = new BillLineItemDTO();

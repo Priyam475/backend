@@ -86,27 +86,11 @@ public class SalesBill implements Serializable {
     private Instant billDate;
 
     @NotNull
-    @Column(name = "buyer_coolie", precision = 15, scale = 2, nullable = false)
-    private BigDecimal buyerCoolie = BigDecimal.ZERO;
-
-    @NotNull
     @Column(name = "outbound_freight", precision = 15, scale = 2, nullable = false)
     private BigDecimal outboundFreight = BigDecimal.ZERO;
 
     @Column(name = "outbound_vehicle", length = 50)
     private String outboundVehicle;
-
-    @NotNull
-    @Column(name = "discount", precision = 15, scale = 2, nullable = false)
-    private BigDecimal discount = BigDecimal.ZERO;
-
-    @NotNull
-    @Column(name = "discount_type", nullable = false, length = 10)
-    private String discountType = "AMOUNT";
-
-    @NotNull
-    @Column(name = "manual_round_off", precision = 15, scale = 2, nullable = false)
-    private BigDecimal manualRoundOff = BigDecimal.ZERO;
 
     @NotNull
     @Column(name = "token_advance", precision = 15, scale = 2, nullable = false)
@@ -188,18 +172,10 @@ public class SalesBill implements Serializable {
     public void setBillingName(String billingName) { this.billingName = billingName; }
     public Instant getBillDate() { return billDate; }
     public void setBillDate(Instant billDate) { this.billDate = billDate; }
-    public BigDecimal getBuyerCoolie() { return buyerCoolie; }
-    public void setBuyerCoolie(BigDecimal buyerCoolie) { this.buyerCoolie = buyerCoolie; }
     public BigDecimal getOutboundFreight() { return outboundFreight; }
     public void setOutboundFreight(BigDecimal outboundFreight) { this.outboundFreight = outboundFreight; }
     public String getOutboundVehicle() { return outboundVehicle; }
     public void setOutboundVehicle(String outboundVehicle) { this.outboundVehicle = outboundVehicle; }
-    public BigDecimal getDiscount() { return discount; }
-    public void setDiscount(BigDecimal discount) { this.discount = discount; }
-    public String getDiscountType() { return discountType; }
-    public void setDiscountType(String discountType) { this.discountType = discountType; }
-    public BigDecimal getManualRoundOff() { return manualRoundOff; }
-    public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
     public BigDecimal getTokenAdvance() { return tokenAdvance; }
     public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
     public BigDecimal getGrandTotal() { return grandTotal; }

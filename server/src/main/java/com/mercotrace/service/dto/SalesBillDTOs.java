@@ -75,6 +75,13 @@ public final class SalesBillDTOs {
         private String hsnCode;
         private BigDecimal commissionPercent;
         private BigDecimal userFeePercent;
+        private BigDecimal coolieRate;
+        private BigDecimal coolieAmount;
+        private BigDecimal weighmanChargeRate;
+        private BigDecimal weighmanChargeAmount;
+        private BigDecimal discount;
+        private String discountType; // PERCENT | AMOUNT
+        private BigDecimal manualRoundOff;
         @Valid
         private List<BillLineItemDTO> items = new ArrayList<>();
         private BigDecimal subtotal;
@@ -92,6 +99,20 @@ public final class SalesBillDTOs {
         public void setCommissionPercent(BigDecimal commissionPercent) { this.commissionPercent = commissionPercent; }
         public BigDecimal getUserFeePercent() { return userFeePercent; }
         public void setUserFeePercent(BigDecimal userFeePercent) { this.userFeePercent = userFeePercent; }
+        public BigDecimal getCoolieRate() { return coolieRate; }
+        public void setCoolieRate(BigDecimal coolieRate) { this.coolieRate = coolieRate; }
+        public BigDecimal getCoolieAmount() { return coolieAmount; }
+        public void setCoolieAmount(BigDecimal coolieAmount) { this.coolieAmount = coolieAmount; }
+        public BigDecimal getWeighmanChargeRate() { return weighmanChargeRate; }
+        public void setWeighmanChargeRate(BigDecimal weighmanChargeRate) { this.weighmanChargeRate = weighmanChargeRate; }
+        public BigDecimal getWeighmanChargeAmount() { return weighmanChargeAmount; }
+        public void setWeighmanChargeAmount(BigDecimal weighmanChargeAmount) { this.weighmanChargeAmount = weighmanChargeAmount; }
+        public BigDecimal getDiscount() { return discount; }
+        public void setDiscount(BigDecimal discount) { this.discount = discount; }
+        public String getDiscountType() { return discountType; }
+        public void setDiscountType(String discountType) { this.discountType = discountType; }
+        public BigDecimal getManualRoundOff() { return manualRoundOff; }
+        public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
         public List<BillLineItemDTO> getItems() { return items; }
         public void setItems(List<BillLineItemDTO> items) { this.items = items != null ? items : new ArrayList<>(); }
         public BigDecimal getSubtotal() { return subtotal; }
@@ -138,13 +159,9 @@ public final class SalesBillDTOs {
         private String billDate; // ISO-8601
         @Valid
         private List<CommodityGroupDTO> commodityGroups = new ArrayList<>();
-        private BigDecimal buyerCoolie;
         private BigDecimal outboundFreight;
         private String outboundVehicle;
-        private BigDecimal discount;
-        private String discountType; // PERCENT | AMOUNT
         private BigDecimal tokenAdvance;
-        private BigDecimal manualRoundOff;
         private BigDecimal grandTotal;
         private String brokerageType; // PERCENT | AMOUNT
         private BigDecimal brokerageValue;
@@ -184,20 +201,12 @@ public final class SalesBillDTOs {
         public void setBillDate(String billDate) { this.billDate = billDate; }
         public List<CommodityGroupDTO> getCommodityGroups() { return commodityGroups; }
         public void setCommodityGroups(List<CommodityGroupDTO> commodityGroups) { this.commodityGroups = commodityGroups != null ? commodityGroups : new ArrayList<>(); }
-        public BigDecimal getBuyerCoolie() { return buyerCoolie; }
-        public void setBuyerCoolie(BigDecimal buyerCoolie) { this.buyerCoolie = buyerCoolie; }
         public BigDecimal getOutboundFreight() { return outboundFreight; }
         public void setOutboundFreight(BigDecimal outboundFreight) { this.outboundFreight = outboundFreight; }
         public String getOutboundVehicle() { return outboundVehicle; }
         public void setOutboundVehicle(String outboundVehicle) { this.outboundVehicle = outboundVehicle; }
-        public BigDecimal getDiscount() { return discount; }
-        public void setDiscount(BigDecimal discount) { this.discount = discount; }
-        public String getDiscountType() { return discountType; }
-        public void setDiscountType(String discountType) { this.discountType = discountType; }
         public BigDecimal getTokenAdvance() { return tokenAdvance; }
         public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
-        public BigDecimal getManualRoundOff() { return manualRoundOff; }
-        public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
         public BigDecimal getGrandTotal() { return grandTotal; }
         public void setGrandTotal(BigDecimal grandTotal) { this.grandTotal = grandTotal; }
         public String getBrokerageType() { return brokerageType; }
@@ -245,15 +254,10 @@ public final class SalesBillDTOs {
         @Valid
         @NotEmpty(message = "at least one commodity group required")
         private List<CommodityGroupDTO> commodityGroups = new ArrayList<>();
-        private BigDecimal buyerCoolie = BigDecimal.ZERO;
         private BigDecimal outboundFreight = BigDecimal.ZERO;
         @Size(max = 50)
         private String outboundVehicle;
-        private BigDecimal discount = BigDecimal.ZERO;
-        @Pattern(regexp = "PERCENT|AMOUNT", message = "discountType must be PERCENT or AMOUNT")
-        private String discountType = "AMOUNT";
         private BigDecimal tokenAdvance = BigDecimal.ZERO;
-        private BigDecimal manualRoundOff = BigDecimal.ZERO;
         @NotNull(message = "grandTotal is required")
         private BigDecimal grandTotal;
         @Pattern(regexp = "PERCENT|AMOUNT", message = "brokerageType must be PERCENT or AMOUNT")
@@ -294,20 +298,12 @@ public final class SalesBillDTOs {
         public void setBillDate(String billDate) { this.billDate = billDate; }
         public List<CommodityGroupDTO> getCommodityGroups() { return commodityGroups; }
         public void setCommodityGroups(List<CommodityGroupDTO> commodityGroups) { this.commodityGroups = commodityGroups != null ? commodityGroups : new ArrayList<>(); }
-        public BigDecimal getBuyerCoolie() { return buyerCoolie; }
-        public void setBuyerCoolie(BigDecimal buyerCoolie) { this.buyerCoolie = buyerCoolie; }
         public BigDecimal getOutboundFreight() { return outboundFreight; }
         public void setOutboundFreight(BigDecimal outboundFreight) { this.outboundFreight = outboundFreight; }
         public String getOutboundVehicle() { return outboundVehicle; }
         public void setOutboundVehicle(String outboundVehicle) { this.outboundVehicle = outboundVehicle; }
-        public BigDecimal getDiscount() { return discount; }
-        public void setDiscount(BigDecimal discount) { this.discount = discount; }
-        public String getDiscountType() { return discountType; }
-        public void setDiscountType(String discountType) { this.discountType = discountType; }
         public BigDecimal getTokenAdvance() { return tokenAdvance; }
         public void setTokenAdvance(BigDecimal tokenAdvance) { this.tokenAdvance = tokenAdvance; }
-        public BigDecimal getManualRoundOff() { return manualRoundOff; }
-        public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
         public BigDecimal getGrandTotal() { return grandTotal; }
         public void setGrandTotal(BigDecimal grandTotal) { this.grandTotal = grandTotal; }
         public String getBrokerageType() { return brokerageType; }
