@@ -470,6 +470,13 @@ const BillingPage = () => {
   const [addBidExtraAmount, setAddBidExtraAmount] = useState('0');
   const [addBidTokenAdvance, setAddBidTokenAdvance] = useState('0');
   const [addBidSaving, setAddBidSaving] = useState(false);
+  const [searchBidInput, setSearchBidInput] = useState('');
+  const [searchBidSourceBuyer, setSearchBidSourceBuyer] = useState<BuyerPurchase | null>(null);
+  const [searchBidDialogOpen, setSearchBidDialogOpen] = useState(false);
+  const [searchBidSelectedKeys, setSearchBidSelectedKeys] = useState<string[]>([]);
+  const [showSearchBidBuyerSuggestions, setShowSearchBidBuyerSuggestions] = useState(false);
+  const searchBidBuyerSelectRef = useRef<HTMLDivElement | null>(null);
+  const searchBidInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     commodityApi.list().then(setCommodities);
@@ -603,6 +610,12 @@ const BillingPage = () => {
       if (k === 'x') setBillingMainTab('create');
       if (k === 'y') setBillingMainTab('progress');
       if (k === 'z') setBillingMainTab('saved');
+      if (k === 'l') {
+        e.preventDefault();
+        if (billingMainTab === 'create' && bill) {
+          searchBidInputRef.current?.focus();
+        }
+      }
 
       if (!bill || showPrint) return;
       const isUpdate = bill.billId && isBackendBillId(bill.billId);
@@ -1445,6 +1458,84 @@ const BillingPage = () => {
     weighingSessions,
   ]);
 
+  const openSearchBidDialogForBuyer = useCallback((picked: BuyerPurchase) => {
+    setSearchBidSourceBuyer(picked);
+    setSearchBidInput(picked.buyerMark || picked.buyerName);
+    setSearchBidSelectedKeys([]);
+    setShowSearchBidBuyerSuggestions(false);
+    setSearchBidDialogOpen(true);
+  }, []);
+
+  const toggleSearchBidSelection = useCallback((entry: Pick<BillEntry, 'bidNumber' | 'lotId'>) => {
+    const key = getBidSelectionKey(entry);
+    setSearchBidSelectedKeys(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
+  }, []);
+
+  const addSearchedBidsToCurrentBill = useCallback(() => {
+    if (!bill || !selectedBuyer || !searchBidSourceBuyer) return;
+    if (searchBidSelectedKeys.length === 0) {
+      toast.error('Select at least one lot');
+      return;
+    }
+    const selectedEntries = searchBidSourceBuyer.entries.filter(e => searchBidSelectedKeys.includes(getBidSelectionKey(e)));
+    if (selectedEntries.length === 0) {
+      toast.error('No selected lots available');
+      return;
+    }
+    const existingKeys = new Set(selectedBuyer.entries.map(e => getBidSelectionKey(e)));
+    const toAdd = selectedEntries.filter(e => !existingKeys.has(getBidSelectionKey(e)));
+    if (toAdd.length === 0) {
+      toast.error('Selected lots already exist in current bill');
+      return;
+    }
+    const mergedBuyer: BuyerPurchase = {
+      ...selectedBuyer,
+      entries: [...selectedBuyer.entries, ...toAdd],
+      tokenAdvanceTotal:
+        (selectedBuyer.tokenAdvanceTotal || 0) + toAdd.reduce((s, e) => s + (Number(e.tokenAdvance) || 0), 0),
+    };
+    setBuyers(prev =>
+      prev.map(b =>
+        (b.buyerMark || '').toLowerCase() === (selectedBuyer.buyerMark || '').toLowerCase()
+        && (b.buyerName || '').toLowerCase() === (selectedBuyer.buyerName || '').toLowerCase()
+          ? mergedBuyer
+          : b,
+      ),
+    );
+    generateBill(mergedBuyer);
+    setSearchBidDialogOpen(false);
+    setSearchBidSelectedKeys([]);
+    toast.success(`${toAdd.length} lot(s) added into current bill`);
+  }, [bill, generateBill, searchBidSelectedKeys, searchBidSourceBuyer, selectedBuyer]);
+
+  const searchBidBuyerOptions = useMemo(() => {
+    if (!bill) return [];
+    const q = searchBidInput.trim().toLowerCase();
+    const isSameBuyer = (b: BuyerPurchase) =>
+      (b.buyerMark || '').toLowerCase() === (bill.buyerMark || '').toLowerCase()
+      && (b.buyerName || '').toLowerCase() === (bill.buyerName || '').toLowerCase();
+    const candidates = buyers.filter(b => !isSameBuyer(b));
+    if (!q) return candidates.slice(0, 12);
+    return candidates
+      .filter(
+        b =>
+          (b.buyerMark || '').toLowerCase().includes(q)
+          || (b.buyerName || '').toLowerCase().includes(q),
+      )
+      .slice(0, 12);
+  }, [bill, buyers, searchBidInput]);
+
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      if (!searchBidBuyerSelectRef.current) return;
+      if (!searchBidBuyerSelectRef.current.contains(e.target as Node)) {
+        setShowSearchBidBuyerSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, []);
+
   // Add a bid from another buyer into the current bill (cross-buyer aggregation).
 
   // Update numeric fields on a line item (quantity, weight, bid rate, brokerage, other charges, token)
@@ -2045,6 +2136,72 @@ const BillingPage = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog
+        open={searchBidDialogOpen}
+        onOpenChange={open => {
+          setSearchBidDialogOpen(open);
+          if (!open) {
+            setSearchBidSelectedKeys([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Search Bid - {searchBidSourceBuyer ? `${searchBidSourceBuyer.buyerName} (${searchBidSourceBuyer.buyerMark})` : 'Buyer'}
+            </DialogTitle>
+          </DialogHeader>
+          {!searchBidSourceBuyer || searchBidSourceBuyer.entries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No buyer lots found.</p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto space-y-2">
+              <div className="grid grid-cols-[1.6rem_1.8fr_0.9fr_1fr_1fr] gap-2 px-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                <span />
+                <span>Item</span>
+                <span>Quantity</span>
+                <span>Base Rate</span>
+                <span>Extra Rate</span>
+              </div>
+              {searchBidSourceBuyer.entries.map(entry => {
+                const checked = searchBidSelectedKeys.includes(getBidSelectionKey(entry));
+                return (
+                  <button
+                    key={`${entry.bidNumber}-${entry.lotId}`}
+                    type="button"
+                    onClick={() => toggleSearchBidSelection(entry)}
+                    className={cn(
+                      'w-full text-left rounded-lg border p-2.5 transition-all',
+                      checked ? 'border-primary/50 bg-primary/10' : 'border-border/50 bg-background hover:bg-muted/40',
+                    )}
+                  >
+                    <div className="grid grid-cols-[1.6rem_1.8fr_0.9fr_1fr_1fr] gap-2 items-start">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onClick={e => e.stopPropagation()}
+                        onChange={() => toggleSearchBidSelection(entry)}
+                        className="mt-0.5 h-4 w-4 rounded border-border"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">{formatLotIdentifierForBillEntry(entry)}</p>
+                      </div>
+                      <p className="text-xs">{entry.quantity}</p>
+                      <p className="text-xs">{Number(entry.rate || 0)}</p>
+                      <p className="text-xs">{Number(entry.presetApplied || 0)}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSearchBidDialogOpen(false)}>Cancel</Button>
+            <Button onClick={addSearchedBidsToCurrentBill} disabled={searchBidSelectedKeys.length === 0}>
+              Add Selected ({searchBidSelectedKeys.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AnimatePresence>
         {contactSheetOpen && (
@@ -2374,6 +2531,40 @@ const BillingPage = () => {
                   </div>
                 </div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <div ref={searchBidBuyerSelectRef} className="relative w-44">
+                <Input
+                  ref={searchBidInputRef}
+                  value={searchBidInput}
+                  onFocus={() => setShowSearchBidBuyerSuggestions(true)}
+                  onChange={e => {
+                    setSearchBidInput(e.target.value);
+                    setShowSearchBidBuyerSuggestions(true);
+                  }}
+                  aria-label="Search Bid"
+                  title={`Search Bid${tabHint('Alt L')}`}
+                  placeholder="Search Bid"
+                  className="h-9 rounded-xl text-xs"
+                />
+                {showSearchBidBuyerSuggestions && (
+                  <div className="absolute z-[95] top-full mt-1 w-full max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
+                    {searchBidBuyerOptions.length === 0 ? (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
+                    ) : (
+                      searchBidBuyerOptions.map(b => (
+                        <button
+                          key={`${b.buyerMark}-${b.buyerName}`}
+                          type="button"
+                          onClick={() => openSearchBidDialogForBuyer(b)}
+                          className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"
+                        >
+                          <p className="text-xs font-semibold">{b.buyerMark} - {b.buyerName}</p>
+                          <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
               <Button
                 type="button"
                 variant="outline"
