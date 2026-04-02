@@ -1903,9 +1903,7 @@ const ArrivalsPage = () => {
     // panel to the end, also nudge the outer "New Arrival" panel scroller to
     // reveal the currently focused input.
     const panel = newArrivalPanelScrollRef.current;
-    const vp = window.visualViewport;
-    const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
-    if (!panel || !isKeyboardLikelyOpen) return;
+    if (!panel) return;
 
     const tryBringActiveIntoView = () => {
       const active = document.activeElement;
@@ -1914,12 +1912,18 @@ const ArrivalsPage = () => {
       active.scrollIntoView({ block: 'center' });
     };
 
+    // Retry at multiple intervals. The keyboard may not be open immediately,
+    // but will open shortly after focus. Longer delays ensure we catch both
+    // the initial scroll and the keyboard appearance timing.
     requestAnimationFrame(tryBringActiveIntoView);
     window.setTimeout(tryBringActiveIntoView, 120);
     window.setTimeout(tryBringActiveIntoView, 280);
     window.setTimeout(tryBringActiveIntoView, 520);
     window.setTimeout(tryBringActiveIntoView, 900);
     window.setTimeout(tryBringActiveIntoView, 1300);
+    window.setTimeout(tryBringActiveIntoView, 2000);
+    window.setTimeout(tryBringActiveIntoView, 2500);
+    window.setTimeout(tryBringActiveIntoView, 3500);
   }, [sellers, sellerExpanded, scrollSellerLotsToLatest]);
 
   // Scroll + focus the seller card input created by the “Add Seller” button.
@@ -1936,13 +1940,13 @@ const ArrivalsPage = () => {
       input.scrollIntoView({ block: 'center', behavior: 'auto' });
       input.focus();
 
-      // Mobile keyboard: when likely open, keep nudging the active element into
-      // view. This covers the +Add Seller path where focus can land before the
-      // sheet's scroll container is fully settled.
+      // Mobile keyboard: keep nudging the active element into view after focus.
+      // The keyboard may not be open immediately when focus is applied, but will
+      // open shortly after. Continue retrying to handle both the initial scroll
+      // and the keyboard appearance timing. KeyboardAvoidance will also help, but
+      // these retries ensure the scroll happens even if timing is off.
       const panel = newArrivalPanelScrollRef.current;
-      const vp = window.visualViewport;
-      const isKeyboardLikelyOpen = !!vp && (window.innerHeight - vp.height) > 50;
-      if (!panel || !isKeyboardLikelyOpen) return;
+      if (!panel) return;
 
       const tryBringActiveIntoView = () => {
         const active = document.activeElement;
@@ -1951,6 +1955,9 @@ const ArrivalsPage = () => {
         active.scrollIntoView({ block: 'center' });
       };
 
+      // Retry at multiple intervals to cover both pre-keyboard and post-keyboard
+      // scroll needs. Longer delays (up to 3500ms) ensure we catch the keyboard
+      // opening and any layout shifts that follow.
       requestAnimationFrame(tryBringActiveIntoView);
       window.setTimeout(tryBringActiveIntoView, 120);
       window.setTimeout(tryBringActiveIntoView, 280);
@@ -1959,6 +1966,7 @@ const ArrivalsPage = () => {
       window.setTimeout(tryBringActiveIntoView, 1300);
       window.setTimeout(tryBringActiveIntoView, 2000);
       window.setTimeout(tryBringActiveIntoView, 2500);
+      window.setTimeout(tryBringActiveIntoView, 3500);
     };
 
     // The newly added seller card can mount a little later on mobile due to
