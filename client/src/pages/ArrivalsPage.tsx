@@ -2975,7 +2975,7 @@ const ArrivalsPage = () => {
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-3 min-w-0 flex-1 sm:min-w-[12rem]">
                             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-base sm:text-lg font-extrabold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
+                              <span className="text-white text-xl sm:text-2xl font-extrabold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
@@ -3874,7 +3874,7 @@ const ArrivalsPage = () => {
                         <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/20 dark:to-teal-950/20 border-b border-border/30 min-w-0">
                           <div className="flex items-center gap-2 min-w-0 flex-1 sm:min-w-[12rem]">
                             <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-[10px] font-bold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
+                              <span className="text-white text-lg sm:text-xl font-extrabold tabular-nums leading-none">{sellerSerialLabel ?? 'N/A'}</span>
                             </div>
                             <div className="min-w-0 flex-1 w-0">
                               {seller.contact_id !== '' ? (
