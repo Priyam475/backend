@@ -959,10 +959,35 @@ const ArrivalsPage = () => {
       const rows = Array.from(el.querySelectorAll('tbody tr')) as HTMLElement[];
       if (rows.length === 0) return;
 
-      const anchorRow = rows[Math.max(0, rows.length - 3)];
-      anchorRow?.scrollIntoView({ block: 'start', inline: 'nearest' });
-      const lastRow = rows[rows.length - 1];
-      lastRow?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const formPanel = el.closest('.overflow-hidden')?.previousElementSibling;
+      const addLotFormDiv = formPanel?.querySelector('[key="add-lot-form"]') || 
+                            document.querySelector(`[class*="overflow-hidden"] .bg-muted\\/10`);
+
+      const panel = newArrivalPanelScrollRef.current;
+      if (!panel || !vp) return;
+
+      const availableHeight = vp.height;
+      const formHeight = addLotFormDiv?.getBoundingClientRect().height || 120;
+      const rowHeight = rows[0]?.getBoundingClientRect().height || 40;
+      const headerHeight = el.querySelector('thead')?.getBoundingClientRect().height || 40;
+      const threeRowsHeight = rowHeight * 3 + headerHeight;
+
+      const targetScrollTop = Math.max(0, el.scrollHeight - threeRowsHeight);
+      el.scrollTop = targetScrollTop;
+
+      requestAnimationFrame(() => {
+        if (addLotFormDiv instanceof HTMLElement) {
+          addLotFormDiv.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          
+          window.setTimeout(() => {
+            const formRect = addLotFormDiv.getBoundingClientRect();
+            const adjustment = Math.min(0, availableHeight - (formRect.bottom + threeRowsHeight + 20));
+            if (adjustment < 0) {
+              panel.scrollBy({ top: -adjustment, behavior: 'smooth' });
+            }
+          }, 150);
+        }
+      });
     };
 
     tryEnsure(0);
@@ -1115,13 +1140,8 @@ const ArrivalsPage = () => {
     deducted_weight: parseFloat(deductedWeight) || 0,
     freight_method: freightMethod,
     freight_mode: freightMethod,
-    freight_rate: (() => {
-      const rate = parseFloat(freightRate) || 0;
-      if (freightMethod !== 'BY_WEIGHT') return rate;
-      const kgs = parseFloat(freightKgs) || 0;
-      if (kgs <= 0) return 0;
-      return rate / kgs;
-    })(),
+    freight_rate: parseFloat(freightRate) || 0,
+    freight_kgs: freightMethod === 'BY_WEIGHT' ? (parseFloat(freightKgs) || 1) : undefined,
     no_rental: noRental,
     advance_paid: parseFloat(advancePaid) || 0,
     broker_name: brokerName || undefined,
@@ -1166,6 +1186,7 @@ const ArrivalsPage = () => {
           deducted_weight: payload.deducted_weight,
           freight_method: payload.freight_method,
           freight_rate: payload.freight_rate,
+          freight_kgs: payload.freight_kgs,
           no_rental: payload.no_rental,
           advance_paid: payload.advance_paid,
           multi_seller: payload.is_multi_seller,
@@ -2111,7 +2132,7 @@ const ArrivalsPage = () => {
       setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
       setFreightMethod((detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT');
       setFreightRate(detail?.freightRate != null ? String(detail.freightRate) : '');
-      setFreightKgs('1');
+      setFreightKgs(detail?.freightKgs != null ? String(detail.freightKgs) : '1');
       setNoRental(Boolean(detail?.noRental));
       setAdvancePaid(detail?.advancePaid != null ? String(detail.advancePaid) : '');
       setGodown(detail?.godown ?? '');
@@ -2159,7 +2180,7 @@ const ArrivalsPage = () => {
         deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
         freightMethod: (detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT',
         freightRate: detail?.freightRate != null ? String(detail.freightRate) : '',
-        freightKgs: '1',
+        freightKgs: detail?.freightKgs != null ? String(detail.freightKgs) : '1',
         noRental: Boolean(detail?.noRental),
         advancePaid: detail?.advancePaid != null ? String(detail.advancePaid) : '',
         brokerName: detail?.brokerName ?? '',
@@ -2210,7 +2231,8 @@ const ArrivalsPage = () => {
         deducted_weight: deductedWeight ? parseFloat(deductedWeight) : undefined,
         freight_method: freightMethod,
         freight_mode: freightMethod,
-        freight_rate: base.freight_rate,
+        freight_rate: freightRate ? parseFloat(freightRate) : undefined,
+        freight_kgs: freightMethod === 'BY_WEIGHT' && freightKgs ? parseFloat(freightKgs) : undefined,
         no_rental: noRental,
         advance_paid: advancePaid ? parseFloat(advancePaid) : undefined,
         partially_completed: false,
@@ -3481,7 +3503,7 @@ const ArrivalsPage = () => {
                                 <p className="text-muted-foreground">Loading…</p>
                               ) : expandedDetail ? (
                                 <>
-                                  <FreightDetailsCard freightRate={expandedDetail.freightRate ?? 0} netWeight={expandedDetail.netWeight ?? 0} freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'} freightTotal={expandedDetail.freightTotal ?? 0} advancePaid={expandedDetail.advancePaid ?? 0} noRental={expandedDetail.noRental ?? false} />
+                                  <FreightDetailsCard freightRate={expandedDetail.freightRate ?? 0} freightKgs={expandedDetail.freightKgs} netWeight={expandedDetail.netWeight ?? 0} freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'} freightTotal={expandedDetail.freightTotal ?? 0} advancePaid={expandedDetail.advancePaid ?? 0} noRental={expandedDetail.noRental ?? false} />
                                   <SellerInfoCard
                                     sellers={expandedDetail.sellers.map(s => ({
                                       sellerName: s.sellerName,

@@ -81,4 +81,5 @@
     <include file="config/liquibase/changelog/20260325120000_vehicle_multi_seller.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260326120000_trader_approval_decision_at.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260326140000_trader_preset_enabled_global_presets.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260401120000_add_freight_kgs.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>
