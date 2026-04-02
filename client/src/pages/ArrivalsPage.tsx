@@ -607,19 +607,42 @@ function LotsScrollPanel({
               style={{
                 left: horizontalThumbMetrics.left,
                 width: horizontalThumbMetrics.width,
-                borderColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
-                backgroundColor: horizontalThumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+                borderColor: horizontalThumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
+                backgroundColor: horizontalThumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
                 boxShadow:
                   horizontalThumbPressed
-                    ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 22px hsl(var(--foreground) / 0.24)'
-                    : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 14px hsl(var(--foreground) / 0.16)',
+                    ? 'inset 0 0 0 1px hsl(0 0% 100% / 0.4), 0 0 26px hsl(229 100% 69% / 0.35)'
+                    : 'inset 0 0 0 1px hsl(0 0% 100% / 0.3), 0 0 18px hsl(229 100% 69% / 0.25)',
               }}
               onPointerDown={onHorizontalThumbPointerDown}
               role="slider"
               aria-label="Drag to scroll lots horizontally"
               aria-valuemin={0}
               aria-valuemax={1}
-            />
+            >
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5">
+                <span
+                  className="block h-[8px] w-[8px] -rotate-45 border-t-2 border-l-2"
+                  style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                />
+                <span
+                  className="grid h-[10px] w-[10px] place-items-center rounded-full"
+                  style={{ backgroundColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                >
+                  <span
+                    className="block h-[2px] w-[2px] rounded-full"
+                    style={{ backgroundColor: 'hsl(229 100% 69%)' }}
+                  />
+                </span>
+                <span
+                  className="block h-[8px] w-[8px] rotate-[135deg] border-t-2 border-l-2"
+                  style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                  aria-hidden
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -764,19 +787,42 @@ function AddLotHorizontalScrollPanel({ children }: { children: ReactNode }) {
             style={{
               left: thumbMetrics.left,
               width: thumbMetrics.width,
-              borderColor: thumbPressed ? 'hsl(var(--foreground) / 0.75)' : 'hsl(var(--foreground) / 0.45)',
-              backgroundColor: thumbPressed ? 'hsl(var(--foreground) / 0.22)' : 'hsl(var(--foreground) / 0.14)',
+              borderColor: thumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
+              backgroundColor: thumbPressed ? 'hsl(229 76% 61%)' : 'hsl(229 100% 69%)',
               boxShadow:
                 thumbPressed
-                  ? 'inset 0 0 0 1px hsl(var(--foreground) / 0.75), 0 0 22px hsl(var(--foreground) / 0.24)'
-                  : 'inset 0 0 0 1px hsl(var(--foreground) / 0.55), 0 0 14px hsl(var(--foreground) / 0.16)',
+                  ? 'inset 0 0 0 1px hsl(0 0% 100% / 0.4), 0 0 26px hsl(229 100% 69% / 0.35)'
+                  : 'inset 0 0 0 1px hsl(0 0% 100% / 0.3), 0 0 18px hsl(229 100% 69% / 0.25)',
             }}
             onPointerDown={onThumbPointerDown}
             role="slider"
             aria-label="Drag to scroll new lot fields horizontally"
             aria-valuemin={0}
             aria-valuemax={1}
-          />
+          >
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5">
+              <span
+                className="block h-[8px] w-[8px] -rotate-45 border-t-2 border-l-2"
+                style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                aria-hidden
+              />
+              <span
+                className="grid h-[10px] w-[10px] place-items-center rounded-full"
+                style={{ backgroundColor: 'hsl(0 0% 100% / 0.92)' }}
+                aria-hidden
+              >
+                <span
+                  className="block h-[2px] w-[2px] rounded-full"
+                  style={{ backgroundColor: 'hsl(229 100% 69%)' }}
+                />
+              </span>
+              <span
+                className="block h-[8px] w-[8px] rotate-[135deg] border-t-2 border-l-2"
+                style={{ borderColor: 'hsl(0 0% 100% / 0.92)' }}
+                aria-hidden
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>
