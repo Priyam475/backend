@@ -1052,6 +1052,36 @@ const ArrivalsPage = () => {
     return String(sellerSerialNumber);
   }, []);
 
+  const mapSellerInfoRows = useCallback((detailSellers: ArrivalFullDetail['sellers']) => {
+    return detailSellers
+      .map((seller, index) => ({ seller, index }))
+      .sort((a, b) => {
+        const aSerial =
+          a.seller.sellerSerialNumber != null && a.seller.sellerSerialNumber > 0
+            ? a.seller.sellerSerialNumber
+            : Number.MAX_SAFE_INTEGER;
+        const bSerial =
+          b.seller.sellerSerialNumber != null && b.seller.sellerSerialNumber > 0
+            ? b.seller.sellerSerialNumber
+            : Number.MAX_SAFE_INTEGER;
+        if (aSerial !== bSerial) return aSerial - bSerial;
+        return a.index - b.index;
+      })
+      .map(({ seller }) => ({
+        sellerSerialNumber: seller.sellerSerialNumber,
+        sellerName: seller.sellerName,
+        sellerMark: seller.sellerMark,
+        lots: seller.lots.map((lot) => ({
+          id: lot.id,
+          lotName: lot.lotName,
+          commodityName: lot.commodityName,
+          bagCount: lot.bagCount,
+          brokerTag: lot.brokerTag,
+          variant: lot.variant,
+        })),
+      }));
+  }, []);
+
   const isArrivalDirty = useMemo(() => {
     if (!isArrivalPanelOpen) return false;
     if (editLoading) return false;
@@ -2572,18 +2602,7 @@ const ArrivalsPage = () => {
                                             </div>
                                             <div className="space-y-3">
                                               <SellerInfoCard
-                                                sellers={expandedDetail.sellers.map(s => ({
-                                                  sellerName: s.sellerName,
-                                                  sellerMark: s.sellerMark,
-                                                  lots: s.lots.map(l => ({
-                                                    id: l.id,
-                                                    lotName: l.lotName,
-                                                    commodityName: l.commodityName,
-                                                    bagCount: l.bagCount,
-                                                    brokerTag: l.brokerTag,
-                                                    variant: l.variant,
-                                                  })),
-                                                }))}
+                                                sellers={mapSellerInfoRows(expandedDetail.sellers)}
                                                 hidePrint
                                                 onRefresh={() => loadExpandedDetail(expandedDetail.vehicleId)}
                                               />
@@ -3513,18 +3532,7 @@ const ArrivalsPage = () => {
                                 <>
                                   <FreightDetailsCard freightRate={expandedDetail.freightRate ?? 0} freightKgs={expandedDetail.freightKgs} netWeight={expandedDetail.netWeight ?? 0} freightMethod={expandedDetail.freightMethod ?? 'BY_WEIGHT'} freightTotal={expandedDetail.freightTotal ?? 0} advancePaid={expandedDetail.advancePaid ?? 0} noRental={expandedDetail.noRental ?? false} />
                                   <SellerInfoCard
-                                    sellers={expandedDetail.sellers.map(s => ({
-                                      sellerName: s.sellerName,
-                                      sellerMark: s.sellerMark,
-                                      lots: s.lots.map(l => ({
-                                        id: l.id,
-                                        lotName: l.lotName,
-                                        commodityName: l.commodityName,
-                                        bagCount: l.bagCount,
-                                        brokerTag: l.brokerTag,
-                                        variant: l.variant,
-                                      })),
-                                    }))}
+                                    sellers={mapSellerInfoRows(expandedDetail.sellers)}
                                     hidePrint
                                   />
                                   <div className="flex gap-2 pt-1">
