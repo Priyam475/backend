@@ -277,6 +277,7 @@ const AuctionsPage = () => {
   const [mobileKeyboardEnabled, setMobileKeyboardEnabled] = useState(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
+  const userClearedRateRef = useRef(false);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -895,6 +896,7 @@ const AuctionsPage = () => {
       lastScribbleSegmentRef.current = '';
       setScribbleMark('');
       setAddBidRetryAllowIncrease(false);
+      userClearedRateRef.current = false;
     } catch (err: unknown) {
       const isConflict = err && typeof err === 'object' && (err as { isConflict?: boolean }).isConflict === true;
       if (isConflict) {
@@ -942,6 +944,7 @@ const AuctionsPage = () => {
         lastScribbleSegmentRef.current = '';
         setScribbleMark('');
         setSelectedBuyer(null);
+        userClearedRateRef.current = false;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to merge bid');
       }
@@ -1048,6 +1051,7 @@ const AuctionsPage = () => {
     setScribbleMark('');
     setRate('');
     setQty('');
+    userClearedRateRef.current = false;
   };
 
   // Unified Add Bid: use selected contact (name + mark) or scribble mark only — fast path for live auction
@@ -1100,11 +1104,15 @@ const AuctionsPage = () => {
     setScribbleMark('');
     setRate('');
     setQty('');
+    userClearedRateRef.current = false;
   };
 
   const updateActiveNumpadField = (next: string) => {
     if (activeNumpadField === 'rate') {
       setRate(next);
+      if (next.trim() !== '') {
+        userClearedRateRef.current = false;
+      }
       if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: next } : d));
     } else if (activeNumpadField === 'qty') {
       setQty(next);
@@ -1163,6 +1171,9 @@ const AuctionsPage = () => {
   };
 
   const handleNumpadClear = () => {
+    if (activeNumpadField === 'rate') {
+      userClearedRateRef.current = true;
+    }
     updateActiveNumpadField('');
   };
 
@@ -1453,6 +1464,7 @@ const AuctionsPage = () => {
       setEditBidDraft(null);
       setEditBidRetryAllowIncrease(false);
       editBidFormSnapshotRef.current = null;
+      userClearedRateRef.current = false;
       void loadTemporaryBuyerMarks();
       hapticNotification(NotificationType.Success);
     } catch (err: unknown) {
@@ -1499,6 +1511,7 @@ const AuctionsPage = () => {
       setEditBidDraft(null);
       setEditBidRetryAllowIncrease(false);
       editBidFormSnapshotRef.current = null;
+      userClearedRateRef.current = false;
       void loadTemporaryBuyerMarks();
       toast.success('Bid updated with lot increase allowed.');
       hapticNotification(NotificationType.Success);
@@ -1533,6 +1546,7 @@ const AuctionsPage = () => {
 
   useEffect(() => {
     if (editingBidId) return;
+    if (userClearedRateRef.current) return;
     if (rate.trim() !== '') return;
     if (previousBidRate <= 0) return;
     const displayRate = showPresetMargin ? previousBidRate + preset : previousBidRate;
@@ -1544,12 +1558,14 @@ const AuctionsPage = () => {
       if (checked) {
         if (previousBidRate > 0) {
           setRate(String(previousBidRate + preset));
+          userClearedRateRef.current = false;
         } else {
           setRate('');
         }
       } else {
         if (previousBidRate > 0) {
           setRate(String(previousBidRate));
+          userClearedRateRef.current = false;
         } else {
           setRate('');
         }
@@ -1579,6 +1595,7 @@ const AuctionsPage = () => {
     setRate('');
     setQty('');
     setLotNumberSearch('');
+    userClearedRateRef.current = false;
     setSessionLoading(true);
     const loadSession = source === 'self_sale'
       ? auctionApi.getOrStartSelfSaleSession(lot.selfSaleUnitId ?? lot.lot_id)
@@ -2455,6 +2472,9 @@ const AuctionsPage = () => {
                       onChange={(e) => {
                         const v = e.target.value;
                         setRate(v);
+                        if (v.trim() !== '') {
+                          userClearedRateRef.current = false;
+                        }
                         if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
                       }}
                       onFocus={(e) => {
@@ -2893,6 +2913,9 @@ const AuctionsPage = () => {
                 onChange={(e) => {
                   const v = e.target.value;
                   setRate(v);
+                  if (v.trim() !== '') {
+                    userClearedRateRef.current = false;
+                  }
                   if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
                 }}
                 onFocus={(e) => {
