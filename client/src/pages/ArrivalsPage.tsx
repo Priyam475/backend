@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, Fragment, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
 import BottomNav from '@/components/BottomNav';
 import {
   ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, ChevronRight, ChevronsUpDown, Trash2,
@@ -2014,7 +2015,20 @@ const ArrivalsPage = () => {
       pendingSellerFocusIdRef.current = null;
 
       input.scrollIntoView({ block: 'center', behavior: 'auto' });
-      input.focus();
+      
+      // Focus the input and ensure keyboard opens on mobile.
+      // On iOS, programmatic focus() alone may not trigger the keyboard
+      // when called asynchronously (via setTimeout/requestAnimationFrame).
+      input.focus({ preventScroll: false });
+      
+      // Additional trigger: simulate a click to ensure keyboard opens.
+      // This makes the browser treat it as a user-initiated action.
+      if (Capacitor.isNativePlatform()) {
+        // Use a microtask delay to ensure the input is fully rendered and focusable
+        requestAnimationFrame(() => {
+          input.click();
+        });
+      }
 
       // Mobile keyboard: keep nudging the active element into view after focus.
       // The keyboard may not be open immediately when focus is applied, but will
@@ -3087,6 +3101,7 @@ const ArrivalsPage = () => {
                                       ref={el => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
+                                      inputMode="text"
                                       className={cn(
                                         "h-11 sm:h-11 w-full min-w-0 rounded-lg text-sm sm:text-base",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
@@ -3975,6 +3990,7 @@ const ArrivalsPage = () => {
                                       ref={el => {
                                         sellerNameInputRefs.current[seller.seller_vehicle_id] = el;
                                       }}
+                                      inputMode="text"
                                       className={cn(
                                         "h-11 sm:h-10 w-full min-w-0 rounded-lg text-xs md:h-9",
                                         isSellerNameInvalid(seller) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20"
