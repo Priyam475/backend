@@ -24,6 +24,7 @@ import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
 import type { AuctionBidUpdateRequest, AuctionEntryDTO, AuctionResultDTO, LotSummaryDTO } from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
+import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
@@ -516,6 +517,7 @@ const BillingPage = () => {
   const buyerSelectRef = useRef<HTMLDivElement | null>(null);
   const summaryTableScrollRef = useRef<HTMLDivElement | null>(null);
   const summarySnapTimerRef = useRef<number | null>(null);
+  const latestVersionSnapshotRef = useRef<BillData | null>(null);
   const mobileCommodityCarouselRef = useRef<HTMLDivElement | null>(null);
   const mobileLotCarouselRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [resyncing, setResyncing] = useState(false);
@@ -621,6 +623,7 @@ const BillingPage = () => {
   const [showSearchBidBuyerSuggestions, setShowSearchBidBuyerSuggestions] = useState(false);
   const searchBidBuyerSelectRef = useRef<HTMLDivElement | null>(null);
   const searchBidInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingDeleteTarget, setPendingDeleteTarget] = useState<{ commIdx: number; itemIdx: number } | null>(null);
 
   useEffect(() => {
     commodityApi.list().then(setCommodities);
@@ -632,6 +635,16 @@ const BillingPage = () => {
       window.clearTimeout(summarySnapTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (!bill) {
+      latestVersionSnapshotRef.current = null;
+      return;
+    }
+    if (selectedPrintVersion === 'latest') {
+      latestVersionSnapshotRef.current = bill;
+    }
+  }, [bill, selectedPrintVersion]);
 
   useEffect(() => {
     weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
@@ -1930,6 +1943,10 @@ const BillingPage = () => {
     setBill(recalcGrandTotal(updated));
   };
 
+  const requestRemoveLineItem = (commIdx: number, itemIdx: number) => {
+    setPendingDeleteTarget({ commIdx, itemIdx });
+  };
+
   // Apply global brokerage/charges to all items
   const applyGlobalCharges = () => {
     if (!bill) return;
@@ -2435,6 +2452,30 @@ const BillingPage = () => {
 
   const tabHint = (code: string) => (isDesktop ? ` (${code})` : '');
 
+  const applySelectedVersion = useCallback((versionSel: 'latest' | number) => {
+    if (!bill) return;
+    if (versionSel === 'latest') {
+      const latestSource = latestVersionSnapshotRef.current ?? bill;
+      const normalizedLatest = normalizeBillFromApi(latestSource, fullConfigs, commodities) as BillData;
+      setBill(recalcGrandTotal(normalizedLatest));
+      return;
+    }
+    const versions = Array.isArray((bill as any).versions) ? (bill as any).versions : [];
+    const picked = versions.find((v: any) => Number(v?.version) === Number(versionSel));
+    const rawSnapshot = picked?.data;
+    if (!rawSnapshot || typeof rawSnapshot !== 'object') {
+      toast.error(`Version v${versionSel} data not available`);
+      return;
+    }
+    const mergedSnapshot = {
+      ...(rawSnapshot as any),
+      billId: bill.billId,
+      versions,
+    };
+    const normalizedVersion = normalizeBillFromApi(mergedSnapshot, fullConfigs, commodities) as BillData;
+    setBill(recalcGrandTotal(normalizedVersion));
+  }, [bill, fullConfigs, commodities, recalcGrandTotal]);
+
   return (
     <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", searchBidDialogOpen && "no-hover")}>
       {searchBidDialogOpen && (
@@ -2456,6 +2497,19 @@ const BillingPage = () => {
         }} />
       )}
       <UnsavedChangesDialog />
+      <ConfirmDeleteDialog
+        open={!!pendingDeleteTarget}
+        onOpenChange={open => {
+          if (!open) setPendingDeleteTarget(null);
+        }}
+        title="Remove lot from bill?"
+        description="This lot line will be removed from the current bill. You can add it again later if needed."
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (!pendingDeleteTarget) return;
+          removeLineItem(pendingDeleteTarget.commIdx, pendingDeleteTarget.itemIdx);
+        }}
+      />
 
       <Dialog open={!!restorePendingPhone} onOpenChange={open => { if (!open) setRestorePendingPhone(null); }}>
         <DialogContent className="max-w-sm">
@@ -3449,7 +3503,7 @@ const BillingPage = () => {
                                 >
                                   <button
                                     type="button"
-                                    onClick={() => removeLineItem(gi, ii)}
+                                    onClick={() => requestRemoveLineItem(gi, ii)}
                                     className="absolute top-1.5 right-1.5 lg:hidden inline-flex items-center justify-center rounded-md p-1.5 text-destructive hover:bg-destructive/10 active:bg-destructive/20"
                                     aria-label="Remove line item"
                                   >
@@ -3645,7 +3699,7 @@ const BillingPage = () => {
                                   <div className="hidden lg:col-span-1 lg:flex items-center justify-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => removeLineItem(gi, ii)}
+                                      onClick={() => requestRemoveLineItem(gi, ii)}
                                       className="inline-flex items-center justify-center rounded-lg p-2 lg:p-1.5 text-destructive hover:bg-destructive/10 active:bg-destructive/20"
                                       aria-label="Remove line item"
                                     >
@@ -4128,7 +4182,7 @@ const BillingPage = () => {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
               <div className="mt-1 space-y-2">
-                <div className="flex flex-wrap gap-2 justify-between items-center">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                   <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
                     <Button
                       type="button"
@@ -4166,30 +4220,40 @@ const BillingPage = () => {
                     </Button>
                   </div>
                   {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="flex w-full items-center gap-2 text-[10px] text-muted-foreground lg:w-auto lg:justify-end">
                       <span className="font-semibold">Version:</span>
-                      <select
+                      <Select
                         value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
-                        onChange={e => {
-                          const val = e.target.value;
+                        onValueChange={val => {
                           if (val === 'latest') {
                             setSelectedPrintVersion('latest');
+                            applySelectedVersion('latest');
+                            return;
+                          }
+                          const num = Number(val);
+                          const next = Number.isFinite(num) ? num : 'latest';
+                          setSelectedPrintVersion(next);
+                          if (next === 'latest') {
+                            applySelectedVersion('latest');
                           } else {
-                            const num = Number(val);
-                            setSelectedPrintVersion(Number.isFinite(num) ? num : 'latest');
+                            applySelectedVersion(next);
                           }
                         }}
-                        className="h-8 rounded-md border border-border bg-background px-2 text-[10px]"
                       >
-                        <option value="latest">Latest (current)</option>
-                        {(bill as any).versions.map((v: any) => (
-                          <option key={v.version} value={String(v.version)}>
-                            v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-8 min-w-0 flex-1 text-[10px] lg:w-auto lg:min-w-[14rem] lg:flex-none">
+                          <SelectValue placeholder="Latest (current)" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          <SelectItem value="latest">Latest (current)</SelectItem>
+                          {(bill as any).versions.map((v: any) => (
+                            <SelectItem key={v.version} value={String(v.version)}>
+                              v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       {selectedPrintVersion !== 'latest' && (
-                        <span className="text-[10px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
+                        <span className="hidden lg:inline text-[10px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
                       )}
                     </div>
                   )}
