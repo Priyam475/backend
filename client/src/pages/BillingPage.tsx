@@ -2398,7 +2398,25 @@ const BillingPage = () => {
   const tabHint = (code: string) => (isDesktop ? ` (${code})` : '');
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+    <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", searchBidDialogOpen && "no-hover")}>
+      {searchBidDialogOpen && (
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            .no-hover *:hover {
+              background-color: inherit !important;
+              box-shadow: none !important;
+              transform: none !important;
+              opacity: 1 !important;
+            }
+            .no-hover .dialog-content,
+            .no-hover .dialog-content *,
+            .no-hover [data-radix-dialog-content],
+            .no-hover [data-radix-dialog-content] * {
+              pointer-events: auto !important;
+            }
+          `
+        }} />
+      )}
       <UnsavedChangesDialog />
 
       <Dialog open={!!restorePendingPhone} onOpenChange={open => { if (!open) setRestorePendingPhone(null); }}>
@@ -2421,10 +2439,12 @@ const BillingPage = () => {
           setSearchBidDialogOpen(open);
           if (!open) {
             setSearchBidSelectedKeys([]);
+            setShowSearchBidBuyerSuggestions(false);
+            setShowBuyerSuggestions(false);
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg dialog-content">
           <DialogHeader>
             <DialogTitle>
               Search & Migrate Bid - {searchBidSourceBuyer ? `${searchBidSourceBuyer.buyerName} (${searchBidSourceBuyer.buyerMark})` : 'Buyer'}
@@ -2688,8 +2708,8 @@ const BillingPage = () => {
                 >
                   <ChevronDown className={cn('w-4 h-4 transition-transform', showBuyerSuggestions && 'rotate-180')} />
                 </button>
-                {showBuyerSuggestions && (
-                  <div className="absolute z-50 top-full mt-1 w-full max-h-56 overflow-y-auto rounded-xl border border-border bg-background shadow-lg">
+                {showBuyerSuggestions && !searchBidDialogOpen && (
+                  <div className={cn("absolute z-50 top-full mt-1 w-full max-h-56 overflow-y-auto rounded-xl border border-border bg-background shadow-lg", searchBidDialogOpen && "z-[20]")}>
                     {filteredBuyerOptions.length === 0 ? (
                       <p className="px-3 py-2 text-xs text-muted-foreground">No buyers match your search.</p>
                     ) : (
@@ -2794,7 +2814,7 @@ const BillingPage = () => {
 
         {billingMainTab === 'create' && bill && selectedBuyer && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-            <div className="glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible">
+            <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-start gap-2 min-w-0">
                   <Receipt className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" aria-hidden />
@@ -2855,7 +2875,7 @@ const BillingPage = () => {
               </div>
             </div>
 
-            <div className="glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible relative z-[80]">
+            <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block">Search & Migrate Bid</Label>
@@ -2873,8 +2893,8 @@ const BillingPage = () => {
                       placeholder="Search & Migrate Bid"
                       className="h-9 rounded-xl text-xs"
                     />
-                    {showSearchBidBuyerSuggestions && (
-                      <div className="absolute z-[95] top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
+                    {showSearchBidBuyerSuggestions && !searchBidDialogOpen && (
+                      <div className={cn("absolute top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[40]")}>
                         {searchBidBuyerOptions.length === 0 ? (
                           <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
                         ) : (
@@ -3014,7 +3034,7 @@ const BillingPage = () => {
               )}
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
-            <div className="glass-card rounded-2xl p-3 space-y-2 relative z-[70] overflow-visible">
+            <div className={cn("glass-card rounded-2xl p-3 space-y-2 relative overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
               <div className="flex flex-wrap items-center gap-2">
                 <RadioGroup
                   value={replaceTarget}
@@ -3053,8 +3073,8 @@ const BillingPage = () => {
                     className={cn('h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium', replaceErrors.mark && 'border-destructive')}
                     disabled={!bill}
                   />
-                  {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && (
-                    <div className="absolute z-[90] mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg">
+                  {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && !searchBidDialogOpen && (
+                    <div className={cn("absolute mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[90]")}>
                       {replaceSearchResults.map(c => (
                         <button
                           key={c.contact_id}
@@ -3155,7 +3175,7 @@ const BillingPage = () => {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               className="glass-card rounded-2xl p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div className="sm:flex-1 sm:max-w-xs">
+                <div className="sm:flex-1 sm:max-w-[6rem]">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                     Billing Name (appears on print) <span className="text-destructive">*</span>
                   </p>
@@ -3197,7 +3217,7 @@ const BillingPage = () => {
                               brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
                             })
                           }
-                          className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground"
+                          className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground h-10 sm:h-8"
                         >
                           {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
                         </button>
@@ -3215,7 +3235,7 @@ const BillingPage = () => {
                           }}
                           placeholder="Brokerage"
                           className={cn(
-                            "h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
+                            "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
                             validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30",
                           )}
                         />
@@ -3246,7 +3266,7 @@ const BillingPage = () => {
                           }}
                           placeholder="Other Charges (₹)"
                           className={cn(
-                            "h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
+                            "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
                             validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30",
                           )}
                         />
@@ -3254,7 +3274,7 @@ const BillingPage = () => {
                           type="button"
                           variant="outline"
                           onClick={applyGlobalCharges}
-                          className={cn(arrSolidSm, 'whitespace-nowrap')}
+                          className={cn(arrSolidSm, 'whitespace-nowrap h-10 sm:h-8')}
                         >
                           Apply to All
                         </Button>
