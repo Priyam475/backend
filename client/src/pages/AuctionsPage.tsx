@@ -2755,9 +2755,6 @@ const AuctionsPage = () => {
                   <div className="space-y-3 min-w-0">
                     {/* Row 1: Registered buyers — contacts — green. */}
                     <div className="min-w-0 w-full max-w-full space-y-1.5">
-                      <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Registered buyers
-                      </p>
                       <div
                         ref={contactScrollRef}
                         role="region"
@@ -2810,9 +2807,6 @@ const AuctionsPage = () => {
 
                     {/* Row 2: Temporary buyers (scribble / quick-add), today — violet accent. */}
                     <div className="min-w-0 w-full max-w-full space-y-1.5">
-                      <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                        Temporary buyers · today
-                      </p>
                       <div
                         ref={markScrollRef}
                         role="region"
@@ -3256,9 +3250,6 @@ const AuctionsPage = () => {
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className="space-y-2 mb-1.5">
             <div>
-              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
-                Registered buyers
-              </p>
               <div
                 ref={contactScrollRef}
                 role="region"
@@ -3302,9 +3293,6 @@ const AuctionsPage = () => {
               </div>
             </div>
             <div>
-              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 px-0.5">
-                Temporary buyers · today
-              </p>
               <div
                 ref={markScrollRef}
                 role="region"
