@@ -2814,7 +2814,7 @@ const BillingPage = () => {
 
         {billingMainTab === 'create' && bill && selectedBuyer && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
-            <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
+            <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[20]" : "z-[20]")}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-start gap-2 min-w-0">
                   <Receipt className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" aria-hidden />
@@ -2894,7 +2894,7 @@ const BillingPage = () => {
                       className="h-9 rounded-xl text-xs"
                     />
                     {showSearchBidBuyerSuggestions && !searchBidDialogOpen && (
-                      <div className={cn("absolute top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[40]")}>
+                      <div className={cn("absolute top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[100]")}>
                         {searchBidBuyerOptions.length === 0 ? (
                           <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
                         ) : (
@@ -3034,7 +3034,7 @@ const BillingPage = () => {
               )}
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
-            <div className={cn("glass-card rounded-2xl p-3 space-y-2 relative overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
+            <div className={cn("glass-card rounded-2xl p-3 space-y-2 relative overflow-visible", searchBidDialogOpen ? "z-[20]" : "z-[30]")}>
               <div className="flex flex-wrap items-center gap-2">
                 <RadioGroup
                   value={replaceTarget}
