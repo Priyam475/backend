@@ -49,6 +49,7 @@ const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
 const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
 const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
 const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
+const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
 /** Desktop main tabs: same as Arrivals Summary / New Arrival (underline + #6075FF bar). */
 const arrDeskTabBtn = (active: boolean) =>
@@ -371,7 +372,10 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
 // ── Validation ────────────────────────────────────────────
 type ValidationErrors = Record<string, string>;
 
-function validateBill(b: BillData): { isValid: boolean; errors: ValidationErrors } {
+function validateBill(
+  b: BillData,
+  commodityAvgWeightBounds: Record<string, { min: number; max: number }>,
+): { isValid: boolean; errors: ValidationErrors } {
   const errors: ValidationErrors = {};
 
   const trimmedName = (b.billingName ?? '').trim();
@@ -447,6 +451,15 @@ function validateBill(b: BillData): { isValid: boolean; errors: ValidationErrors
       if (!item.weight || item.weight <= 0) {
         errors[`items.${gi}.${ii}.weight`] = 'Weight cannot be zero';
       }
+      const avgWeight = item.quantity > 0 ? item.weight / item.quantity : 0;
+      const bounds = commodityAvgWeightBounds[group.commodityName];
+      const avgBelowMin = bounds != null && bounds.min > 0 && avgWeight < bounds.min;
+      const avgAboveMax = bounds != null && bounds.max > 0 && avgWeight > bounds.max;
+      if (avgBelowMin || avgAboveMax) {
+        errors[`items.${gi}.${ii}.avgWeight`] = avgBelowMin
+          ? `Avg Wt must be >= ${bounds!.min} kg`
+          : `Avg Wt must be <= ${bounds!.max} kg`;
+      }
       if (!Number.isFinite(item.brokerage) || item.brokerage < 0) {
         errors[`items.${gi}.${ii}.brokerage`] = 'Invalid';
       } else if (item.brokerage > 10000000) {
@@ -503,7 +516,11 @@ const BillingPage = () => {
   const buyerSelectRef = useRef<HTMLDivElement | null>(null);
   const summaryTableScrollRef = useRef<HTMLDivElement | null>(null);
   const summarySnapTimerRef = useRef<number | null>(null);
+  const mobileCommodityCarouselRef = useRef<HTMLDivElement | null>(null);
+  const mobileLotCarouselRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [resyncing, setResyncing] = useState(false);
+  const [activeCommoditySlide, setActiveCommoditySlide] = useState(0);
+  const [activeLotSlides, setActiveLotSlides] = useState<Record<number, number>>({});
   const [savedBills, setSavedBills] = useState<SalesBillDTO[]>([]);
   const [savedBillsLoading, setSavedBillsLoading] = useState(false);
   const [commodities, setCommodities] = useState<any[]>([]);
@@ -530,6 +547,25 @@ const BillingPage = () => {
       prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx],
     );
   }, []);
+
+  const handleCommodityCarouselScroll = useCallback(() => {
+    const el = mobileCommodityCarouselRef.current;
+    if (!el || !bill?.commodityGroups?.length) return;
+    const step = el.scrollWidth / bill.commodityGroups.length;
+    if (step <= 0) return;
+    const idx = Math.max(0, Math.min(bill.commodityGroups.length - 1, Math.round(el.scrollLeft / step)));
+    setActiveCommoditySlide(idx);
+  }, [bill]);
+
+  const handleLotCarouselScroll = useCallback((groupIdx: number) => {
+    const el = mobileLotCarouselRefs.current[groupIdx];
+    const total = bill?.commodityGroups?.[groupIdx]?.items?.length ?? 0;
+    if (!el || total <= 0) return;
+    const step = el.scrollWidth / total;
+    if (step <= 0) return;
+    const idx = Math.max(0, Math.min(total - 1, Math.round(el.scrollLeft / step)));
+    setActiveLotSlides(prev => (prev[groupIdx] === idx ? prev : { ...prev, [groupIdx]: idx }));
+  }, [bill]);
 
   const { auctionResults: auctionData, refetch: refetchAuctions } = useAuctionResults();
 
@@ -1303,10 +1339,11 @@ const BillingPage = () => {
 
       // REQ-BIL-002: NR = B + P + BRK + Other Charges
       const brokerage = 0; // default, can be edited
-      const otherCharges = computeBuyerOtherChargesRateAdd(entry, commName, group.divisor); // preset-based extra price
-      const sellerOtherCharges = computeSellerOtherChargesRateAdd(entry, commName, group.divisor);
       const presetApplied = entry.presetApplied ?? 0;
-      const newRate = entry.rate + presetApplied + brokerage + otherCharges;
+      // Show preset inside "Other Charges" so UI displays total rate-add in one field.
+      const otherCharges = presetApplied + computeBuyerOtherChargesRateAdd(entry, commName, group.divisor);
+      const sellerOtherCharges = computeSellerOtherChargesRateAdd(entry, commName, group.divisor);
+      const newRate = entry.rate + brokerage + otherCharges;
 
       group.items.push({
         bidNumber: entry.bidNumber,
@@ -1819,8 +1856,8 @@ const BillingPage = () => {
     const item = { ...group.items[itemIdx] };
     (item as any)[field] = value;
     const preset = (item as { presetApplied?: number }).presetApplied ?? 0;
-    // REQ-BIL-002: NR = B + P + BRK + Other
-    item.newRate = item.baseRate + preset + item.brokerage + item.otherCharges;
+    // "Other Charges" now includes preset; avoid double-counting preset in new rate.
+    item.newRate = item.baseRate + item.brokerage + item.otherCharges;
     item.amount = (item.weight * item.newRate) / (group.divisor > 0 ? group.divisor : 50);
 
     // Seller-side dynamic Other Charges (appliesTo=SELLER) - read-only visualization.
@@ -1911,8 +1948,9 @@ const BillingPage = () => {
         const newItem = {
           ...item,
           brokerage: brk,
-          otherCharges: bill.globalOtherCharges,
-          newRate: item.baseRate + preset + brk + bill.globalOtherCharges,
+          // Keep preset folded into displayed "Other Charges" total.
+          otherCharges: preset + bill.globalOtherCharges,
+          newRate: item.baseRate + brk + (preset + bill.globalOtherCharges),
           amount: 0,
         };
         newItem.amount = (newItem.weight * newItem.newRate) / (group.divisor > 0 ? group.divisor : 50);
@@ -1966,7 +2004,7 @@ const BillingPage = () => {
 
   const buildSavePayload = () => {
     if (!bill) return;
-    const { isValid, errors } = validateBill(bill);
+    const { isValid, errors } = validateBill(bill, commodityAvgWeightBounds);
     setValidationErrors(errors);
     if (!isValid) {
       const count = Object.keys(errors).length;
@@ -2991,21 +3029,21 @@ const BillingPage = () => {
                         value={addBidQty}
                         onChange={e => setAddBidQty(e.target.value)}
                         placeholder={String(addBidRemainingQty)}
-                        className="h-8 rounded-lg text-xs px-1.5"
+                        className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`}
                         title={`Remaining bags: ${addBidRemainingQty}`}
                       />
                     </div>
                     <div className="space-y-0.5 w-[4.25rem] sm:w-[4.5rem] shrink-0">
                       <Label className="text-[10px]">Base *</Label>
-                      <Input type="number" inputMode="decimal" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                      <Input type="number" inputMode="decimal" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
                     </div>
                     <div className="space-y-0.5 w-[3.25rem] sm:w-14 shrink-0">
                       <Label className="text-[10px]">Extra</Label>
-                      <Input type="number" inputMode="decimal" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                      <Input type="number" inputMode="decimal" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
                     </div>
                     <div className="space-y-0.5 w-[3.75rem] sm:w-16 shrink-0">
                       <Label className="text-[10px]">Token</Label>
-                      <Input type="number" inputMode="decimal" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className="h-8 rounded-lg text-xs px-1.5" />
+                      <Input type="number" inputMode="decimal" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 pt-1">
@@ -3205,22 +3243,19 @@ const BillingPage = () => {
                   </p>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
+                      <p
+                        className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
+                        onClick={() =>
+                          setBill({
+                            ...bill,
+                            brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                          })
+                        }
+                        title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
+                      >
                         BROKERAGE
                       </p>
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setBill({
-                              ...bill,
-                              brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
-                            })
-                          }
-                          className="px-2 py-1.5 rounded-lg bg-muted/30 text-[10px] font-bold text-muted-foreground h-10 sm:h-8"
-                        >
-                          {bill.brokerageType === 'PERCENT' ? '%' : '₹'}
-                        </button>
                         <Input
                           type="number"
                           inputMode="decimal"
@@ -3233,10 +3268,11 @@ const BillingPage = () => {
                               return n;
                             });
                           }}
-                          placeholder="Brokerage"
+                          placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
                           className={cn(
                             "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
                             validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30",
+                            numberInputNoSpinnerClass,
                           )}
                         />
                       </div>
@@ -3268,6 +3304,7 @@ const BillingPage = () => {
                           className={cn(
                             "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
                             validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30",
+                            numberInputNoSpinnerClass,
                           )}
                         />
                         <Button
@@ -3290,10 +3327,36 @@ const BillingPage = () => {
               </div>
             </motion.div>
 
-            {bill.commodityGroups.map((group, gi) => (
-              <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 + gi * 0.05 }}
-                className="glass-card rounded-2xl overflow-hidden">
+            {bill.commodityGroups.length > 1 && (
+              <div className="lg:hidden flex items-center justify-center gap-1.5 -mt-1 mb-1">
+                {bill.commodityGroups.map((_, gi) => (
+                  <button
+                    key={`commodity-dot-${gi}`}
+                    type="button"
+                    onClick={() => {
+                      const el = mobileCommodityCarouselRef.current;
+                      if (!el) return;
+                      const left = (el.scrollWidth / bill.commodityGroups.length) * gi;
+                      el.scrollTo({ left, behavior: 'smooth' });
+                    }}
+                    className={cn(
+                      'rounded-full transition-all bg-muted-foreground/40',
+                      activeCommoditySlide === gi ? 'w-4 h-2 bg-primary' : 'w-2 h-2',
+                    )}
+                    aria-label={`Go to commodity ${gi + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+            <div
+              ref={mobileCommodityCarouselRef}
+              onScroll={handleCommodityCarouselScroll}
+              className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 lg:block lg:overflow-visible lg:snap-none lg:pb-0 lg:space-y-3"
+            >
+              {bill.commodityGroups.map((group, gi) => (
+                <motion.div key={gi} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + gi * 0.05 }}
+                  className="glass-card rounded-2xl overflow-hidden shrink-0 w-[calc(100%-0.1rem)] snap-start lg:w-auto">
                 {(() => {
                   const isCollapsed = collapsedCommodityIndexes.includes(gi);
                   return (
@@ -3331,7 +3394,7 @@ const BillingPage = () => {
                       {!isCollapsed && (
                         <div className="p-3 space-y-2">
                           {/* Table header for commodity items */}
-                          <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
+                          <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] gap-1.5 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
                             <span>Item</span>
                             <span>Qty</span>
                             <span>Weight (kg)</span>
@@ -3339,17 +3402,42 @@ const BillingPage = () => {
                             <span>Other Charges</span>
                             <span>Brokerage (₹)</span>
                             <span>Token (₹)</span>
-                            <span>Value</span>
                             <span>Bid Rate (₹)</span>
                             <span>New Rate (₹)</span>
                             <span>Amount (₹)</span>
                             <span>Action</span>
                           </div>
 
-                          <div className="space-y-2">
+                          {group.items.length > 1 && (
+                            <div className="lg:hidden flex items-center justify-center gap-1.5 mb-1">
+                              {group.items.map((_, ii) => (
+                                <button
+                                  key={`lot-dot-${gi}-${ii}`}
+                                  type="button"
+                                  onClick={() => {
+                                    const el = mobileLotCarouselRefs.current[gi];
+                                    if (!el) return;
+                                    const left = (el.scrollWidth / group.items.length) * ii;
+                                    el.scrollTo({ left, behavior: 'smooth' });
+                                  }}
+                                  className={cn(
+                                    'rounded-full transition-all bg-muted-foreground/40',
+                                    (activeLotSlides[gi] ?? 0) === ii ? 'w-4 h-2 bg-primary' : 'w-2 h-2',
+                                  )}
+                                  aria-label={`Go to lot ${ii + 1}`}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <div
+                            ref={el => {
+                              mobileLotCarouselRefs.current[gi] = el;
+                            }}
+                            onScroll={() => handleLotCarouselScroll(gi)}
+                            className="space-y-2 lg:space-y-2 flex lg:block overflow-x-auto lg:overflow-visible snap-x snap-mandatory gap-2 lg:gap-0"
+                          >
                             {group.items.map((item, ii) => {
                               const avgWeight = item.quantity > 0 ? item.weight / item.quantity : 0;
-                              const baseValue = (item.weight * item.baseRate) / (group.divisor || 50 || 50);
                               const bounds = commodityAvgWeightBounds[group.commodityName];
                               const avgBelowMin = bounds != null && bounds.min > 0 && avgWeight < bounds.min;
                               const avgAboveMax = bounds != null && bounds.max > 0 && avgWeight > bounds.max;
@@ -3357,8 +3445,16 @@ const BillingPage = () => {
                               return (
                                 <div
                                   key={ii}
-                                  className="grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-left lg:text-center"
+                                  className="relative shrink-0 w-full snap-start grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] lg:gap-x-1.5 items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-left lg:text-center lg:w-auto"
                                 >
+                                  <button
+                                    type="button"
+                                    onClick={() => removeLineItem(gi, ii)}
+                                    className="absolute top-1.5 right-1.5 lg:hidden inline-flex items-center justify-center rounded-md p-1.5 text-destructive hover:bg-destructive/10 active:bg-destructive/20"
+                                    aria-label="Remove line item"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
                                   <div className="min-w-0 col-span-2 sm:col-span-3 lg:col-span-1">
                                     <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Item</p>
                                     <p className="text-[11px] font-semibold text-foreground truncate leading-tight">
@@ -3377,11 +3473,13 @@ const BillingPage = () => {
                                         setValidationErrors(prev => {
                                           const n = { ...prev };
                                           delete n[`items.${gi}.${ii}.quantity`];
+                                          delete n[`items.${gi}.${ii}.avgWeight`];
                                           return n;
                                         });
                                       }}
                                       className={cn(
                                         "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                        numberInputNoSpinnerClass,
                                         validationErrors[`items.${gi}.${ii}.quantity`] &&
                                         "ring-1 ring-destructive/40 rounded",
                                       )}
@@ -3404,11 +3502,13 @@ const BillingPage = () => {
                                         setValidationErrors(prev => {
                                           const n = { ...prev };
                                           delete n[`items.${gi}.${ii}.weight`];
+                                          delete n[`items.${gi}.${ii}.avgWeight`];
                                           return n;
                                         });
                                       }}
                                       className={cn(
                                         "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                        numberInputNoSpinnerClass,
                                         (validationErrors[`items.${gi}.${ii}.weight`] || item.weight === 0) &&
                                         "ring-1 ring-destructive/40 rounded",
                                       )}
@@ -3425,7 +3525,9 @@ const BillingPage = () => {
 
                                   <div className={cn("text-foreground", avgOutOfRange && "text-amber-600 font-semibold")}>
                                     <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Avg Wt</p>
-                                    <p className="text-[11px] lg:text-[10px]">{avgWeight.toFixed(1)}</p>
+                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px]">
+                                      {avgWeight.toFixed(1)}
+                                    </div>
                                     {avgBelowMin && item.weight > 0 && (
                                       <p className="mt-0.5 text-[8px] text-amber-600">
                                         &lt;min {bounds!.min}kg
@@ -3434,6 +3536,11 @@ const BillingPage = () => {
                                     {avgAboveMax && item.weight > 0 && (
                                       <p className="mt-0.5 text-[8px] text-amber-600">
                                         &gt;max {bounds!.max}kg
+                                      </p>
+                                    )}
+                                    {validationErrors[`items.${gi}.${ii}.avgWeight`] && (
+                                      <p className="mt-0.5 text-[8px] text-destructive">
+                                        {validationErrors[`items.${gi}.${ii}.avgWeight`]}
                                       </p>
                                     )}
                                   </div>
@@ -3454,6 +3561,7 @@ const BillingPage = () => {
                                       }}
                                       className={cn(
                                         "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                        numberInputNoSpinnerClass,
                                         validationErrors[`items.${gi}.${ii}.otherCharges`] &&
                                         "ring-1 ring-destructive/40 rounded",
                                       )}
@@ -3481,6 +3589,7 @@ const BillingPage = () => {
                                       }}
                                       className={cn(
                                         "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
+                                        numberInputNoSpinnerClass,
                                         validationErrors[`items.${gi}.${ii}.brokerage`] &&
                                         "ring-1 ring-destructive/40 rounded",
                                       )}
@@ -3501,14 +3610,9 @@ const BillingPage = () => {
                                       onChange={e => {
                                         updateLineItem(gi, ii, 'tokenAdvance', parseFloat(e.target.value) || 0);
                                       }}
-                                      className="h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                       title="Token advance from auction"
                                     />
-                                  </div>
-
-                                  <div className="text-foreground font-semibold">
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Value</p>
-                                    <span className="text-[11px] lg:text-[10px]">₹{baseValue.toFixed(2)}</span>
                                   </div>
 
                                   <div>
@@ -3520,21 +3624,25 @@ const BillingPage = () => {
                                       onChange={e => {
                                         updateLineItem(gi, ii, "baseRate", parseFloat(e.target.value) || 0);
                                       }}
-                                      className="h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                     />
                                   </div>
 
                                   <div className="text-primary font-semibold">
                                     <p className="lg:hidden text-[9px] font-semibold text-primary/80 uppercase tracking-wide mb-0.5">New Rate ₹</p>
-                                    <span className="text-[11px] lg:text-[10px] font-bold">₹{item.newRate}</span>
+                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px] font-bold">
+                                      ₹{item.newRate}
+                                    </div>
                                   </div>
 
                                   <div className="text-foreground font-bold">
                                     <p className="lg:hidden text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-0.5">Amount ₹</p>
-                                    <span className="text-[11px] lg:text-[10px]">₹{item.amount.toLocaleString()}</span>
+                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px]">
+                                      ₹{item.amount.toLocaleString()}
+                                    </div>
                                   </div>
 
-                                  <div className="col-span-2 sm:col-span-1 lg:col-span-1 flex items-center justify-end sm:justify-center gap-1 lg:flex-row lg:items-center lg:justify-center">
+                                  <div className="hidden lg:col-span-1 lg:flex items-center justify-center gap-1">
                                     <button
                                       type="button"
                                       onClick={() => removeLineItem(gi, ii)}
@@ -3548,7 +3656,7 @@ const BillingPage = () => {
                               );
                             })}
 
-                            <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.5fr),repeat(10,minmax(72px,1fr)),minmax(48px,0.5fr)] gap-2 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
+                            <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] gap-1.5 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
                               <div className="text-left text-white">Total</div>
                               <div className="text-white">
                                 {group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString()}
@@ -3564,7 +3672,6 @@ const BillingPage = () => {
                               </div>
                               <div />
                               <div />
-                              <div />
                               <div className="text-white">
                                 ₹{group.items.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
                               </div>
@@ -3574,20 +3681,6 @@ const BillingPage = () => {
                             <div className="pt-2 border-t border-border/30 space-y-1 text-xs">
                             </div>
 
-                            {/* Mobile-only commodity totals strip */}
-                            <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden mt-2">
-                              {[
-                                { label: 'Qty', value: group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString(), cls: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200' },
-                                { label: 'Wt kg', value: group.items.reduce((s, i) => s + (Number(i.weight) || 0), 0).toLocaleString(), cls: 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300' },
-                                { label: 'Token', value: '\u20b9' + group.items.reduce((s, i) => s + (Number(i.tokenAdvance) || 0), 0).toLocaleString(), cls: 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300' },
-                                { label: 'Gross', value: '\u20b9' + group.subtotal.toLocaleString(), cls: 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-bold' },
-                              ].map(chip => (
-                                <div key={chip.label} className={`shrink-0 flex flex-col items-center rounded-lg px-3 py-1.5 ${chip.cls}`}>
-                                  <span className="text-[9px] font-semibold uppercase tracking-wide opacity-70 leading-none">{chip.label}</span>
-                                  <span className="text-[12px] font-bold leading-snug">{chip.value}</span>
-                                </div>
-                              ))}
-                            </div>
                           </div>
                         </div>
                       )}
@@ -3604,8 +3697,9 @@ const BillingPage = () => {
                     </>
                   );
                 })()}
-              </motion.div>
-            ))}
+                </motion.div>
+              ))}
+            </div>
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
               className="glass-card rounded-2xl p-3 sm:p-4 space-y-3">
@@ -3686,7 +3780,7 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className="h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.commissionAmount || 0).toLocaleString()}</span>
@@ -3721,7 +3815,7 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className="h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.userFeeAmount || 0).toLocaleString()}</span>
@@ -3762,7 +3856,7 @@ const BillingPage = () => {
                                     return n;
                                   });
                                 }}
-                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors[`coolie-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors[`coolie-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
@@ -3808,7 +3902,7 @@ const BillingPage = () => {
                                     return n;
                                   });
                                 }}
-                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors[`weighman-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors[`weighman-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
@@ -3893,7 +3987,7 @@ const BillingPage = () => {
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
                                 }}
-                                className="h-10 w-20 lg:h-6 lg:w-16 rounded text-right text-[10px] lg:text-[9px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                                className={`h-10 w-20 lg:h-6 lg:w-16 rounded text-right text-[10px] lg:text-[9px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                 placeholder="0"
                               />
                               <span className="text-[10px] font-semibold text-foreground ml-1">₹{discountAmount.toLocaleString()}</span>
@@ -3926,7 +4020,7 @@ const BillingPage = () => {
                               updated.commodityGroups[gi] = cg;
                               setBill(recalcGrandTotal(updated));
                             }}
-                            className="h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                            className={`h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                             placeholder="0"
                           />
                         </td>
@@ -3980,7 +4074,7 @@ const BillingPage = () => {
                                 return n;
                               });
                             }}
-                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
                           />
                           {validationErrors.outboundFreight && <span className="text-[10px] text-destructive">{validationErrors.outboundFreight}</span>}
                         </div>
