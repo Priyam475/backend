@@ -604,7 +604,7 @@ const BillingPage = () => {
   const [replaceSelectedContact, setReplaceSelectedContact] = useState<Contact | null>(null);
   const [replaceForm, setReplaceForm] = useState({ mark: '', name: '', phone: '' });
   const [replaceErrors, setReplaceErrors] = useState<Record<string, string>>({});
-  const [showAddBidCard, setShowAddBidCard] = useState(false);
+  const [addBidDialogOpen, setAddBidDialogOpen] = useState(false);
   const [addBidLotSearch, setAddBidLotSearch] = useState('');
   const [showAddBidLotDropdown, setShowAddBidLotDropdown] = useState(false);
   const [addBidLotOptions, setAddBidLotOptions] = useState<LotSummaryDTO[]>([]);
@@ -651,7 +651,7 @@ const BillingPage = () => {
   }, []);
 
   useEffect(() => {
-    if (!showAddBidCard) return;
+    if (!addBidDialogOpen) return;
     let active = true;
     setAddBidLotLoading(true);
     void auctionApi
@@ -670,7 +670,7 @@ const BillingPage = () => {
     return () => {
       active = false;
     };
-  }, [showAddBidCard]);
+  }, [addBidDialogOpen]);
 
   const getAddBidLotIdentifier = useCallback((lot: LotSummaryDTO): string => {
     const lotQty = Number(lot.bag_count) || 0;
@@ -1719,7 +1719,7 @@ const BillingPage = () => {
       await refetchAuctions();
       setAddBidRemainingQty(Number(session.remaining_bags) || 0);
       resetAddBidForm();
-      setShowAddBidCard(false);
+      setAddBidDialogOpen(false);
       toast.success('Bid added and bill updated');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add bid');
@@ -1962,12 +1962,13 @@ const BillingPage = () => {
         const brk = bill.brokerageType === 'PERCENT'
           ? Math.round((item.baseRate + preset) * bill.brokerageValue / 100)
           : bill.brokerageValue;
+        const globalOther = bill.globalOtherCharges;
         const newItem = {
           ...item,
           brokerage: brk,
-          // Keep preset folded into displayed "Other Charges" total.
-          otherCharges: preset + bill.globalOtherCharges,
-          newRate: item.baseRate + brk + (preset + bill.globalOtherCharges),
+          // Global replaces line other charges (does not add to preset).
+          otherCharges: globalOther,
+          newRate: item.baseRate + brk + globalOther,
           amount: 0,
         };
         newItem.amount = (newItem.weight * newItem.newRate) / (group.divisor > 0 ? group.divisor : 50);
@@ -2477,8 +2478,8 @@ const BillingPage = () => {
   }, [bill, fullConfigs, commodities, recalcGrandTotal]);
 
   return (
-    <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", searchBidDialogOpen && "no-hover")}>
-      {searchBidDialogOpen && (
+    <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", (searchBidDialogOpen || addBidDialogOpen) && "no-hover")}>
+      {(searchBidDialogOpen || addBidDialogOpen) && (
         <style dangerouslySetInnerHTML={{
           __html: `
             .no-hover *:hover {
@@ -2594,6 +2595,150 @@ const BillingPage = () => {
               className={arrSolidMd}
             >
               Add Selected ({searchBidSelectedKeys.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={addBidDialogOpen}
+        onOpenChange={open => {
+          setAddBidDialogOpen(open);
+          if (!open) resetAddBidForm();
+        }}
+      >
+        <DialogContent
+          className={cn(
+            'dialog-content max-h-[min(92dvh,900px)] w-[calc(100vw-1rem)] max-w-xl sm:max-w-2xl gap-0 overflow-y-auto p-4 sm:p-6',
+            'top-[8%] translate-y-0 sm:top-[50%] sm:translate-y-[-50%]',
+          )}
+        >
+          <DialogHeader className="text-left pr-8">
+            <DialogTitle>Add New Bid</DialogTitle>
+            <p className="text-sm text-muted-foreground font-normal pt-1">
+              {bill ? `${bill.buyerName} (${bill.buyerMark})` : 'Select a bill first'}
+            </p>
+          </DialogHeader>
+          <div className="space-y-3 sm:space-y-4 pt-1">
+            <div className="relative space-y-1">
+              <Label className="text-xs sm:text-sm">Lot Mark Search *</Label>
+              <Input
+                value={addBidLotSearch}
+                onFocus={() => setShowAddBidLotDropdown(true)}
+                onBlur={() => {
+                  window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
+                }}
+                onChange={e => {
+                  setAddBidLotSearch(e.target.value);
+                  setAddBidSelectedLot(null);
+                  setShowAddBidLotDropdown(true);
+                }}
+                placeholder="Lot identifier"
+                className="h-10 sm:h-9 rounded-lg text-sm"
+                autoComplete="off"
+              />
+              {addBidLotLoading && <p className="text-xs text-muted-foreground">Loading lots…</p>}
+              {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
+                <div className="absolute z-[100] left-0 right-0 top-full mt-1 max-h-[40vh] sm:max-h-48 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
+                  {filteredAddBidLots.length === 0 && (
+                    <p className="px-3 py-2 text-xs text-muted-foreground">No auction lots found.</p>
+                  )}
+                  {filteredAddBidLots.map(lot => (
+                    <button
+                      key={lot.lot_id}
+                      type="button"
+                      className="w-full px-3 py-2 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40 min-h-[44px] sm:min-h-0"
+                      onClick={async () => {
+                        setAddBidSelectedLot(lot);
+                        setAddBidLotSearch(getAddBidLotIdentifier(lot));
+                        setShowAddBidLotDropdown(false);
+                        try {
+                          const session = await auctionApi.getOrStartSession(lot.lot_id);
+                          setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+                        } catch {
+                          setAddBidRemainingQty(0);
+                        }
+                      }}
+                    >
+                      <p className="text-sm font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                      <p className="text-xs text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs sm:text-sm">Buyer *</Label>
+              <Input
+                value={bill?.buyerMark ?? ''}
+                disabled
+                className="h-10 sm:h-9 rounded-lg bg-muted/30 text-sm"
+                title={bill?.buyerMark}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
+              <div className="space-y-1">
+                <Label className="text-xs">Qty *</Label>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  value={addBidQty}
+                  onChange={e => setAddBidQty(e.target.value)}
+                  placeholder={String(addBidRemainingQty)}
+                  className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                  title={`Remaining bags: ${addBidRemainingQty}`}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Base *</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={addBidBaseRate}
+                  onChange={e => setAddBidBaseRate(e.target.value)}
+                  className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Extra</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={addBidExtraAmount}
+                  onChange={e => setAddBidExtraAmount(e.target.value)}
+                  className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Token</Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={addBidTokenAdvance}
+                  onChange={e => setAddBidTokenAdvance(e.target.value)}
+                  className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex-col gap-2 pt-4 sm:flex-row sm:justify-end sm:gap-2 border-t mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(arrSolidMd, 'w-full sm:w-auto order-2 sm:order-1')}
+              onClick={() => setAddBidDialogOpen(false)}
+              disabled={addBidSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(arrSolidMd, 'w-full sm:w-auto order-1 sm:order-2')}
+              onClick={() => void handleAddBidToCurrentBuyer()}
+              disabled={addBidSaving}
+            >
+              {addBidSaving ? 'Saving...' : 'Save Bid'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2771,7 +2916,7 @@ const BillingPage = () => {
       <div className="px-4 mt-4 space-y-2">
         {billingMainTab === 'create' && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-4 sm:p-5 space-y-4 overflow-visible relative z-30">
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
               <div ref={buyerSelectRef} className="relative">
                 <Input
                   value={buyerBidMarkInput}
@@ -2832,6 +2977,15 @@ const BillingPage = () => {
               </Button>
               <Button type="button" variant="outline" onClick={handleSelectBidMode} className={cn(arrSolidLg, 'sm:self-end')}>
                 Select Bid
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleClearBillEditor()}
+                disabled={!bill && !selectedBuyer}
+                className={cn(arrSolidLg, 'sm:self-end')}
+              >
+                Change Buyer
               </Button>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -2907,8 +3061,8 @@ const BillingPage = () => {
         {billingMainTab === 'create' && bill && selectedBuyer && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
             <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[20]" : "z-[20]")}>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-start gap-2 min-w-0">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
                   <Receipt className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" aria-hidden />
                   <div className="min-w-0">
                     <h3 className="text-sm sm:text-base font-bold text-foreground">
@@ -2919,10 +3073,54 @@ const BillingPage = () => {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  <Button type="button" variant="outline" className={arrSolidMd} onClick={() => void handleClearBillEditor()}>
-                    Change buyer
-                  </Button>
+                <div className={cn("flex flex-col gap-2 shrink-0 w-full sm:w-auto sm:max-w-none sm:items-end", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
+                  <div className="flex flex-col gap-2 w-full sm:flex-row sm:items-end sm:justify-end sm:gap-2">
+                    <div className="w-full sm:w-auto sm:min-w-[11rem]">
+                      <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block text-left sm:text-right">Search & Migrate</Label>
+                      <div ref={searchBidBuyerSelectRef} className="relative w-full sm:w-48 sm:ml-auto">
+                        <Input
+                          ref={searchBidInputRef}
+                          value={searchBidInput}
+                          onFocus={() => setShowSearchBidBuyerSuggestions(true)}
+                          onChange={e => {
+                            setSearchBidInput(e.target.value);
+                            setShowSearchBidBuyerSuggestions(true);
+                          }}
+                          aria-label="Search & Migrate"
+                          title={`Search & Migrate${tabHint('Alt L')}`}
+                          placeholder="Search & Migrate"
+                          className="h-9 rounded-xl text-xs"
+                        />
+                        {showSearchBidBuyerSuggestions && !searchBidDialogOpen && (
+                          <div className={cn("absolute top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[100]")}>
+                            {searchBidBuyerOptions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
+                            ) : (
+                              searchBidBuyerOptions.map(b => (
+                                <button
+                                  key={`${b.buyerMark}-${b.buyerName}`}
+                                  type="button"
+                                  onClick={() => openSearchBidDialogForBuyer(b)}
+                                  className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"
+                                >
+                                  <p className="text-xs font-semibold">{b.buyerMark} - {b.buyerName}</p>
+                                  <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(arrSolidMd, 'w-full sm:w-auto shrink-0', addBidDialogOpen && 'ring-2 ring-[#6075FF] ring-offset-2 ring-offset-background')}
+                      onClick={() => setAddBidDialogOpen(true)}
+                    >
+                      Add New Bid
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
@@ -2965,165 +3163,6 @@ const BillingPage = () => {
                   <IndianRupee className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden />
                 </div>
               </div>
-            </div>
-
-            <div className={cn("glass-card rounded-2xl p-3 sm:p-4 space-y-3 overflow-visible", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block">Search & Migrate Bid</Label>
-                  <div ref={searchBidBuyerSelectRef} className="relative w-full sm:w-48">
-                    <Input
-                      ref={searchBidInputRef}
-                      value={searchBidInput}
-                      onFocus={() => setShowSearchBidBuyerSuggestions(true)}
-                      onChange={e => {
-                        setSearchBidInput(e.target.value);
-                        setShowSearchBidBuyerSuggestions(true);
-                      }}
-                      aria-label="Search & Migrate Bid"
-                      title={`Search & Migrate Bid${tabHint('Alt L')}`}
-                      placeholder="Search & Migrate Bid"
-                      className="h-9 rounded-xl text-xs"
-                    />
-                    {showSearchBidBuyerSuggestions && !searchBidDialogOpen && (
-                      <div className={cn("absolute top-full mt-1 w-full min-w-[12rem] max-h-44 overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[100]")}>
-                        {searchBidBuyerOptions.length === 0 ? (
-                          <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
-                        ) : (
-                          searchBidBuyerOptions.map(b => (
-                            <button
-                              key={`${b.buyerMark}-${b.buyerName}`}
-                              type="button"
-                              onClick={() => openSearchBidDialogForBuyer(b)}
-                              className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"
-                            >
-                              <p className="text-xs font-semibold">{b.buyerMark} - {b.buyerName}</p>
-                              <p className="text-[11px] text-muted-foreground">{b.entries.length} bid(s)</p>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cn(arrSolidMd, 'shrink-0', showAddBidCard && 'ring-2 ring-[#6075FF] ring-offset-2 ring-offset-background')}
-                  onClick={() => {
-                    setShowAddBidCard(prev => {
-                      const next = !prev;
-                      if (!next) resetAddBidForm();
-                      return next;
-                    });
-                  }}
-                >
-                  {showAddBidCard ? 'Hide Add Bid' : 'Add Bid'}
-                </Button>
-              </div>
-              {showAddBidCard && (
-                <div className="rounded-xl border border-border/60 bg-muted/10 p-2 sm:p-3 space-y-2">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Add Bid</p>
-                  <div className="flex flex-wrap items-end gap-x-2 gap-y-2">
-                    <div className="relative space-y-0.5 min-w-[10rem] flex-1 basis-[min(100%,14rem)]">
-                      <Label className="text-[10px]">Lot Mark Search *</Label>
-                      <Input
-                        value={addBidLotSearch}
-                        onFocus={() => setShowAddBidLotDropdown(true)}
-                        onBlur={() => {
-                          window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
-                        }}
-                        onChange={e => {
-                          setAddBidLotSearch(e.target.value);
-                          setAddBidSelectedLot(null);
-                          setShowAddBidLotDropdown(true);
-                        }}
-                        placeholder="Lot identifier"
-                        className="h-8 rounded-lg text-xs px-2"
-                      />
-                      {addBidLotLoading && <p className="text-[10px] text-muted-foreground">Loading lots…</p>}
-                      {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
-                        <div className="absolute z-[96] left-0 right-0 top-full mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
-                          {filteredAddBidLots.length === 0 && (
-                            <p className="px-2 py-2 text-[10px] text-muted-foreground">No auction lots found.</p>
-                          )}
-                          {filteredAddBidLots.map(lot => (
-                            <button
-                              key={lot.lot_id}
-                              type="button"
-                              className="w-full px-2 py-1.5 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40"
-                              onClick={async () => {
-                                setAddBidSelectedLot(lot);
-                                setAddBidLotSearch(getAddBidLotIdentifier(lot));
-                                setShowAddBidLotDropdown(false);
-                                try {
-                                  const session = await auctionApi.getOrStartSession(lot.lot_id);
-                                  setAddBidRemainingQty(Number(session.remaining_bags) || 0);
-                                } catch {
-                                  setAddBidRemainingQty(0);
-                                }
-                              }}
-                            >
-                              <p className="text-[11px] font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
-                              <p className="text-[10px] text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-0.5 w-[4.25rem] shrink-0">
-                      <Label className="text-[10px]">Buyer *</Label>
-                      <Input value={bill.buyerMark} disabled className="h-8 rounded-lg bg-muted/30 text-xs px-1.5" title={bill.buyerMark} />
-                    </div>
-                    <div className="space-y-0.5 w-[3.5rem] sm:w-16 shrink-0">
-                      <Label className="text-[10px]">Qty *</Label>
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        value={addBidQty}
-                        onChange={e => setAddBidQty(e.target.value)}
-                        placeholder={String(addBidRemainingQty)}
-                        className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`}
-                        title={`Remaining bags: ${addBidRemainingQty}`}
-                      />
-                    </div>
-                    <div className="space-y-0.5 w-[4.25rem] sm:w-[4.5rem] shrink-0">
-                      <Label className="text-[10px]">Base *</Label>
-                      <Input type="number" inputMode="decimal" value={addBidBaseRate} onChange={e => setAddBidBaseRate(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
-                    </div>
-                    <div className="space-y-0.5 w-[3.25rem] sm:w-14 shrink-0">
-                      <Label className="text-[10px]">Extra</Label>
-                      <Input type="number" inputMode="decimal" value={addBidExtraAmount} onChange={e => setAddBidExtraAmount(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
-                    </div>
-                    <div className="space-y-0.5 w-[3.75rem] sm:w-16 shrink-0">
-                      <Label className="text-[10px]">Token</Label>
-                      <Input type="number" inputMode="decimal" value={addBidTokenAdvance} onChange={e => setAddBidTokenAdvance(e.target.value)} className={`h-8 rounded-lg text-xs px-1.5 ${numberInputNoSpinnerClass}`} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={arrSolidSm}
-                      onClick={() => void handleAddBidToCurrentBuyer()}
-                      disabled={addBidSaving}
-                    >
-                      {addBidSaving ? 'Saving...' : 'Save Bid'}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={arrSolidSm}
-                      onClick={() => {
-                        resetAddBidForm();
-                        setShowAddBidCard(false);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
             <div className={cn("glass-card rounded-2xl p-3 space-y-2 relative overflow-visible", searchBidDialogOpen ? "z-[20]" : "z-[30]")}>
