@@ -1,6 +1,8 @@
 // ── Print document HTML for Billing, Settlement, Weighing ───
 // Same format as client_origin; used with directPrint() + printLogApi.
 
+import { formatBillingInr, gstOnSubtotal, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
+
 const PRINT_STYLES = `
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; font-size: 12px; color: #111; }
   .wrap { max-width: 400px; margin: 0 auto; }
@@ -68,18 +70,18 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
 
   const renderGroupHtml = (group: BillPrintData["commodityGroups"][number]) => `
     <div class="section">
-      <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${group.gstRate}%` : ''}</p>
+      <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${formatBillingInr(group.gstRate ?? 0)}%` : ''}</p>
       ${group.items.map((item) => `
         <div class="row" style="font-size:10px">
-          <span>${item.quantity}×${item.weight.toFixed(0)}kg @₹${item.newRate}${(item.tokenAdvance ?? 0) > 0 ? ` · Tok ₹${item.tokenAdvance}` : ''}</span>
-          <span class="bold">₹${item.amount.toLocaleString()}</span>
+          <span>${formatBillingInr(item.quantity)}×${formatBillingInr(item.weight)}kg @₹${formatBillingInr(item.newRate)}${(item.tokenAdvance ?? 0) > 0 ? ` · Tok ₹${formatBillingInr(item.tokenAdvance ?? 0)}` : ''}</span>
+          <span class="bold">₹${formatBillingInr(item.amount)}</span>
         </div>
       `).join('')}
       <div class="section-t" style="border-top-style:dotted">
-        <div class="row"><span class="muted">Subtotal</span><span>₹${group.subtotal.toLocaleString()}</span></div>
-        ${group.commissionPercent > 0 ? `<div class="row"><span class="muted">Commission (${group.commissionPercent}%)</span><span>₹${group.commissionAmount.toLocaleString()}</span></div>` : ''}
-        ${group.userFeePercent > 0 ? `<div class="row"><span class="muted">User Fee (${group.userFeePercent}%)</span><span>₹${group.userFeeAmount.toLocaleString()}</span></div>` : ''}
-        ${(group.gstRate ?? 0) > 0 ? `<div class="row"><span class="muted">GST (${group.gstRate}%)</span><span>₹${Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span></div>` : ''}
+        <div class="row"><span class="muted">Subtotal</span><span>₹${formatBillingInr(group.subtotal)}</span></div>
+        ${group.commissionPercent > 0 ? `<div class="row"><span class="muted">Commission (${formatBillingInr(group.commissionPercent)}%)</span><span>₹${formatBillingInr(group.commissionAmount)}</span></div>` : ''}
+        ${group.userFeePercent > 0 ? `<div class="row"><span class="muted">User Fee (${formatBillingInr(group.userFeePercent)}%)</span><span>₹${formatBillingInr(group.userFeeAmount)}</span></div>` : ''}
+        ${(group.gstRate ?? 0) > 0 ? `<div class="row"><span class="muted">GST (${formatBillingInr(group.gstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(group.subtotal, group.gstRate ?? 0))}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -96,12 +98,12 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
   const MAX_LINES_PER_PAGE = 26;
   const groupSections = bill.commodityGroups.map(renderGroupHtml);
 
-  const additionsHtml = (bill.buyerCoolie > 0 || bill.outboundFreight > 0)
+  const additionsHtml = ((bill as any).buyerCoolie > 0 || bill.outboundFreight > 0)
     ? `
       <div class="section">
         <p class="bold">ADDITIONS</p>
-        ${bill.buyerCoolie > 0 ? `<div class="row"><span class="muted">Buyer Coolie</span><span>₹${bill.buyerCoolie.toLocaleString()}</span></div>` : ''}
-        ${bill.outboundFreight > 0 ? `<div class="row"><span class="muted">Outbound Freight</span><span>₹${bill.outboundFreight.toLocaleString()}</span></div>` : ''}
+        ${(bill as any).buyerCoolie > 0 ? `<div class="row"><span class="muted">Buyer Coolie</span><span>₹${formatBillingInr((bill as any).buyerCoolie)}</span></div>` : ''}
+        ${bill.outboundFreight > 0 ? `<div class="row"><span class="muted">Outbound Freight</span><span>₹${formatBillingInr(bill.outboundFreight)}</span></div>` : ''}
       </div>
     `
     : '';
@@ -109,10 +111,12 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
   const taxGroups = bill.commodityGroups.filter((g) => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
   const totalCommission = taxGroups.reduce((s, g) => s + g.commissionAmount, 0);
   const totalUserFee = taxGroups.reduce((s, g) => s + g.userFeeAmount, 0);
-  const totalGst = taxGroups.reduce((s, g) => s + (((g.gstRate ?? 0) > 0 ? Math.round(g.subtotal * (g.gstRate ?? 0) / 100) : 0)), 0);
+  const totalGst = taxGroups.reduce((s, g) => s + (((g.gstRate ?? 0) > 0 ? gstOnSubtotal(g.subtotal, g.gstRate ?? 0) : 0)), 0);
 
-  const subtotalSum = bill.commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
-  const discountAmount = bill.discountType === 'PERCENT' ? Math.round(subtotalSum * bill.discount / 100) : bill.discount;
+  const subtotalSum = bill.commodityGroups.reduce((s, g) => s + g.subtotal + (g.totalCharges ?? 0), 0);
+  const discountAmount = bill.discountType === 'PERCENT'
+    ? percentOfAmount(subtotalSum, bill.discount ?? 0)
+    : roundMoney2(bill.discount ?? 0);
 
   const taxSummaryHtml = `
     <div class="section">
@@ -120,20 +124,20 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
       ${taxGroups.map((g) => `
         <div style="font-size:10px">
           <span class="muted">${escapeHtml(g.commodityName)}:</span>
-          ${g.commissionPercent > 0 ? `<div class="row" style="padding-left:8px"><span>Commission</span><span>₹${g.commissionAmount}</span></div>` : ''}
-          ${g.userFeePercent > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee</span><span>₹${g.userFeeAmount}</span></div>` : ''}
-          ${(g.gstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>GST (${g.gstRate}%)</span><span>₹${Math.round(g.subtotal * (g.gstRate ?? 0) / 100).toLocaleString()}</span></div>` : ''}
+          ${g.commissionPercent > 0 ? `<div class="row" style="padding-left:8px"><span>Commission</span><span>₹${formatBillingInr(g.commissionAmount)}</span></div>` : ''}
+          ${g.userFeePercent > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee</span><span>₹${formatBillingInr(g.userFeeAmount)}</span></div>` : ''}
+          ${(g.gstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>GST (${formatBillingInr(g.gstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, g.gstRate ?? 0))}</span></div>` : ''}
         </div>
       `).join('')}
       {/* Overall cumulative row (REQ-BIL-010) */}
       <div style="margin-top:4px;padding-top:4px;border-top:1px dashed #ccc;font-size:10px">
         <div class="row" style="padding-left:8px">
           <span class="muted" style="font-weight:700">TOTAL</span>
-          <span style="font-weight:800">₹${(totalCommission + totalUserFee + totalGst).toLocaleString()}</span>
+          <span style="font-weight:800">₹${formatBillingInr(roundMoney2(totalCommission + totalUserFee + totalGst))}</span>
         </div>
-        ${totalCommission > 0 ? `<div class="row" style="padding-left:8px"><span>Commission Total</span><span>₹${totalCommission.toLocaleString()}</span></div>` : ''}
-        ${totalUserFee > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee Total</span><span>₹${totalUserFee.toLocaleString()}</span></div>` : ''}
-        ${totalGst > 0 ? `<div class="row" style="padding-left:8px"><span>GST Total</span><span>₹${totalGst.toLocaleString()}</span></div>` : ''}
+        ${totalCommission > 0 ? `<div class="row" style="padding-left:8px"><span>Commission Total</span><span>₹${formatBillingInr(totalCommission)}</span></div>` : ''}
+        ${totalUserFee > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee Total</span><span>₹${formatBillingInr(totalUserFee)}</span></div>` : ''}
+        ${totalGst > 0 ? `<div class="row" style="padding-left:8px"><span>GST Total</span><span>₹${formatBillingInr(totalGst)}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -163,11 +167,11 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
       ${currentGroupsHtml}
       ${additionsHtml}
       ${taxSummaryHtml}
-      ${bill.discount > 0 ? `<div class="row"><span class="muted">Discount</span><span class="destructive">−₹${discountAmount}</span></div>` : ''}
-      ${bill.manualRoundOff !== 0 ? `<div class="row"><span class="muted">Round Off</span><span>${bill.manualRoundOff > 0 ? '+' : ''}₹${bill.manualRoundOff}</span></div>` : ''}
+      ${bill.discount > 0 ? `<div class="row"><span class="muted">Discount</span><span class="destructive">−₹${formatBillingInr(discountAmount)}</span></div>` : ''}
+      ${bill.manualRoundOff !== 0 ? `<div class="row"><span class="muted">Round Off</span><span>${bill.manualRoundOff > 0 ? '+' : ''}₹${formatBillingInr(bill.manualRoundOff ?? 0)}</span></div>` : ''}
       <div class="row total section-t">
         <span class="bold">GRAND TOTAL</span>
-        <span class="grand">₹${bill.grandTotal.toLocaleString()}</span>
+        <span class="grand">₹${formatBillingInr(bill.grandTotal)}</span>
       </div>
       <div class="center foot section-t">
         <p>NR = B + P + BRK + Other</p>
