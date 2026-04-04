@@ -270,6 +270,10 @@ function AuctionsGridScrollPanel({
   gridSectionRef?: React.RefObject<HTMLDivElement>;
 }) {
   const outerRef = useRef<HTMLDivElement | null>(null);
+  /** User scrolled away from bottom — do not fight them with auto scroll-to-bottom. */
+  const suppressAutoScrollToBottomRef = useRef(false);
+  /** Ignore scroll events right after programmatic scroll (smooth scroll would otherwise set suppress). */
+  const ignoreScrollForAutoDetectionUntilRef = useRef(0);
   const [hintBottom, setHintBottom] = useState(false);
   const [hintRight, setHintRight] = useState(false);
   const [horizontalThumbMetrics, setHorizontalThumbMetrics] = useState<{ visible: boolean; left: number; width: number }>({
@@ -334,12 +338,11 @@ function AuctionsGridScrollPanel({
     const outer = outerRef.current;
     if (!outer || autoScrollToBottomKey <= 0) return;
 
+    suppressAutoScrollToBottomRef.current = false;
+
     let cleanedUp = false;
     const timeouts: number[] = [];
     const rafs: number[] = [];
-    let pollingInterval: number | null = null;
-    let lastScrollHeight = 0;
-    let stableCount = 0;
 
     const scrollPageToGrid = () => {
       if (cleanedUp) return;
@@ -360,6 +363,8 @@ function AuctionsGridScrollPanel({
       
       if (maxScroll <= 0) return;
 
+      ignoreScrollForAutoDetectionUntilRef.current = performance.now() + (smooth ? 650 : 120);
+
       if (smooth) {
         outer.scrollTo({ top: maxScroll, behavior: 'smooth' });
       } else {
@@ -372,6 +377,17 @@ function AuctionsGridScrollPanel({
       });
       rafs.push(raf);
     };
+
+    const onUserScroll = () => {
+      if (cleanedUp) return;
+      if (performance.now() < ignoreScrollForAutoDetectionUntilRef.current) return;
+      const maxScroll = Math.max(0, outer.scrollHeight - outer.clientHeight);
+      const atBottom =
+        maxScroll <= AUCTION_SCROLL_EPS ||
+        outer.scrollTop >= maxScroll - AUCTION_SCROLL_EPS;
+      suppressAutoScrollToBottomRef.current = !atBottom;
+    };
+    outer.addEventListener('scroll', onUserScroll, { passive: true });
 
     const isLatestRowFullyVisible = (): boolean => {
       const rows = Array.from(
@@ -400,27 +416,9 @@ function AuctionsGridScrollPanel({
 
     const checkAndScroll = () => {
       if (cleanedUp) return;
-
-      const currentScrollHeight = outer.scrollHeight;
-      
-      if (currentScrollHeight === lastScrollHeight) {
-        stableCount++;
-      } else {
-        stableCount = 0;
-        lastScrollHeight = currentScrollHeight;
-      }
-
-      const isVisible = isLatestRowFullyVisible();
-
-      if (!isVisible) {
+      if (suppressAutoScrollToBottomRef.current) return;
+      if (!isLatestRowFullyVisible()) {
         scrollToBottom(false);
-      }
-
-      if (stableCount >= 3 && isVisible) {
-        if (pollingInterval !== null) {
-          clearInterval(pollingInterval);
-          pollingInterval = null;
-        }
       }
     };
 
@@ -432,12 +430,9 @@ function AuctionsGridScrollPanel({
     timeouts.push(window.setTimeout(() => checkAndScroll(), 900));
     timeouts.push(window.setTimeout(() => checkAndScroll(), 1200));
 
-    pollingInterval = window.setInterval(() => {
-      checkAndScroll();
-    }, 400);
-
     const resizeObserver = new ResizeObserver(() => {
       if (cleanedUp) return;
+      if (suppressAutoScrollToBottomRef.current) return;
       scrollToBottom(false);
       const timeout = window.setTimeout(() => checkAndScroll(), 100);
       timeouts.push(timeout);
@@ -446,6 +441,7 @@ function AuctionsGridScrollPanel({
 
     const mutationObserver = new MutationObserver(() => {
       if (cleanedUp) return;
+      if (suppressAutoScrollToBottomRef.current) return;
       const timeout = window.setTimeout(() => scrollToBottom(false), 50);
       timeouts.push(timeout);
     });
@@ -453,9 +449,9 @@ function AuctionsGridScrollPanel({
 
     return () => {
       cleanedUp = true;
+      outer.removeEventListener('scroll', onUserScroll);
       rafs.forEach(id => cancelAnimationFrame(id));
       timeouts.forEach(id => clearTimeout(id));
-      if (pollingInterval !== null) clearInterval(pollingInterval);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
@@ -496,7 +492,10 @@ function AuctionsGridScrollPanel({
     <div className="relative">
       <div
         ref={outerRef}
-        className={cn('auctions-grid-scroll-panel lot-fields-x-scroll overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5', className)}
+        className={cn(
+          'auctions-grid-scroll-panel lot-fields-x-scroll min-h-0 overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5',
+          className
+        )}
         style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         {children}
@@ -647,6 +646,11 @@ const AuctionsPage = () => {
 
   /** ENH-34: inline edit bid row */
   const [editingBidId, setEditingBidId] = useState<string | null>(null);
+  const entriesRef = useRef<SaleEntry[]>([]);
+  const editingBidIdRef = useRef<string | null>(null);
+  entriesRef.current = entries;
+  editingBidIdRef.current = editingBidId;
+  const presetSyncChainRef = useRef(Promise.resolve());
   const [editBidDraft, setEditBidDraft] = useState<{
     rate: string;
     qty: string;
@@ -1116,6 +1120,61 @@ const AuctionsPage = () => {
       ? auctionApi.updateSelfSaleBid(selectedLot.selfSaleUnitId ?? selectedLot.lot_id, bidId, body)
       : auctionApi.updateBid(selectedLot.lot_id, bidId, body);
   }, [selectedLot, selectedLotSource]);
+
+  /** When preset margin changes, persist the same margin on every bid in the session (all traders). */
+  const syncPresetToAllSessionBids = useCallback(
+    (applied: number, type: PresetType) => {
+      if (!selectedLot) return;
+      if (!can('Auctions / Sales', 'Edit')) return;
+
+      presetSyncChainRef.current = presetSyncChainRef.current
+        .then(async () => {
+          let lastSession: AuctionSessionDTO | null = null;
+          let iterations = 0;
+          while (iterations < 500) {
+            iterations += 1;
+            const fresh = lastSession
+              ? mapOrderedSessionEntries(lastSession.entries)
+              : entriesRef.current;
+            const next = fresh.find(
+              e => !(e.presetApplied === applied && e.presetType === type)
+            );
+            if (!next) break;
+            lastSession = await updateBidForCurrentSelection(Number(next.id), {
+              rate: next.rate,
+              quantity: next.quantity,
+              extra_rate: next.extraRate ?? 0,
+              token_advance: next.tokenAdvance ?? 0,
+              preset_applied: applied,
+              preset_type: type,
+              expected_last_modified_ms: next.lastModifiedMs ?? undefined,
+            });
+            applyAuctionSession(lastSession);
+          }
+
+          const editId = editingBidIdRef.current;
+          if (editId && lastSession) {
+            const updated = mapOrderedSessionEntries(lastSession.entries).find(x => x.id === editId);
+            if (updated) {
+              setEditBidDraft(d => {
+                if (!d) return d;
+                return {
+                  ...d,
+                  lastModifiedMs: updated.lastModifiedMs ?? null,
+                  preset: updated.presetApplied,
+                  presetType: updated.presetType,
+                };
+              });
+            }
+          }
+        })
+        .catch(async err => {
+          toast.error(err instanceof Error ? err.message : 'Failed to sync preset on bids');
+          await refetchAuctionSession();
+        });
+    },
+    [selectedLot, can, updateBidForCurrentSelection, applyAuctionSession, refetchAuctionSession]
+  );
 
   const deleteBidForCurrentSelection = useCallback(async (bidId: number) => {
     if (!selectedLot) throw new Error('No lot selected');
@@ -1913,6 +1972,11 @@ const AuctionsPage = () => {
         };
       });
     }
+
+    if (showPresetMargin) {
+      const nextType: PresetType = next !== 0 ? (value >= 0 ? 'PROFIT' : 'LOSS') : 'PROFIT';
+      syncPresetToAllSessionBids(next, nextType);
+    }
   };
 
   useEffect(() => {
@@ -1958,7 +2022,13 @@ const AuctionsPage = () => {
         return { ...d, preset: nextPreset, presetType: nextPreset < 0 ? 'LOSS' : 'PROFIT' };
       });
     }
-  }, [editingBidId, preset, previousBidRate, rate]);
+
+    if (!checked) {
+      syncPresetToAllSessionBids(0, 'PROFIT');
+    } else if (preset !== 0) {
+      syncPresetToAllSessionBids(preset, presetType);
+    }
+  }, [editingBidId, preset, presetType, previousBidRate, rate, syncPresetToAllSessionBids]);
 
   const selectLot = useCallback((lot: LotInfo, source: LotSource = statusFilter === 'self_sale' ? 'self_sale' : 'regular') => {
     setSelectedLotSource(source);
@@ -2959,9 +3029,13 @@ const AuctionsPage = () => {
             <div className="glass-card rounded-2xl h-auto min-h-0 overflow-hidden">
               <AuctionsGridScrollPanel
                 className={cn(
-                  entries.length > 5
-                    ? 'max-h-[min(42vh,17rem)] sm:max-h-[min(48vh,19rem)] md:max-h-[min(52vh,21rem)]'
-                    : 'max-h-[min(52vh,21rem)]'
+                  isDesktop
+                    ? entries.length > 5
+                      ? 'max-h-[min(60vh,28rem)] lg:max-h-[min(55vh,26rem)]'
+                      : 'max-h-[min(65vh,32rem)] lg:max-h-[min(60vh,30rem)]'
+                    : entries.length > 5
+                      ? 'max-h-[min(42vh,17rem)] sm:max-h-[min(48vh,19rem)] md:max-h-[min(52vh,21rem)]'
+                      : 'max-h-[min(52vh,21rem)]'
                 )}
                 contentLayoutKey={entries.length}
                 autoScrollToBottomKey={autoScrollKey}
