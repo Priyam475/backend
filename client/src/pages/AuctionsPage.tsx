@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, Fra
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Gavel, Plus, Trash2,
-  ShoppingCart, User, Package, Truck, Banknote, ChevronDown,
+  ShoppingCart, User, Users, Package, Truck, Banknote, ChevronDown,
   Search, AlertTriangle, Merge, Hash,
   ChevronLeft, ChevronRight, List, Filter, Printer,
   Pencil, Check, X,
@@ -20,6 +20,7 @@ import InlineScribblePad, { MAX_MARK_LEN, type MarkDetectionMeta } from '@/compo
 import { contactApi, auctionApi, presetMarksApi } from '@/services/api';
 import type {
   LotSummaryDTO,
+  LotParticipatingBuyerDTO,
   AuctionSelfSaleUnitDTO,
   AuctionSessionDTO,
   AuctionEntryDTO,
@@ -58,6 +59,13 @@ interface LotInfo {
   selfSaleRate?: number;
   selfSaleAmount?: number;
   createdAt?: string;
+  /** From API: buyers with bids on latest auction (for By Buyer navigation). */
+  participatingBuyers?: Array<{
+    groupKey: string;
+    buyerName: string;
+    buyerMark: string;
+    registered: boolean;
+  }>;
 }
 
 type LotStatus = 'available' | 'sold' | 'partial' | 'pending' | 'self_sale';
@@ -163,6 +171,12 @@ function formatLotDisplayName(lot: {
 
 // ── Map API DTOs to UI types ──────────────────────────────
 function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
+  const participatingBuyers = (dto.participating_buyers ?? []).map((p: LotParticipatingBuyerDTO) => ({
+    groupKey: p.group_key,
+    buyerName: p.buyer_name ?? '',
+    buyerMark: p.buyer_mark ?? '',
+    registered: p.registered ?? false,
+  }));
   return {
     lot_id: String(dto.lot_id),
     lot_name: dto.lot_name ?? '',
@@ -177,6 +191,7 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     status: (dto.status?.toLowerCase() as LotStatus) ?? 'available',
     vehicle_total_qty: dto.vehicle_total_qty,
     seller_total_qty: dto.seller_total_qty,
+    participatingBuyers: participatingBuyers.length > 0 ? participatingBuyers : undefined,
   };
 }
 
@@ -614,7 +629,7 @@ const AuctionsPage = () => {
   const [selectedLotSource, setSelectedLotSource] = useState<LotSource>('regular');
   const [selfSaleContext, setSelfSaleContext] = useState<AuctionSelfSaleContextDTO | null>(null);
   const [lotSearchQuery, setLotSearchQuery] = useState('');
-  const [lotNavMode, setLotNavMode] = useState<'all' | 'vehicle' | 'seller' | 'lot_number'>('all');
+  const [lotNavMode, setLotNavMode] = useState<'all' | 'vehicle' | 'seller' | 'buyer' | 'lot_number'>('all');
   const [lotNumberSearch, setLotNumberSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LotStatus | 'all'>('all');
   const [showLotList, setShowLotList] = useState(false);
@@ -908,6 +923,21 @@ const AuctionsPage = () => {
       const key = l.seller_vehicle_id || `sv-${l.seller_name}-${l.vehicle_number}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(l);
+    });
+    return map;
+  }, [filteredLots]);
+
+  /** Group lots by buyer (registered contact or temp scribble) who has bids on that lot — same pattern as By Seller. */
+  const lotsByBuyer = useMemo(() => {
+    const map = new Map<string, LotInfo[]>();
+    filteredLots.forEach(l => {
+      const pbs = l.participatingBuyers;
+      if (!pbs?.length) return;
+      pbs.forEach(pb => {
+        const key = pb.groupKey;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(l);
+      });
     });
     return map;
   }, [filteredLots]);
@@ -2326,9 +2356,10 @@ const AuctionsPage = () => {
               { key: 'all', label: 'All Lots', icon: Package },
               { key: 'vehicle', label: 'By Vehicle', icon: Truck },
               { key: 'seller', label: 'By Seller', icon: User },
+              { key: 'buyer', label: 'By Buyer', icon: Users },
               { key: 'lot_number', label: 'By Lot #', icon: Hash },
             ].map(m => (
-              <button key={m.key} onClick={() => setLotNavMode(m.key as any)}
+              <button key={m.key} onClick={() => setLotNavMode(m.key as 'all' | 'vehicle' | 'seller' | 'buyer' | 'lot_number')}
                 className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all",
                   lotNavMode === m.key
                     ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
@@ -2402,6 +2433,56 @@ const AuctionsPage = () => {
                   <div className="p-3 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-950/20 dark:to-green-950/20 border-b border-border/30 flex items-center gap-2">
                     <User className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
                     <span className="text-sm font-bold text-foreground truncate min-w-0">{label}</span>
+                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{lots.length} lot(s)</span>
+                  </div>
+                  <div className="divide-y divide-border/20">
+                    {lots.map(lot => (
+                      <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()
+          ) : lotNavMode === 'buyer' && statusFilter !== 'self_sale' ? (
+            (() => {
+              const entries = Array.from(lotsByBuyer.entries());
+              if (entries.length === 0) {
+                return (
+                  <div className="glass-card rounded-2xl p-8 text-center">
+                    <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground font-medium">No buyer-linked lots yet</p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">Lots appear here once buyers (registered or temporary) have bids on them.</p>
+                  </div>
+                );
+              }
+              const toLabel = ([groupKey, lots]: [string, LotInfo[]]) => {
+                const first = lots[0];
+                const pb = first?.participatingBuyers?.find(p => p.groupKey === groupKey);
+                if (!pb) {
+                  return { key: groupKey, lots, label: groupKey, sortKey: groupKey, registered: true };
+                }
+                const name = (pb.buyerName || '').trim();
+                const mark = (pb.buyerMark || '').trim();
+                const label = [name, mark ? `(${mark})` : null].filter(Boolean).join(' ') || groupKey;
+                const sortKey = `${pb.registered ? '0' : '1'}|${name.toLowerCase()}|${mark.toLowerCase()}`;
+                return { key: groupKey, lots, label, sortKey, registered: pb.registered };
+              };
+              const sorted = entries.map(toLabel).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+              return sorted.map(({ key, lots, label, registered }) => (
+                <div key={key} className="glass-card rounded-2xl overflow-hidden">
+                  <div className="p-3 bg-gradient-to-r from-violet-50 to-fuchsia-50 dark:from-violet-950/20 dark:to-fuchsia-950/20 border-b border-border/30 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-violet-600 dark:text-violet-400 flex-shrink-0" />
+                    <span className="text-sm font-bold text-foreground truncate min-w-0">{label}</span>
+                    {!registered && (
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 flex-shrink-0">
+                        Temp
+                      </span>
+                    )}
+                    {registered && (
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 flex-shrink-0">
+                        Registered
+                      </span>
+                    )}
                     <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{lots.length} lot(s)</span>
                   </div>
                   <div className="divide-y divide-border/20">
