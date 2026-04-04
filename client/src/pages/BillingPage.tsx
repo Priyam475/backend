@@ -4,7 +4,7 @@ import {
   ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
   Percent, FileText, ChevronDown, ChevronUp,
-  AlertCircle, BookOpen, X, Loader2, Clock,
+  AlertCircle, AlertTriangle, BookOpen, X, Loader2, Clock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -22,7 +22,14 @@ import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
-import type { AuctionBidUpdateRequest, AuctionEntryDTO, AuctionResultDTO, LotSummaryDTO } from '@/services/api/auction';
+import type {
+  AuctionBidCreateRequest,
+  AuctionBidUpdateRequest,
+  AuctionEntryDTO,
+  AuctionResultDTO,
+  AuctionSessionDTO,
+  LotSummaryDTO,
+} from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { usePermissions } from '@/lib/permissions';
@@ -606,6 +613,10 @@ const BillingPage = () => {
   const [replaceErrors, setReplaceErrors] = useState<Record<string, string>>({});
   const [addBidDialogOpen, setAddBidDialogOpen] = useState(false);
   const [addBidLotSearch, setAddBidLotSearch] = useState('');
+  const addBidLotSearchRef = useRef('');
+  addBidLotSearchRef.current = addBidLotSearch;
+  /** Full browse list (no status filter — includes SOLD / PARTIAL / PENDING / AVAILABLE). */
+  const addBidBrowseLotsRef = useRef<LotSummaryDTO[]>([]);
   const [showAddBidLotDropdown, setShowAddBidLotDropdown] = useState(false);
   const [addBidLotOptions, setAddBidLotOptions] = useState<LotSummaryDTO[]>([]);
   const [addBidLotLoading, setAddBidLotLoading] = useState(false);
@@ -616,6 +627,19 @@ const BillingPage = () => {
   const [addBidExtraAmount, setAddBidExtraAmount] = useState('0');
   const [addBidTokenAdvance, setAddBidTokenAdvance] = useState('0');
   const [addBidSaving, setAddBidSaving] = useState(false);
+  /** Cached session for the selected lot (auction parity: merge, lot increase). */
+  const [addBidSession, setAddBidSession] = useState<AuctionSessionDTO | null>(null);
+  const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+  const [addBidQtyIncreaseDialog, setAddBidQtyIncreaseDialog] = useState<{
+    currentTotal: number;
+    lotTotal: number;
+    attemptedQty: number;
+  } | null>(null);
+  const [addBidDuplicateDialog, setAddBidDuplicateDialog] = useState<{
+    existingEntry: AuctionEntryDTO;
+    rate: number;
+    qty: number;
+  } | null>(null);
   const [searchBidInput, setSearchBidInput] = useState('');
   const [searchBidSourceBuyer, setSearchBidSourceBuyer] = useState<BuyerPurchase | null>(null);
   const [searchBidDialogOpen, setSearchBidDialogOpen] = useState(false);
@@ -652,25 +676,59 @@ const BillingPage = () => {
 
   useEffect(() => {
     if (!addBidDialogOpen) return;
-    let active = true;
+    let cancelled = false;
     setAddBidLotLoading(true);
     void auctionApi
-      .listLots({ page: 0, size: 500 })
+      .listLots({ page: 0, size: 4000 })
       .then(list => {
-        if (!active) return;
-        setAddBidLotOptions(Array.isArray(list) ? list : []);
+        if (cancelled) return;
+        const arr = Array.isArray(list) ? list : [];
+        addBidBrowseLotsRef.current = arr;
+        if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions(arr);
       })
       .catch(() => {
-        if (!active) return;
-        setAddBidLotOptions([]);
+        if (!cancelled) {
+          addBidBrowseLotsRef.current = [];
+          if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions([]);
+        }
       })
       .finally(() => {
-        if (active) setAddBidLotLoading(false);
+        if (!cancelled) setAddBidLotLoading(false);
       });
     return () => {
-      active = false;
+      cancelled = true;
     };
   }, [addBidDialogOpen]);
+
+  /** Server search by lot name (backend ignores status — sold lots remain discoverable). */
+  useEffect(() => {
+    if (!addBidDialogOpen) return;
+    const q = addBidLotSearch.trim();
+    if (q.length < 2) {
+      setAddBidLotOptions(addBidBrowseLotsRef.current);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      setAddBidLotLoading(true);
+      void auctionApi
+        .listLots({ page: 0, size: 1500, q })
+        .then(list => {
+          if (cancelled) return;
+          setAddBidLotOptions(Array.isArray(list) ? list : []);
+        })
+        .catch(() => {
+          if (!cancelled) setAddBidLotOptions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setAddBidLotLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [addBidDialogOpen, addBidLotSearch]);
 
   const getAddBidLotIdentifier = useCallback((lot: LotSummaryDTO): string => {
     const lotQty = Number(lot.bag_count) || 0;
@@ -682,19 +740,22 @@ const BillingPage = () => {
 
   const filteredAddBidLots = useMemo(() => {
     const q = addBidLotSearch.trim().toLowerCase();
-    if (!q) return addBidLotOptions.slice(0, 25);
-    return addBidLotOptions
+    const base = addBidLotOptions;
+    if (!q) return base.slice(0, 150);
+    return base
       .filter(lot => {
         const identifier = getAddBidLotIdentifier(lot).toLowerCase();
+        const st = (lot.status || '').toLowerCase();
         return (
           identifier.includes(q)
           || (lot.lot_name || '').toLowerCase().includes(q)
           || String(lot.lot_id || '').toLowerCase().includes(q)
           || (lot.seller_name || '').toLowerCase().includes(q)
           || (lot.vehicle_number || '').toLowerCase().includes(q)
+          || st.includes(q)
         );
       })
-      .slice(0, 25);
+      .slice(0, 150);
   }, [addBidLotOptions, addBidLotSearch, getAddBidLotIdentifier]);
 
   // Load saved bills from backend
@@ -1595,6 +1656,10 @@ const BillingPage = () => {
     setAddBidLotOptions([]);
     setAddBidSelectedLot(null);
     setAddBidRemainingQty(0);
+    setAddBidSession(null);
+    setAddBidRetryAllowIncrease(false);
+    setAddBidQtyIncreaseDialog(null);
+    setAddBidDuplicateDialog(null);
     setAddBidQty('');
     setAddBidBaseRate('');
     setAddBidExtraAmount('0');
@@ -1630,44 +1695,164 @@ const BillingPage = () => {
     });
   }, []);
 
-  const handleAddBidToCurrentBuyer = useCallback(async () => {
-    if (!bill || !selectedBuyer) {
-      toast.error('Open a buyer bill first');
-      return;
-    }
-    if (!addBidSelectedLot) {
-      toast.error('Select lot mark');
-      return;
-    }
-    const qty = Number(addBidQty);
-    const rate = Number(addBidBaseRate);
-    const extra = Number(addBidExtraAmount || 0);
-    const tokenAdvance = Number(addBidTokenAdvance || 0);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast.error('Enter valid bid quantity');
-      return;
-    }
-    if (!Number.isFinite(rate) || rate <= 0) {
-      toast.error('Enter valid base rate');
-      return;
-    }
-    if (qty > addBidRemainingQty) {
-      toast.error(`Bid quantity cannot exceed remaining (${addBidRemainingQty})`);
-      return;
-    }
-    if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
-      toast.error('Enter valid extra/token values');
-      return;
-    }
+  /** When auction merges bids (same mark + rate), update the existing bill line instead of appending. */
+  const upsertBidForBuyer = useCallback(
+    (buyerKey: string, buyerName: string, buyerMark: string, buyerContactId: string | null, entry: BillEntry) => {
+      const lineKey = getBidSelectionKey(entry);
+      const patch = (buyer: BuyerPurchase): BuyerPurchase => {
+        const idx = buyer.entries.findIndex(e => getBidSelectionKey(e) === lineKey);
+        if (idx < 0) {
+          return {
+            ...buyer,
+            entries: [...buyer.entries, entry],
+            tokenAdvanceTotal: (buyer.tokenAdvanceTotal || 0) + (Number(entry.tokenAdvance) || 0),
+          };
+        }
+        const oldTa = Number(buyer.entries[idx].tokenAdvance) || 0;
+        const newTa = Number(entry.tokenAdvance) || 0;
+        const nextEntries = [...buyer.entries];
+        nextEntries[idx] = entry;
+        return {
+          ...buyer,
+          entries: nextEntries,
+          tokenAdvanceTotal: (buyer.tokenAdvanceTotal || 0) - oldTa + newTa,
+        };
+      };
+      setBuyers(prev => {
+        const idx = prev.findIndex(
+          b =>
+            (b.buyerMark || '').toLowerCase() === buyerMark.toLowerCase()
+            && (b.buyerName || '').toLowerCase() === buyerName.toLowerCase(),
+        );
+        if (idx < 0) {
+          return [...prev, { buyerName, buyerMark, buyerContactId, entries: [entry], tokenAdvanceTotal: Number(entry.tokenAdvance) || 0 }];
+        }
+        const next = [...prev];
+        next[idx] = patch(next[idx]);
+        return next;
+      });
+      setSelectedBuyer(prev => {
+        if (!prev) return prev;
+        const key = `${(prev.buyerMark || '').toLowerCase()}::${(prev.buyerName || '').toLowerCase()}`;
+        if (key !== buyerKey) return prev;
+        return patch(prev);
+      });
+    },
+    [],
+  );
 
-    const buyerIdNum =
-      selectedBuyer.buyerContactId && /^\d+$/.test(selectedBuyer.buyerContactId)
-        ? Number(selectedBuyer.buyerContactId)
-        : undefined;
+  const applyAddBidSessionToBill = useCallback(
+    (session: AuctionSessionDTO) => {
+      if (!bill || !selectedBuyer || !addBidSelectedLot) return;
+      const billBuyerMarkNorm = (bill.buyerMark || '').trim().toLowerCase();
+      const lotIdStr = String(addBidSelectedLot.lot_id);
+      const buyerOwn = (session.entries || []).filter(
+        e => (e.buyer_mark || '').trim().toLowerCase() === billBuyerMarkNorm,
+      );
+      const existingForLot = selectedBuyer.entries.filter(e => String(e.lotId) === lotIdStr);
+      let matchedAuction: AuctionEntryDTO | undefined;
+      for (const be of existingForLot) {
+        if (be.auctionEntryId != null) {
+          const hit = buyerOwn.find(a => a.auction_entry_id === be.auctionEntryId);
+          if (hit) {
+            matchedAuction = hit;
+            break;
+          }
+        }
+      }
+      if (!matchedAuction && buyerOwn.length) {
+        matchedAuction = [...buyerOwn].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
+      }
+      if (!matchedAuction) {
+        toast.error('Bid saved but failed to map in bill. Refresh billing data.');
+        return;
+      }
+      const ws = weighingSessions.find((s: any) => s.bid_number === matchedAuction!.bid_number);
+      const newBillEntry: BillEntry = {
+        bidNumber: matchedAuction.bid_number,
+        lotId: lotIdStr,
+        auctionEntryId: matchedAuction.auction_entry_id ?? null,
+        selfSaleUnitId: null,
+        lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
+        lotTotalQty: session.lot?.bag_count ?? addBidSelectedLot.bag_count ?? matchedAuction.quantity,
+        sellerName: addBidSelectedLot.seller_name || 'Unknown',
+        commodityName: addBidSelectedLot.commodity_name || 'Unknown',
+        rate: Number(matchedAuction.bid_rate) || 0,
+        quantity: matchedAuction.quantity ?? 0,
+        weight: ws ? ws.net_weight : (matchedAuction.quantity ?? 0) * 50,
+        vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? matchedAuction.quantity ?? 0,
+        sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? matchedAuction.quantity ?? 0,
+        presetApplied: Number(matchedAuction.preset_margin) || 0,
+        isSelfSale: !!matchedAuction.is_self_sale,
+        tokenAdvance: Number(matchedAuction.token_advance) || 0,
+      };
+      const buyerKey = `${(bill.buyerMark || '').toLowerCase()}::${(bill.buyerName || '').toLowerCase()}`;
+      const existingLine = selectedBuyer.entries.find(
+        e => String(e.lotId) === lotIdStr && e.bidNumber === newBillEntry.bidNumber,
+      );
+      if (existingLine) {
+        upsertBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
+        const nextEntries = selectedBuyer.entries.map(e =>
+          getBidSelectionKey(e) === getBidSelectionKey(newBillEntry) ? newBillEntry : e,
+        );
+        generateBill({
+          ...selectedBuyer,
+          entries: nextEntries,
+          tokenAdvanceTotal: nextEntries.reduce((s, e) => s + (Number(e.tokenAdvance) || 0), 0),
+        });
+      } else {
+        appendBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
+        const mergedBuyer: BuyerPurchase = {
+          buyerMark: bill.buyerMark,
+          buyerName: bill.buyerName,
+          buyerContactId: selectedBuyer.buyerContactId ?? null,
+          entries: [...selectedBuyer.entries, newBillEntry],
+          tokenAdvanceTotal: (selectedBuyer.tokenAdvanceTotal || 0) + (Number(newBillEntry.tokenAdvance) || 0),
+        };
+        generateBill(mergedBuyer);
+      }
+    },
+    [
+      addBidSelectedLot,
+      appendBidForBuyer,
+      bill,
+      generateBill,
+      selectedBuyer,
+      upsertBidForBuyer,
+      weighingSessions,
+    ],
+  );
 
-    try {
-      setAddBidSaving(true);
-      const session = await auctionApi.addBid(addBidSelectedLot.lot_id, {
+  const executeBillingAddBid = useCallback(
+    async (allowLotIncrease: boolean) => {
+      if (!bill || !selectedBuyer || !addBidSelectedLot) {
+        toast.error('Open a buyer bill first');
+        return;
+      }
+      const qty = Number(addBidQty);
+      const rate = Number(addBidBaseRate);
+      const extra = Number(addBidExtraAmount || 0);
+      const tokenAdvance = Number(addBidTokenAdvance || 0);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter valid bid quantity');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate <= 0) {
+        toast.error('Enter valid base rate');
+        return;
+      }
+      if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
+        toast.error('Enter valid extra/token values');
+        return;
+      }
+
+      const buyerIdNum =
+        selectedBuyer.buyerContactId && /^\d+$/.test(selectedBuyer.buyerContactId)
+          ? Number(selectedBuyer.buyerContactId)
+          : undefined;
+
+      const allow = allowLotIncrease || addBidRetryAllowIncrease;
+      const body: AuctionBidCreateRequest = {
         buyer_id: buyerIdNum,
         buyer_name: (bill.billingName || bill.buyerName || '').trim(),
         buyer_mark: (bill.buyerMark || '').trim(),
@@ -1675,72 +1860,125 @@ const BillingPage = () => {
         quantity: qty,
         extra_rate: extra,
         token_advance: tokenAdvance,
-      });
-      const billBuyerNameNorm = (bill.billingName || bill.buyerName || '').trim().toLowerCase();
-      const ownEntries = (session.entries || []).filter(
-        e =>
-          (e.buyer_mark || '').trim().toLowerCase() === (bill.buyerMark || '').trim().toLowerCase()
-          && (e.buyer_name || '').trim().toLowerCase() === billBuyerNameNorm,
-      );
-      const latest: AuctionEntryDTO | undefined = [...ownEntries].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
-      if (!latest) {
-        toast.error('Bid saved but failed to map in bill. Refresh billing data.');
+        preset_applied: 0,
+        preset_type: 'PROFIT',
+        is_scribble: false,
+        is_self_sale: false,
+        allow_lot_increase: allow,
+      };
+
+      try {
+        setAddBidSaving(true);
+        const session = await auctionApi.addBid(addBidSelectedLot.lot_id, body);
+        setAddBidSession(session);
+        setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+        setAddBidRetryAllowIncrease(false);
+        applyAddBidSessionToBill(session);
+        await refetchAuctions();
+        resetAddBidForm();
+        setAddBidDialogOpen(false);
+        toast.success('Bid added and bill updated');
+      } catch (err: unknown) {
+        const e = err as { isConflict?: boolean; message?: string };
+        if (e.isConflict) {
+          setAddBidRetryAllowIncrease(true);
+          toast.error('Quantity exceeds lot. Tap Save again to allow lot increase and retry.');
+        } else {
+          toast.error(e instanceof Error ? e.message : 'Failed to add bid');
+        }
+      } finally {
+        setAddBidSaving(false);
+      }
+    },
+    [
+      addBidBaseRate,
+      addBidExtraAmount,
+      addBidQty,
+      addBidRetryAllowIncrease,
+      addBidSelectedLot,
+      addBidTokenAdvance,
+      applyAddBidSessionToBill,
+      bill,
+      refetchAuctions,
+      resetAddBidForm,
+      selectedBuyer,
+    ],
+  );
+
+  const beginAddBidFlow = useCallback(
+    (allowLotIncreaseFromStep: boolean) => {
+      if (!bill || !selectedBuyer) {
+        toast.error('Open a buyer bill first');
         return;
       }
-      const ws = weighingSessions.find((s: any) => s.bid_number === latest.bid_number);
-      const newBillEntry: BillEntry = {
-        bidNumber: latest.bid_number,
-        lotId: String(addBidSelectedLot.lot_id),
-        auctionEntryId: latest.auction_entry_id ?? null,
-        selfSaleUnitId: null,
-        lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
-        lotTotalQty: addBidSelectedLot.bag_count ?? latest.quantity,
-        sellerName: addBidSelectedLot.seller_name || 'Unknown',
-        commodityName: addBidSelectedLot.commodity_name || 'Unknown',
-        rate: Number(latest.bid_rate) || rate,
-        quantity: latest.quantity ?? qty,
-        weight: ws ? ws.net_weight : (latest.quantity ?? qty) * 50,
-        vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? latest.quantity ?? qty,
-        sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? latest.quantity ?? qty,
-        presetApplied: Number(latest.preset_margin) || 0,
-        isSelfSale: false,
-        tokenAdvance: Number(latest.token_advance ?? tokenAdvance) || 0,
-      };
-      const buyerKey = `${(bill.buyerMark || '').toLowerCase()}::${(bill.buyerName || '').toLowerCase()}`;
-      appendBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
-      const mergedBuyer: BuyerPurchase = {
-        buyerMark: bill.buyerMark,
-        buyerName: bill.buyerName,
-        buyerContactId: selectedBuyer.buyerContactId ?? null,
-        entries: [...selectedBuyer.entries, newBillEntry],
-        tokenAdvanceTotal: (selectedBuyer.tokenAdvanceTotal || 0) + (Number(newBillEntry.tokenAdvance) || 0),
-      };
-      generateBill(mergedBuyer);
-      await refetchAuctions();
-      setAddBidRemainingQty(Number(session.remaining_bags) || 0);
-      resetAddBidForm();
-      setAddBidDialogOpen(false);
-      toast.success('Bid added and bill updated');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add bid');
-    } finally {
-      setAddBidSaving(false);
-    }
-  }, [
-    addBidBaseRate,
-    addBidExtraAmount,
-    addBidQty,
-    addBidRemainingQty,
-    addBidSelectedLot,
-    addBidTokenAdvance,
-    appendBidForBuyer,
-    bill,
-    generateBill,
-    resetAddBidForm,
-    refetchAuctions,
-    selectedBuyer,
-    weighingSessions,
-  ]);
+      if (!addBidSelectedLot) {
+        toast.error('Select lot mark');
+        return;
+      }
+      if (!addBidSession) {
+        toast.error('Lot session not loaded — re-select the lot');
+        return;
+      }
+      const qty = Number(addBidQty);
+      const rate = Number(addBidBaseRate);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter valid bid quantity');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate <= 0) {
+        toast.error('Enter valid base rate');
+        return;
+      }
+
+      const lotTotal = addBidSession.lot?.bag_count ?? 0;
+      const currentSold = Number(addBidSession.total_sold_bags) || 0;
+      const newTotal = currentSold + qty;
+      if (newTotal > lotTotal && !addBidRetryAllowIncrease && !allowLotIncreaseFromStep) {
+        setAddBidQtyIncreaseDialog({ currentTotal: currentSold, lotTotal, attemptedQty: qty });
+        return;
+      }
+
+      const markNorm = (bill.buyerMark || '').trim().toLowerCase();
+      const dup = (addBidSession.entries || []).find(
+        e => !e.is_self_sale && (e.buyer_mark || '').trim().toLowerCase() === markNorm,
+      );
+      if (dup) {
+        setAddBidDuplicateDialog({ existingEntry: dup, rate, qty });
+        return;
+      }
+
+      void executeBillingAddBid(allowLotIncreaseFromStep);
+    },
+    [
+      addBidSession,
+      addBidBaseRate,
+      addBidQty,
+      addBidRetryAllowIncrease,
+      addBidSelectedLot,
+      bill,
+      executeBillingAddBid,
+      selectedBuyer,
+    ],
+  );
+
+  const handleAddBidToCurrentBuyer = useCallback(() => {
+    beginAddBidFlow(false);
+  }, [beginAddBidFlow]);
+
+  const confirmAddBidQtyIncrease = useCallback(() => {
+    setAddBidQtyIncreaseDialog(null);
+    beginAddBidFlow(true);
+  }, [beginAddBidFlow]);
+
+  const handleAddBidDuplicateDifferentMark = useCallback(() => {
+    setAddBidDuplicateDialog(null);
+    toast.info('Change the buyer mark on the sales bill, then add the bid again.');
+  }, []);
+
+  const handleAddBidDuplicateConfirm = useCallback(() => {
+    setAddBidDuplicateDialog(null);
+    void executeBillingAddBid(false);
+  }, [executeBillingAddBid]);
 
   const openSearchBidDialogForBuyer = useCallback((picked: BuyerPurchase) => {
     setSearchBidSourceBuyer(picked);
@@ -2631,13 +2869,20 @@ const BillingPage = () => {
                 onChange={e => {
                   setAddBidLotSearch(e.target.value);
                   setAddBidSelectedLot(null);
+                  setAddBidSession(null);
+                  setAddBidRemainingQty(0);
                   setShowAddBidLotDropdown(true);
                 }}
-                placeholder="Lot identifier"
+                placeholder="Search lot, vehicle, seller (includes sold / full lots)"
                 className="h-10 sm:h-9 rounded-lg text-sm"
                 autoComplete="off"
               />
               {addBidLotLoading && <p className="text-xs text-muted-foreground">Loading lots…</p>}
+              {!addBidLotLoading && addBidLotSearch.trim().length === 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Add a character to search the full catalog by lot name; one letter still filters the loaded list below.
+                </p>
+              )}
               {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
                 <div className="absolute z-[100] left-0 right-0 top-full mt-1 max-h-[40vh] sm:max-h-48 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
                   {filteredAddBidLots.length === 0 && (
@@ -2654,13 +2899,32 @@ const BillingPage = () => {
                         setShowAddBidLotDropdown(false);
                         try {
                           const session = await auctionApi.getOrStartSession(lot.lot_id);
+                          setAddBidSession(session);
                           setAddBidRemainingQty(Number(session.remaining_bags) || 0);
                         } catch {
+                          setAddBidSession(null);
                           setAddBidRemainingQty(0);
                         }
                       }}
                     >
-                      <p className="text-sm font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                        {lot.status && (
+                          <span
+                            className={cn(
+                              'shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded',
+                              lot.status === 'SOLD' && 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+                              lot.status === 'AVAILABLE' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+                              (lot.status === 'PARTIAL' || lot.status === 'PENDING')
+                                && 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
+                              !['SOLD', 'AVAILABLE', 'PARTIAL', 'PENDING'].includes(String(lot.status || ''))
+                                && 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {lot.status}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
                     </button>
                   ))}
@@ -2738,9 +3002,98 @@ const BillingPage = () => {
               onClick={() => void handleAddBidToCurrentBuyer()}
               disabled={addBidSaving}
             >
-              {addBidSaving ? 'Saving...' : 'Save Bid'}
+              {addBidSaving ? 'Saving...' : addBidRetryAllowIncrease ? 'Save (allow lot increase)' : 'Save Bid'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!addBidDuplicateDialog}
+        onOpenChange={open => {
+          if (!open) setAddBidDuplicateDialog(null);
+        }}
+      >
+        <DialogContent
+          hideCloseButton
+          overlayClassName="z-[200] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            'dialog-content z-[200] w-[calc(100vw-1.5rem)] max-w-sm gap-0 overflow-hidden border border-border/50 bg-card p-5 shadow-2xl sm:rounded-2xl',
+          )}
+        >
+          {addBidDuplicateDialog && (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/20 flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-7 h-7 text-amber-500" />
+              </div>
+              <h3 className="text-lg font-bold text-center text-foreground mb-1">
+                Reusing mark &quot;{addBidDuplicateDialog.existingEntry.buyer_mark}&quot;?
+              </h3>
+              <p className="text-sm text-center text-muted-foreground mb-4">
+                This mark already exists on this lot (Bid #{addBidDuplicateDialog.existingEntry.bid_number}).
+                {addBidDuplicateDialog.existingEntry.bid_rate === addBidDuplicateDialog.rate
+                  ? ' Same rate — new quantity will merge into that bid.'
+                  : ' Different rate — a separate bid row will be created.'}
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={handleAddBidDuplicateDifferentMark} variant="outline" className="flex-1 h-12 rounded-xl">
+                  Different mark
+                </Button>
+                <Button
+                  onClick={handleAddBidDuplicateConfirm}
+                  className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white"
+                >
+                  {addBidDuplicateDialog.existingEntry.bid_rate === addBidDuplicateDialog.rate ? 'Merge' : 'Keep separate'}
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!addBidQtyIncreaseDialog}
+        onOpenChange={open => {
+          if (!open) setAddBidQtyIncreaseDialog(null);
+        }}
+      >
+        <DialogContent
+          hideCloseButton
+          overlayClassName="z-[200] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            'dialog-content z-[200] w-[calc(100vw-1.5rem)] max-w-sm gap-0 overflow-hidden border border-border/50 bg-card p-5 shadow-2xl sm:rounded-2xl',
+          )}
+        >
+          {addBidQtyIncreaseDialog && (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500/20 to-violet-500/20 border border-blue-500/20 flex items-center justify-center mx-auto mb-3">
+                <Plus className="w-7 h-7 text-primary" />
+              </div>
+              <h3 className="text-lg font-bold text-center text-foreground mb-1">Increase lot quantity?</h3>
+              <p className="text-sm text-center text-muted-foreground mb-4">
+                Lot has <strong>{addBidQtyIncreaseDialog.lotTotal}</strong> bags,{' '}
+                <strong>{addBidQtyIncreaseDialog.currentTotal}</strong> already sold. Adding{' '}
+                <strong>{addBidQtyIncreaseDialog.attemptedQty}</strong> bags exceeds the limit.
+                <br />
+                New total will be:{' '}
+                <strong>
+                  {addBidQtyIncreaseDialog.currentTotal + addBidQtyIncreaseDialog.attemptedQty}
+                </strong>{' '}
+                bags.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setAddBidQtyIncreaseDialog(null)} variant="outline" className="flex-1 h-12 rounded-xl">
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmAddBidQtyIncrease}
+                  className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white"
+                >
+                  Increase &amp; add
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
