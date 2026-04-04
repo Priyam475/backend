@@ -89,4 +89,5 @@
     <include file="config/liquibase/changelog/20260402000000_per_commodity_billing_charges.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260402120000_sales_bill_line_item_lot_id.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260402140000_sales_bill_line_item_auction_entry_id.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260404120000_commodity_config_sgst_cgst_igst.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>
