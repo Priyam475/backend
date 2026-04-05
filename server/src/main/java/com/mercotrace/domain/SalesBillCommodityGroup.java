@@ -87,6 +87,19 @@ public class SalesBillCommodityGroup implements Serializable {
     @Column(name = "manual_round_off", precision = 15, scale = 2)
     private BigDecimal manualRoundOff = BigDecimal.ZERO;
 
+    /** Combined GST % on bill (overrides commodity config for this bill line). */
+    @Column(name = "gst_rate", precision = 8, scale = 2)
+    private BigDecimal gstRate;
+
+    @Column(name = "sgst_rate", precision = 8, scale = 2)
+    private BigDecimal sgstRate;
+
+    @Column(name = "cgst_rate", precision = 8, scale = 2)
+    private BigDecimal cgstRate;
+
+    @Column(name = "igst_rate", precision = 8, scale = 2)
+    private BigDecimal igstRate;
+
     @NotNull
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
@@ -129,6 +142,14 @@ public class SalesBillCommodityGroup implements Serializable {
     public void setDiscountType(String discountType) { this.discountType = discountType; }
     public BigDecimal getManualRoundOff() { return manualRoundOff; }
     public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
+    public BigDecimal getGstRate() { return gstRate; }
+    public void setGstRate(BigDecimal gstRate) { this.gstRate = gstRate; }
+    public BigDecimal getSgstRate() { return sgstRate; }
+    public void setSgstRate(BigDecimal sgstRate) { this.sgstRate = sgstRate; }
+    public BigDecimal getCgstRate() { return cgstRate; }
+    public void setCgstRate(BigDecimal cgstRate) { this.cgstRate = cgstRate; }
+    public BigDecimal getIgstRate() { return igstRate; }
+    public void setIgstRate(BigDecimal igstRate) { this.igstRate = igstRate; }
     public Integer getSortOrder() { return sortOrder; }
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
     public List<SalesBillLineItem> getItems() { return items; }

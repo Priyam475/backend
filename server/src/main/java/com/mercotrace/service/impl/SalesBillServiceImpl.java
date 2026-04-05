@@ -348,6 +348,10 @@ public class SalesBillServiceImpl implements SalesBillService {
             group.setDiscount(nullToZero(g.getDiscount()));
             group.setDiscountType(g.getDiscountType() != null ? g.getDiscountType() : "AMOUNT");
             group.setManualRoundOff(nullToZero(g.getManualRoundOff()));
+            group.setGstRate(g.getGstRate());
+            group.setSgstRate(g.getSgstRate());
+            group.setCgstRate(g.getCgstRate());
+            group.setIgstRate(g.getIgstRate());
             group.setSortOrder(go++);
             bill.getCommodityGroups().add(group);
             int io = 0;
@@ -423,6 +427,10 @@ public class SalesBillServiceImpl implements SalesBillService {
             gdto.setDiscount(g.getDiscount());
             gdto.setDiscountType(g.getDiscountType());
             gdto.setManualRoundOff(g.getManualRoundOff());
+            gdto.setGstRate(g.getGstRate());
+            gdto.setSgstRate(g.getSgstRate());
+            gdto.setCgstRate(g.getCgstRate());
+            gdto.setIgstRate(g.getIgstRate());
             List<BillLineItemDTO> items = new ArrayList<>();
             for (SalesBillLineItem it : g.getItems()) {
                 BillLineItemDTO idto = new BillLineItemDTO();

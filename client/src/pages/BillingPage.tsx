@@ -4,7 +4,7 @@ import {
   ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
   Edit3, Lock, Unlock, Save, Printer, Plus, Trash2,
   Percent, FileText, ChevronDown, ChevronUp,
-  AlertCircle, BookOpen, X, Loader2, Clock,
+  AlertCircle, AlertTriangle, BookOpen, X, Loader2, Clock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -22,7 +22,14 @@ import { useAuctionResults } from '@/hooks/useAuctionResults';
 import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
-import type { AuctionBidUpdateRequest, AuctionEntryDTO, AuctionResultDTO, LotSummaryDTO } from '@/services/api/auction';
+import type {
+  AuctionBidCreateRequest,
+  AuctionBidUpdateRequest,
+  AuctionEntryDTO,
+  AuctionResultDTO,
+  AuctionSessionDTO,
+  LotSummaryDTO,
+} from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { usePermissions } from '@/lib/permissions';
@@ -32,6 +39,15 @@ import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import { directPrint } from '@/utils/printTemplates';
 import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
+import {
+  billGroupSubtotalWithTaxAndCharges,
+  effectiveGstPercent,
+  formatBillingInr,
+  gstOnSubtotal,
+  percentOfAmount,
+  roundMoney2,
+} from '@/utils/billingMoney';
+import { BillingMoneyInput } from '@/components/billing/BillingMoneyInput';
 
 /**
  * Billing buttons/tabs match ArrivalsPage.tsx:
@@ -51,6 +67,10 @@ const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
 const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
 const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
 const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+
+/** Commodity line: computed fields (not inputs). Muted + dashed border + not-allowed cursor so they read as read-only. */
+const billingCommodityReadOnlyCellClass =
+  'h-10 lg:h-6 px-2 lg:px-1 border border-dashed border-border/70 rounded-md bg-muted/50 text-muted-foreground inline-flex items-center justify-center w-full text-[11px] lg:text-[10px] cursor-not-allowed shadow-inner select-text';
 
 /** Desktop main tabs: same as Arrivals Summary / New Arrival (underline + #6075FF bar). */
 const arrDeskTabBtn = (active: boolean) =>
@@ -168,6 +188,10 @@ interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
   gstRate: number;
+  /** Optional SGST/CGST (intra) or IGST (inter) split; see `effectiveGstPercent` in billingMoney. */
+  sgstRate: number;
+  cgstRate: number;
+  igstRate: number;
   divisor: number;
   commissionPercent: number;
   userFeePercent: number;
@@ -248,10 +272,64 @@ function isBackendBillId(billId: string): boolean {
 
 /** Sum of per-line token advances (auction bid tokens). */
 function sumLineTokenAdvances(b: { commodityGroups: CommodityGroup[] }): number {
-  return b.commodityGroups.reduce(
-    (s, g) => s + g.items.reduce((ss, i) => ss + (Number(i.tokenAdvance) || 0), 0),
-    0,
+  return roundMoney2(
+    b.commodityGroups.reduce(
+      (s, g) => s + g.items.reduce((ss, i) => ss + (Number(i.tokenAdvance) || 0), 0),
+      0,
+    ),
   );
+}
+
+/** Normalize every billing number to 2 decimal places for display and API consistency. */
+function roundBillMoneyValues(b: BillData): BillData {
+  const commodityGroups = b.commodityGroups.map(g => {
+    const items = g.items.map(it => ({
+      ...it,
+      quantity: roundMoney2(Number(it.quantity) || 0),
+      weight: roundMoney2(Number(it.weight) || 0),
+      baseRate: roundMoney2(Number(it.baseRate) || 0),
+      presetApplied: roundMoney2(Number(it.presetApplied) || 0),
+      brokerage: roundMoney2(Number(it.brokerage) || 0),
+      otherCharges: roundMoney2(Number(it.otherCharges) || 0),
+      sellerOtherCharges: roundMoney2(Number(it.sellerOtherCharges) || 0),
+      newRate: roundMoney2(Number(it.newRate) || 0),
+      amount: roundMoney2(Number(it.amount) || 0),
+      tokenAdvance: roundMoney2(Number(it.tokenAdvance) || 0),
+    }));
+    const div = Number(g.divisor) > 0 ? Number(g.divisor) : 50;
+    return {
+      ...g,
+      divisor: roundMoney2(div),
+      gstRate: roundMoney2(Number(g.gstRate) || 0),
+      sgstRate: roundMoney2(Number(g.sgstRate) || 0),
+      cgstRate: roundMoney2(Number(g.cgstRate) || 0),
+      igstRate: roundMoney2(Number(g.igstRate) || 0),
+      commissionPercent: roundMoney2(Number(g.commissionPercent) || 0),
+      userFeePercent: roundMoney2(Number(g.userFeePercent) || 0),
+      coolieRate: roundMoney2(Number(g.coolieRate) || 0),
+      coolieAmount: roundMoney2(Number(g.coolieAmount) || 0),
+      weighmanChargeRate: roundMoney2(Number(g.weighmanChargeRate) || 0),
+      weighmanChargeAmount: roundMoney2(Number(g.weighmanChargeAmount) || 0),
+      discount: roundMoney2(Number(g.discount) || 0),
+      manualRoundOff: roundMoney2(Number(g.manualRoundOff) || 0),
+      subtotal: roundMoney2(Number(g.subtotal) || 0),
+      commissionAmount: roundMoney2(Number(g.commissionAmount) || 0),
+      userFeeAmount: roundMoney2(Number(g.userFeeAmount) || 0),
+      totalCharges: roundMoney2(Number(g.totalCharges) || 0),
+      items,
+    };
+  });
+  const tokenAdvance = sumLineTokenAdvances({ commodityGroups });
+  return {
+    ...b,
+    outboundFreight: roundMoney2(Number(b.outboundFreight) || 0),
+    grandTotal: roundMoney2(Number(b.grandTotal) || 0),
+    pendingBalance: roundMoney2(Number(b.pendingBalance) || 0),
+    brokerageValue: roundMoney2(Number(b.brokerageValue) || 0),
+    globalOtherCharges: roundMoney2(Number(b.globalOtherCharges) || 0),
+    tokenAdvance,
+    commodityGroups,
+  };
 }
 
 /** Lot identifier for billing rows: Vehicle QTY / Seller QTY / Lot Name - Lot QTY. */
@@ -266,7 +344,10 @@ function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): strin
 
 /** Normalize bill from API: add presetApplied (derived) and gstRate to items/groups. */
 function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], commodities?: any[]): BillData {
-  const configByCommName = new Map<string, { gstRate: number; divisor: number }>();
+  const configByCommName = new Map<
+    string,
+    { gstRate: number; sgstRate: number; cgstRate: number; igstRate: number; divisor: number }
+  >();
   const dynamicChargesByCommName = new Map<string, any[]>();
   if (fullConfigs && commodities) {
     commodities.forEach((c: any) => {
@@ -274,16 +355,24 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
       const name = c.commodity_name ?? c.commodityName;
       if (!name) return;
       const gstRate = cfg?.config?.gstRate ?? 0;
+      const sgstRate = cfg?.config?.sgstRate ?? 0;
+      const cgstRate = cfg?.config?.cgstRate ?? 0;
+      const igstRate = cfg?.config?.igstRate ?? 0;
       const divisorRaw = cfg?.config?.ratePerUnit ?? 50;
       const divisor = Number(divisorRaw) > 0 ? Number(divisorRaw) : 50;
-      configByCommName.set(name, { gstRate, divisor });
+      configByCommName.set(name, { gstRate, sgstRate, cgstRate, igstRate, divisor });
       dynamicChargesByCommName.set(name, cfg?.dynamicCharges ?? []);
     });
   }
-  const groups = (b.commodityGroups || []).map((g: any) => ({
+  const groups = (b.commodityGroups || []).map((g: any) => {
+    const fromCfg = configByCommName.get(g.commodityName);
+    return {
     ...g,
-    gstRate: g.gstRate ?? configByCommName.get(g.commodityName)?.gstRate ?? 0,
-    divisor: g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50,
+    gstRate: g.gstRate ?? fromCfg?.gstRate ?? 0,
+    sgstRate: g.sgstRate ?? g.sgst_rate ?? fromCfg?.sgstRate ?? 0,
+    cgstRate: g.cgstRate ?? g.cgst_rate ?? fromCfg?.cgstRate ?? 0,
+    igstRate: g.igstRate ?? g.igst_rate ?? fromCfg?.igstRate ?? 0,
+    divisor: g.divisor ?? fromCfg?.divisor ?? 50,
     items: (g.items || []).map((item: any) => {
       const base = Number(item.baseRate) || 0;
       const brk = Number(item.brokerage) || 0;
@@ -333,7 +422,8 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
       const tok = Number(item.tokenAdvance) || 0;
       return { ...item, presetApplied, sellerOtherCharges, tokenAdvance: tok };
     }),
-  }));
+  };
+  });
 
   let migratedGroups = groups.map((g: any) => ({ ...g, items: g.items.map((it: any) => ({ ...it })) }));
   let lineTokenSum = 0;
@@ -354,7 +444,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
   }
   const tokenAdvance = sumLineTokenAdvances({ commodityGroups: migratedGroups });
 
-  return {
+  return roundBillMoneyValues({
     ...b,
     buyerContactId: (b as any).buyerContactId ?? null,
     buyerPhone: (b as any).buyerPhone ?? '',
@@ -367,7 +457,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     brokerAddress: (b as any).brokerAddress ?? '',
     tokenAdvance,
     commodityGroups: migratedGroups,
-  };
+  } as BillData);
 }
 
 // ── Validation ────────────────────────────────────────────
@@ -606,6 +696,10 @@ const BillingPage = () => {
   const [replaceErrors, setReplaceErrors] = useState<Record<string, string>>({});
   const [addBidDialogOpen, setAddBidDialogOpen] = useState(false);
   const [addBidLotSearch, setAddBidLotSearch] = useState('');
+  const addBidLotSearchRef = useRef('');
+  addBidLotSearchRef.current = addBidLotSearch;
+  /** Full browse list (no status filter — includes SOLD / PARTIAL / PENDING / AVAILABLE). */
+  const addBidBrowseLotsRef = useRef<LotSummaryDTO[]>([]);
   const [showAddBidLotDropdown, setShowAddBidLotDropdown] = useState(false);
   const [addBidLotOptions, setAddBidLotOptions] = useState<LotSummaryDTO[]>([]);
   const [addBidLotLoading, setAddBidLotLoading] = useState(false);
@@ -616,6 +710,19 @@ const BillingPage = () => {
   const [addBidExtraAmount, setAddBidExtraAmount] = useState('0');
   const [addBidTokenAdvance, setAddBidTokenAdvance] = useState('0');
   const [addBidSaving, setAddBidSaving] = useState(false);
+  /** Cached session for the selected lot (auction parity: merge, lot increase). */
+  const [addBidSession, setAddBidSession] = useState<AuctionSessionDTO | null>(null);
+  const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+  const [addBidQtyIncreaseDialog, setAddBidQtyIncreaseDialog] = useState<{
+    currentTotal: number;
+    lotTotal: number;
+    attemptedQty: number;
+  } | null>(null);
+  const [addBidDuplicateDialog, setAddBidDuplicateDialog] = useState<{
+    existingEntry: AuctionEntryDTO;
+    rate: number;
+    qty: number;
+  } | null>(null);
   const [searchBidInput, setSearchBidInput] = useState('');
   const [searchBidSourceBuyer, setSearchBidSourceBuyer] = useState<BuyerPurchase | null>(null);
   const [searchBidDialogOpen, setSearchBidDialogOpen] = useState(false);
@@ -652,25 +759,59 @@ const BillingPage = () => {
 
   useEffect(() => {
     if (!addBidDialogOpen) return;
-    let active = true;
+    let cancelled = false;
     setAddBidLotLoading(true);
     void auctionApi
-      .listLots({ page: 0, size: 500 })
+      .listLots({ page: 0, size: 4000 })
       .then(list => {
-        if (!active) return;
-        setAddBidLotOptions(Array.isArray(list) ? list : []);
+        if (cancelled) return;
+        const arr = Array.isArray(list) ? list : [];
+        addBidBrowseLotsRef.current = arr;
+        if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions(arr);
       })
       .catch(() => {
-        if (!active) return;
-        setAddBidLotOptions([]);
+        if (!cancelled) {
+          addBidBrowseLotsRef.current = [];
+          if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions([]);
+        }
       })
       .finally(() => {
-        if (active) setAddBidLotLoading(false);
+        if (!cancelled) setAddBidLotLoading(false);
       });
     return () => {
-      active = false;
+      cancelled = true;
     };
   }, [addBidDialogOpen]);
+
+  /** Server search by lot name (backend ignores status — sold lots remain discoverable). */
+  useEffect(() => {
+    if (!addBidDialogOpen) return;
+    const q = addBidLotSearch.trim();
+    if (q.length < 2) {
+      setAddBidLotOptions(addBidBrowseLotsRef.current);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      setAddBidLotLoading(true);
+      void auctionApi
+        .listLots({ page: 0, size: 1500, q })
+        .then(list => {
+          if (cancelled) return;
+          setAddBidLotOptions(Array.isArray(list) ? list : []);
+        })
+        .catch(() => {
+          if (!cancelled) setAddBidLotOptions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setAddBidLotLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [addBidDialogOpen, addBidLotSearch]);
 
   const getAddBidLotIdentifier = useCallback((lot: LotSummaryDTO): string => {
     const lotQty = Number(lot.bag_count) || 0;
@@ -682,19 +823,22 @@ const BillingPage = () => {
 
   const filteredAddBidLots = useMemo(() => {
     const q = addBidLotSearch.trim().toLowerCase();
-    if (!q) return addBidLotOptions.slice(0, 25);
-    return addBidLotOptions
+    const base = addBidLotOptions;
+    if (!q) return base.slice(0, 150);
+    return base
       .filter(lot => {
         const identifier = getAddBidLotIdentifier(lot).toLowerCase();
+        const st = (lot.status || '').toLowerCase();
         return (
           identifier.includes(q)
           || (lot.lot_name || '').toLowerCase().includes(q)
           || String(lot.lot_id || '').toLowerCase().includes(q)
           || (lot.seller_name || '').toLowerCase().includes(q)
           || (lot.vehicle_number || '').toLowerCase().includes(q)
+          || st.includes(q)
         );
       })
-      .slice(0, 25);
+      .slice(0, 150);
   }, [addBidLotOptions, addBidLotSearch, getAddBidLotIdentifier]);
 
   // Load saved bills from backend
@@ -1176,16 +1320,17 @@ const BillingPage = () => {
     }
   }, [buyersForBilling, selectBidBuyer]);
 
-  const calculateGroupCharges = (group: CommodityGroup) => {
-    const commissionAmount = Math.round(group.subtotal * (group.commissionPercent || 0) / 100);
-    const userFeeAmount = Math.round(group.subtotal * (group.userFeePercent || 0) / 100);
-    const gstAmount = Math.round(group.subtotal * ((group.gstRate ?? 0) / 100));
-    const totalCharges = commissionAmount + userFeeAmount + gstAmount;
-    return { commissionAmount, userFeeAmount, totalCharges };
-  };
-
   // Recalculate grand total (includes per-commodity discount and round-off)
   const recalcGrandTotal = useCallback((b: BillData): BillData => {
+    const calculateGroupCharges = (group: CommodityGroup) => {
+      const sub = roundMoney2(group.subtotal);
+      const commissionAmount = percentOfAmount(sub, group.commissionPercent || 0);
+      const userFeeAmount = percentOfAmount(sub, group.userFeePercent || 0);
+      const gstAmount = gstOnSubtotal(sub, effectiveGstPercent(group));
+      const totalCharges = roundMoney2(commissionAmount + userFeeAmount + gstAmount);
+      return { commissionAmount, userFeeAmount, totalCharges };
+    };
+
     const commodityGroups = b.commodityGroups.map(group => {
       const next = { ...group };
       const charges = calculateGroupCharges(next);
@@ -1195,25 +1340,25 @@ const BillingPage = () => {
       return next;
     });
 
-    // Calculate per-commodity totals: Subtotal + Commission + UserFee + Coolie + Weighman + GST - Discount + RoundOff
     let grandTotal = 0;
     commodityGroups.forEach(group => {
-      const subtotalWithCharges = group.subtotal + group.totalCharges;
-      const additionsSum = (group.coolieAmount || 0) + (group.weighmanChargeAmount || 0);
-      let discountAmount = group.discount || 0;
+      const subtotalWithCharges = roundMoney2(group.subtotal + group.totalCharges);
+      const additionsSum = roundMoney2((group.coolieAmount || 0) + (group.weighmanChargeAmount || 0));
+      let discountAmount = roundMoney2(group.discount || 0);
       if (group.discountType === 'PERCENT') {
-        discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+        discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
       }
-      const commodityTotal = subtotalWithCharges + additionsSum - discountAmount + (group.manualRoundOff || 0);
-      grandTotal += commodityTotal;
+      const commodityTotal = roundMoney2(
+        subtotalWithCharges + additionsSum - discountAmount + roundMoney2(group.manualRoundOff || 0),
+      );
+      grandTotal = roundMoney2(grandTotal + commodityTotal);
     });
 
-    // Add outbound freight charges (bill-level only)
-    grandTotal += b.outboundFreight || 0;
+    grandTotal = roundMoney2(grandTotal + roundMoney2(b.outboundFreight || 0));
 
-    const tokenAdvance = sumLineTokenAdvances(b);
-    const pendingBalance = grandTotal - tokenAdvance;
-    return { ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance };
+    const tokenAdvance = sumLineTokenAdvances({ ...b, commodityGroups });
+    const pendingBalance = roundMoney2(grandTotal - tokenAdvance);
+    return roundBillMoneyValues({ ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance });
   }, []);
 
   // Generate Bill (commodity config from API)
@@ -1330,6 +1475,9 @@ const BillingPage = () => {
           commodityName: commName,
           hsnCode: config?.hsnCode || '',
           gstRate: config?.gstRate ?? 0,
+          sgstRate: config?.sgstRate ?? 0,
+          cgstRate: config?.cgstRate ?? 0,
+          igstRate: config?.igstRate ?? 0,
           divisor,
           commissionPercent: config?.commissionPercent || 0,
           userFeePercent: config?.userFeePercent || 0,
@@ -1356,7 +1504,9 @@ const BillingPage = () => {
       // Show preset inside "Other Charges" so UI displays total rate-add in one field.
       const otherCharges = presetApplied + computeBuyerOtherChargesRateAdd(entry, commName, group.divisor);
       const sellerOtherCharges = computeSellerOtherChargesRateAdd(entry, commName, group.divisor);
-      const newRate = entry.rate + brokerage + otherCharges;
+      const div = group.divisor > 0 ? group.divisor : 50;
+      const newRate = roundMoney2(entry.rate + brokerage + otherCharges);
+      const amount = roundMoney2((entry.weight * newRate) / div);
 
       group.items.push({
         bidNumber: entry.bidNumber,
@@ -1366,29 +1516,28 @@ const BillingPage = () => {
         selfSaleUnitId: entry.selfSaleUnitId ?? null,
         lotTotalQty: (entry as any).lotTotalQty ?? entry.quantity,
         sellerName: entry.sellerName,
-        quantity: entry.quantity,
-        weight: entry.weight,
-        baseRate: entry.rate,
-        presetApplied,
-        brokerage,
-        otherCharges,
-        sellerOtherCharges,
+        quantity: roundMoney2(entry.quantity),
+        weight: roundMoney2(entry.weight),
+        baseRate: roundMoney2(entry.rate),
+        presetApplied: roundMoney2(presetApplied),
+        brokerage: roundMoney2(brokerage),
+        otherCharges: roundMoney2(otherCharges),
+        sellerOtherCharges: roundMoney2(sellerOtherCharges),
         vehicleTotalQty: (entry as any).vehicleTotalQty,
         sellerVehicleQty: (entry as any).sellerVehicleQty,
         newRate,
-        amount: (entry.weight * newRate) / group.divisor,
-        tokenAdvance: Number(entry.tokenAdvance) || 0,
+        amount,
+        tokenAdvance: roundMoney2(Number(entry.tokenAdvance) || 0),
       });
     });
 
     // Calculate per-commodity totals
     commodityMap.forEach(group => {
-      group.subtotal = group.items.reduce((s, item) => s + item.amount, 0);
-      // REQ-BIL-005: CA = BG × C%
-      group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
-      // REQ-BIL-006: UFA = BG × UF%
-      group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
-      group.totalCharges = group.commissionAmount + group.userFeeAmount;
+      group.subtotal = roundMoney2(group.items.reduce((s, item) => s + item.amount, 0));
+      group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
+      group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
+      const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
+      group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
     });
 
     const commodityGroups = Array.from(commodityMap.values()).map(g => ({
@@ -1401,7 +1550,7 @@ const BillingPage = () => {
       discountType: 'AMOUNT' as const,
       manualRoundOff: 0,
     }));
-    const subtotalSum = commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0);
+    const subtotalSum = roundMoney2(commodityGroups.reduce((s, g) => s + g.subtotal + g.totalCharges, 0));
 
     // REQ-BIL-009: GT = Σ(Commodity Totals with per-commodity additions/discounts/round-off) + Outbound Freight
     const initialBill: BillData = {
@@ -1595,6 +1744,10 @@ const BillingPage = () => {
     setAddBidLotOptions([]);
     setAddBidSelectedLot(null);
     setAddBidRemainingQty(0);
+    setAddBidSession(null);
+    setAddBidRetryAllowIncrease(false);
+    setAddBidQtyIncreaseDialog(null);
+    setAddBidDuplicateDialog(null);
     setAddBidQty('');
     setAddBidBaseRate('');
     setAddBidExtraAmount('0');
@@ -1630,44 +1783,164 @@ const BillingPage = () => {
     });
   }, []);
 
-  const handleAddBidToCurrentBuyer = useCallback(async () => {
-    if (!bill || !selectedBuyer) {
-      toast.error('Open a buyer bill first');
-      return;
-    }
-    if (!addBidSelectedLot) {
-      toast.error('Select lot mark');
-      return;
-    }
-    const qty = Number(addBidQty);
-    const rate = Number(addBidBaseRate);
-    const extra = Number(addBidExtraAmount || 0);
-    const tokenAdvance = Number(addBidTokenAdvance || 0);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast.error('Enter valid bid quantity');
-      return;
-    }
-    if (!Number.isFinite(rate) || rate <= 0) {
-      toast.error('Enter valid base rate');
-      return;
-    }
-    if (qty > addBidRemainingQty) {
-      toast.error(`Bid quantity cannot exceed remaining (${addBidRemainingQty})`);
-      return;
-    }
-    if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
-      toast.error('Enter valid extra/token values');
-      return;
-    }
+  /** When auction merges bids (same mark + rate), update the existing bill line instead of appending. */
+  const upsertBidForBuyer = useCallback(
+    (buyerKey: string, buyerName: string, buyerMark: string, buyerContactId: string | null, entry: BillEntry) => {
+      const lineKey = getBidSelectionKey(entry);
+      const patch = (buyer: BuyerPurchase): BuyerPurchase => {
+        const idx = buyer.entries.findIndex(e => getBidSelectionKey(e) === lineKey);
+        if (idx < 0) {
+          return {
+            ...buyer,
+            entries: [...buyer.entries, entry],
+            tokenAdvanceTotal: (buyer.tokenAdvanceTotal || 0) + (Number(entry.tokenAdvance) || 0),
+          };
+        }
+        const oldTa = Number(buyer.entries[idx].tokenAdvance) || 0;
+        const newTa = Number(entry.tokenAdvance) || 0;
+        const nextEntries = [...buyer.entries];
+        nextEntries[idx] = entry;
+        return {
+          ...buyer,
+          entries: nextEntries,
+          tokenAdvanceTotal: (buyer.tokenAdvanceTotal || 0) - oldTa + newTa,
+        };
+      };
+      setBuyers(prev => {
+        const idx = prev.findIndex(
+          b =>
+            (b.buyerMark || '').toLowerCase() === buyerMark.toLowerCase()
+            && (b.buyerName || '').toLowerCase() === buyerName.toLowerCase(),
+        );
+        if (idx < 0) {
+          return [...prev, { buyerName, buyerMark, buyerContactId, entries: [entry], tokenAdvanceTotal: Number(entry.tokenAdvance) || 0 }];
+        }
+        const next = [...prev];
+        next[idx] = patch(next[idx]);
+        return next;
+      });
+      setSelectedBuyer(prev => {
+        if (!prev) return prev;
+        const key = `${(prev.buyerMark || '').toLowerCase()}::${(prev.buyerName || '').toLowerCase()}`;
+        if (key !== buyerKey) return prev;
+        return patch(prev);
+      });
+    },
+    [],
+  );
 
-    const buyerIdNum =
-      selectedBuyer.buyerContactId && /^\d+$/.test(selectedBuyer.buyerContactId)
-        ? Number(selectedBuyer.buyerContactId)
-        : undefined;
+  const applyAddBidSessionToBill = useCallback(
+    (session: AuctionSessionDTO) => {
+      if (!bill || !selectedBuyer || !addBidSelectedLot) return;
+      const billBuyerMarkNorm = (bill.buyerMark || '').trim().toLowerCase();
+      const lotIdStr = String(addBidSelectedLot.lot_id);
+      const buyerOwn = (session.entries || []).filter(
+        e => (e.buyer_mark || '').trim().toLowerCase() === billBuyerMarkNorm,
+      );
+      const existingForLot = selectedBuyer.entries.filter(e => String(e.lotId) === lotIdStr);
+      let matchedAuction: AuctionEntryDTO | undefined;
+      for (const be of existingForLot) {
+        if (be.auctionEntryId != null) {
+          const hit = buyerOwn.find(a => a.auction_entry_id === be.auctionEntryId);
+          if (hit) {
+            matchedAuction = hit;
+            break;
+          }
+        }
+      }
+      if (!matchedAuction && buyerOwn.length) {
+        matchedAuction = [...buyerOwn].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
+      }
+      if (!matchedAuction) {
+        toast.error('Bid saved but failed to map in bill. Refresh billing data.');
+        return;
+      }
+      const ws = weighingSessions.find((s: any) => s.bid_number === matchedAuction!.bid_number);
+      const newBillEntry: BillEntry = {
+        bidNumber: matchedAuction.bid_number,
+        lotId: lotIdStr,
+        auctionEntryId: matchedAuction.auction_entry_id ?? null,
+        selfSaleUnitId: null,
+        lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
+        lotTotalQty: session.lot?.bag_count ?? addBidSelectedLot.bag_count ?? matchedAuction.quantity,
+        sellerName: addBidSelectedLot.seller_name || 'Unknown',
+        commodityName: addBidSelectedLot.commodity_name || 'Unknown',
+        rate: Number(matchedAuction.bid_rate) || 0,
+        quantity: matchedAuction.quantity ?? 0,
+        weight: ws ? ws.net_weight : (matchedAuction.quantity ?? 0) * 50,
+        vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? matchedAuction.quantity ?? 0,
+        sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? matchedAuction.quantity ?? 0,
+        presetApplied: Number(matchedAuction.preset_margin) || 0,
+        isSelfSale: !!matchedAuction.is_self_sale,
+        tokenAdvance: Number(matchedAuction.token_advance) || 0,
+      };
+      const buyerKey = `${(bill.buyerMark || '').toLowerCase()}::${(bill.buyerName || '').toLowerCase()}`;
+      const existingLine = selectedBuyer.entries.find(
+        e => String(e.lotId) === lotIdStr && e.bidNumber === newBillEntry.bidNumber,
+      );
+      if (existingLine) {
+        upsertBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
+        const nextEntries = selectedBuyer.entries.map(e =>
+          getBidSelectionKey(e) === getBidSelectionKey(newBillEntry) ? newBillEntry : e,
+        );
+        generateBill({
+          ...selectedBuyer,
+          entries: nextEntries,
+          tokenAdvanceTotal: nextEntries.reduce((s, e) => s + (Number(e.tokenAdvance) || 0), 0),
+        });
+      } else {
+        appendBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
+        const mergedBuyer: BuyerPurchase = {
+          buyerMark: bill.buyerMark,
+          buyerName: bill.buyerName,
+          buyerContactId: selectedBuyer.buyerContactId ?? null,
+          entries: [...selectedBuyer.entries, newBillEntry],
+          tokenAdvanceTotal: (selectedBuyer.tokenAdvanceTotal || 0) + (Number(newBillEntry.tokenAdvance) || 0),
+        };
+        generateBill(mergedBuyer);
+      }
+    },
+    [
+      addBidSelectedLot,
+      appendBidForBuyer,
+      bill,
+      generateBill,
+      selectedBuyer,
+      upsertBidForBuyer,
+      weighingSessions,
+    ],
+  );
 
-    try {
-      setAddBidSaving(true);
-      const session = await auctionApi.addBid(addBidSelectedLot.lot_id, {
+  const executeBillingAddBid = useCallback(
+    async (allowLotIncrease: boolean) => {
+      if (!bill || !selectedBuyer || !addBidSelectedLot) {
+        toast.error('Open a buyer bill first');
+        return;
+      }
+      const qty = roundMoney2(Number(addBidQty));
+      const rate = roundMoney2(Number(addBidBaseRate));
+      const extra = roundMoney2(Number(addBidExtraAmount || 0));
+      const tokenAdvance = roundMoney2(Number(addBidTokenAdvance || 0));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter valid bid quantity');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate <= 0) {
+        toast.error('Enter valid base rate');
+        return;
+      }
+      if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
+        toast.error('Enter valid extra/token values');
+        return;
+      }
+
+      const buyerIdNum =
+        selectedBuyer.buyerContactId && /^\d+$/.test(selectedBuyer.buyerContactId)
+          ? Number(selectedBuyer.buyerContactId)
+          : undefined;
+
+      const allow = allowLotIncrease || addBidRetryAllowIncrease;
+      const body: AuctionBidCreateRequest = {
         buyer_id: buyerIdNum,
         buyer_name: (bill.billingName || bill.buyerName || '').trim(),
         buyer_mark: (bill.buyerMark || '').trim(),
@@ -1675,72 +1948,125 @@ const BillingPage = () => {
         quantity: qty,
         extra_rate: extra,
         token_advance: tokenAdvance,
-      });
-      const billBuyerNameNorm = (bill.billingName || bill.buyerName || '').trim().toLowerCase();
-      const ownEntries = (session.entries || []).filter(
-        e =>
-          (e.buyer_mark || '').trim().toLowerCase() === (bill.buyerMark || '').trim().toLowerCase()
-          && (e.buyer_name || '').trim().toLowerCase() === billBuyerNameNorm,
-      );
-      const latest: AuctionEntryDTO | undefined = [...ownEntries].sort((a, b) => (a.auction_entry_id ?? 0) - (b.auction_entry_id ?? 0)).pop();
-      if (!latest) {
-        toast.error('Bid saved but failed to map in bill. Refresh billing data.');
+        preset_applied: 0,
+        preset_type: 'PROFIT',
+        is_scribble: false,
+        is_self_sale: false,
+        allow_lot_increase: allow,
+      };
+
+      try {
+        setAddBidSaving(true);
+        const session = await auctionApi.addBid(addBidSelectedLot.lot_id, body);
+        setAddBidSession(session);
+        setAddBidRemainingQty(Number(session.remaining_bags) || 0);
+        setAddBidRetryAllowIncrease(false);
+        applyAddBidSessionToBill(session);
+        await refetchAuctions();
+        resetAddBidForm();
+        setAddBidDialogOpen(false);
+        toast.success('Bid added and bill updated');
+      } catch (err: unknown) {
+        const e = err as { isConflict?: boolean; message?: string };
+        if (e.isConflict) {
+          setAddBidRetryAllowIncrease(true);
+          toast.error('Quantity exceeds lot. Tap Save again to allow lot increase and retry.');
+        } else {
+          toast.error(e instanceof Error ? e.message : 'Failed to add bid');
+        }
+      } finally {
+        setAddBidSaving(false);
+      }
+    },
+    [
+      addBidBaseRate,
+      addBidExtraAmount,
+      addBidQty,
+      addBidRetryAllowIncrease,
+      addBidSelectedLot,
+      addBidTokenAdvance,
+      applyAddBidSessionToBill,
+      bill,
+      refetchAuctions,
+      resetAddBidForm,
+      selectedBuyer,
+    ],
+  );
+
+  const beginAddBidFlow = useCallback(
+    (allowLotIncreaseFromStep: boolean) => {
+      if (!bill || !selectedBuyer) {
+        toast.error('Open a buyer bill first');
         return;
       }
-      const ws = weighingSessions.find((s: any) => s.bid_number === latest.bid_number);
-      const newBillEntry: BillEntry = {
-        bidNumber: latest.bid_number,
-        lotId: String(addBidSelectedLot.lot_id),
-        auctionEntryId: latest.auction_entry_id ?? null,
-        selfSaleUnitId: null,
-        lotName: addBidSelectedLot.lot_name || String(addBidSelectedLot.bag_count || ''),
-        lotTotalQty: addBidSelectedLot.bag_count ?? latest.quantity,
-        sellerName: addBidSelectedLot.seller_name || 'Unknown',
-        commodityName: addBidSelectedLot.commodity_name || 'Unknown',
-        rate: Number(latest.bid_rate) || rate,
-        quantity: latest.quantity ?? qty,
-        weight: ws ? ws.net_weight : (latest.quantity ?? qty) * 50,
-        vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? latest.quantity ?? qty,
-        sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? latest.quantity ?? qty,
-        presetApplied: Number(latest.preset_margin) || 0,
-        isSelfSale: false,
-        tokenAdvance: Number(latest.token_advance ?? tokenAdvance) || 0,
-      };
-      const buyerKey = `${(bill.buyerMark || '').toLowerCase()}::${(bill.buyerName || '').toLowerCase()}`;
-      appendBidForBuyer(buyerKey, bill.buyerName, bill.buyerMark, selectedBuyer.buyerContactId ?? null, newBillEntry);
-      const mergedBuyer: BuyerPurchase = {
-        buyerMark: bill.buyerMark,
-        buyerName: bill.buyerName,
-        buyerContactId: selectedBuyer.buyerContactId ?? null,
-        entries: [...selectedBuyer.entries, newBillEntry],
-        tokenAdvanceTotal: (selectedBuyer.tokenAdvanceTotal || 0) + (Number(newBillEntry.tokenAdvance) || 0),
-      };
-      generateBill(mergedBuyer);
-      await refetchAuctions();
-      setAddBidRemainingQty(Number(session.remaining_bags) || 0);
-      resetAddBidForm();
-      setAddBidDialogOpen(false);
-      toast.success('Bid added and bill updated');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add bid');
-    } finally {
-      setAddBidSaving(false);
-    }
-  }, [
-    addBidBaseRate,
-    addBidExtraAmount,
-    addBidQty,
-    addBidRemainingQty,
-    addBidSelectedLot,
-    addBidTokenAdvance,
-    appendBidForBuyer,
-    bill,
-    generateBill,
-    resetAddBidForm,
-    refetchAuctions,
-    selectedBuyer,
-    weighingSessions,
-  ]);
+      if (!addBidSelectedLot) {
+        toast.error('Select lot mark');
+        return;
+      }
+      if (!addBidSession) {
+        toast.error('Lot session not loaded — re-select the lot');
+        return;
+      }
+      const qty = Number(addBidQty);
+      const rate = Number(addBidBaseRate);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter valid bid quantity');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate <= 0) {
+        toast.error('Enter valid base rate');
+        return;
+      }
+
+      const lotTotal = addBidSession.lot?.bag_count ?? 0;
+      const currentSold = Number(addBidSession.total_sold_bags) || 0;
+      const newTotal = currentSold + qty;
+      if (newTotal > lotTotal && !addBidRetryAllowIncrease && !allowLotIncreaseFromStep) {
+        setAddBidQtyIncreaseDialog({ currentTotal: currentSold, lotTotal, attemptedQty: qty });
+        return;
+      }
+
+      const markNorm = (bill.buyerMark || '').trim().toLowerCase();
+      const dup = (addBidSession.entries || []).find(
+        e => !e.is_self_sale && (e.buyer_mark || '').trim().toLowerCase() === markNorm,
+      );
+      if (dup) {
+        setAddBidDuplicateDialog({ existingEntry: dup, rate, qty });
+        return;
+      }
+
+      void executeBillingAddBid(allowLotIncreaseFromStep);
+    },
+    [
+      addBidSession,
+      addBidBaseRate,
+      addBidQty,
+      addBidRetryAllowIncrease,
+      addBidSelectedLot,
+      bill,
+      executeBillingAddBid,
+      selectedBuyer,
+    ],
+  );
+
+  const handleAddBidToCurrentBuyer = useCallback(() => {
+    beginAddBidFlow(false);
+  }, [beginAddBidFlow]);
+
+  const confirmAddBidQtyIncrease = useCallback(() => {
+    setAddBidQtyIncreaseDialog(null);
+    beginAddBidFlow(true);
+  }, [beginAddBidFlow]);
+
+  const handleAddBidDuplicateDifferentMark = useCallback(() => {
+    setAddBidDuplicateDialog(null);
+    toast.info('Change the buyer mark on the sales bill, then add the bid again.');
+  }, []);
+
+  const handleAddBidDuplicateConfirm = useCallback(() => {
+    setAddBidDuplicateDialog(null);
+    void executeBillingAddBid(false);
+  }, [executeBillingAddBid]);
 
   const openSearchBidDialogForBuyer = useCallback((picked: BuyerPurchase) => {
     setSearchBidSourceBuyer(picked);
@@ -1853,10 +2179,11 @@ const BillingPage = () => {
     value: number,
   ) => {
     if (!bill) return;
+    const v = roundMoney2(value);
     if (field === 'tokenAdvance') {
       const updated = { ...bill };
       const group = { ...updated.commodityGroups[commIdx] };
-      const item = { ...group.items[itemIdx], tokenAdvance: value };
+      const item = { ...group.items[itemIdx], tokenAdvance: v };
       group.items = [...group.items];
       group.items[itemIdx] = item;
       updated.commodityGroups = [...updated.commodityGroups];
@@ -1867,20 +2194,18 @@ const BillingPage = () => {
     const updated = { ...bill };
     const group = { ...updated.commodityGroups[commIdx] };
     const item = { ...group.items[itemIdx] };
-    (item as any)[field] = value;
+    (item as any)[field] = v;
     const preset = (item as { presetApplied?: number }).presetApplied ?? 0;
-    // "Other Charges" now includes preset; avoid double-counting preset in new rate.
-    item.newRate = item.baseRate + item.brokerage + item.otherCharges;
-    item.amount = (item.weight * item.newRate) / (group.divisor > 0 ? group.divisor : 50);
+    item.newRate = roundMoney2(item.baseRate + item.brokerage + item.otherCharges);
+    const divisorUsed = group.divisor > 0 ? group.divisor : 50;
+    item.amount = roundMoney2((item.weight * item.newRate) / divisorUsed);
 
-    // Seller-side dynamic Other Charges (appliesTo=SELLER) - read-only visualization.
     const commName = group.commodityName;
     const commodity = commodities.find((c: any) => c.commodity_name === commName);
     const fullCfg = commodity
       ? fullConfigs.find((f: FullCommodityConfigDto) => String(f.commodityId) === String(commodity.commodity_id))
       : null;
     const dynCharges = fullCfg?.dynamicCharges ?? [];
-    const divisorUsed = group.divisor > 0 ? group.divisor : 50;
     const weight = item.weight || 0;
     const qty = item.quantity || 0;
     const baseNewRateWithoutOther = item.baseRate + preset + item.brokerage;
@@ -1890,31 +2215,32 @@ const BillingPage = () => {
       const appliesTo = String(ch.appliesTo || 'BUYER').toUpperCase();
       if (appliesTo !== 'SELLER') return;
       const chargeType = String(ch.chargeType || ch.charge_type || 'FIXED').toUpperCase();
-      const value = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
-      if (value <= 0) return;
+      const chVal = Number(ch.valueAmount ?? ch.value ?? 0) || 0;
+      if (chVal <= 0) return;
       if (chargeType === 'PERCENT') {
-        const chargeTotal = baseAmount * (value / 100);
+        const chargeTotal = baseAmount * (chVal / 100);
         const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
         sellerOtherCharges += rateAdd;
       } else {
         const fixedBasis = String(ch.fixedBasis || ch.fixed_basis || 'PER_50KG').toUpperCase();
         if (fixedBasis === 'PER_COUNT') {
-          const chargeTotal = value * qty;
+          const chargeTotal = chVal * qty;
           const rateAdd = weight > 0 ? (chargeTotal * divisorUsed) / weight : 0;
           sellerOtherCharges += rateAdd;
         } else {
-          sellerOtherCharges += value * (divisorUsed / 50);
+          sellerOtherCharges += chVal * (divisorUsed / 50);
         }
       }
     });
-    item.sellerOtherCharges = sellerOtherCharges;
+    item.sellerOtherCharges = roundMoney2(sellerOtherCharges);
 
     group.items = [...group.items];
     group.items[itemIdx] = item;
-    group.subtotal = group.items.reduce((s, i) => s + i.amount, 0);
-    group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
-    group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
-    group.totalCharges = group.commissionAmount + group.userFeeAmount;
+    group.subtotal = roundMoney2(group.items.reduce((s, i) => s + i.amount, 0));
+    group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
+    group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
+    const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
+    group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
     updated.commodityGroups = [...updated.commodityGroups];
     updated.commodityGroups[commIdx] = group;
     setBill(recalcGrandTotal(updated));
@@ -1932,10 +2258,11 @@ const BillingPage = () => {
       groups.splice(commIdx, 1);
     } else {
       group.items = items;
-      group.subtotal = items.reduce((s, i) => s + i.amount, 0);
-      group.commissionAmount = Math.round(group.subtotal * group.commissionPercent / 100);
-      group.userFeeAmount = Math.round(group.subtotal * group.userFeePercent / 100);
-      group.totalCharges = group.commissionAmount + group.userFeeAmount;
+      group.subtotal = roundMoney2(items.reduce((s, i) => s + i.amount, 0));
+      group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
+      group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
+      const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
+      group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
       groups[commIdx] = group;
     }
 
@@ -1960,18 +2287,19 @@ const BillingPage = () => {
       const items = group.items.map(item => {
         const preset = item.presetApplied ?? 0;
         const brk = bill.brokerageType === 'PERCENT'
-          ? Math.round((item.baseRate + preset) * bill.brokerageValue / 100)
-          : bill.brokerageValue;
-        const globalOther = bill.globalOtherCharges;
+          ? percentOfAmount(item.baseRate + preset, bill.brokerageValue)
+          : roundMoney2(bill.brokerageValue);
+        const globalOther = roundMoney2(bill.globalOtherCharges);
         const newItem = {
           ...item,
           brokerage: brk,
-          // Global replaces line other charges (does not add to preset).
           otherCharges: globalOther,
-          newRate: item.baseRate + brk + globalOther,
+          newRate: roundMoney2(item.baseRate + brk + globalOther),
           amount: 0,
         };
-        newItem.amount = (newItem.weight * newItem.newRate) / (group.divisor > 0 ? group.divisor : 50);
+        newItem.amount = roundMoney2(
+          (newItem.weight * newItem.newRate) / (group.divisor > 0 ? group.divisor : 50),
+        );
 
         // Seller-side dynamic Other Charges (appliesTo=SELLER) - read-only visualization.
         const divisorUsed = group.divisor > 0 ? group.divisor : 50;
@@ -2003,17 +2331,22 @@ const BillingPage = () => {
             sellerOtherCharges += value * (divisorUsed / 50);
           }
         });
-        newItem.sellerOtherCharges = sellerOtherCharges;
+        newItem.sellerOtherCharges = roundMoney2(sellerOtherCharges);
         return newItem;
       });
-      const subtotal = items.reduce((s, i) => s + i.amount, 0);
+      const subtotal = roundMoney2(items.reduce((s, i) => s + i.amount, 0));
+      const gst = gstOnSubtotal(subtotal, effectiveGstPercent(group));
       return {
         ...group,
         items,
         subtotal,
-        commissionAmount: Math.round(subtotal * group.commissionPercent / 100),
-        userFeeAmount: Math.round(subtotal * group.userFeePercent / 100),
-        totalCharges: Math.round(subtotal * group.commissionPercent / 100) + Math.round(subtotal * group.userFeePercent / 100),
+        commissionAmount: percentOfAmount(subtotal, group.commissionPercent),
+        userFeeAmount: percentOfAmount(subtotal, group.userFeePercent),
+        totalCharges: roundMoney2(
+          percentOfAmount(subtotal, group.commissionPercent)
+          + percentOfAmount(subtotal, group.userFeePercent)
+          + gst,
+        ),
       };
     });
     setBill(recalcGrandTotal(updated));
@@ -2265,23 +2598,49 @@ const BillingPage = () => {
             {/* Per-commodity tables — REQ-BIL-004 */}
             {activePrintBill.commodityGroups.map((group, gi) => (
               <div key={gi} className="border-b border-dashed border-border pb-2">
-                <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}{(group.gstRate ?? 0) > 0 && ` · GST: ${group.gstRate}%`}</p>
+                <p className="font-bold text-foreground mb-1">
+                  {group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}
+                  {(group.gstRate ?? 0) > 0 && ` · GST: ${formatBillingInr(group.gstRate)}%`}
+                  {(group.sgstRate ?? 0) > 0 && ` · SGST: ${formatBillingInr(group.sgstRate)}%`}
+                  {(group.cgstRate ?? 0) > 0 && ` · CGST: ${formatBillingInr(group.cgstRate)}%`}
+                  {(group.igstRate ?? 0) > 0 && ` · IGST: ${formatBillingInr(group.igstRate)}%`}
+                  {effectiveGstPercent(group) > 0 && (group.gstRate ?? 0) <= 0
+                    && ` · Tax (eff.): ${formatBillingInr(effectiveGstPercent(group))}%`}
+                </p>
                 {group.items.map((item, ii) => (
                   <div key={ii} className="flex justify-between text-[10px] gap-2">
                     <span className="text-foreground min-w-0">
-                      {item.quantity}×{item.weight.toFixed(0)}kg @₹{item.newRate}
+                      {formatBillingInr(item.quantity)}×{formatBillingInr(item.weight)}kg @₹{formatBillingInr(item.newRate)}
                       {(item.tokenAdvance ?? 0) > 0 && (
-                        <span className="text-muted-foreground"> · Tok ₹{item.tokenAdvance}</span>
+                        <span className="text-muted-foreground"> · Tok ₹{formatBillingInr(item.tokenAdvance ?? 0)}</span>
                       )}
                     </span>
-                    <span className="font-bold text-foreground shrink-0">₹{item.amount.toLocaleString()}</span>
+                    <span className="font-bold text-foreground shrink-0">₹{formatBillingInr(item.amount)}</span>
                   </div>
                 ))}
                 <div className="mt-1 pt-1 border-t border-dotted border-border/50 space-y-0.5">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{group.subtotal.toLocaleString()}</span></div>
-                  {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({group.commissionPercent}%)</span><span className="text-foreground">₹{group.commissionAmount.toLocaleString()}</span></div>}
-                  {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({group.userFeePercent}%)</span><span className="text-foreground">₹{group.userFeeAmount.toLocaleString()}</span></div>}
-                  {(group.gstRate ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">GST ({group.gstRate}%)</span><span className="text-foreground">₹{Math.round(group.subtotal * (group.gstRate ?? 0) / 100).toLocaleString()}</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{formatBillingInr(group.subtotal)}</span></div>
+                  {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({formatBillingInr(group.commissionPercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.commissionAmount)}</span></div>}
+                  {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({formatBillingInr(group.userFeePercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.userFeeAmount)}</span></div>}
+                  {effectiveGstPercent(group) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        {(group.gstRate ?? 0) > 0
+                          ? `GST (${formatBillingInr(group.gstRate)}%)`
+                          : `Tax on goods (${formatBillingInr(effectiveGstPercent(group))}%)`}
+                      </span>
+                      <span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, effectiveGstPercent(group)))}</span>
+                    </div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.sgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">SGST ({formatBillingInr(group.sgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.sgstRate ?? 0))}</span></div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.cgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">CGST ({formatBillingInr(group.cgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.cgstRate ?? 0))}</span></div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.igstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">IGST ({formatBillingInr(group.igstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.igstRate ?? 0))}</span></div>
+                  )}
                 </div>
               </div>
             ))}
@@ -2293,9 +2652,9 @@ const BillingPage = () => {
               return (totalCoolie > 0 || totalWeighman > 0 || activePrintBill.outboundFreight > 0) && (
                 <div className="border-b border-dashed border-border pb-2">
                   <p className="font-bold text-foreground mb-1">ADDITIONS</p>
-                  {totalCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Coolie Charge</span><span className="text-foreground">₹{totalCoolie.toLocaleString()}</span></div>}
-                  {totalWeighman > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Weighman Charge</span><span className="text-foreground">₹{totalWeighman.toLocaleString()}</span></div>}
-                  {activePrintBill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{activePrintBill.outboundFreight.toLocaleString()}</span></div>}
+                  {totalCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Coolie Charge</span><span className="text-foreground">₹{formatBillingInr(totalCoolie)}</span></div>}
+                  {totalWeighman > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Weighman Charge</span><span className="text-foreground">₹{formatBillingInr(totalWeighman)}</span></div>}
+                  {activePrintBill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{formatBillingInr(activePrintBill.outboundFreight)}</span></div>}
                 </div>
               );
             })()}
@@ -2303,33 +2662,51 @@ const BillingPage = () => {
             {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
             <div className="border-b border-dashed border-border pb-2">
               <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
-              {activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g, i) => (
+              {activePrintBill.commodityGroups.filter(g =>
+                g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
+              ).map((g, i) => (
                 <div key={i} className="text-[10px] space-y-0.5">
                   <span className="text-muted-foreground">{g.commodityName}:</span>
-                  {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{g.commissionAmount}</span></div>}
-                  {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{g.userFeeAmount}</span></div>}
-                  {(g.gstRate ?? 0) > 0 && <div className="flex justify-between pl-2"><span>GST ({g.gstRate}%)</span><span>₹{Math.round(g.subtotal * (g.gstRate ?? 0) / 100).toLocaleString()}</span></div>}
+                  {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{formatBillingInr(g.commissionAmount)}</span></div>}
+                  {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{formatBillingInr(g.userFeeAmount)}</span></div>}
+                  {effectiveGstPercent(g) > 0 && (
+                    <div className="flex justify-between pl-2">
+                      <span>{(g.gstRate ?? 0) > 0 ? `GST (${formatBillingInr(g.gstRate)}%)` : `Tax (${formatBillingInr(effectiveGstPercent(g))}%)`}</span>
+                      <span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, effectiveGstPercent(g)))}</span>
+                    </div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.sgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>SGST ({formatBillingInr(g.sgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.sgstRate ?? 0))}</span></div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.cgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>CGST ({formatBillingInr(g.cgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.cgstRate ?? 0))}</span></div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.igstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>IGST ({formatBillingInr(g.igstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.igstRate ?? 0))}</span></div>
+                  )}
                 </div>
               ))}
 
               {/* Overall cumulative row (REQ-BIL-010) */}
               {(() => {
-                const groups = activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
+                const groups = activePrintBill.commodityGroups.filter(g =>
+                  g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
+                );
                 const totalCommission = groups.reduce((s, g) => s + g.commissionAmount, 0);
                 const totalUserFee = groups.reduce((s, g) => s + g.userFeeAmount, 0);
                 const totalGst = groups.reduce(
-                  (s, g) => s + ((g.gstRate ?? 0) > 0 ? Math.round(g.subtotal * (g.gstRate ?? 0) / 100) : 0),
+                  (s, g) => s + (effectiveGstPercent(g) > 0 ? gstOnSubtotal(g.subtotal, effectiveGstPercent(g)) : 0),
                   0,
                 );
                 return (
                   <div className="mt-1 pt-1 border-t border-dotted border-border/60 text-[10px] space-y-0.5">
                     <div className="flex justify-between pl-2">
                       <span className="text-muted-foreground font-semibold">TOTAL</span>
-                      <span className="font-bold">₹{(totalCommission + totalUserFee + totalGst).toLocaleString()}</span>
+                      <span className="font-bold">₹{formatBillingInr(roundMoney2(totalCommission + totalUserFee + totalGst))}</span>
                     </div>
-                    {totalCommission > 0 && <div className="flex justify-between pl-2"><span>Commission Total</span><span>₹{totalCommission.toLocaleString()}</span></div>}
-                    {totalUserFee > 0 && <div className="flex justify-between pl-2"><span>User Fee Total</span><span>₹{totalUserFee.toLocaleString()}</span></div>}
-                    {totalGst > 0 && <div className="flex justify-between pl-2"><span>GST Total</span><span>₹{totalGst.toLocaleString()}</span></div>}
+                    {totalCommission > 0 && <div className="flex justify-between pl-2"><span>Commission Total</span><span>₹{formatBillingInr(totalCommission)}</span></div>}
+                    {totalUserFee > 0 && <div className="flex justify-between pl-2"><span>User Fee Total</span><span>₹{formatBillingInr(totalUserFee)}</span></div>}
+                    {totalGst > 0 && <div className="flex justify-between pl-2"><span>GST Total</span><span>₹{formatBillingInr(totalGst)}</span></div>}
                   </div>
                 );
               })()}
@@ -2337,27 +2714,29 @@ const BillingPage = () => {
 
             {/* Discount & Adjustments (now per-commodity) */}
             {(() => {
-              const totalDiscount = activePrintBill.commodityGroups.reduce((s, g) => {
+              const totalDiscount = roundMoney2(activePrintBill.commodityGroups.reduce((s, g) => {
                 let discountAmount = g.discount || 0;
                 if (g.discountType === 'PERCENT') {
-                  const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
-                  discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                  const subtotalWithCharges = billGroupSubtotalWithTaxAndCharges(g);
+                  discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
+                } else {
+                  discountAmount = roundMoney2(discountAmount);
                 }
-                return s + discountAmount;
-              }, 0);
-              const totalRoundOff = activePrintBill.commodityGroups.reduce((s, g) => s + (g.manualRoundOff || 0), 0);
+                return roundMoney2(s + discountAmount);
+              }, 0));
+              const totalRoundOff = roundMoney2(activePrintBill.commodityGroups.reduce((s, g) => s + (g.manualRoundOff || 0), 0));
               return (totalDiscount > 0 || totalRoundOff !== 0) && (
                 <div className="border-b border-dashed border-border pb-2">
                   <p className="font-bold text-foreground mb-1">DISCOUNT & ADJUSTMENTS</p>
-                  {totalDiscount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{totalDiscount.toLocaleString()}</span></div>}
-                  {totalRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{totalRoundOff > 0 ? '+' : ''}₹{totalRoundOff}</span></div>}
+                  {totalDiscount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{formatBillingInr(totalDiscount)}</span></div>}
+                  {totalRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{totalRoundOff > 0 ? '+' : ''}₹{formatBillingInr(totalRoundOff)}</span></div>}
                 </div>
               );
             })()}
 
             <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
               <span className="font-bold text-foreground">GRAND TOTAL</span>
-              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{activePrintBill.grandTotal.toLocaleString()}</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{formatBillingInr(activePrintBill.grandTotal)}</span>
             </div>
 
             <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2">
@@ -2631,13 +3010,20 @@ const BillingPage = () => {
                 onChange={e => {
                   setAddBidLotSearch(e.target.value);
                   setAddBidSelectedLot(null);
+                  setAddBidSession(null);
+                  setAddBidRemainingQty(0);
                   setShowAddBidLotDropdown(true);
                 }}
-                placeholder="Lot identifier"
+                placeholder="Search lot, vehicle, seller (includes sold / full lots)"
                 className="h-10 sm:h-9 rounded-lg text-sm"
                 autoComplete="off"
               />
               {addBidLotLoading && <p className="text-xs text-muted-foreground">Loading lots…</p>}
+              {!addBidLotLoading && addBidLotSearch.trim().length === 1 && (
+                <p className="text-xs text-muted-foreground">
+                  Add a character to search the full catalog by lot name; one letter still filters the loaded list below.
+                </p>
+              )}
               {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
                 <div className="absolute z-[100] left-0 right-0 top-full mt-1 max-h-[40vh] sm:max-h-48 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
                   {filteredAddBidLots.length === 0 && (
@@ -2654,13 +3040,32 @@ const BillingPage = () => {
                         setShowAddBidLotDropdown(false);
                         try {
                           const session = await auctionApi.getOrStartSession(lot.lot_id);
+                          setAddBidSession(session);
                           setAddBidRemainingQty(Number(session.remaining_bags) || 0);
                         } catch {
+                          setAddBidSession(null);
                           setAddBidRemainingQty(0);
                         }
                       }}
                     >
-                      <p className="text-sm font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold leading-tight">{getAddBidLotIdentifier(lot)}</p>
+                        {lot.status && (
+                          <span
+                            className={cn(
+                              'shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded',
+                              lot.status === 'SOLD' && 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+                              lot.status === 'AVAILABLE' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+                              (lot.status === 'PARTIAL' || lot.status === 'PENDING')
+                                && 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
+                              !['SOLD', 'AVAILABLE', 'PARTIAL', 'PENDING'].includes(String(lot.status || ''))
+                                && 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {lot.status}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">{lot.seller_name} · {lot.vehicle_number}</p>
                     </button>
                   ))}
@@ -2679,11 +3084,10 @@ const BillingPage = () => {
             <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
               <div className="space-y-1">
                 <Label className="text-xs">Qty *</Label>
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  value={addBidQty}
-                  onChange={e => setAddBidQty(e.target.value)}
+                <BillingMoneyInput
+                  value={Number(addBidQty) || 0}
+                  min={0}
+                  onCommit={n => setAddBidQty(n > 0 ? String(roundMoney2(n)) : '')}
                   placeholder={String(addBidRemainingQty)}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                   title={`Remaining bags: ${addBidRemainingQty}`}
@@ -2691,31 +3095,28 @@ const BillingPage = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Base *</Label>
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  value={addBidBaseRate}
-                  onChange={e => setAddBidBaseRate(e.target.value)}
+                <BillingMoneyInput
+                  value={Number(addBidBaseRate) || 0}
+                  min={0}
+                  onCommit={n => setAddBidBaseRate(n > 0 ? String(roundMoney2(n)) : '')}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                 />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Extra</Label>
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  value={addBidExtraAmount}
-                  onChange={e => setAddBidExtraAmount(e.target.value)}
+                <BillingMoneyInput
+                  value={Number(addBidExtraAmount) || 0}
+                  min={0}
+                  onCommit={n => setAddBidExtraAmount(String(roundMoney2(n)))}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                 />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Token</Label>
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  value={addBidTokenAdvance}
-                  onChange={e => setAddBidTokenAdvance(e.target.value)}
+                <BillingMoneyInput
+                  value={Number(addBidTokenAdvance) || 0}
+                  min={0}
+                  onCommit={n => setAddBidTokenAdvance(String(roundMoney2(n)))}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                 />
               </div>
@@ -2738,9 +3139,98 @@ const BillingPage = () => {
               onClick={() => void handleAddBidToCurrentBuyer()}
               disabled={addBidSaving}
             >
-              {addBidSaving ? 'Saving...' : 'Save Bid'}
+              {addBidSaving ? 'Saving...' : addBidRetryAllowIncrease ? 'Save (allow lot increase)' : 'Save Bid'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!addBidDuplicateDialog}
+        onOpenChange={open => {
+          if (!open) setAddBidDuplicateDialog(null);
+        }}
+      >
+        <DialogContent
+          hideCloseButton
+          overlayClassName="z-[200] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            'dialog-content z-[200] w-[calc(100vw-1.5rem)] max-w-sm gap-0 overflow-hidden border border-border/50 bg-card p-5 shadow-2xl sm:rounded-2xl',
+          )}
+        >
+          {addBidDuplicateDialog && (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/20 flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-7 h-7 text-amber-500" />
+              </div>
+              <h3 className="text-lg font-bold text-center text-foreground mb-1">
+                Reusing mark &quot;{addBidDuplicateDialog.existingEntry.buyer_mark}&quot;?
+              </h3>
+              <p className="text-sm text-center text-muted-foreground mb-4">
+                This mark already exists on this lot (Bid #{addBidDuplicateDialog.existingEntry.bid_number}).
+                {addBidDuplicateDialog.existingEntry.bid_rate === addBidDuplicateDialog.rate
+                  ? ' Same rate — new quantity will merge into that bid.'
+                  : ' Different rate — a separate bid row will be created.'}
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={handleAddBidDuplicateDifferentMark} variant="outline" className="flex-1 h-12 rounded-xl">
+                  Different mark
+                </Button>
+                <Button
+                  onClick={handleAddBidDuplicateConfirm}
+                  className="flex-1 h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white"
+                >
+                  {addBidDuplicateDialog.existingEntry.bid_rate === addBidDuplicateDialog.rate ? 'Merge' : 'Keep separate'}
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!addBidQtyIncreaseDialog}
+        onOpenChange={open => {
+          if (!open) setAddBidQtyIncreaseDialog(null);
+        }}
+      >
+        <DialogContent
+          hideCloseButton
+          overlayClassName="z-[200] bg-black/50 backdrop-blur-sm"
+          className={cn(
+            'dialog-content z-[200] w-[calc(100vw-1.5rem)] max-w-sm gap-0 overflow-hidden border border-border/50 bg-card p-5 shadow-2xl sm:rounded-2xl',
+          )}
+        >
+          {addBidQtyIncreaseDialog && (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500/20 to-violet-500/20 border border-blue-500/20 flex items-center justify-center mx-auto mb-3">
+                <Plus className="w-7 h-7 text-primary" />
+              </div>
+              <h3 className="text-lg font-bold text-center text-foreground mb-1">Increase lot quantity?</h3>
+              <p className="text-sm text-center text-muted-foreground mb-4">
+                Lot has <strong>{addBidQtyIncreaseDialog.lotTotal}</strong> bags,{' '}
+                <strong>{addBidQtyIncreaseDialog.currentTotal}</strong> already sold. Adding{' '}
+                <strong>{addBidQtyIncreaseDialog.attemptedQty}</strong> bags exceeds the limit.
+                <br />
+                New total will be:{' '}
+                <strong>
+                  {addBidQtyIncreaseDialog.currentTotal + addBidQtyIncreaseDialog.attemptedQty}
+                </strong>{' '}
+                bags.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={() => setAddBidQtyIncreaseDialog(null)} variant="outline" className="flex-1 h-12 rounded-xl">
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmAddBidQtyIncrease}
+                  className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white"
+                >
+                  Increase &amp; add
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -3069,7 +3559,7 @@ const BillingPage = () => {
                       Sales bill — {bill.buyerName} ({bill.buyerMark})
                     </h3>
                     <p className="text-[10px] sm:text-sm text-muted-foreground">
-                      {bill.billNumber || 'New Bill'} · {bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)} item(s) · ₹{bill.grandTotal.toLocaleString()}
+                      {bill.billNumber || 'New Bill'} · {bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)} item(s) · ₹{formatBillingInr(bill.grandTotal)}
                     </p>
                   </div>
                 </div>
@@ -3157,7 +3647,7 @@ const BillingPage = () => {
                   <div className="min-w-0 flex-1">
                     <p className="text-[8px] text-muted-foreground uppercase leading-none tracking-wide">Total</p>
                     <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums leading-tight mt-0.5 truncate">
-                      ₹{bill.grandTotal.toLocaleString()}
+                      ₹{formatBillingInr(bill.grandTotal)}
                     </p>
                   </div>
                   <IndianRupee className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden />
@@ -3305,8 +3795,14 @@ const BillingPage = () => {
 
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               className="glass-card rounded-2xl p-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div className="sm:flex-1 sm:max-w-[6rem]">
+              <div
+                className={cn(
+                  'grid w-full min-w-0 gap-3 sm:gap-3 lg:gap-4',
+                  'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+                  'items-end',
+                )}
+              >
+                <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                     Billing Name (appears on print) <span className="text-destructive">*</span>
                   </p>
@@ -3321,8 +3817,8 @@ const BillingPage = () => {
                       });
                     }}
                     className={cn(
-                      "h-9 rounded-xl text-sm font-medium bg-muted/20 border-border/30",
-                      validationErrors.billingName && "border-destructive ring-1 ring-destructive/30",
+                      'h-9 w-full min-w-0 max-w-full rounded-xl text-sm font-medium bg-muted/20 border-border/30',
+                      validationErrors.billingName && 'border-destructive ring-1 ring-destructive/30',
                     )}
                   />
                   {validationErrors.billingName && (
@@ -3330,94 +3826,86 @@ const BillingPage = () => {
                   )}
                 </div>
 
-                <div className="flex-1">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 sm:text-right">
-                    Global Charges (Apply to All Items)
+                <div className="min-w-0">
+                  <p
+                    className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
+                    onClick={() =>
+                      setBill({
+                        ...bill,
+                        brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                      })
+                    }
+                    title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
+                  >
+                    BROKERAGE
                   </p>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
-                        onClick={() =>
-                          setBill({
-                            ...bill,
-                            brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
-                          })
-                        }
-                        title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
-                      >
-                        BROKERAGE
-                      </p>
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          value={bill.brokerageValue || ""}
-                          onChange={e => {
-                            setBill({ ...bill, brokerageValue: parseFloat(e.target.value) || 0 });
-                            setValidationErrors(prev => {
-                              const n = { ...prev };
-                              delete n.brokerageValue;
-                              return n;
-                            });
-                          }}
-                          placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
-                          className={cn(
-                            "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
-                            validationErrors.brokerageValue && "border-destructive ring-1 ring-destructive/30",
-                            numberInputNoSpinnerClass,
-                          )}
-                        />
-                      </div>
-                      {validationErrors.brokerageValue && (
-                        <p className="text-[9px] text-destructive mt-0.5 text-right">
-                          {validationErrors.brokerageValue}
-                        </p>
-                      )}
-                    </div>
+                  <BillingMoneyInput
+                    value={bill.brokerageValue}
+                    min={0}
+                    onCommit={n => {
+                      setBill({ ...bill, brokerageValue: n });
+                      setValidationErrors(prev => {
+                        const err = { ...prev };
+                        delete err.brokerageValue;
+                        return err;
+                      });
+                    }}
+                    placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
+                    className={cn(
+                      'h-9 w-full min-w-0 max-w-full rounded-lg text-xs text-center font-bold bg-muted/10',
+                      validationErrors.brokerageValue && 'border-destructive ring-1 ring-destructive/30',
+                      numberInputNoSpinnerClass,
+                    )}
+                  />
+                  {validationErrors.brokerageValue && (
+                    <p className="text-[9px] text-destructive mt-0.5 text-right">
+                      {validationErrors.brokerageValue}
+                    </p>
+                  )}
+                </div>
 
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
-                        OTHER CHARGES
-                      </p>
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          value={bill.globalOtherCharges || ""}
-                          onChange={e => {
-                            setBill({ ...bill, globalOtherCharges: parseFloat(e.target.value) || 0 });
-                            setValidationErrors(prev => {
-                              const n = { ...prev };
-                              delete n.globalOtherCharges;
-                              return n;
-                            });
-                          }}
-                          placeholder="Other Charges (₹)"
-                          className={cn(
-                            "h-10 sm:h-8 rounded-lg text-xs text-center font-bold bg-muted/10 flex-1",
-                            validationErrors.globalOtherCharges && "border-destructive ring-1 ring-destructive/30",
-                            numberInputNoSpinnerClass,
-                          )}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={applyGlobalCharges}
-                          className={cn(arrSolidSm, 'whitespace-nowrap h-10 sm:h-8')}
-                        >
-                          Apply to All
-                        </Button>
-                      </div>
-                      {validationErrors.globalOtherCharges && (
-                        <p className="text-[9px] text-destructive mt-0.5 text-right">
-                          {validationErrors.globalOtherCharges}
-                        </p>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
+                    OTHER CHARGES
+                  </p>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <BillingMoneyInput
+                      value={bill.globalOtherCharges}
+                      min={0}
+                      onCommit={n => {
+                        setBill({ ...bill, globalOtherCharges: n });
+                        setValidationErrors(prev => {
+                          const err = { ...prev };
+                          delete err.globalOtherCharges;
+                          return err;
+                        });
+                      }}
+                      placeholder="Other Charges (₹)"
+                      className={cn(
+                        'h-9 min-w-0 flex-1 rounded-lg text-xs text-center font-bold bg-muted/10',
+                        validationErrors.globalOtherCharges && 'border-destructive ring-1 ring-destructive/30',
+                        numberInputNoSpinnerClass,
                       )}
-                    </div>
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={applyGlobalCharges}
+                      className={cn(arrSolidSm, 'h-9 shrink-0 whitespace-nowrap px-2.5 sm:px-3')}
+                    >
+                      Apply to All
+                    </Button>
                   </div>
+                  {validationErrors.globalOtherCharges && (
+                    <p className="text-[9px] text-destructive mt-0.5 text-right">
+                      {validationErrors.globalOtherCharges}
+                    </p>
+                  )}
                 </div>
               </div>
+              <p className="mt-2 text-[9px] text-muted-foreground text-center sm:text-left">
+                Global charges: brokerage and other amounts apply to all items in this bill.
+              </p>
             </motion.div>
 
             {bill.commodityGroups.length > 1 && (
@@ -3452,14 +3940,20 @@ const BillingPage = () => {
                   className="glass-card rounded-2xl overflow-hidden shrink-0 w-[calc(100%-0.1rem)] snap-start lg:w-auto">
                 {(() => {
                   const isCollapsed = collapsedCommodityIndexes.includes(gi);
+                  const groupTotalQty = roundMoney2(
+                    group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0),
+                  );
+                  const groupTotalWeight = roundMoney2(
+                    group.items.reduce((s, i) => s + (Number(i.weight) || 0), 0),
+                  );
                   return (
                     <>
                       <div className="p-3 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/20 dark:to-blue-950/20 border-b border-border/30">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                          <p className="text-sm font-bold text-foreground">{group.commodityName}</p>
+                          <p className="text-base font-bold text-foreground leading-snug">{group.commodityName}</p>
                           <div className="flex flex-wrap gap-1.5 items-center">
                             <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-[9px] font-bold text-emerald-700 dark:text-emerald-200">
-                              Gross: ₹{group.subtotal.toLocaleString()}
+                              Gross: ₹{formatBillingInr(group.subtotal)}
                             </span>
                             <button
                               type="button"
@@ -3478,7 +3972,22 @@ const BillingPage = () => {
                             )}
                             {(group.gstRate ?? 0) > 0 && (
                               <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">
-                                GST: {group.gstRate}%
+                                GST: {formatBillingInr(group.gstRate)}%
+                              </span>
+                            )}
+                            {(group.sgstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                SGST: {formatBillingInr(group.sgstRate)}%
+                              </span>
+                            )}
+                            {(group.cgstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                CGST: {formatBillingInr(group.cgstRate)}%
+                              </span>
+                            )}
+                            {(group.igstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                IGST: {formatBillingInr(group.igstRate)}%
                               </span>
                             )}
                           </div>
@@ -3538,7 +4047,7 @@ const BillingPage = () => {
                               return (
                                 <div
                                   key={ii}
-                                  className="relative shrink-0 w-full snap-start grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] lg:gap-x-1.5 items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-left lg:text-center lg:w-auto"
+                                  className="relative shrink-0 w-full snap-start grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] lg:gap-x-1.5 items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-center lg:w-auto"
                                 >
                                   <button
                                     type="button"
@@ -3549,167 +4058,164 @@ const BillingPage = () => {
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                   <div className="min-w-0 col-span-2 sm:col-span-3 lg:col-span-1">
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Item</p>
-                                    <p className="text-[11px] font-semibold text-foreground truncate leading-tight">
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Item</p>
+                                    <p className="text-[11px] font-semibold text-foreground truncate leading-tight text-center">
                                       {formatLotIdentifierForBillEntry(item)}
                                     </p>
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Qty</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="numeric"
-                                      value={item.quantity || ""}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, "quantity", parseInt(e.target.value, 10) || 0);
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Qty</p>
+                                    <BillingMoneyInput
+                                      value={item.quantity}
+                                      min={0}
+                                      onCommit={n => {
+                                        updateLineItem(gi, ii, 'quantity', Math.max(1, n));
                                         setValidationErrors(prev => {
-                                          const n = { ...prev };
-                                          delete n[`items.${gi}.${ii}.quantity`];
-                                          delete n[`items.${gi}.${ii}.avgWeight`];
-                                          return n;
+                                          const err = { ...prev };
+                                          delete err[`items.${gi}.${ii}.quantity`];
+                                          delete err[`items.${gi}.${ii}.avgWeight`];
+                                          return err;
                                         });
                                       }}
                                       className={cn(
-                                        "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
-                                        numberInputNoSpinnerClass,
+                                        'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
                                         validationErrors[`items.${gi}.${ii}.quantity`] &&
-                                        "ring-1 ring-destructive/40 rounded",
+                                          'ring-1 ring-destructive/40 rounded',
                                       )}
                                     />
                                     {validationErrors[`items.${gi}.${ii}.quantity`] && (
-                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">
+                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive text-center">
                                         {validationErrors[`items.${gi}.${ii}.quantity`]}
                                       </p>
                                     )}
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Wt (kg)</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={item.weight || ""}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, "weight", parseFloat(e.target.value) || 0);
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Wt (kg)</p>
+                                    <BillingMoneyInput
+                                      value={item.weight}
+                                      min={0}
+                                      onCommit={n => {
+                                        updateLineItem(gi, ii, 'weight', n);
                                         setValidationErrors(prev => {
-                                          const n = { ...prev };
-                                          delete n[`items.${gi}.${ii}.weight`];
-                                          delete n[`items.${gi}.${ii}.avgWeight`];
-                                          return n;
+                                          const err = { ...prev };
+                                          delete err[`items.${gi}.${ii}.weight`];
+                                          delete err[`items.${gi}.${ii}.avgWeight`];
+                                          return err;
                                         });
                                       }}
                                       className={cn(
-                                        "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
-                                        numberInputNoSpinnerClass,
+                                        'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
                                         (validationErrors[`items.${gi}.${ii}.weight`] || item.weight === 0) &&
-                                        "ring-1 ring-destructive/40 rounded",
+                                          'ring-1 ring-destructive/40 rounded',
                                       )}
                                     />
                                     {item.weight === 0 && (
-                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">Can&apos;t be 0</p>
+                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive text-center">Can&apos;t be 0</p>
                                     )}
                                     {validationErrors[`items.${gi}.${ii}.weight`] && (
-                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive">
+                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive text-center">
                                         {validationErrors[`items.${gi}.${ii}.weight`]}
                                       </p>
                                     )}
                                   </div>
 
                                   <div className={cn("text-foreground", avgOutOfRange && "text-amber-600 font-semibold")}>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Avg Wt</p>
-                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px]">
-                                      {avgWeight.toFixed(1)}
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Avg Wt</p>
+                                    <div
+                                      className={cn(
+                                        billingCommodityReadOnlyCellClass,
+                                        avgOutOfRange &&
+                                          'border-amber-500/45 bg-amber-500/[0.12] text-amber-800 dark:text-amber-300',
+                                      )}
+                                      title="Calculated: weight ÷ quantity (not editable)"
+                                      aria-label={`Average weight ${formatBillingInr(avgWeight)} kilograms, calculated, read-only`}
+                                    >
+                                      {formatBillingInr(avgWeight)}
                                     </div>
                                     {avgBelowMin && item.weight > 0 && (
-                                      <p className="mt-0.5 text-[8px] text-amber-600">
+                                      <p className="mt-0.5 text-[8px] text-amber-600 text-center">
                                         &lt;min {bounds!.min}kg
                                       </p>
                                     )}
                                     {avgAboveMax && item.weight > 0 && (
-                                      <p className="mt-0.5 text-[8px] text-amber-600">
+                                      <p className="mt-0.5 text-[8px] text-amber-600 text-center">
                                         &gt;max {bounds!.max}kg
                                       </p>
                                     )}
                                     {validationErrors[`items.${gi}.${ii}.avgWeight`] && (
-                                      <p className="mt-0.5 text-[8px] text-destructive">
+                                      <p className="mt-0.5 text-[8px] text-destructive text-center">
                                         {validationErrors[`items.${gi}.${ii}.avgWeight`]}
                                       </p>
                                     )}
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Other ₹</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={item.otherCharges || ""}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, "otherCharges", parseFloat(e.target.value) || 0);
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Other ₹</p>
+                                    <BillingMoneyInput
+                                      value={item.otherCharges}
+                                      min={0}
+                                      onCommit={n => {
+                                        updateLineItem(gi, ii, 'otherCharges', n);
                                         setValidationErrors(prev => {
-                                          const n = { ...prev };
-                                          delete n[`items.${gi}.${ii}.otherCharges`];
-                                          return n;
+                                          const err = { ...prev };
+                                          delete err[`items.${gi}.${ii}.otherCharges`];
+                                          return err;
                                         });
                                       }}
                                       className={cn(
-                                        "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
-                                        numberInputNoSpinnerClass,
+                                        'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
                                         validationErrors[`items.${gi}.${ii}.otherCharges`] &&
-                                        "ring-1 ring-destructive/40 rounded",
+                                          'ring-1 ring-destructive/40 rounded',
                                       )}
                                     />
                                     {validationErrors[`items.${gi}.${ii}.otherCharges`] && (
-                                      <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5">
+                                      <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5 text-center">
                                         {validationErrors[`items.${gi}.${ii}.otherCharges`]}
                                       </p>
                                     )}
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Brok ₹</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={item.brokerage || ""}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, "brokerage", parseFloat(e.target.value) || 0);
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Brok ₹</p>
+                                    <BillingMoneyInput
+                                      value={item.brokerage}
+                                      min={0}
+                                      onCommit={n => {
+                                        updateLineItem(gi, ii, 'brokerage', n);
                                         setValidationErrors(prev => {
-                                          const n = { ...prev };
-                                          delete n[`items.${gi}.${ii}.brokerage`];
-                                          return n;
+                                          const err = { ...prev };
+                                          delete err[`items.${gi}.${ii}.brokerage`];
+                                          return err;
                                         });
                                       }}
                                       className={cn(
-                                        "h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
-                                        numberInputNoSpinnerClass,
+                                        'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
                                         validationErrors[`items.${gi}.${ii}.brokerage`] &&
-                                        "ring-1 ring-destructive/40 rounded",
+                                          'ring-1 ring-destructive/40 rounded',
                                       )}
                                     />
                                     {validationErrors[`items.${gi}.${ii}.brokerage`] && (
-                                      <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5">
+                                      <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5 text-center">
                                         {validationErrors[`items.${gi}.${ii}.brokerage`]}
                                       </p>
                                     )}
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Token ₹</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={item.tokenAdvance ?? ''}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, 'tokenAdvance', parseFloat(e.target.value) || 0);
-                                      }}
-                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Token ₹</p>
+                                    <BillingMoneyInput
+                                      value={item.tokenAdvance ?? 0}
+                                      min={0}
+                                      onCommit={n => updateLineItem(gi, ii, 'tokenAdvance', n)}
+                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                       title="Token advance from auction"
                                     />
                                   </div>
 
                                   <div>
-                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Bid Rate ₹</p>
+                                    <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Bid Rate ₹</p>
                                     <Input
                                       type="number"
                                       inputMode="decimal"
@@ -3717,21 +4223,35 @@ const BillingPage = () => {
                                       onChange={e => {
                                         updateLineItem(gi, ii, "baseRate", parseFloat(e.target.value) || 0);
                                       }}
-                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-right px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                                      className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                     />
                                   </div>
 
                                   <div className="text-primary font-semibold">
-                                    <p className="lg:hidden text-[9px] font-semibold text-primary/80 uppercase tracking-wide mb-0.5">New Rate ₹</p>
-                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px] font-bold">
-                                      ₹{item.newRate}
+                                    <p className="lg:hidden text-[9px] font-semibold text-primary/80 uppercase tracking-wide mb-0.5 text-center">New Rate ₹</p>
+                                    <div
+                                      className={cn(
+                                        billingCommodityReadOnlyCellClass,
+                                        'font-bold text-primary/85 dark:text-primary/75 border-primary/25 bg-primary/[0.07]',
+                                      )}
+                                      title="Calculated from bid rate, brokerage, and other charges (not editable)"
+                                      aria-label={`New rate ₹${formatBillingInr(item.newRate)}, calculated, read-only`}
+                                    >
+                                      ₹{formatBillingInr(item.newRate)}
                                     </div>
                                   </div>
 
                                   <div className="text-foreground font-bold">
-                                    <p className="lg:hidden text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-0.5">Amount ₹</p>
-                                    <div className="h-10 lg:h-6 px-2 lg:px-1 border border-border rounded bg-background inline-flex items-center justify-end w-full text-[11px] lg:text-[10px]">
-                                      ₹{item.amount.toLocaleString()}
+                                    <p className="lg:hidden text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-0.5 text-center">Amount ₹</p>
+                                    <div
+                                      className={cn(
+                                        billingCommodityReadOnlyCellClass,
+                                        'font-bold text-emerald-900/90 dark:text-emerald-300/95 border-emerald-600/25 bg-emerald-500/[0.08]',
+                                      )}
+                                      title="Calculated from weight and new rate (not editable)"
+                                      aria-label={`Amount ₹${formatBillingInr(item.amount)}, calculated, read-only`}
+                                    >
+                                      ₹{formatBillingInr(item.amount)}
                                     </div>
                                   </div>
 
@@ -3750,23 +4270,23 @@ const BillingPage = () => {
                             })}
 
                             <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] gap-1.5 items-center rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500 px-2 py-2 text-[11px] font-bold text-center text-white shadow-md">
-                              <div className="text-left text-white">Total</div>
+                              <div className="text-white">Total</div>
                               <div className="text-white">
-                                {group.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0).toLocaleString()}
+                                {formatBillingInr(groupTotalQty)}
                               </div>
                               <div className="text-white">
-                                {group.items.reduce((s, i) => s + (Number(i.weight) || 0), 0).toLocaleString()}
-                              </div>
-                              <div />
-                              <div />
-                              <div />
-                              <div className="text-white">
-                                ₹{group.items.reduce((s, i) => s + (Number(i.tokenAdvance) || 0), 0).toLocaleString()}
+                                {formatBillingInr(groupTotalWeight)}
                               </div>
                               <div />
                               <div />
+                              <div />
                               <div className="text-white">
-                                ₹{group.items.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
+                                ₹{formatBillingInr(roundMoney2(group.items.reduce((s, i) => s + (Number(i.tokenAdvance) || 0), 0)))}
+                              </div>
+                              <div />
+                              <div />
+                              <div className="text-white">
+                                ₹{formatBillingInr(roundMoney2(group.items.reduce((s, i) => s + (Number(i.amount) || 0), 0)))}
                               </div>
                               <div />
                             </div>
@@ -3778,11 +4298,27 @@ const BillingPage = () => {
                         </div>
                       )}
                       {isCollapsed && (
-                        <div className="px-3 py-2 bg-muted/10 border-t border-border/20">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground font-medium">Items: {group.items.length}</span>
-                            <span className="text-foreground font-semibold">
-                              Subtotal/Gross: ₹{group.subtotal.toLocaleString()}
+                        <div className="px-3 py-2.5 bg-muted/10 border-t border-border/20">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 text-[11px]">
+                            <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 min-w-0 sm:justify-start text-center sm:text-left">
+                              <span className="text-muted-foreground font-medium shrink-0">
+                                Items: {group.items.length}
+                              </span>
+                              <span className="hidden sm:inline text-muted-foreground/50 select-none" aria-hidden>
+                                ·
+                              </span>
+                              <span className="font-semibold text-foreground tabular-nums">
+                                Total Qty: {formatBillingInr(groupTotalQty)}
+                              </span>
+                              <span className="hidden sm:inline text-muted-foreground/50 select-none" aria-hidden>
+                                ·
+                              </span>
+                              <span className="font-semibold text-foreground tabular-nums">
+                                Total Wt: {formatBillingInr(groupTotalWeight)} kg
+                              </span>
+                            </div>
+                            <span className="text-center sm:text-right font-semibold text-foreground tabular-nums border-t border-border/30 pt-2 sm:border-0 sm:pt-0 shrink-0">
+                              Subtotal/Gross: ₹{formatBillingInr(group.subtotal)}
                             </span>
                           </div>
                         </div>
@@ -3804,7 +4340,7 @@ const BillingPage = () => {
                 onScroll={handleSummaryTableScroll}
                 className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm"
               >
-                <table className="w-full min-w-[680px] text-[11px] leading-tight border-separate border-spacing-0">
+                <table className="w-full min-w-[720px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
                     <tr className="bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-700 dark:to-slate-700 shadow-sm">
                       <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest whitespace-normal bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 border-b border-border/40 border-r border-border/50 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
@@ -3833,7 +4369,7 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          ₹{g.subtotal.toLocaleString()}
+                          ₹{formatBillingInr(g.subtotal)}
                         </td>
                       ))}
                     </tr>
@@ -3857,18 +4393,17 @@ const BillingPage = () => {
                           )}
                         >
                           <div className="flex items-center gap-1">
-                            <Input
-                              type="number"
-                              inputMode="decimal"
+                            <BillingMoneyInput
                               value={g.commissionPercent}
-                              min="0"
-                              onChange={e => {
-                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
-                                cg.commissionPercent = val;
-                                cg.commissionAmount = Math.round(cg.subtotal * cg.commissionPercent / 100);
-                                cg.totalCharges = cg.commissionAmount + cg.userFeeAmount;
+                                cg.commissionPercent = v;
+                                cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
@@ -3876,7 +4411,7 @@ const BillingPage = () => {
                               className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.commissionAmount || 0).toLocaleString()}</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.commissionAmount || 0)}</span>
                           </div>
                         </td>
                       ))}
@@ -3892,18 +4427,17 @@ const BillingPage = () => {
                           )}
                         >
                           <div className="flex items-center gap-1">
-                            <Input
-                              type="number"
-                              inputMode="decimal"
+                            <BillingMoneyInput
                               value={g.userFeePercent}
-                              min="0"
-                              onChange={e => {
-                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
-                                cg.userFeePercent = val;
-                                cg.userFeeAmount = Math.round(cg.subtotal * cg.userFeePercent / 100);
-                                cg.totalCharges = cg.commissionAmount + cg.userFeeAmount;
+                                cg.userFeePercent = v;
+                                cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
@@ -3911,7 +4445,7 @@ const BillingPage = () => {
                               className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.userFeeAmount || 0).toLocaleString()}</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.userFeeAmount || 0)}</span>
                           </div>
                         </td>
                       ))}
@@ -3930,33 +4464,31 @@ const BillingPage = () => {
                             )}
                           >
                             <div className="flex items-center gap-1">
-                              <Input
-                                type="number"
-                                inputMode="decimal"
-                                value={g.coolieRate || ""}
-                                onChange={e => {
-                                  const rate = parseFloat(e.target.value) || 0;
+                              <BillingMoneyInput
+                                value={g.coolieRate || 0}
+                                min={0}
+                                onCommit={rate => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
                                   cg.coolieRate = rate;
-                                  cg.coolieAmount = rate > 0 && qty > 0 ? Math.round(rate * qty) : 0;
+                                  cg.coolieAmount = rate > 0 && qty > 0 ? roundMoney2(rate * qty) : 0;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
                                   setValidationErrors(prev => {
-                                    const n = { ...prev };
-                                    delete n[`coolie-${gi}`];
-                                    return n;
+                                    const err = { ...prev };
+                                    delete err[`coolie-${gi}`];
+                                    return err;
                                   });
                                 }}
-                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors[`coolie-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                className={cn('h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
                               <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
-                                {qty}
+                                {formatBillingInr(qty)}
                               </span>
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.coolieAmount || 0).toLocaleString()}</span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.coolieAmount || 0)}</span>
                             </div>
                           </td>
                         );
@@ -3976,33 +4508,31 @@ const BillingPage = () => {
                             )}
                           >
                             <div className="flex items-center gap-1">
-                              <Input
-                                type="number"
-                                inputMode="decimal"
-                                value={g.weighmanChargeRate || ""}
-                                onChange={e => {
-                                  const rate = parseFloat(e.target.value) || 0;
+                              <BillingMoneyInput
+                                value={g.weighmanChargeRate || 0}
+                                min={0}
+                                onCommit={rate => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
                                   cg.weighmanChargeRate = rate;
-                                  cg.weighmanChargeAmount = rate > 0 && qty > 0 ? Math.round(rate * qty) : 0;
+                                  cg.weighmanChargeAmount = rate > 0 && qty > 0 ? roundMoney2(rate * qty) : 0;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
                                   setValidationErrors(prev => {
-                                    const n = { ...prev };
-                                    delete n[`weighman-${gi}`];
-                                    return n;
+                                    const err = { ...prev };
+                                    delete err[`weighman-${gi}`];
+                                    return err;
                                   });
                                 }}
-                                className={cn("h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors[`weighman-${gi}`] && "border-destructive ring-1 ring-destructive/30")}
+                                className={cn('h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
                               <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
-                                {qty}
+                                {formatBillingInr(qty)}
                               </span>
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{(g.weighmanChargeAmount || 0).toLocaleString()}</span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.weighmanChargeAmount || 0)}</span>
                             </div>
                           </td>
                         );
@@ -4010,16 +4540,146 @@ const BillingPage = () => {
                     </tr>
 
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">GST</td>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        <span className="block">GST</span>
+                        <span className="block text-[8px] font-normal text-muted-foreground leading-snug mt-0.5 max-w-[7.5rem]">
+                          Combined % drives tax. If 0, tax uses SGST+CGST or IGST.
+                        </span>
+                      </td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`gst-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900',
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          ₹{Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100)).toLocaleString()}
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.gstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.gstRate = v;
+                                cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        SGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`sgst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.sgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], sgstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        CGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`cgst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.cgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], cgstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        IGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`igst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.igstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], igstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0))}
+                            </span>
+                          </div>
                         </td>
                       ))}
                     </tr>
@@ -4036,10 +4696,12 @@ const BillingPage = () => {
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Discount</td>
                       {bill.commodityGroups.map((g, gi) => {
-                        const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
+                        const subtotalWithCharges = billGroupSubtotalWithTaxAndCharges(g);
                         let discountAmount = g.discount || 0;
                         if (g.discountType === 'PERCENT') {
-                          discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                          discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
+                        } else {
+                          discountAmount = roundMoney2(discountAmount);
                         }
                         return (
                           <td
@@ -4066,16 +4728,14 @@ const BillingPage = () => {
                                   <SelectItem value="AMOUNT">₹</SelectItem>
                                 </SelectContent>
                               </Select>
-                              <Input
-                                type="number"
-                                inputMode="decimal"
-                                value={g.discount || ""}
-                                min="0"
-                                onChange={e => {
-                                  const val = Math.max(0, parseFloat(e.target.value) || 0);
+                              <BillingMoneyInput
+                                value={g.discount || 0}
+                                min={0}
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
-                                  cg.discount = val;
+                                  cg.discount = v;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
@@ -4083,7 +4743,7 @@ const BillingPage = () => {
                                 className={`h-10 w-20 lg:h-6 lg:w-16 rounded text-right text-[10px] lg:text-[9px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                 placeholder="0"
                               />
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{discountAmount.toLocaleString()}</span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(discountAmount)}</span>
                             </div>
                           </td>
                         );
@@ -4100,12 +4760,9 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <Input
-                            type="number"
-                            inputMode="decimal"
-                            value={g.manualRoundOff || ""}
-                            onChange={e => {
-                              const val = parseFloat(e.target.value) || 0;
+                          <BillingMoneyInput
+                            value={g.manualRoundOff || 0}
+                            onCommit={val => {
                               const updated = { ...bill };
                               const cg = { ...updated.commodityGroups[gi] };
                               cg.manualRoundOff = val;
@@ -4123,12 +4780,14 @@ const BillingPage = () => {
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Overall Rate</td>
                       {bill.commodityGroups.map((g, gi) => {
-                        const subtotalWithCharges = (g.subtotal || 0) + (g.commissionAmount || 0) + (g.userFeeAmount || 0) + (g.coolieAmount || 0) + (g.weighmanChargeAmount || 0) + Math.round((g.subtotal || 0) * ((g.gstRate ?? 0) / 100));
+                        const subtotalWithCharges = billGroupSubtotalWithTaxAndCharges(g);
                         let discountAmount = g.discount || 0;
                         if (g.discountType === 'PERCENT') {
-                          discountAmount = Math.round(subtotalWithCharges * discountAmount / 100);
+                          discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
+                        } else {
+                          discountAmount = roundMoney2(discountAmount);
                         }
-                        const totalAmount = subtotalWithCharges - discountAmount + (g.manualRoundOff || 0);
+                        const totalAmount = roundMoney2(subtotalWithCharges - discountAmount + (g.manualRoundOff || 0));
                         return (
                           <td
                             key={`overallrate-${gi}`}
@@ -4137,7 +4796,7 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            ₹{totalAmount.toLocaleString()}
+                            ₹{formatBillingInr(totalAmount)}
                           </td>
                         );
                       })}
@@ -4155,19 +4814,18 @@ const BillingPage = () => {
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Outbound Freight (Rate/Value)</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Input
-                            type="number"
-                            inputMode="decimal"
-                            value={bill.outboundFreight || ''}
-                            onChange={e => {
-                              setBill(recalcGrandTotal({ ...bill, outboundFreight: parseInt(e.target.value, 10) || 0 }));
+                          <BillingMoneyInput
+                            value={bill.outboundFreight || 0}
+                            min={0}
+                            onCommit={n => {
+                              setBill(recalcGrandTotal({ ...bill, outboundFreight: n }));
                               setValidationErrors(prev => {
-                                const n = { ...prev };
-                                delete n.outboundFreight;
-                                return n;
+                                const err = { ...prev };
+                                delete err.outboundFreight;
+                                return err;
                               });
                             }}
-                            className={cn("h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", numberInputNoSpinnerClass, validationErrors.outboundFreight && "border-destructive ring-1 ring-destructive/30")}
+                            className={cn('h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors.outboundFreight && 'border-destructive ring-1 ring-destructive/30')}
                           />
                           {validationErrors.outboundFreight && <span className="text-[10px] text-destructive">{validationErrors.outboundFreight}</span>}
                         </div>
@@ -4200,15 +4858,15 @@ const BillingPage = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-violet-500/40 dark:border-violet-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700 dark:text-violet-300">💵 Grand Total</p>
-                            <p className="font-extrabold text-lg text-violet-900 dark:text-violet-100 mt-1">₹{bill.grandTotal.toLocaleString()}</p>
+                            <p className="font-extrabold text-lg text-violet-900 dark:text-violet-100 mt-1">₹{formatBillingInr(bill.grandTotal)}</p>
                           </div>
                           <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-indigo-500/40 dark:border-indigo-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-700 dark:text-indigo-300">📊 Pending Balance</p>
-                            <p className="font-extrabold text-lg text-indigo-900 dark:text-indigo-100 mt-1">₹{bill.pendingBalance.toLocaleString()}</p>
+                            <p className="font-extrabold text-lg text-indigo-900 dark:text-indigo-100 mt-1">₹{formatBillingInr(bill.pendingBalance)}</p>
                           </div>
                           <div className="rounded-xl bg-white dark:bg-slate-800 border-2 border-emerald-500/40 dark:border-emerald-400/30 px-3 py-2 shadow-md hover:shadow-lg transition-shadow">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">🎟️ Token Advance</p>
-                            <p className="font-extrabold text-lg text-emerald-900 dark:text-emerald-100 mt-1">₹{sumLineTokenAdvances(bill).toLocaleString()}</p>
+                            <p className="font-extrabold text-lg text-emerald-900 dark:text-emerald-100 mt-1">₹{formatBillingInr(sumLineTokenAdvances(bill))}</p>
                           </div>
                         </div>
                       </td>
@@ -4331,7 +4989,7 @@ const BillingPage = () => {
                     <p className="text-xs text-muted-foreground">{b.buyerMark} · In progress</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold text-foreground">₹{b.grandTotal?.toLocaleString()}</p>
+                    <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
                     <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
                   </div>
                 </div>
@@ -4366,7 +5024,7 @@ const BillingPage = () => {
                     <p className="text-xs text-muted-foreground truncate">{b.billingName} ({b.buyerMark})</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold text-foreground">₹{b.grandTotal?.toLocaleString()}</p>
+                    <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
                     <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
                   </div>
                 </div>

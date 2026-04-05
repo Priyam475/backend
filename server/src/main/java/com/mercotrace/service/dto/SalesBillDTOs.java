@@ -82,6 +82,11 @@ public final class SalesBillDTOs {
         private BigDecimal discount;
         private String discountType; // PERCENT | AMOUNT
         private BigDecimal manualRoundOff;
+        /** Per-bill GST % (combined). */
+        private BigDecimal gstRate;
+        private BigDecimal sgstRate;
+        private BigDecimal cgstRate;
+        private BigDecimal igstRate;
         @Valid
         private List<BillLineItemDTO> items = new ArrayList<>();
         private BigDecimal subtotal;
@@ -113,6 +118,14 @@ public final class SalesBillDTOs {
         public void setDiscountType(String discountType) { this.discountType = discountType; }
         public BigDecimal getManualRoundOff() { return manualRoundOff; }
         public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
+        public BigDecimal getGstRate() { return gstRate; }
+        public void setGstRate(BigDecimal gstRate) { this.gstRate = gstRate; }
+        public BigDecimal getSgstRate() { return sgstRate; }
+        public void setSgstRate(BigDecimal sgstRate) { this.sgstRate = sgstRate; }
+        public BigDecimal getCgstRate() { return cgstRate; }
+        public void setCgstRate(BigDecimal cgstRate) { this.cgstRate = cgstRate; }
+        public BigDecimal getIgstRate() { return igstRate; }
+        public void setIgstRate(BigDecimal igstRate) { this.igstRate = igstRate; }
         public List<BillLineItemDTO> getItems() { return items; }
         public void setItems(List<BillLineItemDTO> items) { this.items = items != null ? items : new ArrayList<>(); }
         public BigDecimal getSubtotal() { return subtotal; }

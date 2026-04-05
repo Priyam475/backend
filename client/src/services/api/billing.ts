@@ -33,6 +33,11 @@ export interface CommodityGroupDTO {
   commissionAmount?: number;
   userFeeAmount?: number;
   totalCharges?: number;
+  /** Per-bill GST % (combined and split); persisted on sales_bill_commodity_group. */
+  gstRate?: number;
+  sgstRate?: number;
+  cgstRate?: number;
+  igstRate?: number;
 }
 
 /** Version snapshot (backend BillVersionDTO). */

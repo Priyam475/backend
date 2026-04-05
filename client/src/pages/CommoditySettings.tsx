@@ -54,6 +54,9 @@ function fullConfigToLocal(commodity: Commodity, full: FullCommodityConfigDto): 
     bill_prefix: cfg?.billPrefix,
     hamali_enabled: cfg?.hamaliEnabled,
     gst_rate: cfg?.gstRate,
+    sgst_rate: cfg?.sgstRate,
+    cgst_rate: cfg?.cgstRate,
+    igst_rate: cfg?.igstRate,
     weighing_threshold: cfg?.weighingThreshold,
     created_at: new Date().toISOString(),
   };
@@ -82,6 +85,36 @@ function fullConfigToLocal(commodity: Commodity, full: FullCommodityConfigDto): 
     billPrefix: cfg?.billPrefix ?? '',
     gstApplicable: !!(cfg?.hsnCode && cfg.hsnCode.trim()),
   };
+}
+
+function parseOptionalPercentField(raw: number | string | undefined | null): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s === '') return undefined;
+    const n = parseFloat(s);
+    return Number.isNaN(n) ? undefined : n;
+  }
+  return raw as number;
+}
+
+function validateOptionalGstSplitPercent(
+  commodityName: string,
+  raw: number | string | undefined,
+  label: string,
+): boolean {
+  const v = parseOptionalPercentField(raw);
+  if (v == null) return true;
+  if (Number.isNaN(v) || v < 0 || v > 100) {
+    toast.error(`${commodityName}: ${label} must be between 0 and 100 when provided`);
+    return false;
+  }
+  const decimalPart = String(raw).split('.')[1];
+  if (decimalPart != null && decimalPart.length > 2) {
+    toast.error(`${commodityName}: ${label} allows max 2 decimal places (e.g. 2.50)`);
+    return false;
+  }
+  return true;
 }
 
 const CommoditySettings = () => {
@@ -411,6 +444,16 @@ const CommoditySettings = () => {
       toast.error(`${commodityName}: GST Rate must be between 0 and 100 when provided`); return;
     }
 
+    if (item.gstApplicable) {
+      if (!validateOptionalGstSplitPercent(commodityName, cfg.sgst_rate as number | string | undefined, 'SGST (%)')) return;
+      if (!validateOptionalGstSplitPercent(commodityName, cfg.cgst_rate as number | string | undefined, 'CGST (%)')) return;
+      if (!validateOptionalGstSplitPercent(commodityName, cfg.igst_rate as number | string | undefined, 'IGST (%)')) return;
+    }
+
+    const sgstRateValue = item.gstApplicable ? parseOptionalPercentField(cfg.sgst_rate as number | string | undefined) : undefined;
+    const cgstRateValue = item.gstApplicable ? parseOptionalPercentField(cfg.cgst_rate as number | string | undefined) : undefined;
+    const igstRateValue = item.gstApplicable ? parseOptionalPercentField(cfg.igst_rate as number | string | undefined) : undefined;
+
     const weighingThresholdValue = (cfg.weighing_threshold ?? undefined) as number | undefined;
     if (weighingThresholdValue != null && weighingThresholdValue <= 0) {
       toast.error(`${commodityName}: Weighing Threshold must be greater than 0 when set`); return;
@@ -461,6 +504,9 @@ const CommoditySettings = () => {
         billPrefix: item.billPrefix?.trim() || undefined,
         hamaliEnabled: item.hamaliEnabled,
         gstRate: gstRateValue,
+        sgstRate: sgstRateValue,
+        cgstRate: cgstRateValue,
+        igstRate: igstRateValue,
         weighingThreshold: weighingThresholdValue,
         weighingCharge: cfg.weighing_charge,
       },
@@ -763,7 +809,13 @@ const CommoditySettings = () => {
                               const newGst = !item.gstApplicable;
                               updateItem(index, { gstApplicable: newGst });
                               if (!newGst) {
-                                updateConfig(index, { hsn_code: '', gst_rate: undefined as any });
+                                updateConfig(index, {
+                                  hsn_code: '',
+                                  gst_rate: undefined as any,
+                                  sgst_rate: undefined as any,
+                                  cgst_rate: undefined as any,
+                                  igst_rate: undefined as any,
+                                });
                               }
                             }}
                             className={cn("w-14 h-8 rounded-full transition-all relative shadow-inner", item.gstApplicable ? 'bg-gradient-to-r from-emerald-500 to-green-600 shadow-emerald-500/30' : 'bg-slate-300 dark:bg-slate-600')}
@@ -815,6 +867,85 @@ const CommoditySettings = () => {
                                 placeholder="e.g. 5, 12, 18 (max 2 decimals)"
                                 className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
                               />
+                            </div>
+                            <div className="rounded-lg border border-slate-200/80 dark:border-slate-600/40 bg-slate-50/60 dark:bg-slate-900/25 p-3">
+                              <p className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                                GST split (optional)
+                              </p>
+                              <p className="text-[10px] text-muted-foreground mb-3 leading-snug">
+                                Intra-state: SGST + CGST; inter-state: IGST. Leave blank if the combined GST rate above is enough.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
+                                    SGST (%)
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={(() => {
+                                      const v = item.config.sgst_rate;
+                                      if (v === undefined || v === null) return '';
+                                      if (typeof v === 'string') return v;
+                                      return String(v);
+                                    })()}
+                                    onChange={e => {
+                                      const v = e.target.value;
+                                      if (v === '') { updateConfig(index, { sgst_rate: undefined as any }); return; }
+                                      if (!/^\d*\.?\d*$/.test(v)) return;
+                                      updateConfig(index, { sgst_rate: v } as any);
+                                    }}
+                                    placeholder="e.g. 2.5"
+                                    className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
+                                    CGST (%)
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={(() => {
+                                      const v = item.config.cgst_rate;
+                                      if (v === undefined || v === null) return '';
+                                      if (typeof v === 'string') return v;
+                                      return String(v);
+                                    })()}
+                                    onChange={e => {
+                                      const v = e.target.value;
+                                      if (v === '') { updateConfig(index, { cgst_rate: undefined as any }); return; }
+                                      if (!/^\d*\.?\d*$/.test(v)) return;
+                                      updateConfig(index, { cgst_rate: v } as any);
+                                    }}
+                                    placeholder="e.g. 2.5"
+                                    className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-600/80 dark:text-slate-400/60 mb-1 block font-semibold">
+                                    IGST (%)
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={(() => {
+                                      const v = item.config.igst_rate;
+                                      if (v === undefined || v === null) return '';
+                                      if (typeof v === 'string') return v;
+                                      return String(v);
+                                    })()}
+                                    onChange={e => {
+                                      const v = e.target.value;
+                                      if (v === '') { updateConfig(index, { igst_rate: undefined as any }); return; }
+                                      if (!/^\d*\.?\d*$/.test(v)) return;
+                                      updateConfig(index, { igst_rate: v } as any);
+                                    }}
+                                    placeholder="e.g. 5"
+                                    className="h-12 rounded-xl bg-white dark:bg-white/10 border-2 border-slate-200 dark:border-slate-700/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 text-base"
+                                  />
+                                </div>
+                              </div>
                             </div>
                           </div>
                         )}
