@@ -41,6 +41,7 @@ import { directPrint } from '@/utils/printTemplates';
 import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
 import {
   billGroupSubtotalWithTaxAndCharges,
+  effectiveGstPercent,
   formatBillingInr,
   gstOnSubtotal,
   percentOfAmount,
@@ -187,6 +188,10 @@ interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
   gstRate: number;
+  /** Optional SGST/CGST (intra) or IGST (inter) split; see `effectiveGstPercent` in billingMoney. */
+  sgstRate: number;
+  cgstRate: number;
+  igstRate: number;
   divisor: number;
   commissionPercent: number;
   userFeePercent: number;
@@ -296,6 +301,9 @@ function roundBillMoneyValues(b: BillData): BillData {
       ...g,
       divisor: roundMoney2(div),
       gstRate: roundMoney2(Number(g.gstRate) || 0),
+      sgstRate: roundMoney2(Number(g.sgstRate) || 0),
+      cgstRate: roundMoney2(Number(g.cgstRate) || 0),
+      igstRate: roundMoney2(Number(g.igstRate) || 0),
       commissionPercent: roundMoney2(Number(g.commissionPercent) || 0),
       userFeePercent: roundMoney2(Number(g.userFeePercent) || 0),
       coolieRate: roundMoney2(Number(g.coolieRate) || 0),
@@ -336,7 +344,10 @@ function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): strin
 
 /** Normalize bill from API: add presetApplied (derived) and gstRate to items/groups. */
 function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], commodities?: any[]): BillData {
-  const configByCommName = new Map<string, { gstRate: number; divisor: number }>();
+  const configByCommName = new Map<
+    string,
+    { gstRate: number; sgstRate: number; cgstRate: number; igstRate: number; divisor: number }
+  >();
   const dynamicChargesByCommName = new Map<string, any[]>();
   if (fullConfigs && commodities) {
     commodities.forEach((c: any) => {
@@ -344,16 +355,24 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
       const name = c.commodity_name ?? c.commodityName;
       if (!name) return;
       const gstRate = cfg?.config?.gstRate ?? 0;
+      const sgstRate = cfg?.config?.sgstRate ?? 0;
+      const cgstRate = cfg?.config?.cgstRate ?? 0;
+      const igstRate = cfg?.config?.igstRate ?? 0;
       const divisorRaw = cfg?.config?.ratePerUnit ?? 50;
       const divisor = Number(divisorRaw) > 0 ? Number(divisorRaw) : 50;
-      configByCommName.set(name, { gstRate, divisor });
+      configByCommName.set(name, { gstRate, sgstRate, cgstRate, igstRate, divisor });
       dynamicChargesByCommName.set(name, cfg?.dynamicCharges ?? []);
     });
   }
-  const groups = (b.commodityGroups || []).map((g: any) => ({
+  const groups = (b.commodityGroups || []).map((g: any) => {
+    const fromCfg = configByCommName.get(g.commodityName);
+    return {
     ...g,
-    gstRate: g.gstRate ?? configByCommName.get(g.commodityName)?.gstRate ?? 0,
-    divisor: g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50,
+    gstRate: g.gstRate ?? fromCfg?.gstRate ?? 0,
+    sgstRate: g.sgstRate ?? g.sgst_rate ?? fromCfg?.sgstRate ?? 0,
+    cgstRate: g.cgstRate ?? g.cgst_rate ?? fromCfg?.cgstRate ?? 0,
+    igstRate: g.igstRate ?? g.igst_rate ?? fromCfg?.igstRate ?? 0,
+    divisor: g.divisor ?? fromCfg?.divisor ?? 50,
     items: (g.items || []).map((item: any) => {
       const base = Number(item.baseRate) || 0;
       const brk = Number(item.brokerage) || 0;
@@ -403,7 +422,8 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
       const tok = Number(item.tokenAdvance) || 0;
       return { ...item, presetApplied, sellerOtherCharges, tokenAdvance: tok };
     }),
-  }));
+  };
+  });
 
   let migratedGroups = groups.map((g: any) => ({ ...g, items: g.items.map((it: any) => ({ ...it })) }));
   let lineTokenSum = 0;
@@ -1306,7 +1326,7 @@ const BillingPage = () => {
       const sub = roundMoney2(group.subtotal);
       const commissionAmount = percentOfAmount(sub, group.commissionPercent || 0);
       const userFeeAmount = percentOfAmount(sub, group.userFeePercent || 0);
-      const gstAmount = gstOnSubtotal(sub, group.gstRate ?? 0);
+      const gstAmount = gstOnSubtotal(sub, effectiveGstPercent(group));
       const totalCharges = roundMoney2(commissionAmount + userFeeAmount + gstAmount);
       return { commissionAmount, userFeeAmount, totalCharges };
     };
@@ -1455,6 +1475,9 @@ const BillingPage = () => {
           commodityName: commName,
           hsnCode: config?.hsnCode || '',
           gstRate: config?.gstRate ?? 0,
+          sgstRate: config?.sgstRate ?? 0,
+          cgstRate: config?.cgstRate ?? 0,
+          igstRate: config?.igstRate ?? 0,
           divisor,
           commissionPercent: config?.commissionPercent || 0,
           userFeePercent: config?.userFeePercent || 0,
@@ -1513,7 +1536,7 @@ const BillingPage = () => {
       group.subtotal = roundMoney2(group.items.reduce((s, item) => s + item.amount, 0));
       group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
       group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
-      const gst = gstOnSubtotal(group.subtotal, group.gstRate ?? 0);
+      const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
       group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
     });
 
@@ -2216,7 +2239,7 @@ const BillingPage = () => {
     group.subtotal = roundMoney2(group.items.reduce((s, i) => s + i.amount, 0));
     group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
     group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
-    const gst = gstOnSubtotal(group.subtotal, group.gstRate ?? 0);
+    const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
     group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
     updated.commodityGroups = [...updated.commodityGroups];
     updated.commodityGroups[commIdx] = group;
@@ -2238,7 +2261,7 @@ const BillingPage = () => {
       group.subtotal = roundMoney2(items.reduce((s, i) => s + i.amount, 0));
       group.commissionAmount = percentOfAmount(group.subtotal, group.commissionPercent);
       group.userFeeAmount = percentOfAmount(group.subtotal, group.userFeePercent);
-      const gst = gstOnSubtotal(group.subtotal, group.gstRate ?? 0);
+      const gst = gstOnSubtotal(group.subtotal, effectiveGstPercent(group));
       group.totalCharges = roundMoney2(group.commissionAmount + group.userFeeAmount + gst);
       groups[commIdx] = group;
     }
@@ -2312,7 +2335,7 @@ const BillingPage = () => {
         return newItem;
       });
       const subtotal = roundMoney2(items.reduce((s, i) => s + i.amount, 0));
-      const gst = gstOnSubtotal(subtotal, group.gstRate ?? 0);
+      const gst = gstOnSubtotal(subtotal, effectiveGstPercent(group));
       return {
         ...group,
         items,
@@ -2575,7 +2598,15 @@ const BillingPage = () => {
             {/* Per-commodity tables — REQ-BIL-004 */}
             {activePrintBill.commodityGroups.map((group, gi) => (
               <div key={gi} className="border-b border-dashed border-border pb-2">
-                <p className="font-bold text-foreground mb-1">{group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}{(group.gstRate ?? 0) > 0 && ` · GST: ${formatBillingInr(group.gstRate)}%`}</p>
+                <p className="font-bold text-foreground mb-1">
+                  {group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}
+                  {(group.gstRate ?? 0) > 0 && ` · GST: ${formatBillingInr(group.gstRate)}%`}
+                  {(group.sgstRate ?? 0) > 0 && ` · SGST: ${formatBillingInr(group.sgstRate)}%`}
+                  {(group.cgstRate ?? 0) > 0 && ` · CGST: ${formatBillingInr(group.cgstRate)}%`}
+                  {(group.igstRate ?? 0) > 0 && ` · IGST: ${formatBillingInr(group.igstRate)}%`}
+                  {effectiveGstPercent(group) > 0 && (group.gstRate ?? 0) <= 0
+                    && ` · Tax (eff.): ${formatBillingInr(effectiveGstPercent(group))}%`}
+                </p>
                 {group.items.map((item, ii) => (
                   <div key={ii} className="flex justify-between text-[10px] gap-2">
                     <span className="text-foreground min-w-0">
@@ -2591,7 +2622,25 @@ const BillingPage = () => {
                   <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{formatBillingInr(group.subtotal)}</span></div>
                   {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({formatBillingInr(group.commissionPercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.commissionAmount)}</span></div>}
                   {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({formatBillingInr(group.userFeePercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.userFeeAmount)}</span></div>}
-                  {(group.gstRate ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">GST ({formatBillingInr(group.gstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.gstRate ?? 0))}</span></div>}
+                  {effectiveGstPercent(group) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        {(group.gstRate ?? 0) > 0
+                          ? `GST (${formatBillingInr(group.gstRate)}%)`
+                          : `Tax on goods (${formatBillingInr(effectiveGstPercent(group))}%)`}
+                      </span>
+                      <span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, effectiveGstPercent(group)))}</span>
+                    </div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.sgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">SGST ({formatBillingInr(group.sgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.sgstRate ?? 0))}</span></div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.cgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">CGST ({formatBillingInr(group.cgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.cgstRate ?? 0))}</span></div>
+                  )}
+                  {(group.gstRate ?? 0) > 0 && (group.igstRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">IGST ({formatBillingInr(group.igstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.igstRate ?? 0))}</span></div>
+                  )}
                 </div>
               </div>
             ))}
@@ -2613,22 +2662,40 @@ const BillingPage = () => {
             {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
             <div className="border-b border-dashed border-border pb-2">
               <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
-              {activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0).map((g, i) => (
+              {activePrintBill.commodityGroups.filter(g =>
+                g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
+              ).map((g, i) => (
                 <div key={i} className="text-[10px] space-y-0.5">
                   <span className="text-muted-foreground">{g.commodityName}:</span>
                   {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{formatBillingInr(g.commissionAmount)}</span></div>}
                   {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{formatBillingInr(g.userFeeAmount)}</span></div>}
-                  {(g.gstRate ?? 0) > 0 && <div className="flex justify-between pl-2"><span>GST ({formatBillingInr(g.gstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.gstRate ?? 0))}</span></div>}
+                  {effectiveGstPercent(g) > 0 && (
+                    <div className="flex justify-between pl-2">
+                      <span>{(g.gstRate ?? 0) > 0 ? `GST (${formatBillingInr(g.gstRate)}%)` : `Tax (${formatBillingInr(effectiveGstPercent(g))}%)`}</span>
+                      <span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, effectiveGstPercent(g)))}</span>
+                    </div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.sgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>SGST ({formatBillingInr(g.sgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.sgstRate ?? 0))}</span></div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.cgstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>CGST ({formatBillingInr(g.cgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.cgstRate ?? 0))}</span></div>
+                  )}
+                  {(g.gstRate ?? 0) > 0 && (g.igstRate ?? 0) > 0 && (
+                    <div className="flex justify-between pl-2 opacity-90"><span>IGST ({formatBillingInr(g.igstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.igstRate ?? 0))}</span></div>
+                  )}
                 </div>
               ))}
 
               {/* Overall cumulative row (REQ-BIL-010) */}
               {(() => {
-                const groups = activePrintBill.commodityGroups.filter(g => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
+                const groups = activePrintBill.commodityGroups.filter(g =>
+                  g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
+                );
                 const totalCommission = groups.reduce((s, g) => s + g.commissionAmount, 0);
                 const totalUserFee = groups.reduce((s, g) => s + g.userFeeAmount, 0);
                 const totalGst = groups.reduce(
-                  (s, g) => s + ((g.gstRate ?? 0) > 0 ? gstOnSubtotal(g.subtotal, g.gstRate ?? 0) : 0),
+                  (s, g) => s + (effectiveGstPercent(g) > 0 ? gstOnSubtotal(g.subtotal, effectiveGstPercent(g)) : 0),
                   0,
                 );
                 return (
@@ -3908,6 +3975,21 @@ const BillingPage = () => {
                                 GST: {formatBillingInr(group.gstRate)}%
                               </span>
                             )}
+                            {(group.sgstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                SGST: {formatBillingInr(group.sgstRate)}%
+                              </span>
+                            )}
+                            {(group.cgstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                CGST: {formatBillingInr(group.cgstRate)}%
+                              </span>
+                            )}
+                            {(group.igstRate ?? 0) > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
+                                IGST: {formatBillingInr(group.igstRate)}%
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -4258,7 +4340,7 @@ const BillingPage = () => {
                 onScroll={handleSummaryTableScroll}
                 className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm"
               >
-                <table className="w-full min-w-[680px] text-[11px] leading-tight border-separate border-spacing-0">
+                <table className="w-full min-w-[720px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
                     <tr className="bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-700 dark:to-slate-700 shadow-sm">
                       <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest whitespace-normal bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 border-b border-border/40 border-r border-border/50 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
@@ -4320,7 +4402,7 @@ const BillingPage = () => {
                                 const cg = { ...updated.commodityGroups[gi] };
                                 cg.commissionPercent = v;
                                 cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
-                                const gst = gstOnSubtotal(cg.subtotal, cg.gstRate ?? 0);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
                                 cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
@@ -4354,7 +4436,7 @@ const BillingPage = () => {
                                 const cg = { ...updated.commodityGroups[gi] };
                                 cg.userFeePercent = v;
                                 cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
-                                const gst = gstOnSubtotal(cg.subtotal, cg.gstRate ?? 0);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
                                 cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
@@ -4458,16 +4540,146 @@ const BillingPage = () => {
                     </tr>
 
                     <tr className="border-t border-border/30">
-                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">GST</td>
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        <span className="block">GST</span>
+                        <span className="block text-[8px] font-normal text-muted-foreground leading-snug mt-0.5 max-w-[7.5rem]">
+                          Combined % drives tax. If 0, tax uses SGST+CGST or IGST.
+                        </span>
+                      </td>
                       {bill.commodityGroups.map((g, gi) => (
                         <td
                           key={`gst-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900',
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.gstRate ?? 0))}
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.gstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.gstRate = v;
+                                cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        SGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`sgst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.sgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], sgstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        CGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`cgst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.cgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], cgstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0))}
+                            </span>
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        IGST <span className="text-muted-foreground font-normal">(opt.)</span>
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => (
+                        <td
+                          key={`igst-${gi}`}
+                          className={cn(
+                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <BillingMoneyInput
+                              value={g.igstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi], igstRate: v };
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            />
+                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0))}
+                            </span>
+                          </div>
                         </td>
                       ))}
                     </tr>

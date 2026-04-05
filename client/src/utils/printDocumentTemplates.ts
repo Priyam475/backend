@@ -1,7 +1,7 @@
 // ── Print document HTML for Billing, Settlement, Weighing ───
 // Same format as client_origin; used with directPrint() + printLogApi.
 
-import { formatBillingInr, gstOnSubtotal, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
+import { effectiveGstPercent, formatBillingInr, gstOnSubtotal, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
 
 const PRINT_STYLES = `
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; font-size: 12px; color: #111; }
@@ -35,6 +35,9 @@ export interface BillPrintData {
     commodityName: string;
     hsnCode?: string;
     gstRate?: number;
+    sgstRate?: number;
+    cgstRate?: number;
+    igstRate?: number;
     commissionPercent: number;
     commissionAmount: number;
     userFeePercent: number;
@@ -70,7 +73,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
 
   const renderGroupHtml = (group: BillPrintData["commodityGroups"][number]) => `
     <div class="section">
-      <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${formatBillingInr(group.gstRate ?? 0)}%` : ''}</p>
+      <p class="bold">${escapeHtml(group.commodityName)}${group.hsnCode ? ` (HSN: ${escapeHtml(group.hsnCode)})` : ''}${(group.gstRate ?? 0) > 0 ? ` · GST: ${formatBillingInr(group.gstRate ?? 0)}%` : ''}${(group.sgstRate ?? 0) > 0 ? ` · SGST: ${formatBillingInr(group.sgstRate ?? 0)}%` : ''}${(group.cgstRate ?? 0) > 0 ? ` · CGST: ${formatBillingInr(group.cgstRate ?? 0)}%` : ''}${(group.igstRate ?? 0) > 0 ? ` · IGST: ${formatBillingInr(group.igstRate ?? 0)}%` : ''}</p>
       ${group.items.map((item) => `
         <div class="row" style="font-size:10px">
           <span>${formatBillingInr(item.quantity)}×${formatBillingInr(item.weight)}kg @₹${formatBillingInr(item.newRate)}${(item.tokenAdvance ?? 0) > 0 ? ` · Tok ₹${formatBillingInr(item.tokenAdvance ?? 0)}` : ''}</span>
@@ -81,7 +84,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
         <div class="row"><span class="muted">Subtotal</span><span>₹${formatBillingInr(group.subtotal)}</span></div>
         ${group.commissionPercent > 0 ? `<div class="row"><span class="muted">Commission (${formatBillingInr(group.commissionPercent)}%)</span><span>₹${formatBillingInr(group.commissionAmount)}</span></div>` : ''}
         ${group.userFeePercent > 0 ? `<div class="row"><span class="muted">User Fee (${formatBillingInr(group.userFeePercent)}%)</span><span>₹${formatBillingInr(group.userFeeAmount)}</span></div>` : ''}
-        ${(group.gstRate ?? 0) > 0 ? `<div class="row"><span class="muted">GST (${formatBillingInr(group.gstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(group.subtotal, group.gstRate ?? 0))}</span></div>` : ''}
+        ${effectiveGstPercent(group) > 0 ? `<div class="row"><span class="muted">${(group.gstRate ?? 0) > 0 ? 'GST' : 'Tax'} (${formatBillingInr(effectiveGstPercent(group))}%)</span><span>₹${formatBillingInr(gstOnSubtotal(group.subtotal, effectiveGstPercent(group)))}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -91,7 +94,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
     let lines = 1 + group.items.length + 1;
     if (group.commissionPercent > 0) lines += 1;
     if (group.userFeePercent > 0) lines += 1;
-    if ((group.gstRate ?? 0) > 0) lines += 1;
+    if (effectiveGstPercent(group) > 0) lines += 1;
     return lines;
   };
 
@@ -108,10 +111,13 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
     `
     : '';
 
-  const taxGroups = bill.commodityGroups.filter((g) => g.commissionPercent > 0 || g.userFeePercent > 0 || (g.gstRate ?? 0) > 0);
+  const taxGroups = bill.commodityGroups.filter((g) => g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0);
   const totalCommission = taxGroups.reduce((s, g) => s + g.commissionAmount, 0);
   const totalUserFee = taxGroups.reduce((s, g) => s + g.userFeeAmount, 0);
-  const totalGst = taxGroups.reduce((s, g) => s + (((g.gstRate ?? 0) > 0 ? gstOnSubtotal(g.subtotal, g.gstRate ?? 0) : 0)), 0);
+  const totalGst = taxGroups.reduce(
+    (s, g) => s + (effectiveGstPercent(g) > 0 ? gstOnSubtotal(g.subtotal, effectiveGstPercent(g)) : 0),
+    0,
+  );
 
   const subtotalSum = bill.commodityGroups.reduce((s, g) => s + g.subtotal + (g.totalCharges ?? 0), 0);
   const discountAmount = bill.discountType === 'PERCENT'
@@ -126,7 +132,10 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
           <span class="muted">${escapeHtml(g.commodityName)}:</span>
           ${g.commissionPercent > 0 ? `<div class="row" style="padding-left:8px"><span>Commission</span><span>₹${formatBillingInr(g.commissionAmount)}</span></div>` : ''}
           ${g.userFeePercent > 0 ? `<div class="row" style="padding-left:8px"><span>User Fee</span><span>₹${formatBillingInr(g.userFeeAmount)}</span></div>` : ''}
-          ${(g.gstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>GST (${formatBillingInr(g.gstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, g.gstRate ?? 0))}</span></div>` : ''}
+          ${effectiveGstPercent(g) > 0 ? `<div class="row" style="padding-left:8px"><span>${(g.gstRate ?? 0) > 0 ? 'GST' : 'Tax'} (${formatBillingInr(effectiveGstPercent(g))}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, effectiveGstPercent(g)))}</span></div>` : ''}
+          ${(g.gstRate ?? 0) > 0 && (g.sgstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>SGST (${formatBillingInr(g.sgstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, g.sgstRate ?? 0))}</span></div>` : ''}
+          ${(g.gstRate ?? 0) > 0 && (g.cgstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>CGST (${formatBillingInr(g.cgstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, g.cgstRate ?? 0))}</span></div>` : ''}
+          ${(g.gstRate ?? 0) > 0 && (g.igstRate ?? 0) > 0 ? `<div class="row" style="padding-left:8px"><span>IGST (${formatBillingInr(g.igstRate ?? 0)}%)</span><span>₹${formatBillingInr(gstOnSubtotal(g.subtotal, g.igstRate ?? 0))}</span></div>` : ''}
         </div>
       `).join('')}
       {/* Overall cumulative row (REQ-BIL-010) */}

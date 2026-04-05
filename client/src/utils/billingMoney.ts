@@ -16,6 +16,31 @@ export function gstOnSubtotal(subtotal: number, gstRatePercent: number): number 
   return roundMoney2(subtotal * (gstRatePercent || 0) / 100);
 }
 
+/**
+ * Single effective GST % for money calculations.
+ * - If combined `gstRate` > 0, it wins (master rate from commodity / bill).
+ * - Otherwise: intra-state = SGST + CGST; inter-state = IGST. SGST+CGST and IGST are
+ *   alternatives — if both are filled, we take the larger (avoids double-counting).
+ */
+export function effectiveGstPercent(g: {
+  gstRate?: number;
+  sgstRate?: number;
+  cgstRate?: number;
+  igstRate?: number;
+}): number {
+  const combined = roundMoney2(Number(g.gstRate) || 0);
+  if (combined > 0) return combined;
+  const sgst = roundMoney2(Number(g.sgstRate) || 0);
+  const cgst = roundMoney2(Number(g.cgstRate) || 0);
+  const igst = roundMoney2(Number(g.igstRate) || 0);
+  const intra = roundMoney2(sgst + cgst);
+  if (igst > 0 && intra > 0) {
+    return Math.max(igst, intra);
+  }
+  if (igst > 0) return igst;
+  return intra;
+}
+
 export function percentOfAmount(amount: number, percent: number): number {
   return roundMoney2(amount * (percent || 0) / 100);
 }
@@ -28,6 +53,9 @@ export function billGroupSubtotalWithTaxAndCharges(g: {
   coolieAmount?: number;
   weighmanChargeAmount?: number;
   gstRate?: number;
+  sgstRate?: number;
+  cgstRate?: number;
+  igstRate?: number;
 }): number {
   return roundMoney2(
     roundMoney2(g.subtotal || 0)
@@ -35,6 +63,6 @@ export function billGroupSubtotalWithTaxAndCharges(g: {
       + roundMoney2(g.userFeeAmount || 0)
       + roundMoney2(g.coolieAmount || 0)
       + roundMoney2(g.weighmanChargeAmount || 0)
-      + gstOnSubtotal(g.subtotal || 0, g.gstRate ?? 0),
+      + gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)),
   );
 }

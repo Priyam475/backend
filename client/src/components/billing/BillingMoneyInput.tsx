@@ -5,6 +5,7 @@ import { roundMoney2 } from '@/utils/billingMoney';
 
 type BillingMoneyInputProps = {
   value: number;
+  /** Called on every keystroke while focused (live recalc) and again on blur (final normalize). */
   onCommit: (n: number) => void;
   disabled?: boolean;
   className?: string;
@@ -17,8 +18,26 @@ type BillingMoneyInputProps = {
 };
 
 /**
- * Money field: shows 00.00 when not focused; while focused allows free typing;
- * on blur parses, rounds to 2 decimals, and commits.
+ * Parse in-progress decimal text for live updates. Returns null when the field is empty,
+ * incomplete (e.g. lone minus/dot), or invalid — parent state is left unchanged until blur
+ * or a complete number, so clearing a field does not force artificial values (e.g. qty → 1).
+ */
+function parseDraftToNumber(raw: string, min?: number): number | null {
+  const t = raw.replace(/,/g, '').trim();
+  if (t === '') return null;
+  if (t === '.') return null;
+  if (t === '-') return null;
+  if (!/^-?\d*\.?\d*$/.test(t)) return null;
+  const n = parseFloat(t);
+  if (!Number.isFinite(n)) return null;
+  let x = roundMoney2(n);
+  if (min !== undefined && x < min) x = min;
+  return x;
+}
+
+/**
+ * Money field: shows 00.00 when not focused; while focused allows free typing.
+ * Parent state and dependent totals update on every change (not only on blur).
  */
 export function BillingMoneyInput({
   value,
@@ -44,7 +63,14 @@ export function BillingMoneyInput({
       title={title}
       value={display}
       onFocus={() => setDraft(roundMoney2(value).toFixed(2))}
-      onChange={e => setDraft(e.target.value)}
+      onChange={e => {
+        const next = e.target.value;
+        setDraft(next);
+        const live = parseDraftToNumber(next, min);
+        if (live !== null) {
+          onCommit(live);
+        }
+      }}
       onBlur={() => {
         const raw = draft ?? '';
         setDraft(null);
