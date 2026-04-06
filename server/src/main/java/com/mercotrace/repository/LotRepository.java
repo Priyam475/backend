@@ -16,6 +16,15 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
 
     List<Lot> findAllBySellerVehicleIdIn(Iterable<Long> sellerVehicleIds);
 
+    /**
+     * Lots for a seller-in-vehicle row, scoped to the trader (Arrivals → Settlement billing).
+     */
+    @Query(
+        "SELECT l FROM Lot l JOIN SellerInVehicle siv ON l.sellerVehicleId = siv.id JOIN Vehicle v ON siv.vehicleId = v.id " +
+        "WHERE l.sellerVehicleId = :sivId AND v.traderId = :traderId"
+    )
+    List<Lot> findAllBySellerVehicleIdAndTraderId(@Param("sivId") Long sivId, @Param("traderId") Long traderId);
+
     void deleteBySellerVehicleIdIn(Collection<Long> sellerVehicleIds);
 
     Page<Lot> findAllByLotNameContainingIgnoreCase(String lotName, Pageable pageable);

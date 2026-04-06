@@ -181,7 +181,14 @@ public final class SettlementDTOs {
         private String lotId;
         private String lotName;
         private String commodityName;
+        /** Bags recorded on the lot in Arrivals ({@code lot.bag_count}). */
+        private Integer arrivalBagCount;
         private List<SettlementEntryDTO> entries = new ArrayList<>();
+        /**
+         * Σ persisted billing line weights for this lot ({@code sales_bill_line_item.weight}), when invoiced.
+         * Drives Sales Patti default weight when present.
+         */
+        private BigDecimal billingWeightKg;
 
         public String getLotId() { return lotId; }
         public void setLotId(String lotId) { this.lotId = lotId; }
@@ -189,8 +196,12 @@ public final class SettlementDTOs {
         public void setLotName(String lotName) { this.lotName = lotName; }
         public String getCommodityName() { return commodityName; }
         public void setCommodityName(String commodityName) { this.commodityName = commodityName; }
+        public Integer getArrivalBagCount() { return arrivalBagCount; }
+        public void setArrivalBagCount(Integer arrivalBagCount) { this.arrivalBagCount = arrivalBagCount; }
         public List<SettlementEntryDTO> getEntries() { return entries; }
         public void setEntries(List<SettlementEntryDTO> entries) { this.entries = entries; }
+        public BigDecimal getBillingWeightKg() { return billingWeightKg; }
+        public void setBillingWeightKg(BigDecimal billingWeightKg) { this.billingWeightKg = billingWeightKg; }
     }
 
     /** Seller for settlement list (matches frontend SellerSettlement). */
@@ -202,6 +213,21 @@ public final class SettlementDTOs {
         private String sellerName;
         private String sellerMark;
         private String vehicleNumber;
+        /** Sum of {@link Lot#getBagCount()} for this seller's lots (Arrivals). */
+        private Integer arrivalTotalBags;
+        /**
+         * Vehicle net billable kg from Arrivals weighing: max(0, netWeight − deductedWeight) on {@code vehicle_weight}.
+         * Same value for all sellers sharing a vehicle.
+         */
+        private BigDecimal vehicleArrivalNetBillableKg;
+        /** Σ billing line weights ({@code sales_bill_line_item.weight}) for this seller's lots. */
+        private BigDecimal billingNetWeightKg;
+        /** When set, seller is linked to a registry contact ({@code seller_in_vehicle.contact_id}). */
+        private String contactId;
+        /**
+         * Phone for display: contact phone when linked, else free-text {@code seller_in_vehicle.seller_phone}.
+         */
+        private String sellerPhone;
         private List<SettlementLotDTO> lots = new ArrayList<>();
 
         public String getSellerId() { return sellerId; }
@@ -212,8 +238,55 @@ public final class SettlementDTOs {
         public void setSellerMark(String sellerMark) { this.sellerMark = sellerMark; }
         public String getVehicleNumber() { return vehicleNumber; }
         public void setVehicleNumber(String vehicleNumber) { this.vehicleNumber = vehicleNumber; }
+        public Integer getArrivalTotalBags() { return arrivalTotalBags; }
+        public void setArrivalTotalBags(Integer arrivalTotalBags) { this.arrivalTotalBags = arrivalTotalBags; }
+        public BigDecimal getVehicleArrivalNetBillableKg() { return vehicleArrivalNetBillableKg; }
+        public void setVehicleArrivalNetBillableKg(BigDecimal vehicleArrivalNetBillableKg) {
+            this.vehicleArrivalNetBillableKg = vehicleArrivalNetBillableKg;
+        }
+        public BigDecimal getBillingNetWeightKg() { return billingNetWeightKg; }
+        public void setBillingNetWeightKg(BigDecimal billingNetWeightKg) { this.billingNetWeightKg = billingNetWeightKg; }
+        public String getContactId() { return contactId; }
+        public void setContactId(String contactId) { this.contactId = contactId; }
+        public String getSellerPhone() { return sellerPhone; }
+        public void setSellerPhone(String sellerPhone) { this.sellerPhone = sellerPhone; }
         public List<SettlementLotDTO> getLots() { return lots; }
         public void setLots(List<SettlementLotDTO> lots) { this.lots = lots; }
+    }
+
+    /** Response after linking a settlement seller row to a contact (Sales Patti registration). */
+    public static class SellerRegistrationDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private String sellerId;
+        private String contactId;
+        private String sellerName;
+        private String sellerMark;
+        private String sellerPhone;
+
+        public String getSellerId() { return sellerId; }
+        public void setSellerId(String sellerId) { this.sellerId = sellerId; }
+        public String getContactId() { return contactId; }
+        public void setContactId(String contactId) { this.contactId = contactId; }
+        public String getSellerName() { return sellerName; }
+        public void setSellerName(String sellerName) { this.sellerName = sellerName; }
+        public String getSellerMark() { return sellerMark; }
+        public void setSellerMark(String sellerMark) { this.sellerMark = sellerMark; }
+        public String getSellerPhone() { return sellerPhone; }
+        public void setSellerPhone(String sellerPhone) { this.sellerPhone = sellerPhone; }
+    }
+
+    /** Link settlement seller (seller_in_vehicle id) to an existing contact. */
+    public static class LinkSellerContactRequest implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @NotNull
+        private Long contactId;
+
+        public Long getContactId() { return contactId; }
+        public void setContactId(Long contactId) { this.contactId = contactId; }
     }
 
     /**
@@ -237,5 +310,125 @@ public final class SettlementDTOs {
         public void setFreightAutoPulled(Boolean freightAutoPulled) { this.freightAutoPulled = freightAutoPulled; }
         public Boolean getAdvanceAutoPulled() { return advanceAutoPulled; }
         public void setAdvanceAutoPulled(Boolean advanceAutoPulled) { this.advanceAutoPulled = advanceAutoPulled; }
+    }
+
+    /**
+     * Freight / payable snapshot for the Sales Patti Amount card: arrival freight from Arrivals,
+     * invoiced freight and payable from billing (sales bills) for this seller's lots.
+     */
+    /**
+     * Server-computed expense lines for Sales Patti (Arrivals freight share + commodity unloading/weighing).
+     * Frontend must not recompute these for display; manual fields (gunnies, others) stay client-side.
+     */
+    public static class SellerExpenseSnapshotDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private BigDecimal freight;
+        private BigDecimal unloading;
+        private BigDecimal weighing;
+        private BigDecimal cashAdvance;
+        private Boolean freightAutoPulled;
+        private Boolean unloadingAutoPulled;
+        private Boolean weighingAutoPulled;
+        /** When true, UI may show that full Journal-module cash advance flows are not wired yet. */
+        private Boolean cashAdvanceJournalPending;
+
+        public BigDecimal getFreight() {
+            return freight;
+        }
+
+        public void setFreight(BigDecimal freight) {
+            this.freight = freight;
+        }
+
+        public BigDecimal getUnloading() {
+            return unloading;
+        }
+
+        public void setUnloading(BigDecimal unloading) {
+            this.unloading = unloading;
+        }
+
+        public BigDecimal getWeighing() {
+            return weighing;
+        }
+
+        public void setWeighing(BigDecimal weighing) {
+            this.weighing = weighing;
+        }
+
+        public BigDecimal getCashAdvance() {
+            return cashAdvance;
+        }
+
+        public void setCashAdvance(BigDecimal cashAdvance) {
+            this.cashAdvance = cashAdvance;
+        }
+
+        public Boolean getFreightAutoPulled() {
+            return freightAutoPulled;
+        }
+
+        public void setFreightAutoPulled(Boolean freightAutoPulled) {
+            this.freightAutoPulled = freightAutoPulled;
+        }
+
+        public Boolean getUnloadingAutoPulled() {
+            return unloadingAutoPulled;
+        }
+
+        public void setUnloadingAutoPulled(Boolean unloadingAutoPulled) {
+            this.unloadingAutoPulled = unloadingAutoPulled;
+        }
+
+        public Boolean getWeighingAutoPulled() {
+            return weighingAutoPulled;
+        }
+
+        public void setWeighingAutoPulled(Boolean weighingAutoPulled) {
+            this.weighingAutoPulled = weighingAutoPulled;
+        }
+
+        public Boolean getCashAdvanceJournalPending() {
+            return cashAdvanceJournalPending;
+        }
+
+        public void setCashAdvanceJournalPending(Boolean cashAdvanceJournalPending) {
+            this.cashAdvanceJournalPending = cashAdvanceJournalPending;
+        }
+    }
+
+    public static class SettlementAmountSummaryDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private BigDecimal arrivalFreightAmount;
+        private BigDecimal freightInvoiced;
+        private BigDecimal payableInvoiced;
+
+        public BigDecimal getArrivalFreightAmount() {
+            return arrivalFreightAmount;
+        }
+
+        public void setArrivalFreightAmount(BigDecimal arrivalFreightAmount) {
+            this.arrivalFreightAmount = arrivalFreightAmount;
+        }
+
+        public BigDecimal getFreightInvoiced() {
+            return freightInvoiced;
+        }
+
+        public void setFreightInvoiced(BigDecimal freightInvoiced) {
+            this.freightInvoiced = freightInvoiced;
+        }
+
+        public BigDecimal getPayableInvoiced() {
+            return payableInvoiced;
+        }
+
+        public void setPayableInvoiced(BigDecimal payableInvoiced) {
+            this.payableInvoiced = payableInvoiced;
+        }
     }
 }

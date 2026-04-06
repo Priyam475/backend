@@ -47,4 +47,21 @@ public interface SettlementService {
      * This replaces prototype localStorage-based voucher lookups.
      */
     SellerChargesDTO getSellerCharges(String sellerId);
+
+    /**
+     * Amount card: arrival freight (Arrivals), invoiced freight and payable from sales bills for this seller's lots.
+     * Optional {@code invoiceNameFilter} narrows to bills whose billing name matches (case-insensitive contains).
+     */
+    SettlementAmountSummaryDTO getSettlementAmountSummary(String sellerId, String invoiceNameFilter);
+
+    /**
+     * Freight (Arrivals bag share), unloading/weighing (commodity settings), and cash advance (freight advance + ledger).
+     * Values are computed server-side for Sales Patti reflection only.
+     */
+    SellerExpenseSnapshotDTO getSellerExpenseSnapshot(String sellerId);
+
+    /**
+     * Link a settlement seller row ({@code seller_in_vehicle} id) to an existing contact (registered trader).
+     */
+    SellerRegistrationDTO linkSellerContact(String sellerVehicleId, LinkSellerContactRequest request);
 }

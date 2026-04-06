@@ -2,13 +2,17 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, User, Users, Package, Truck,
-  Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2
+  Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
+  ChevronDown, ChevronUp, Info
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -19,7 +23,10 @@ import {
 } from '@/components/ui/dialog';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
-import { printLogApi, settlementApi, type PattiDTO } from '@/services/api';
+import { printLogApi, settlementApi, arrivalsApi, commodityApi, contactApi, type PattiDTO } from '@/services/api';
+import type { ArrivalFullDetail, ArrivalSellerFullDetail } from '@/services/api/arrivals';
+import type { FullCommodityConfigDto } from '@/services/api/commodities';
+import type { Commodity, Contact } from '@/types/models';
 import { directPrint } from '@/utils/printTemplates';
 import { generateSalesPattiPrintHTML, type PattiPrintData } from '@/utils/printDocumentTemplates';
 import ForbiddenPage from '@/components/ForbiddenPage';
@@ -40,6 +47,14 @@ interface SellerSettlement {
   sellerName: string;
   sellerMark: string;
   vehicleNumber: string;
+  /** Arrivals: Σ lot bag counts for this seller. */
+  arrivalTotalBags?: number;
+  /** Arrivals: vehicle net billable kg from weighing (shared per vehicle). */
+  vehicleArrivalNetBillableKg?: number;
+  /** Billing: Σ commodity-group line weights for this seller's lots. */
+  billingNetWeightKg?: number;
+  contactId?: string | null;
+  sellerPhone?: string | null;
   fromLocation?: string;
   sellerSerialNo?: string | number;
   createdAt?: string;
@@ -51,6 +66,10 @@ interface SettlementLot {
   lotId: string;
   lotName: string;
   commodityName: string;
+  /** Arrivals module: `lot.bag_count` (from settlement API). */
+  arrivalBagCount?: number;
+  /** Σ billing line weights for this lot (kg), when invoiced. */
+  billingWeightKg?: number | null;
   entries: SettlementEntry[];
 }
 
@@ -132,6 +151,86 @@ function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
   };
 }
 
+function formatMoney2Display(n: number): string {
+  const x = Number.isFinite(n) ? n : 0;
+  return x.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Restore per-seller expense form from saved patti deduction lines. */
+function deductionsToSellerExpenseForm(deds: DeductionItem[]): SellerExpenseFormState {
+  const byKey = Object.fromEntries(deds.map(d => [d.key, d.amount])) as Record<string, number>;
+  return {
+    freight: Number(byKey.freight ?? 0),
+    unloading: Number(byKey.coolie ?? byKey.unloading ?? 0),
+    weighman: Number(byKey.weighing ?? byKey.weighman ?? 0),
+    cashAdvance: Number(byKey.advance ?? 0),
+    gunnies: Number(byKey.gunnies ?? 0),
+    others: Number(byKey.others ?? 0),
+  };
+}
+
+/** Main patti deduction rows from primary seller expense state (labels for print/save). */
+function buildDeductionItemsFromSellerExpenses(
+  exp: SellerExpenseFormState,
+  coolieMode: 'FLAT' | 'RECALCULATED',
+  weighingEnabled: boolean,
+  mergeWeighingIntoFreight: boolean
+): DeductionItem[] {
+  const coolieLabel =
+    coolieMode === 'FLAT'
+      ? 'Unloading (Coolie) — commodity slab'
+      : 'Unloading (Coolie) — commodity slab (weight mode reference)';
+
+  let freightAmt = exp.freight;
+  let weighingAmt = weighingEnabled ? exp.weighman : 0;
+  if (weighingEnabled && mergeWeighingIntoFreight) {
+    freightAmt = exp.freight + exp.weighman;
+    weighingAmt = 0;
+  }
+
+  const items: DeductionItem[] = [
+    {
+      key: 'freight',
+      label: mergeWeighingIntoFreight && weighingEnabled ? 'Freight (incl. weighing)' : 'Freight',
+      amount: freightAmt,
+      editable: false,
+      autoPulled: true,
+    },
+    { key: 'coolie', label: coolieLabel, amount: exp.unloading, editable: false, autoPulled: true },
+  ];
+  if (!(weighingEnabled && mergeWeighingIntoFreight)) {
+    items.push({
+      key: 'weighing',
+      label: 'Weighing Charges',
+      amount: weighingAmt,
+      editable: false,
+      autoPulled: true,
+    });
+  }
+  items.push(
+    { key: 'advance', label: 'Cash Advance', amount: exp.cashAdvance, editable: false, autoPulled: false },
+    { key: 'gunnies', label: 'Gunnies', amount: exp.gunnies, editable: true, autoPulled: false },
+    { key: 'others', label: 'Others', amount: exp.others, editable: true, autoPulled: false }
+  );
+  return items;
+}
+
+function totalSellerExpenses(
+  exp: SellerExpenseFormState,
+  weighingEnabled: boolean,
+  mergeWeighingIntoFreight: boolean
+): number {
+  let freight = exp.freight;
+  let w = weighingEnabled ? exp.weighman : 0;
+  if (weighingEnabled && mergeWeighingIntoFreight) {
+    freight = exp.freight + exp.weighman;
+    w = 0;
+  } else if (!weighingEnabled) {
+    w = 0;
+  }
+  return freight + exp.unloading + w + exp.cashAdvance + exp.gunnies + exp.others;
+}
+
 // ── Validation constants (from Buyer Selection Section.ini) ──
 const DEDUCTION_MAX = 10_000_000;
 const VEHICLE_NUMBER_MIN = 10;
@@ -160,20 +259,77 @@ function totalBagsForSeller(s: SellerSettlement): number {
   return s.lots.reduce((acc, l) => acc + l.entries.reduce((a2, e) => a2 + (Number(e.quantity) || 0), 0), 0);
 }
 
-/** Sum of net weights on settlement entries (weighing / defaulted). */
-function totalWeighedWeightForSeller(s: SellerSettlement): number {
-  return s.lots.reduce(
-    (acc, l) => acc + l.entries.reduce((a2, e) => a2 + (Number(e.weight) || 0), 0),
-    0
-  );
-}
-
 /** Sales Pad style estimate: Σ (bags × 50 kg) when actual weight not yet applied. */
 function totalPadEstimateWeightForSeller(s: SellerSettlement): number {
   return s.lots.reduce(
     (acc, l) => acc + l.entries.reduce((a2, e) => a2 + (Number(e.quantity) || 0) * 50, 0),
     0
   );
+}
+
+/** Arrivals module: total bags (lot.bag_count) for this seller. */
+function totalArrivalBagsForSeller(s: SellerSettlement): number {
+  if (typeof s.arrivalTotalBags === 'number' && !Number.isNaN(s.arrivalTotalBags)) {
+    return s.arrivalTotalBags;
+  }
+  return s.lots.reduce((acc, l) => acc + (Number(l.arrivalBagCount) || 0), 0);
+}
+
+/** Billing module: Σ persisted line weights for this seller's lots; falls back to pad estimate if API omitted. */
+function totalBillingNetWeightForSeller(s: SellerSettlement): number {
+  if (s.billingNetWeightKg != null && Number.isFinite(Number(s.billingNetWeightKg))) {
+    return Number(s.billingNetWeightKg);
+  }
+  return totalPadEstimateWeightForSeller(s);
+}
+
+function vehicleArrivalNetBillableKgForSeller(s: SellerSettlement): number | null {
+  if (s.vehicleArrivalNetBillableKg == null || !Number.isFinite(Number(s.vehicleArrivalNetBillableKg))) {
+    return null;
+  }
+  return Number(s.vehicleArrivalNetBillableKg);
+}
+
+function roundMoney2(n: number): number {
+  return Math.round(Math.max(0, n) * 100) / 100;
+}
+
+/**
+ * Coolie / weighman (unloading) slab at lot level:
+ * If actual weight is greater than threshold: perKg = (F × actual) / threshold, total = perKg × actual.
+ * If actual weight is at or below threshold: total = F × threshold.
+ */
+function computeSlabChargeTotal(actualWeight: number, fixedRate: number, threshold: number): number {
+  const w = Math.max(0, Number(actualWeight) || 0);
+  const T = Math.max(0, Number(threshold) || 0);
+  const F = Math.max(0, Number(fixedRate) || 0);
+  if (T <= 0) return 0;
+  if (w > T) {
+    const perKg = (F * w) / T;
+    return perKg * w;
+  }
+  return F * T;
+}
+
+function findArrivalSellerForSettlement(
+  arrival: ArrivalFullDetail,
+  settlement: SellerSettlement
+): ArrivalSellerFullDetail | undefined {
+  const sellers = arrival.sellers ?? [];
+  const byMark = sellers.find(
+    x =>
+      (x.sellerName || '').trim().toLowerCase() === (settlement.sellerName || '').trim().toLowerCase() &&
+      (x.sellerMark || '').trim().toLowerCase() === (settlement.sellerMark || '').trim().toLowerCase()
+  );
+  if (byMark) return byMark;
+  return sellers.find(
+    x => (x.sellerName || '').trim().toLowerCase() === (settlement.sellerName || '').trim().toLowerCase()
+  );
+}
+
+function bagsFromArrivalSeller(arrivalSeller: ArrivalSellerFullDetail | undefined): number {
+  if (!arrivalSeller) return 0;
+  return arrivalSeller.lots.reduce((a, l) => a + (Number(l.bagCount) || 0), 0);
 }
 
 function formatOptionalKg(value: number | null): string {
@@ -190,12 +346,18 @@ function formatRupeeInr(value: number): string {
   return `₹ ${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** Per-seller registration form (Sales report). Wire save/update to contacts API later. */
+/** Same visual language as Billing commodity read-only cells (computed fields). */
+const settlementReadOnlyCellClass =
+  'h-9 lg:h-8 min-h-[2.25rem] px-2 lg:px-1.5 border border-dashed border-border/70 rounded-md bg-muted/50 text-muted-foreground inline-flex items-center justify-center w-full text-xs lg:text-[11px] cursor-not-allowed shadow-inner select-text tabular-nums';
+
+/** Per-seller registration (Sales report): registered = linked to contact registry. */
 interface SellerRegFormState {
-  sellerRegistration: 'registered' | 'unregistered';
+  registered: boolean;
+  contactId: string | null;
   mark: string;
   name: string;
   mobile: string;
+  contactSearchQuery: string;
 }
 
 interface SellerExpenseFormState {
@@ -203,6 +365,7 @@ interface SellerExpenseFormState {
   unloading: number;
   weighman: number;
   cashAdvance: number;
+  gunnies: number;
   others: number;
 }
 
@@ -218,32 +381,58 @@ interface VehicleExpenseRow {
   gunnies: number;
 }
 
-function createVehicleExpenseRowFromSeller(s: SellerSettlement): VehicleExpenseRow {
-  return {
-    id: `seller_${s.sellerId || Math.random().toString(36).slice(2, 9)}`,
-    sellerId: s.sellerId || '',
-    sellerName: s.sellerName || 'Seller',
-    quantity: totalBagsForSeller(s),
-    freight: 0,
-    unloading: 0,
-    weighing: 0,
-    gunnies: 0,
-  };
+/** Distribute total lot weight across entries (billing total or sum of entry weights). */
+function distributeLotEntryWeights(lot: SettlementLot, totalW: number): number[] {
+  const sumEw = lot.entries.reduce((s, e) => s + (Number(e.weight) || 0), 0);
+  const qty = lot.entries.reduce((s, e) => s + (Number(e.quantity) || 0), 0);
+  return lot.entries.map(e => {
+    const ew = Number(e.weight) || 0;
+    const q = Number(e.quantity) || 0;
+    if (sumEw > 0) return (ew / sumEw) * totalW;
+    if (qty > 0) return (q / qty) * totalW;
+    return 0;
+  });
 }
 
-function lotSalesRow(lot: SettlementLot) {
+/**
+ * Lot-level Sales Patti row: amount = Σ (distributedWeight × rate per bag) / commodity divisor (same as Billing).
+ */
+function lotBaseSalesRow(lot: SettlementLot, divisor: number) {
+  const div = divisor > 0 ? divisor : 50;
   const qty = lot.entries.reduce((s, e) => s + (Number(e.quantity) || 0), 0);
-  const weight = lot.entries.reduce((s, e) => s + (Number(e.weight) || 0), 0);
-  const amount = lot.entries.reduce((s, e) => s + (Number(e.weight) || 0) * sellerSettlementRatePerBag(e), 0);
+  const sumEntryW = lot.entries.reduce((s, e) => s + (Number(e.weight) || 0), 0);
+  const bw = lot.billingWeightKg;
+  const useBilling = bw != null && Number.isFinite(Number(bw)) && Number(bw) > 0;
+  const weight = useBilling ? Number(bw) : sumEntryW;
+  const itemLabel = lot.lotName || lot.commodityName || '—';
+  if (qty <= 0 || weight <= 0) {
+    return {
+      itemLabel,
+      qty,
+      weight,
+      avg: 0,
+      ratePerBag: 0,
+      amount: 0,
+      divisor: div,
+    };
+  }
+  const distW = distributeLotEntryWeights(lot, weight);
+  let amount = 0;
+  lot.entries.forEach((e, i) => {
+    const w = distW[i] ?? 0;
+    amount += (w * sellerSettlementRatePerBag(e)) / div;
+  });
+  amount = roundMoney2(amount);
+  const ratePerBag = weight > 0 ? roundMoney2((amount * div) / weight) : 0;
   const avg = qty > 0 ? weight / qty : 0;
-  const ratePerWeight = weight > 0 ? amount / weight : 0;
   return {
-    itemLabel: lot.lotName || lot.commodityName || '—',
+    itemLabel,
     qty,
     weight,
     avg,
-    ratePerWeight,
+    ratePerBag,
     amount,
+    divisor: div,
   };
 }
 
@@ -251,29 +440,31 @@ function lotSalesRow(lot: SettlementLot) {
 interface LotSalesOverride {
   qty?: number;
   weight?: number;
-  ratePerWeight?: number;
+  /** Seller settlement rate per bag (₹/bag), aligned with Billing new-rate / divisor model. */
+  ratePerBag?: number;
 }
 
 function hasLotSalesOverride(o: LotSalesOverride | undefined): boolean {
   if (!o) return false;
-  return o.qty !== undefined || o.weight !== undefined || o.ratePerWeight !== undefined;
+  return o.qty !== undefined || o.weight !== undefined || o.ratePerBag !== undefined;
 }
 
-/** Merge API lot totals with optional user overrides. Amount = rate/weight × weight (₹/kg × kg). */
-function mergeLotDisplayRow(lot: SettlementLot, o: LotSalesOverride | undefined) {
-  const base = lotSalesRow(lot);
+/** Merge API lot totals with optional user overrides. Amount = (weight × rate per bag) / divisor. */
+function mergeLotDisplayRow(lot: SettlementLot, o: LotSalesOverride | undefined, divisor: number) {
+  const base = lotBaseSalesRow(lot, divisor);
   if (!hasLotSalesOverride(o)) return base;
   const qty = o!.qty !== undefined ? o!.qty : base.qty;
   const weight = o!.weight !== undefined ? o!.weight : base.weight;
-  const ratePerWeight = o!.ratePerWeight !== undefined ? o!.ratePerWeight : base.ratePerWeight;
-  const amount = ratePerWeight * weight;
+  const div = base.divisor;
+  const ratePerBag = o!.ratePerBag !== undefined ? o!.ratePerBag : base.ratePerBag;
+  const amount = roundMoney2((weight * ratePerBag) / div);
   const avg = qty > 0 ? weight / qty : 0;
   return {
     ...base,
     qty,
     weight,
     avg,
-    ratePerWeight,
+    ratePerBag,
     amount,
   };
 }
@@ -284,59 +475,81 @@ function lotStableId(lot: SettlementLot, index: number): string {
   return `__idx_${index}_${encodeURIComponent(lot.lotName || '')}_${encodeURIComponent(lot.commodityName || '')}`;
 }
 
+/** Lot-level unloading (hamali slab) + weighing (commodity threshold/charge) using Sales report weights. */
+function sumLotSlabChargesForSeller(
+  seller: SellerSettlement,
+  removed: Set<string>,
+  lotOv: Record<string, LotSalesOverride>,
+  nameToId: Map<string, number>,
+  configById: Map<number, FullCommodityConfigDto>,
+  getDivisor: (lot: SettlementLot) => number
+): { unloading: number; weighing: number } {
+  let unloading = 0;
+  let weighing = 0;
+  seller.lots.forEach((lot, i) => {
+    const sid = lotStableId(lot, i);
+    if (removed.has(sid)) return;
+    const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisor(lot));
+    const actualW = merged.weight;
+    const cname = (lot.commodityName || '').trim();
+    if (!cname) return;
+    const cid = nameToId.get(cname.toLowerCase());
+    if (cid == null) return;
+    const full = configById.get(cid);
+    if (!full?.config) return;
+
+    const slabs = [...(full.hamaliSlabs ?? [])].sort((a, b) => a.thresholdWeight - b.thresholdWeight);
+    const slab = slabs[0];
+    if (slab && slab.thresholdWeight > 0) {
+      unloading += computeSlabChargeTotal(actualW, slab.fixedRate, slab.thresholdWeight);
+    }
+
+    const cfg = full.config;
+    const wTh = cfg.weighingThreshold ?? 0;
+    const wCh = cfg.weighingCharge ?? 0;
+    if (wTh > 0) {
+      weighing += computeSlabChargeTotal(actualW, wCh, wTh);
+    }
+  });
+  return { unloading, weighing };
+}
+
 function buildRateClustersFromSellerLots(
   seller: SellerSettlement,
   removedIds: Set<string>,
-  lotOverrides?: Record<string, LotSalesOverride>
+  lotOverrides?: Record<string, LotSalesOverride>,
+  getDivisor?: (lot: SettlementLot) => number
 ): RateCluster[] {
+  const divFn = getDivisor ?? (() => 50);
   const rateMap = new Map<number, RateCluster>();
   seller.lots.forEach((lot, i) => {
     const sid = lotStableId(lot, i);
     if (removedIds.has(sid)) return;
     const ov = lotOverrides?.[sid];
-    if (hasLotSalesOverride(ov)) {
-      const row = mergeLotDisplayRow(lot, ov);
-      const qty = row.qty;
-      const weight = row.weight;
-      const amount = row.amount;
-      const ratePerBag = qty > 0 ? amount / qty : 0;
-      const existing = rateMap.get(ratePerBag);
-      if (existing) {
-        existing.totalQuantity += qty;
-        existing.totalWeight += weight;
-        existing.amount += amount;
-      } else {
-        rateMap.set(ratePerBag, {
-          rate: ratePerBag,
-          totalQuantity: qty,
-          totalWeight: weight,
-          amount,
-        });
-      }
-      return;
+    const row = mergeLotDisplayRow(lot, ov, divFn(lot));
+    const ratePerBag = row.ratePerBag;
+    const qty = row.qty;
+    const weight = row.weight;
+    const amount = row.amount;
+    const existing = rateMap.get(ratePerBag);
+    if (existing) {
+      existing.totalQuantity += qty;
+      existing.totalWeight += weight;
+      existing.amount += amount;
+    } else {
+      rateMap.set(ratePerBag, {
+        rate: ratePerBag,
+        totalQuantity: qty,
+        totalWeight: weight,
+        amount,
+      });
     }
-    lot.entries.forEach(entry => {
-      const sr = sellerSettlementRatePerBag(entry);
-      const existing = rateMap.get(sr);
-      if (existing) {
-        existing.totalQuantity += entry.quantity;
-        existing.totalWeight += entry.weight;
-        existing.amount += entry.weight * sr;
-      } else {
-        rateMap.set(sr, {
-          rate: sr,
-          totalQuantity: entry.quantity,
-          totalWeight: entry.weight,
-          amount: entry.weight * sr,
-        });
-      }
-    });
   });
   return Array.from(rateMap.values()).sort((a, b) => b.rate - a.rate);
 }
 
 function defaultSellerExpenses(): SellerExpenseFormState {
-  return { freight: 0, unloading: 0, weighman: 0, cashAdvance: 0, others: 0 };
+  return { freight: 0, unloading: 0, weighman: 0, cashAdvance: 0, gunnies: 0, others: 0 };
 }
 
 function buildSellerSubPattiPrintData(
@@ -346,15 +559,17 @@ function buildSellerSubPattiPrintData(
   removedIds: Set<string>,
   pattiId: string,
   createdAt: string,
-  lotOverrides?: Record<string, LotSalesOverride>
+  lotOverrides?: Record<string, LotSalesOverride>,
+  getDivisor?: (lot: SettlementLot) => number
 ): PattiPrintData {
-  const rateClusters = buildRateClustersFromSellerLots(seller, removedIds, lotOverrides);
+  const rateClusters = buildRateClustersFromSellerLots(seller, removedIds, lotOverrides, getDivisor);
   const grossAmount = rateClusters.reduce((s, c) => s + c.amount, 0);
   const deductions = [
     { key: 'freight', label: 'Freight Amount', amount: expenses.freight, autoPulled: false },
     { key: 'unloading', label: 'Unloading Charges', amount: expenses.unloading, autoPulled: false },
     { key: 'weighman', label: 'Weighman Charges', amount: expenses.weighman, autoPulled: false },
     { key: 'advance', label: 'Cash Advance', amount: expenses.cashAdvance, autoPulled: false },
+    { key: 'gunnies', label: 'Gunnies', amount: expenses.gunnies, autoPulled: false },
     { key: 'others', label: 'Others', amount: expenses.others, autoPulled: false },
   ];
   const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
@@ -375,6 +590,8 @@ function buildSellerSubPattiPrintData(
 function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: SellerRegFormState | undefined): boolean {
   if (!current || !baseline) return false;
   return (
+    current.registered !== baseline.registered ||
+    (current.contactId ?? '') !== (baseline.contactId ?? '') ||
     current.mark !== baseline.mark ||
     current.name !== baseline.name ||
     current.mobile !== baseline.mobile
@@ -382,12 +599,24 @@ function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: Sel
 }
 
 function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
+  const cid = seller.contactId != null && String(seller.contactId).trim() !== '' ? String(seller.contactId).trim() : null;
   return {
-    sellerRegistration: 'registered',
+    registered: !!cid,
+    contactId: cid,
     mark: seller.sellerMark || '',
     name: seller.sellerName || '',
-    mobile: '',
+    mobile: (seller.sellerPhone ?? '').trim(),
+    contactSearchQuery: '',
   };
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 const SettlementPage = () => {
@@ -411,18 +640,47 @@ const SettlementPage = () => {
   const [savedPattis, setSavedPattis] = useState<PattiDTO[]>([]);
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
-  const [hamaliEnabled, setHamaliEnabled] = useState(false);
+  /** Toggle 1: use weighing charges in settlement totals. */
+  const [settlementWeighingEnabled, setSettlementWeighingEnabled] = useState(true);
+  /** Toggle 2: merge weighing into freight for display and main patti deductions. */
+  const [settlementWeighingMergeIntoFreight, setSettlementWeighingMergeIntoFreight] = useState(false);
   const [gunniesAmount, setGunniesAmount] = useState(0);
+  /** Per seller: collapsed sales report shows qty / weight / gross summary only (Billing-style). */
+  const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
   const [showPrint, setShowPrint] = useState(false);
 
-  /** Placeholder for freight / payable summary — wire to API later. */
-  const [freightPayableSummary] = useState({
+  /** Arrival freight + billing aggregates (invoiced freight & payable); optional invoice name filter. */
+  const [amountSummaryFromApi, setAmountSummaryFromApi] = useState({
     arrivalFreightAmount: 0,
     freightInvoiced: 0,
-    payableFromSales: 0,
     payableInvoiced: 0,
   });
   const [invoiceNameSearch, setInvoiceNameSearch] = useState('');
+  const debouncedInvoiceName = useDebouncedValue(invoiceNameSearch, 300);
+
+  /** Auction-based gross (same source as rate clusters / Sales Pad). */
+  const payableFromSales = pattiData?.grossAmount ?? 0;
+
+  useEffect(() => {
+    if (!selectedSeller?.sellerId) {
+      setAmountSummaryFromApi({ arrivalFreightAmount: 0, freightInvoiced: 0, payableInvoiced: 0 });
+      return;
+    }
+    let cancelled = false;
+    settlementApi
+      .getSettlementAmountSummary(selectedSeller.sellerId, debouncedInvoiceName.trim() || undefined)
+      .then(data => {
+        if (!cancelled) setAmountSummaryFromApi(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAmountSummaryFromApi({ arrivalFreightAmount: 0, freightInvoiced: 0, payableInvoiced: 0 });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSeller?.sellerId, debouncedInvoiceName]);
 
   /** Lot IDs removed from UI per seller (pending API sync). */
   const [removedLotsBySellerId, setRemovedLotsBySellerId] = useState<Record<string, string[]>>({});
@@ -437,12 +695,71 @@ const SettlementPage = () => {
   const [registeredBaselineById, setRegisteredBaselineById] = useState<Record<string, SellerRegFormState>>({});
   const [sellerExpensesById, setSellerExpensesById] = useState<Record<string, SellerExpenseFormState>>({});
   const [vehicleExpenseModalOpen, setVehicleExpenseModalOpen] = useState(false);
+  const [vehicleExpenseLoading, setVehicleExpenseLoading] = useState(false);
   const [vehicleExpenseRows, setVehicleExpenseRows] = useState<VehicleExpenseRow[]>([]);
 
-  /** Per-seller per-lot edits for Sales report qty / weight / rate-per-kg. */
+  /** Per-seller per-lot edits for Sales report qty / weight / rate per bag. */
   const [lotSalesOverridesBySellerId, setLotSalesOverridesBySellerId] = useState<
     Record<string, Record<string, LotSalesOverride>>
   >({});
+
+  const [fullCommodityConfigs, setFullCommodityConfigs] = useState<FullCommodityConfigDto[]>([]);
+  const [commodityList, setCommodityList] = useState<Commodity[]>([]);
+
+  useEffect(() => {
+    Promise.all([commodityApi.getAllFullConfigs(), commodityApi.list()])
+      .then(([cfgs, comms]) => {
+        setFullCommodityConfigs(Array.isArray(cfgs) ? cfgs : []);
+        setCommodityList(Array.isArray(comms) ? comms : []);
+      })
+      .catch(() => {
+        /* optional */
+      });
+  }, []);
+
+  /** Same divisor source as Billing: commodity config `ratePerUnit` (bag divisor). */
+  const commodityDivisorByName = useMemo(() => {
+    const map: Record<string, number> = {};
+    commodityList.forEach(c => {
+      const name = String(c.commodity_name ?? '').trim().toLowerCase();
+      if (!name) return;
+      const cid = Number(c.commodity_id);
+      if (!Number.isFinite(cid)) return;
+      const cfg = fullCommodityConfigs.find(f => f.commodityId === cid);
+      const d = Number(cfg?.config?.ratePerUnit);
+      if (d > 0) map[name] = d;
+    });
+    return map;
+  }, [fullCommodityConfigs, commodityList]);
+
+  const commodityAvgWeightBounds = useMemo(() => {
+    const map: Record<string, { min: number; max: number }> = {};
+    commodityList.forEach(c => {
+      const cid = Number(c.commodity_id);
+      const cfg = fullCommodityConfigs.find(f => f.commodityId === cid);
+      const min = Number(cfg?.config?.minWeight ?? 0);
+      const max = Number(cfg?.config?.maxWeight ?? 0);
+      const name = String(c.commodity_name ?? '').trim();
+      if (name && (min > 0 || max > 0)) {
+        map[name] = { min, max };
+      }
+    });
+    return map;
+  }, [fullCommodityConfigs, commodityList]);
+
+  const getLotDivisor = useCallback(
+    (lot: SettlementLot) => {
+      const n = (lot.commodityName || '').trim().toLowerCase();
+      const d = commodityDivisorByName[n];
+      return d != null && d > 0 ? d : 50;
+    },
+    [commodityDivisorByName]
+  );
+
+  /** Contact search (registered traders) per seller card in Sales report. */
+  const [sellerContactSearchById, setSellerContactSearchById] = useState<Record<string, Contact[]>>({});
+  const [sellerContactSearchLoading, setSellerContactSearchLoading] = useState<Record<string, boolean>>({});
+  const [sellerRegSaving, setSellerRegSaving] = useState<Record<string, boolean>>({});
 
   // Load sellers from backend only (no localStorage or mock data).
   useEffect(() => {
@@ -477,7 +794,7 @@ const SettlementPage = () => {
 
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
-  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; hamaliEnabled?: boolean; gunniesAmount?: number }) => {
+  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number }) => {
     setExistingPattiId(null);
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
@@ -489,85 +806,26 @@ const SettlementPage = () => {
     if (!isVehicleNumberValid(seller.vehicleNumber)) {
       toast.warning(`Vehicle number should be ${VEHICLE_NUMBER_MIN}–${VEHICLE_NUMBER_MAX} characters`);
     }
-    
-    // REQ-PUT-001: Cluster by rate
-    const rateMap = new Map<number, RateCluster>();
-    let totalWeight = 0;
-    
-    seller.lots.forEach(lot => {
-      lot.entries.forEach(entry => {
-        const sr = sellerSettlementRatePerBag(entry);
-        const existing = rateMap.get(sr);
-        if (existing) {
-          existing.totalQuantity += entry.quantity;
-          existing.totalWeight += entry.weight;
-          existing.amount += entry.weight * sr;
-        } else {
-          rateMap.set(sr, {
-            rate: sr,
-            totalQuantity: entry.quantity,
-            totalWeight: entry.weight,
-            amount: entry.weight * sr,
-          });
-        }
-        totalWeight += entry.weight;
-      });
-    });
-    
-    const rateClusters = Array.from(rateMap.values()).sort((a, b) => b.rate - a.rate);
-    
-    // REQ-PUT-002: GA = Σ (NW × SR)
-    const grossAmount = rateClusters.reduce((sum, c) => sum + c.amount, 0);
-    
-    // REQ-PUT-003: Deductions (freight/advance from backend when available; default 0).
-    const totalBags = seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
-    const effectiveCoolieMode = overrides?.coolieMode ?? coolieMode;
-    const effectiveHamali = overrides?.hamaliEnabled ?? hamaliEnabled;
-    const coolieAmount = effectiveCoolieMode === 'FLAT'
-      ? totalBags * 5
-      : Math.round(totalWeight / 50) * 5;
 
-    const baseDeductions: DeductionItem[] = [
-      {
-        key: 'freight',
-        label: 'Freight',
-        amount: 0,
-        editable: true,
-        autoPulled: false,
-      },
-      {
-        key: 'coolie',
-        label: `Coolie / Unloading (${effectiveCoolieMode === 'FLAT' ? 'Flat — per bag' : 'Auto-calculated — by weight'})`,
-        amount: coolieAmount,
-        editable: true,
-        autoPulled: false,
-      },
-      {
-        key: 'weighing',
-        label: 'Weighing Charges',
-        amount: effectiveHamali ? Math.round(totalWeight * 0.5) : 0,
-        editable: true,
-        autoPulled: false,
-      },
-      {
-        key: 'advance',
-        label: 'Cash Advance',
-        amount: 0,
-        editable: true,
-        autoPulled: false,
-      },
-      {
-        key: 'gunnies',
-        label: 'Gunnies',
-        amount: overrides?.gunniesAmount ?? gunniesAmount,
-        editable: true,
-        autoPulled: false,
-      },
-    ];
-    
+    const rateClusters = buildRateClustersFromSellerLots(seller, new Set(), undefined, getLotDivisor);
+
+    const grossAmount = rateClusters.reduce((sum, c) => sum + c.amount, 0);
+
+    const effectiveCoolieMode = overrides?.coolieMode ?? coolieMode;
+    const placeholderExp: SellerExpenseFormState = {
+      ...defaultSellerExpenses(),
+      gunnies: overrides?.gunniesAmount ?? gunniesAmount,
+    };
+    const baseDeductions = buildDeductionItemsFromSellerExpenses(
+      placeholderExp,
+      effectiveCoolieMode,
+      settlementWeighingEnabled,
+      settlementWeighingMergeIntoFreight
+    );
+
     const baseTotalDeductions = baseDeductions.reduce((s, d) => s + d.amount, 0);
     const baseNetPayable = grossAmount - baseTotalDeductions;
-    
+
     const createdAt = new Date().toISOString();
 
     setPattiData({
@@ -581,7 +839,7 @@ const SettlementPage = () => {
       createdAt,
       useAverageWeight: false,
     });
-  }, [coolieMode, hamaliEnabled, gunniesAmount]);
+  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, settlementWeighingMergeIntoFreight]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
   const openPattiForEdit = useCallback(async (id: number) => {
@@ -601,6 +859,13 @@ const SettlementPage = () => {
       }
       setPattiData(data);
       setExistingPattiId(dto.id ?? id);
+      const sid = String(dto.sellerId ?? '');
+      if (sid) {
+        setSellerExpensesById(prev => ({
+          ...prev,
+          [sid]: { ...defaultSellerExpenses(), ...deductionsToSellerExpenseForm(dto.deductions ?? []) },
+        }));
+      }
       setSelectedSeller({
         sellerId: dto.sellerId ?? '',
         sellerName: dto.sellerName ?? '',
@@ -701,26 +966,38 @@ const SettlementPage = () => {
   const vehicleFormDetails = useMemo(() => {
     if (!selectedSeller || !pattiData) return null;
 
-    const pattiNetWeight = pattiData.rateClusters.reduce((s, c) => s + (Number(c.totalWeight) || 0), 0);
+    const removed = new Set(removedLotsBySellerId[selectedSeller.sellerId] ?? []);
+    const ov = lotSalesOverridesBySellerId[selectedSeller.sellerId];
+    const recountClusters = buildRateClustersFromSellerLots(selectedSeller, removed, ov, getLotDivisor);
+    const pattiNetWeight = recountClusters.reduce((s, c) => s + (Number(c.totalWeight) || 0), 0);
+
     const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
     const sameVehicleSellers = vKey ? sellers.filter(s => normalizeVehicleKey(s.vehicleNumber) === vKey) : [];
     const scope = sameVehicleSellers.length > 0 ? sameVehicleSellers : [selectedSeller];
 
     const scopeHasLotData = scope.some(s => s.lots.some(l => (l.entries?.length ?? 0) > 0));
 
-    const arrivalQty = scope.reduce((acc, s) => acc + totalBagsForSeller(s), 0);
-    const arrivalWeight = scope.reduce((acc, s) => acc + totalWeighedWeightForSeller(s), 0);
-    const salesPadNetWeight = scope.reduce((acc, s) => acc + totalPadEstimateWeightForSeller(s), 0);
+    let arrivalWeightVehicleKg: number | null = null;
+    for (const s of scope) {
+      const w = vehicleArrivalNetBillableKgForSeller(s);
+      if (w != null) {
+        arrivalWeightVehicleKg = w;
+        break;
+      }
+    }
+
+    const arrivalQty = scope.reduce((acc, s) => acc + totalArrivalBagsForSeller(s), 0);
+    const salesPadNetWeight = scope.reduce((acc, s) => acc + totalBillingNetWeightForSeller(s), 0);
 
     return {
       vKey,
       sellersCount: vKey ? scope.length : null,
       arrivalQty: scopeHasLotData ? arrivalQty : null,
-      arrivalWeightKg: scopeHasLotData ? arrivalWeight : null,
+      arrivalWeightKg: scopeHasLotData ? arrivalWeightVehicleKg : null,
       salesPadNetWeightKg: scopeHasLotData ? salesPadNetWeight : null,
       pattiNetWeightKg: pattiNetWeight,
     };
-  }, [sellers, selectedSeller, pattiData]);
+  }, [sellers, selectedSeller, pattiData, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]);
 
   /** All sellers on the same vehicle as the current settlement (arrival scope). */
   const arrivalSellersForPatti = useMemo(() => {
@@ -751,19 +1028,6 @@ const SettlementPage = () => {
     salesReportCarouselRef.current?.scrollTo({ left: 0 });
   }, [selectedSeller?.sellerId, arrivalSalesReportSellerIdsKey]);
 
-  /** Sync vehicle expense modal rows when arrival scope sellers change; preserve edits per sellerId. */
-  useEffect(() => {
-    if (!selectedSeller || !pattiData) return;
-    setVehicleExpenseRows(prev => {
-      const bySeller = new Map(prev.map(r => [r.sellerId, r]));
-      return arrivalSellersForPatti.map(s => {
-        const ex = bySeller.get(s.sellerId);
-        if (!ex) return createVehicleExpenseRowFromSeller(s);
-        return { ...ex, sellerName: s.sellerName || ex.sellerName };
-      });
-    });
-  }, [arrivalSellersForPatti, selectedSeller, pattiData]);
-
   useEffect(() => {
     if (!selectedSeller || !pattiData) return;
     setSellerFormById(prev => {
@@ -772,12 +1036,7 @@ const SettlementPage = () => {
       for (const s of arrivalSellersForPatti) {
         if (!next[s.sellerId]) {
           changed = true;
-          next[s.sellerId] = {
-            sellerRegistration: 'registered',
-            mark: s.sellerMark || '',
-            name: s.sellerName || '',
-            mobile: '',
-          };
+          next[s.sellerId] = defaultSellerForm(s);
         }
       }
       return changed ? next : prev;
@@ -788,12 +1047,7 @@ const SettlementPage = () => {
       for (const s of arrivalSellersForPatti) {
         if (!next[s.sellerId]) {
           changed = true;
-          next[s.sellerId] = {
-            sellerRegistration: 'registered',
-            mark: s.sellerMark || '',
-            name: s.sellerName || '',
-            mobile: '',
-          };
+          next[s.sellerId] = defaultSellerForm(s);
         }
       }
       return changed ? next : prev;
@@ -804,12 +1058,68 @@ const SettlementPage = () => {
       for (const s of arrivalSellersForPatti) {
         if (!next[s.sellerId]) {
           changed = true;
-          next[s.sellerId] = { freight: 0, unloading: 0, weighman: 0, cashAdvance: 0, others: 0 };
+          next[s.sellerId] = { freight: 0, unloading: 0, weighman: 0, cashAdvance: 0, gunnies: 0, others: 0 };
         }
       }
       return changed ? next : prev;
     });
   }, [arrivalSellersForPatti, selectedSeller, pattiData]);
+
+  /** Pull freight / unloading / weighing / cash advance from backend (same rules as Quick Expenses). */
+  useEffect(() => {
+    if (!pattiData || arrivalSellersForPatti.length === 0) return;
+    if (existingPattiId != null) return;
+    let cancelled = false;
+    void (async () => {
+      for (const s of arrivalSellersForPatti) {
+        try {
+          const snap = await settlementApi.getSellerExpenseSnapshot(s.sellerId);
+          if (cancelled) return;
+          setSellerExpensesById(prev => ({
+            ...prev,
+            [s.sellerId]: {
+              ...(prev[s.sellerId] ?? defaultSellerExpenses()),
+              freight: snap.freight,
+              unloading: snap.unloading,
+              weighman: snap.weighing,
+              cashAdvance: snap.cashAdvance,
+            },
+          }));
+        } catch {
+          /* keep existing row */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pattiData?.createdAt, arrivalSalesReportSellerIdsKey, existingPattiId]);
+
+  /** Main patti deduction lines mirror primary seller expenses + weighing toggles. */
+  useEffect(() => {
+    if (!selectedSeller || !pattiData) return;
+    const exp = sellerExpensesById[selectedSeller.sellerId] ?? defaultSellerExpenses();
+    const deds = buildDeductionItemsFromSellerExpenses(
+      exp,
+      coolieMode,
+      settlementWeighingEnabled,
+      settlementWeighingMergeIntoFreight
+    );
+    const total = deds.reduce((s, d) => s + d.amount, 0);
+    setPattiData(prev => {
+      if (!prev) return null;
+      if (Math.abs(prev.totalDeductions - total) < 1e-9 && JSON.stringify(prev.deductions) === JSON.stringify(deds)) {
+        return prev;
+      }
+      return { ...prev, deductions: deds, totalDeductions: total, netPayable: prev.grossAmount - total };
+    });
+  }, [
+    selectedSeller?.sellerId,
+    sellerExpensesById,
+    coolieMode,
+    settlementWeighingEnabled,
+    settlementWeighingMergeIntoFreight,
+  ]);
 
   /** Keep main patti rate clusters / gross in sync with lot row edits (primary seller only). */
   useEffect(() => {
@@ -818,14 +1128,28 @@ const SettlementPage = () => {
       if (!prev) return null;
       const removed = new Set(removedLotsBySellerId[selectedSeller.sellerId] ?? []);
       const ov = lotSalesOverridesBySellerId[selectedSeller.sellerId];
-      const clusters = buildRateClustersFromSellerLots(selectedSeller, removed, ov);
+      const clusters = buildRateClustersFromSellerLots(selectedSeller, removed, ov, getLotDivisor);
       const gross = clusters.reduce((s, c) => s + c.amount, 0);
       const sameGross = Math.abs(prev.grossAmount - gross) < 0.01;
       const sameClusters = JSON.stringify(prev.rateClusters) === JSON.stringify(clusters);
       if (sameGross && sameClusters) return prev;
       return { ...prev, rateClusters: clusters, grossAmount: gross, netPayable: gross - prev.totalDeductions };
     });
-  }, [selectedSeller, removedLotsBySellerId, lotSalesOverridesBySellerId]);
+  }, [selectedSeller, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]);
+
+  const runSellerContactSearch = useCallback(async (sellerId: string, query: string) => {
+    setSellerContactSearchLoading(prev => ({ ...prev, [sellerId]: true }));
+    try {
+      const list = query.trim()
+        ? await contactApi.search(query.trim())
+        : await contactApi.list({ scope: 'participants' });
+      setSellerContactSearchById(prev => ({ ...prev, [sellerId]: list }));
+    } catch {
+      toast.error('Contact search failed');
+    } finally {
+      setSellerContactSearchLoading(prev => ({ ...prev, [sellerId]: false }));
+    }
+  }, []);
 
   const setLotSalesField = useCallback((sellerId: string, sid: string, field: keyof LotSalesOverride, raw: string) => {
     setLotSalesOverridesBySellerId(prev => {
@@ -884,13 +1208,14 @@ const SettlementPage = () => {
         removedSet,
         pattiData.pattiId,
         pattiData.createdAt,
-        lotSalesOverridesBySellerId[seller.sellerId]
+        lotSalesOverridesBySellerId[seller.sellerId],
+        getLotDivisor
       );
       const ok = await directPrint(generateSalesPattiPrintHTML(payload), { mode: 'system' });
       if (ok) toast.success('Seller sub-patti sent to printer');
       else toast.error('Printer not connected.');
     },
-    [pattiData, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId]
+    [pattiData, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]
   );
 
   const runPrintAllSubPatti = useCallback(async () => {
@@ -907,7 +1232,8 @@ const SettlementPage = () => {
         removedSet,
         pattiData.pattiId,
         pattiData.createdAt,
-        lotSalesOverridesBySellerId[s.sellerId]
+        lotSalesOverridesBySellerId[s.sellerId],
+        getLotDivisor
       );
       const ok = await directPrint(generateSalesPattiPrintHTML(payload), { mode: 'system' });
       if (!ok) {
@@ -916,7 +1242,7 @@ const SettlementPage = () => {
       }
     }
     toast.success('All sub-pattis sent to printer');
-  }, [pattiData, arrivalSellersForPatti, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId]);
+  }, [pattiData, arrivalSellersForPatti, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]);
 
   const vehicleExpenseTotals = useMemo(() => {
     return vehicleExpenseRows.reduce(
@@ -932,7 +1258,7 @@ const SettlementPage = () => {
   }, [vehicleExpenseRows]);
 
   const updateVehicleExpenseCell = useCallback(
-    (id: string, field: keyof Omit<VehicleExpenseRow, 'id' | 'sellerId' | 'sellerName'>, raw: string) => {
+    (id: string, field: 'freight' | 'unloading' | 'weighing' | 'gunnies', raw: string) => {
       setVehicleExpenseRows(prev =>
         prev.map(row => {
           if (row.id !== id) return row;
@@ -941,13 +1267,127 @@ const SettlementPage = () => {
           }
           const n = parseFloat(raw);
           if (!Number.isFinite(n)) return row;
-          if (field === 'quantity') return { ...row, quantity: Math.max(0, Math.round(n)) };
           return { ...row, [field]: clampMoney(n) };
         })
       );
     },
     []
   );
+
+  const openVehicleExpenseModal = useCallback(async () => {
+    if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) {
+      toast.error('Open a vehicle settlement first.');
+      return;
+    }
+    setVehicleExpenseModalOpen(true);
+    setVehicleExpenseLoading(true);
+    try {
+      const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
+      const summaries = await arrivalsApi.list(0, 500);
+      const match = summaries.find(s => normalizeVehicleKey(String(s.vehicleNumber)) === vKey);
+
+      const [configs, commodities] = await Promise.all([
+        commodityApi.getAllFullConfigs(),
+        commodityApi.list(),
+      ]);
+      const nameToId = new Map(
+        commodities.map(c => [String(c.commodity_name || '').trim().toLowerCase(), Number(c.commodity_id)])
+      );
+      const configById = new Map(configs.map(c => [c.commodityId, c]));
+
+      let arrival: ArrivalFullDetail | null = null;
+      if (match) {
+        try {
+          arrival = await arrivalsApi.getById(match.vehicleId);
+        } catch {
+          arrival = null;
+        }
+      }
+
+      const totalBagsOnVehicle = arrival
+        ? arrival.sellers.reduce(
+            (acc, s) => acc + s.lots.reduce((a, l) => a + (Number(l.bagCount) || 0), 0),
+            0
+          )
+        : arrivalSellersForPatti.reduce((acc, s) => acc + totalArrivalBagsForSeller(s), 0);
+
+      const freightTotal = arrival ? Number(arrival.freightTotal ?? 0) : amountSummaryFromApi.arrivalFreightAmount;
+      const perBagFreight = totalBagsOnVehicle > 0 ? freightTotal / totalBagsOnVehicle : 0;
+
+      const rows: VehicleExpenseRow[] = arrivalSellersForPatti.map(s => {
+        const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
+        const qtyRaw = arrSeller ? bagsFromArrivalSeller(arrSeller) : totalArrivalBagsForSeller(s);
+        const qty = Math.max(0, Math.round(qtyRaw));
+        const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
+        const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
+        const getDivisorLocal = (lot: SettlementLot) => {
+          const n = (lot.commodityName || '').trim().toLowerCase();
+          const cid = nameToId.get(n);
+          if (cid == null) return 50;
+          const d = Number(configById.get(cid)?.config?.ratePerUnit);
+          return d > 0 ? d : 50;
+        };
+        const { unloading, weighing } = sumLotSlabChargesForSeller(
+          s,
+          removed,
+          lotOv,
+          nameToId,
+          configById,
+          getDivisorLocal
+        );
+        const freight = roundMoney2(perBagFreight * qty);
+
+        return {
+          id: `ve_${s.sellerId}`,
+          sellerId: s.sellerId,
+          sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
+          quantity: qty,
+          freight,
+          unloading: roundMoney2(unloading),
+          weighing: roundMoney2(weighing),
+          gunnies: 0,
+        };
+      });
+
+      setVehicleExpenseRows(rows);
+    } catch {
+      toast.error('Failed to load quick expenses from arrivals.');
+      setVehicleExpenseRows(
+        arrivalSellersForPatti.map(s => ({
+          id: `ve_${s.sellerId}`,
+          sellerId: s.sellerId,
+          sellerName: s.sellerName || 'Seller',
+          quantity: totalArrivalBagsForSeller(s),
+          freight: 0,
+          unloading: 0,
+          weighing: 0,
+          gunnies: 0,
+        }))
+      );
+    } finally {
+      setVehicleExpenseLoading(false);
+    }
+  }, [
+    selectedSeller,
+    pattiData,
+    arrivalSellersForPatti,
+    removedLotsBySellerId,
+    lotSalesOverridesBySellerId,
+    amountSummaryFromApi.arrivalFreightAmount,
+  ]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'x' && e.key !== 'X')) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (!selectedSeller || !pattiData) return;
+      e.preventDefault();
+      void openVehicleExpenseModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedSeller, pattiData, openVehicleExpenseModal]);
 
   const getSellerLots = (seller: SellerSettlement): number =>
     seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
@@ -1337,13 +1777,13 @@ const SettlementPage = () => {
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Arrival Freight Amount</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(freightPayableSummary.arrivalFreightAmount)}
+                          {formatRupeeInr(amountSummaryFromApi.arrivalFreightAmount)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Invoiced</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(freightPayableSummary.freightInvoiced)}
+                          {formatRupeeInr(amountSummaryFromApi.freightInvoiced)}
                         </span>
                       </div>
                     </div>
@@ -1364,13 +1804,13 @@ const SettlementPage = () => {
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">From Sales</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(freightPayableSummary.payableFromSales)}
+                          {formatRupeeInr(payableFromSales)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Invoiced</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(freightPayableSummary.payableInvoiced)}
+                          {formatRupeeInr(amountSummaryFromApi.payableInvoiced)}
                         </span>
                       </div>
                     </div>
@@ -1392,21 +1832,56 @@ const SettlementPage = () => {
               </p>
             </div>
             <div className="p-4 sm:p-5">
+              <div className="mb-4 flex flex-col gap-3 rounded-xl border border-border/40 bg-muted/15 p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="settlement-weighing-enabled"
+                      checked={settlementWeighingEnabled}
+                      onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
+                    />
+                    <label htmlFor="settlement-weighing-enabled" className="text-xs font-medium text-foreground">
+                      Use weighing charges in settlement
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="settlement-weighing-merge"
+                      checked={settlementWeighingMergeIntoFreight}
+                      disabled={!settlementWeighingEnabled}
+                      onCheckedChange={v => setSettlementWeighingMergeIntoFreight(v === true)}
+                    />
+                    <label htmlFor="settlement-weighing-merge" className="text-xs font-medium text-foreground">
+                      Merge weighing into freight (else show separate)
+                    </label>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground sm:max-w-xs sm:text-right">
+                  Freight / unloading / weighing values are loaded from the server (same rules as Quick Expenses). This section only
+                  controls how weighing appears in totals.
+                </p>
+              </div>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full shrink-0 rounded-xl border-dashed border-primary/40 bg-background/60 font-semibold sm:h-10 sm:w-auto sm:min-w-[9rem]"
-                  onClick={() => {
-                    setVehicleExpenseRows(prev =>
-                      prev.length === 0 ? arrivalSellersForPatti.map(s => createVehicleExpenseRowFromSeller(s)) : prev
-                    );
-                    setVehicleExpenseModalOpen(true);
-                  }}
-                >
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Add Expense
-                </Button>
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full shrink-0 rounded-xl border-dashed border-primary/40 bg-background/60 font-semibold sm:h-10 sm:w-auto sm:min-w-[12rem]"
+                    onClick={() => void openVehicleExpenseModal()}
+                  >
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Quick Expenses (Alt + X)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full rounded-xl border-dashed border-border font-semibold sm:h-10 sm:w-auto sm:min-w-[10rem]"
+                    onClick={() => void openVehicleExpenseModal()}
+                  >
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Add Expenses
+                  </Button>
+                </div>
                 <div className="w-full min-w-0 flex-1 sm:max-w-md">
                   <label htmlFor="settlement-invoice-name-search" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
                     Invoice Name
@@ -1469,13 +1944,15 @@ const SettlementPage = () => {
                 const visibleLots = (seller.lots ?? [])
                   .map((lot, i) => ({ lot, i, sid: lotStableId(lot, i) }))
                   .filter(x => !removedSet.has(x.sid));
-                const lotRows = visibleLots.map(({ lot, sid }) => mergeLotDisplayRow(lot, lotOv[sid]));
+                const lotRows = visibleLots.map(({ lot, sid }) =>
+                  mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot))
+                );
                 const qtyTot = lotRows.reduce((s, r) => s + r.qty, 0);
                 const weightTot = lotRows.reduce((s, r) => s + r.weight, 0);
                 const amountTot = lotRows.reduce((s, r) => s + r.amount, 0);
-                const expenseTotal =
-                  exp.freight + exp.unloading + exp.weighman + exp.cashAdvance + exp.others;
+                const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
                 const netSeller = amountTot - expenseTotal;
+                const salesCollapsed = salesReportCollapsedBySellerId[seller.sellerId] === true;
 
                 return (
                   <div
@@ -1486,41 +1963,140 @@ const SettlementPage = () => {
                       id={`settlement-seller-card-${seller.sellerId}`}
                       className="rounded-2xl border border-border/60 bg-muted/10 p-3 sm:p-4"
                     >
-                    <div className="mb-3 flex flex-wrap items-center gap-4">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller source</span>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="radio"
-                          name={`reg-${seller.sellerId}`}
-                          className="h-4 w-4 accent-primary"
-                          checked={form.sellerRegistration === 'registered'}
-                          onChange={() =>
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trader</span>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                        <Checkbox
+                          checked={form.registered}
+                          onCheckedChange={v => {
+                            const on = v === true;
                             setSellerFormById(prev => {
                               const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                              return { ...prev, [seller.sellerId]: { ...cur, sellerRegistration: 'registered' } };
-                            })
-                          }
+                              return {
+                                ...prev,
+                                [seller.sellerId]: {
+                                  ...cur,
+                                  registered: on,
+                                  contactSearchQuery: on ? cur.contactSearchQuery : '',
+                                },
+                              };
+                            });
+                            if (on) void runSellerContactSearch(seller.sellerId, '');
+                          }}
                         />
                         Registered
                       </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="radio"
-                          name={`reg-${seller.sellerId}`}
-                          className="h-4 w-4 accent-primary"
-                          checked={form.sellerRegistration === 'unregistered'}
-                          onChange={() =>
-                            setSellerFormById(prev => {
-                              const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                              return { ...prev, [seller.sellerId]: { ...cur, sellerRegistration: 'unregistered' } };
-                            })
-                          }
-                        />
-                        Unregistered
-                      </label>
+                      <span className="text-xs text-muted-foreground">
+                        {form.registered ? 'Linked to trader registry' : 'Unregistered — capture details or register below'}
+                      </span>
                     </div>
 
-                    <div className="mb-4 rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
+                    <div className="mb-4 space-y-3 rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
+                      {form.registered ? (
+                        <div className="space-y-2">
+                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Search registered traders
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            <Input
+                              placeholder="Mark, name, or phone…"
+                              value={form.contactSearchQuery}
+                              onChange={e =>
+                                setSellerFormById(prev => {
+                                  const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                  return { ...prev, [seller.sellerId]: { ...cur, contactSearchQuery: e.target.value } };
+                                })
+                              }
+                              className="h-9 min-w-[12rem] flex-1 rounded-lg text-sm"
+                            />
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="h-9 shrink-0 rounded-lg"
+                              disabled={!!sellerContactSearchLoading[seller.sellerId]}
+                              onClick={() => void runSellerContactSearch(seller.sellerId, form.contactSearchQuery)}
+                            >
+                              {sellerContactSearchLoading[seller.sellerId] ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Search className="h-4 w-4" />
+                              )}
+                              Search
+                            </Button>
+                          </div>
+                          {(sellerContactSearchById[seller.sellerId] ?? []).length > 0 && (
+                            <ul className="max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-muted/20 text-xs">
+                              {(sellerContactSearchById[seller.sellerId] ?? []).slice(0, 12).map(c => (
+                                <li key={c.contact_id}>
+                                  <button
+                                    type="button"
+                                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/50"
+                                    onClick={() => {
+                                      void (async () => {
+                                        if (!can('Settlement', 'Edit')) {
+                                          toast.error('You do not have permission to link traders.');
+                                          return;
+                                        }
+                                        setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
+                                        try {
+                                          const reg = await settlementApi.linkSellerContact(seller.sellerId, c.contact_id);
+                                          setSellers(prev =>
+                                            prev.map(x =>
+                                              x.sellerId === seller.sellerId
+                                                ? {
+                                                    ...x,
+                                                    sellerName: reg.sellerName,
+                                                    sellerMark: reg.sellerMark,
+                                                    contactId: reg.contactId,
+                                                    sellerPhone: reg.sellerPhone,
+                                                  }
+                                                : x
+                                            )
+                                          );
+                                          setSellerFormById(prev => ({
+                                            ...prev,
+                                            [seller.sellerId]: {
+                                              registered: true,
+                                              contactId: reg.contactId,
+                                              name: reg.sellerName,
+                                              mark: reg.sellerMark,
+                                              mobile: reg.sellerPhone,
+                                              contactSearchQuery: '',
+                                            },
+                                          }));
+                                          setRegisteredBaselineById(prev => ({
+                                            ...prev,
+                                            [seller.sellerId]: {
+                                              registered: true,
+                                              contactId: reg.contactId,
+                                              name: reg.sellerName,
+                                              mark: reg.sellerMark,
+                                              mobile: reg.sellerPhone,
+                                              contactSearchQuery: '',
+                                            },
+                                          }));
+                                          toast.success('Trader linked to this seller');
+                                        } catch {
+                                          toast.error('Could not link trader');
+                                        } finally {
+                                          setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
+                                        }
+                                      })();
+                                    }}
+                                  >
+                                    <span className="font-semibold text-foreground">{c.name}</span>
+                                    <span className="text-muted-foreground">
+                                      {c.phone}
+                                      {c.mark ? ` · ${c.mark}` : ''}
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ) : null}
                       <div className="flex min-w-0 flex-nowrap items-end gap-2 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
                         <div className="min-w-[6rem] max-w-[7rem] shrink-0 sm:min-w-0 sm:max-w-none sm:flex-1">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1534,12 +2110,15 @@ const SettlementPage = () => {
                                 return { ...prev, [seller.sellerId]: { ...cur, mark: e.target.value } };
                               })
                             }
-                            className="h-9 rounded-lg text-sm"
+                            className={cn(
+                              'h-9 rounded-lg text-sm',
+                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                            )}
                           />
                         </div>
                         <div className="min-w-[7.5rem] flex-1 sm:min-w-[8rem]">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            Seller name
+                            Trader name
                           </label>
                           <Input
                             value={form.name}
@@ -1549,7 +2128,10 @@ const SettlementPage = () => {
                                 return { ...prev, [seller.sellerId]: { ...cur, name: e.target.value } };
                               })
                             }
-                            className="h-9 min-w-0 rounded-lg text-sm"
+                            className={cn(
+                              'h-9 min-w-0 rounded-lg text-sm',
+                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                            )}
                           />
                         </div>
                         <div className="min-w-[6.5rem] max-w-[8rem] shrink-0 sm:max-w-[9rem] sm:flex-initial">
@@ -1564,7 +2146,10 @@ const SettlementPage = () => {
                                 return { ...prev, [seller.sellerId]: { ...cur, mobile: e.target.value } };
                               })
                             }
-                            className="h-9 rounded-lg text-sm"
+                            className={cn(
+                              'h-9 rounded-lg text-sm',
+                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                            )}
                             inputMode="tel"
                           />
                         </div>
@@ -1572,90 +2157,285 @@ const SettlementPage = () => {
                           type="button"
                           size="sm"
                           className="h-9 shrink-0 self-end rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
-                          disabled={form.sellerRegistration === 'registered' && !dirty}
+                          disabled={
+                            !!sellerRegSaving[seller.sellerId] ||
+                            (form.registered && !form.contactId) ||
+                            (form.registered && !!form.contactId && !dirty) ||
+                            (!form.registered && (!form.name.trim() || !form.mobile.trim()))
+                          }
                           onClick={() => {
-                            if (form.sellerRegistration === 'unregistered') {
-                              toast.message('Register seller — connect to contacts API next');
-                              return;
-                            }
-                            toast.message('Update seller — connect to contacts API next');
+                            void (async () => {
+                              if (!can('Settlement', 'Edit')) {
+                                toast.error('You do not have permission to update trader details.');
+                                return;
+                              }
+                              if (!form.registered) {
+                                setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
+                                try {
+                                  const created = await contactApi.create({
+                                    name: form.name.trim(),
+                                    phone: form.mobile.trim(),
+                                    mark: form.mark.trim(),
+                                    trader_id: '',
+                                  });
+                                  const reg = await settlementApi.linkSellerContact(seller.sellerId, created.contact_id);
+                                  setSellers(prev =>
+                                    prev.map(x =>
+                                      x.sellerId === seller.sellerId
+                                        ? {
+                                            ...x,
+                                            sellerName: reg.sellerName,
+                                            sellerMark: reg.sellerMark,
+                                            contactId: reg.contactId,
+                                            sellerPhone: reg.sellerPhone,
+                                          }
+                                        : x
+                                    )
+                                  );
+                                  const nextForm: SellerRegFormState = {
+                                    registered: true,
+                                    contactId: reg.contactId,
+                                    name: reg.sellerName,
+                                    mark: reg.sellerMark,
+                                    mobile: reg.sellerPhone,
+                                    contactSearchQuery: '',
+                                  };
+                                  setSellerFormById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
+                                  setRegisteredBaselineById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
+                                  toast.success('Trader registered and linked');
+                                } catch (e) {
+                                  toast.error(e instanceof Error ? e.message : 'Registration failed');
+                                } finally {
+                                  setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
+                                }
+                                return;
+                              }
+                              if (!form.contactId) {
+                                toast.message('Select a registered trader from search, or uncheck Registered to onboard.');
+                                return;
+                              }
+                              setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
+                              try {
+                                await contactApi.update(form.contactId, {
+                                  name: form.name.trim(),
+                                  phone: form.mobile.trim(),
+                                  mark: form.mark.trim(),
+                                });
+                                setRegisteredBaselineById(prev => ({
+                                  ...prev,
+                                  [seller.sellerId]: { ...form, contactSearchQuery: '' },
+                                }));
+                                setSellers(prev =>
+                                  prev.map(x =>
+                                    x.sellerId === seller.sellerId
+                                      ? {
+                                          ...x,
+                                          sellerName: form.name.trim(),
+                                          sellerMark: form.mark.trim(),
+                                          sellerPhone: form.mobile.trim(),
+                                        }
+                                      : x
+                                  )
+                                );
+                                toast.success('Contact updated');
+                              } catch {
+                                toast.error('Update failed');
+                              } finally {
+                                setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
+                              }
+                            })();
                           }}
                         >
-                          {form.sellerRegistration === 'unregistered' ? 'Register seller' : 'Update'}
+                          {!form.registered
+                            ? 'Register seller'
+                            : !form.contactId
+                              ? 'Select trader'
+                              : dirty
+                                ? 'Update'
+                                : 'Up to date'}
                         </Button>
                       </div>
                     </div>
 
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per seller sales</p>
+                        <p className="truncate text-sm font-bold text-foreground">{seller.sellerName}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
+                          Gross ₹{formatMoney2Display(amountTot)}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg text-[10px]"
+                          onClick={() =>
+                            setSalesReportCollapsedBySellerId(prev => ({
+                              ...prev,
+                              [seller.sellerId]: !prev[seller.sellerId],
+                            }))
+                          }
+                        >
+                          {salesCollapsed ? (
+                            <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronUp className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          {salesCollapsed ? 'Expand' : 'Collapse'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {salesCollapsed ? (
+                      <div className="mb-3 rounded-xl border border-border/30 bg-muted/10 px-3 py-2.5 text-[11px]">
+                        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-foreground sm:justify-start">
+                          <span className="font-medium text-muted-foreground">Items: {visibleLots.length}</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums">Total Qty: {qtyTot}</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums">Total Wt: {formatMoney2Display(weightTot)} kg</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                            Gross: ₹{formatMoney2Display(amountTot)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-                      <div className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/40 bg-background/30">
-                        <table className="w-full min-w-[720px] border-collapse text-sm">
+                      <div className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+                        <table className="w-full min-w-[860px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
                           <thead>
-                            <tr className="border-b border-border/60 bg-muted/50 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                              <th className="px-2 py-2.5 text-center">#</th>
-                              <th className="px-2 py-2.5 text-center">Item</th>
-                              <th className="px-2 py-2.5 text-center">Quantity</th>
-                              <th className="px-2 py-2.5 text-center">Weight (kg)</th>
-                              <th className="px-2 py-2.5 text-center">Average</th>
-                              <th className="px-2 py-2.5 text-center">Rate/Weight</th>
-                              <th className="px-2 py-2.5 text-center">Amount</th>
-                              <th className="px-2 py-2.5 text-center">Action</th>
+                            <tr className="bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 dark:from-slate-800 dark:via-slate-800/90 dark:to-slate-800">
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                #
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Item (lot)
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Qty
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Wt (kg)
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Avg (kg)
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Rate (₹/bag)
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Amount
+                              </th>
+                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                                Action
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
                             {(seller.lots ?? []).length === 0 || visibleLots.length === 0 ? (
                               <tr>
-                                <td colSpan={8} className="px-2 py-6 text-center text-muted-foreground">
+                                <td colSpan={8} className="px-2 py-8 text-center text-muted-foreground">
                                   No lots for this seller
                                 </td>
                               </tr>
                             ) : (
                               visibleLots.map(({ lot, sid }, displayIdx) => {
-                                const row = mergeLotDisplayRow(lot, lotOv[sid]);
+                                const div = getLotDivisor(lot);
+                                const row = mergeLotDisplayRow(lot, lotOv[sid], div);
+                                const bounds = commodityAvgWeightBounds[lot.commodityName || ''];
+                                const avgBelowMin = bounds != null && bounds.min > 0 && row.avg < bounds.min;
+                                const avgAboveMax = bounds != null && bounds.max > 0 && row.avg > bounds.max;
+                                const avgWarn = avgBelowMin || avgAboveMax;
                                 return (
-                                  <tr key={sid} className="border-b border-border/40 bg-background/40 text-center hover:bg-muted/20">
-                                    <td className="px-2 py-2 tabular-nums text-foreground">{displayIdx + 1}</td>
-                                    <td className="px-2 py-2 font-medium text-foreground">{row.itemLabel}</td>
-                                    <td className="px-1 py-1 align-middle">
+                                  <tr
+                                    key={sid}
+                                    className="border-b border-border/40 bg-card/90 text-center transition-colors hover:bg-muted/25"
+                                  >
+                                    <td className="px-2 py-2 align-middle tabular-nums text-foreground lg:px-3">
+                                      {displayIdx + 1}
+                                    </td>
+                                    <td className="px-2 py-2 align-middle text-left font-semibold text-foreground lg:px-3">
+                                      {row.itemLabel}
+                                    </td>
+                                    <td className="px-1 py-1.5 align-middle lg:px-2">
                                       <Input
                                         type="number"
                                         min={0}
                                         step={1}
-                                        className="mx-auto h-8 w-[4.25rem] rounded-md border-border/60 px-1 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        className="mx-auto h-9 w-[4.5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                         value={row.qty}
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'qty', e.target.value)}
                                         aria-label="Quantity"
                                       />
                                     </td>
-                                    <td className="px-1 py-1 align-middle">
+                                    <td className="px-1 py-1.5 align-middle lg:px-2">
                                       <Input
                                         type="number"
                                         min={0}
                                         step={0.1}
-                                        className="mx-auto h-8 w-[4.75rem] rounded-md border-border/60 px-1 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        className="mx-auto h-9 w-[5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                         value={Number.isFinite(row.weight) ? row.weight : 0}
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'weight', e.target.value)}
                                         aria-label="Weight kg"
                                       />
                                     </td>
-                                    <td className="px-2 py-2 tabular-nums text-foreground">{row.avg.toFixed(2)}</td>
-                                    <td className="px-1 py-1 align-middle">
+                                    <td className="px-1 py-1.5 align-middle lg:px-2">
+                                      <div
+                                        className={cn(
+                                          settlementReadOnlyCellClass,
+                                          avgWarn &&
+                                            'border-amber-500/45 bg-amber-500/[0.12] text-amber-800 dark:text-amber-300'
+                                        )}
+                                        title="Weight ÷ quantity (from Billing commodity rules)"
+                                      >
+                                        {row.avg.toFixed(2)}
+                                      </div>
+                                      {avgBelowMin && row.weight > 0 && bounds && (
+                                        <p className="mt-0.5 text-[9px] text-amber-600">&lt; min {bounds.min} kg</p>
+                                      )}
+                                      {avgAboveMax && row.weight > 0 && bounds && (
+                                        <p className="mt-0.5 text-[9px] text-amber-600">&gt; max {bounds.max} kg</p>
+                                      )}
+                                    </td>
+                                    <td className="px-1 py-1.5 align-middle lg:px-2">
                                       <Input
                                         type="number"
                                         min={0}
                                         step={0.01}
-                                        className="mx-auto h-8 w-[4.75rem] rounded-md border-border/60 px-1 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                                        value={Number.isFinite(row.ratePerWeight) ? row.ratePerWeight : 0}
-                                        onChange={e => setLotSalesField(seller.sellerId, sid, 'ratePerWeight', e.target.value)}
-                                        aria-label="Rate per kg"
+                                        className="mx-auto h-9 w-[5.25rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        value={Number.isFinite(row.ratePerBag) ? row.ratePerBag : 0}
+                                        onChange={e => setLotSalesField(seller.sellerId, sid, 'ratePerBag', e.target.value)}
+                                        aria-label="Rate per bag"
+                                        title="Seller settlement rate per bag; amount uses commodity divisor from settings"
                                       />
                                     </td>
-                                    <td className="px-2 py-2 tabular-nums font-medium text-foreground">{Math.round(row.amount)}</td>
-                                    <td className="px-2 py-2 text-center">
+                                    <td className="px-1 py-1.5 align-middle lg:px-2">
+                                      <div
+                                        className={cn(
+                                          settlementReadOnlyCellClass,
+                                          'font-bold text-emerald-900/90 dark:text-emerald-300/95 border-emerald-600/25 bg-emerald-500/[0.08]'
+                                        )}
+                                        title={`(Weight × rate) ÷ divisor (${div})`}
+                                      >
+                                        ₹{formatMoney2Display(row.amount)}
+                                      </div>
+                                    </td>
+                                    <td className="px-1 py-1.5 align-middle text-center lg:px-2">
                                       <Button
                                         type="button"
                                         variant="ghost"
                                         size="icon"
-                                        className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                         aria-label="Remove row"
                                         onClick={() =>
                                           setDeleteLotConfirm({
@@ -1675,16 +2455,18 @@ const SettlementPage = () => {
                           </tbody>
                           {visibleLots.length > 0 ? (
                             <tfoot>
-                              <tr className="border-t-2 border-border/70 bg-muted/35 text-[11px] font-bold text-foreground">
-                                <td colSpan={2} className="px-2 py-2.5 text-center">
+                              <tr className="border-t-2 border-violet-500/35 bg-gradient-to-r from-violet-500/10 via-indigo-500/10 to-slate-500/10 text-[11px] font-bold text-foreground">
+                                <td colSpan={2} className="px-2 py-2.5 text-center lg:px-3">
                                   Total
                                 </td>
-                                <td className="px-2 py-2.5 text-center tabular-nums">{qtyTot}</td>
-                                <td className="px-2 py-2.5 text-center tabular-nums">{weightTot.toFixed(1)}</td>
-                                <td className="px-2 py-2.5 text-center" />
-                                <td className="px-2 py-2.5 text-center" />
-                                <td className="px-2 py-2.5 text-center tabular-nums">{Math.round(amountTot)}</td>
-                                <td className="px-2 py-2.5 text-center" />
+                                <td className="px-2 py-2.5 text-center tabular-nums lg:px-3">{qtyTot}</td>
+                                <td className="px-2 py-2.5 text-center tabular-nums lg:px-3">{weightTot.toFixed(1)}</td>
+                                <td className="px-2 py-2.5 text-center lg:px-3" />
+                                <td className="px-2 py-2.5 text-center lg:px-3" />
+                                <td className="px-2 py-2.5 text-center tabular-nums lg:px-3">
+                                  ₹{formatMoney2Display(amountTot)}
+                                </td>
+                                <td className="px-2 py-2.5 text-center lg:px-3" />
                               </tr>
                             </tfoot>
                           ) : null}
@@ -1695,53 +2477,129 @@ const SettlementPage = () => {
                         <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-3 py-2.5 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20">
                           <p className="text-center text-sm font-bold text-foreground">Expenses</p>
                         </div>
-                        <div className="space-y-2 p-3 text-xs">
-                          {(
-                            [
-                              ['freight', 'Freight Amount'],
-                              ['unloading', 'Unloading Charges'],
-                              ['weighman', 'Weighman Charges'],
-                              ['cashAdvance', 'Cash Advance'],
-                              ['others', 'Others'],
-                            ] as const
-                          ).map(([key, label]) => (
-                            <div key={key} className="flex items-center justify-between gap-2">
-                              <span className="text-center text-muted-foreground">{label}</span>
+                        <TooltipProvider delayDuration={200}>
+                          <div className="space-y-2 p-3 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Freight (Arrivals)</span>
                               <Input
-                                id={key === 'freight' ? `settlement-seller-expense-${seller.sellerId}-freight` : undefined}
+                                id={`settlement-seller-expense-${seller.sellerId}-freight`}
+                                readOnly
+                                tabIndex={-1}
+                                type="text"
+                                className={cn(
+                                  'h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums',
+                                  settlementReadOnlyCellClass,
+                                  'cursor-not-allowed'
+                                )}
+                                value={formatMoney2Display(
+                                  settlementWeighingEnabled && settlementWeighingMergeIntoFreight
+                                    ? exp.freight + exp.weighman
+                                    : exp.freight
+                                )}
+                                title="From server (bag share). Not editable here."
+                              />
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Unloading (Coolie)</span>
+                              <Input
+                                readOnly
+                                tabIndex={-1}
+                                type="text"
+                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
+                                value={formatMoney2Display(exp.unloading)}
+                                title="From commodity settings (server). Not editable here."
+                              />
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Weighing</span>
+                              <Input
+                                readOnly
+                                tabIndex={-1}
+                                type="text"
+                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
+                                value={
+                                  !settlementWeighingEnabled
+                                    ? '—'
+                                    : settlementWeighingMergeIntoFreight
+                                      ? 'In Freight'
+                                      : formatMoney2Display(exp.weighman)
+                                }
+                                title="From commodity settings (server). Toggle weighing in Expenses & invoice."
+                              />
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1 text-muted-foreground">
+                                Cash Advance
+                                <Tooltip>
+                                  <TooltipTrigger type="button" className="inline-flex text-muted-foreground hover:text-foreground">
+                                    <Info className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-[14rem] text-xs">
+                                    Full Journal module integration is pending. Shown amount may include freight advance and ledger
+                                    credits from the server.
+                                  </TooltipContent>
+                                </Tooltip>
+                              </span>
+                              <Input
+                                readOnly
+                                tabIndex={-1}
+                                type="text"
+                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
+                                value={formatMoney2Display(exp.cashAdvance)}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Gunnies</span>
+                              <Input
                                 type="number"
                                 min={0}
                                 step="0.01"
-                                className="h-8 w-24 rounded-md text-center text-xs tabular-nums"
-                                value={exp[key] === 0 ? '' : exp[key]}
+                                className="h-8 w-[5.5rem] rounded-md text-center text-xs tabular-nums"
+                                value={exp.gunnies === 0 ? '' : exp.gunnies}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                    return {
-                                      ...prev,
-                                      [seller.sellerId]: { ...e0, [key]: v },
-                                    };
+                                    return { ...prev, [seller.sellerId]: { ...e0, gunnies: v } };
                                   });
                                 }}
                               />
                             </div>
-                          ))}
-                        </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Others</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                className="h-8 w-[5.5rem] rounded-md text-center text-xs tabular-nums"
+                                value={exp.others === 0 ? '' : exp.others}
+                                onChange={e => {
+                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  setSellerExpensesById(prev => {
+                                    const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                    return { ...prev, [seller.sellerId]: { ...e0, others: v } };
+                                  });
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </TooltipProvider>
                         <div className="space-y-1 border-t border-border/50 p-3 pt-2 text-xs">
                           <div className="flex justify-between font-semibold">
-                            <span className="text-center">Total</span>
-                            <span className="tabular-nums text-center">{Math.round(expenseTotal)}</span>
+                            <span className="text-center">Total expenses</span>
+                            <span className="tabular-nums text-center">{formatMoney2Display(expenseTotal)}</span>
                           </div>
                           <div className="flex justify-between font-bold text-foreground">
                             <span className="text-center">Net payable</span>
                             <span className="tabular-nums text-center text-emerald-600 dark:text-emerald-400">
-                              {Math.round(netSeller)}
+                              {formatMoney2Display(netSeller)}
                             </span>
                           </div>
                         </div>
                       </div>
                     </div>
+                      </>
+                    )}
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
@@ -1776,6 +2634,20 @@ const SettlementPage = () => {
                 );
               })}
             </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
+          >
+            <p className="text-center text-sm font-bold tracking-tight text-foreground">Receivable adjustment</p>
+            <p className="mt-2 text-center text-xs leading-relaxed text-muted-foreground">
+              Allocation against contact receivable ledgers will load open vouchers with live outstanding balances, allow edits only in
+              draft, and validate on post (no reservation at selection). Server-side locking and a dedicated allocation table are
+              required — this UI will connect when that API is ready.
+            </p>
           </motion.div>
 
           <motion.div
@@ -1823,142 +2695,167 @@ const SettlementPage = () => {
 
           <Dialog
             open={vehicleExpenseModalOpen}
-            onOpenChange={open => {
-              setVehicleExpenseModalOpen(open);
-              if (open) {
-                setVehicleExpenseRows(prev =>
-                  prev.length === 0 ? arrivalSellersForPatti.map(s => createVehicleExpenseRowFromSeller(s)) : prev
-                );
-              }
-            }}
+            onOpenChange={setVehicleExpenseModalOpen}
           >
-            <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto rounded-2xl">
-              <DialogHeader>
-                <DialogTitle>Add Expense</DialogTitle>
-                <DialogDescription>
-                  Enter quantity and charge amounts per line. Footer shows column totals for this vehicle settlement.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="overflow-x-auto rounded-xl border border-border/50 shadow-sm">
-                <table className="w-full min-w-[820px] border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-blue-500/75 via-indigo-500/75 to-cyan-500/75 text-white shadow-sm dark:from-blue-600/60 dark:via-indigo-600/60 dark:to-cyan-600/60">
-                      <th className="min-w-[12rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Seller Name
-                      </th>
-                      <th className="min-w-[5.5rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Quantity
-                      </th>
-                      <th className="min-w-[7rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Freight Amount
-                      </th>
-                      <th className="min-w-[7rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Unloading Charges
-                      </th>
-                      <th className="min-w-[7rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Weighing Charges
-                      </th>
-                      <th className="min-w-[7rem] px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wide">
-                        Gunnies
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vehicleExpenseRows.map(row => (
-                      <tr key={row.id} className="border-b border-border/40 bg-background/50 hover:bg-muted/30">
-                        <td className="px-2 py-2 text-left align-middle">
-                          <div className="truncate text-xs font-semibold text-foreground sm:text-sm">{row.sellerName}</div>
-                        </td>
-                        <td className="px-1 py-1.5 align-middle">
-                          <Input
-                            type="number"
-                            min={0}
-                            step={1}
-                            className="h-9 w-full min-w-[4.5rem] rounded-lg border-border/60 px-2 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            value={row.quantity || ''}
-                            onChange={e => updateVehicleExpenseCell(row.id, 'quantity', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 align-middle">
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-9 w-full min-w-[5rem] rounded-lg border-border/60 px-2 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            value={row.freight === 0 ? '' : row.freight}
-                            onChange={e => updateVehicleExpenseCell(row.id, 'freight', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 align-middle">
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-9 w-full min-w-[5rem] rounded-lg border-border/60 px-2 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            value={row.unloading === 0 ? '' : row.unloading}
-                            onChange={e => updateVehicleExpenseCell(row.id, 'unloading', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 align-middle">
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-9 w-full min-w-[5rem] rounded-lg border-border/60 px-2 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            value={row.weighing === 0 ? '' : row.weighing}
-                            onChange={e => updateVehicleExpenseCell(row.id, 'weighing', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-1 py-1.5 align-middle">
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            className="h-9 w-full min-w-[5rem] rounded-lg border-border/60 px-2 text-center text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            value={row.gunnies === 0 ? '' : row.gunnies}
-                            onChange={e => updateVehicleExpenseCell(row.id, 'gunnies', e.target.value)}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-border/50 bg-gradient-to-r from-blue-600/85 via-indigo-600/85 to-cyan-600/85 text-white dark:from-blue-700/75 dark:via-indigo-700/75 dark:to-cyan-700/75">
-                      <td className="px-2 py-3 text-center text-xs font-black uppercase tracking-wide">Total</td>
-                      <td className="px-2 py-3 text-center text-sm font-bold tabular-nums">
-                        {vehicleExpenseTotals.quantity}
-                      </td>
-                      <td className="px-2 py-3 text-center text-sm font-bold tabular-nums">
-                        {vehicleExpenseTotals.freight.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-2 py-3 text-center text-sm font-bold tabular-nums">
-                        {vehicleExpenseTotals.unloading.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-2 py-3 text-center text-sm font-bold tabular-nums">
-                        {vehicleExpenseTotals.weighing.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-2 py-3 text-center text-sm font-bold tabular-nums">
-                        {vehicleExpenseTotals.gunnies.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+            <DialogContent className="max-h-[90dvh] max-w-5xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
+              <div className="border-b border-border/50 bg-muted/30 px-5 py-4 sm:px-6">
+                <DialogHeader className="space-y-1.5 text-center sm:text-center">
+                  <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Expenses</DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
+                    Sellers and quantities come from Arrivals. Freight is allocated per bag. Unloading / weighing use commodity
+                    slab rules at lot level (editable). Press Alt + X to open.
+                  </DialogDescription>
+                </DialogHeader>
               </div>
 
-              <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => setVehicleExpenseModalOpen(false)}
-                >
-                  Close
-                </Button>
-                <Button type="button" className="rounded-xl" onClick={() => toast.message('Expense add action will be wired next.')}>
-                  <PlusCircle className="mr-1.5 h-4 w-4" />
-                  Add
-                </Button>
+              <div className="relative px-3 py-4 sm:px-5 sm:py-5">
+                {vehicleExpenseLoading && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/70 backdrop-blur-[1px]">
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
+                    <span className="sr-only">Loading expenses</span>
+                  </div>
+                )}
+                <div className="overflow-x-auto rounded-xl border border-border/60 bg-card shadow-sm">
+                  <table className="w-full min-w-[880px] border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-border/60 bg-muted/50">
+                        <th className="min-w-[11rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Seller
+                        </th>
+                        <th className="min-w-[5.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Qty (bags)
+                        </th>
+                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Freight
+                        </th>
+                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Unloading
+                        </th>
+                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Weighing
+                        </th>
+                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Gunnies
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vehicleExpenseRows.map(row => (
+                        <tr
+                          key={row.id}
+                          className="border-b border-border/40 transition-colors odd:bg-background even:bg-muted/20 hover:bg-muted/40"
+                        >
+                          <td className="px-3 py-3 text-center align-middle">
+                            <span className="line-clamp-2 text-xs font-medium text-foreground sm:text-sm">{row.sellerName}</span>
+                          </td>
+                          <td className="px-3 py-3 text-center align-middle">
+                            <span className="inline-flex min-h-9 min-w-[4rem] items-center justify-center rounded-md border border-border/50 bg-muted/40 px-2 text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+                              {row.quantity}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2.5 text-center align-middle">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              value={row.freight === 0 ? '' : row.freight}
+                              onChange={e => updateVehicleExpenseCell(row.id, 'freight', e.target.value)}
+                              aria-label="Freight amount"
+                            />
+                          </td>
+                          <td className="px-2 py-2.5 text-center align-middle">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              value={row.unloading === 0 ? '' : row.unloading}
+                              onChange={e => updateVehicleExpenseCell(row.id, 'unloading', e.target.value)}
+                              aria-label="Unloading charges"
+                            />
+                          </td>
+                          <td className="px-2 py-2.5 text-center align-middle">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              value={row.weighing === 0 ? '' : row.weighing}
+                              onChange={e => updateVehicleExpenseCell(row.id, 'weighing', e.target.value)}
+                              aria-label="Weighing charges"
+                            />
+                          </td>
+                          <td className="px-2 py-2.5 text-center align-middle">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              value={row.gunnies === 0 ? '' : row.gunnies}
+                              onChange={e => updateVehicleExpenseCell(row.id, 'gunnies', e.target.value)}
+                              aria-label="Gunnies"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-border/60 bg-muted/60">
+                        <td className="px-3 py-3.5 text-center text-xs font-bold uppercase tracking-wide text-foreground">
+                          Total
+                        </td>
+                        <td className="px-3 py-3.5 text-center text-sm font-bold tabular-nums text-foreground">
+                          {vehicleExpenseTotals.quantity}
+                        </td>
+                        <td className="px-3 py-3.5 text-center text-sm font-bold tabular-nums text-foreground">
+                          {vehicleExpenseTotals.freight.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-3.5 text-center text-sm font-bold tabular-nums text-foreground">
+                          {vehicleExpenseTotals.unloading.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-3.5 text-center text-sm font-bold tabular-nums text-foreground">
+                          {vehicleExpenseTotals.weighing.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3 py-3.5 text-center text-sm font-bold tabular-nums text-foreground">
+                          {vehicleExpenseTotals.gunnies.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <DialogFooter className="border-t border-border/50 bg-muted/20 px-5 py-4 sm:px-6">
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button type="button" variant="outline" className="rounded-xl" onClick={() => setVehicleExpenseModalOpen(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    className="rounded-xl"
+                    onClick={() => {
+                      setSellerExpensesById(prev => {
+                        const next = { ...prev };
+                        for (const row of vehicleExpenseRows) {
+                          next[row.sellerId] = {
+                            ...(prev[row.sellerId] ?? defaultSellerExpenses()),
+                            freight: row.freight,
+                            unloading: row.unloading,
+                            weighman: row.weighing,
+                            gunnies: row.gunnies,
+                          };
+                        }
+                        return next;
+                      });
+                      setVehicleExpenseModalOpen(false);
+                      toast.success('Expenses applied to per-seller Sales report.');
+                    }}
+                  >
+                    <PlusCircle className="mr-1.5 h-4 w-4" />
+                    Apply to settlement
+                  </Button>
+                </div>
               </DialogFooter>
             </DialogContent>
           </Dialog>

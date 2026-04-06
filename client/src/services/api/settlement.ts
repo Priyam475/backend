@@ -59,6 +59,10 @@ export interface SettlementLotDTO {
   lotId: string;
   lotName: string;
   commodityName: string;
+  /** Arrivals: lot bag count (`lot.bag_count`). */
+  arrivalBagCount?: number;
+  /** Σ billing line weights for this lot (Sales bill), when invoiced. */
+  billingWeightKg?: number;
   entries: SettlementEntryDTO[];
 }
 
@@ -67,7 +71,26 @@ export interface SellerSettlementDTO {
   sellerName: string;
   sellerMark: string;
   vehicleNumber: string;
+  /** Arrivals: Σ bag counts for this seller's lots. */
+  arrivalTotalBags?: number;
+  /** Arrivals: vehicle net billable kg (net − deducted) from weighing; shared across sellers on same vehicle. */
+  vehicleArrivalNetBillableKg?: number;
+  /** Billing: Σ line weights in sales bills for this seller's lots (commodity groups). */
+  billingNetWeightKg?: number;
+  /** Linked contact (seller_in_vehicle.contact_id), when registered. */
+  contactId?: string | null;
+  /** Phone from contact or free-text seller phone. */
+  sellerPhone?: string | null;
   lots: SettlementLotDTO[];
+}
+
+/** Response from linking a settlement seller to a contact. */
+export interface SellerRegistrationDTO {
+  sellerId: string;
+  contactId: string;
+  sellerName: string;
+  sellerMark: string;
+  sellerPhone: string;
 }
 
 export interface SellerChargesDTO {
@@ -75,6 +98,26 @@ export interface SellerChargesDTO {
   advance: number;
   freightAutoPulled?: boolean;
   advanceAutoPulled?: boolean;
+}
+
+/** Server-computed lines for Sales Patti (no client-side recomputation for display). */
+export interface SellerExpenseSnapshotDTO {
+  freight: number;
+  unloading: number;
+  weighing: number;
+  cashAdvance: number;
+  freightAutoPulled?: boolean;
+  unloadingAutoPulled?: boolean;
+  weighingAutoPulled?: boolean;
+  /** When true, show Journal-module pending tooltip on cash advance. */
+  cashAdvanceJournalPending?: boolean;
+}
+
+/** Amount card: Arrivals freight + billing (sales bill) aggregates for this seller's lots. */
+export interface SettlementAmountSummaryDTO {
+  arrivalFreightAmount: number;
+  freightInvoiced: number;
+  payableInvoiced: number;
 }
 
 export interface ListSellersParams {
@@ -179,6 +222,58 @@ export const settlementApi = {
       advance: Number(data.advance ?? 0),
       freightAutoPulled: Boolean(data.freightAutoPulled),
       advanceAutoPulled: Boolean(data.advanceAutoPulled),
+    };
+  },
+
+  /** Freight (bag share), unloading/weighing (commodity slabs), cash advance — all computed server-side. */
+  async getSellerExpenseSnapshot(sellerId: string): Promise<SellerExpenseSnapshotDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/expense-snapshot`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load seller expense snapshot');
+    const data = await res.json();
+    return {
+      freight: Number(data.freight ?? 0),
+      unloading: Number(data.unloading ?? 0),
+      weighing: Number(data.weighing ?? 0),
+      cashAdvance: Number(data.cashAdvance ?? 0),
+      freightAutoPulled: Boolean(data.freightAutoPulled),
+      unloadingAutoPulled: Boolean(data.unloadingAutoPulled),
+      weighingAutoPulled: Boolean(data.weighingAutoPulled),
+      cashAdvanceJournalPending: Boolean(data.cashAdvanceJournalPending),
+    };
+  },
+
+  /** Freight / payable invoiced totals from sales bills for this seller's lots; optional invoice name filter. */
+  async getSettlementAmountSummary(sellerId: string, invoiceName?: string): Promise<SettlementAmountSummaryDTO> {
+    const q = new URLSearchParams();
+    if (invoiceName != null && invoiceName.trim() !== '') q.set('invoiceName', invoiceName.trim());
+    const qs = q.toString();
+    const res = await apiFetch(
+      `${BASE}/sellers/${encodeURIComponent(sellerId)}/amount-summary${qs ? `?${qs}` : ''}`,
+      { method: 'GET' }
+    );
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load settlement amount summary');
+    const data = await res.json();
+    return {
+      arrivalFreightAmount: Number(data.arrivalFreightAmount ?? 0),
+      freightInvoiced: Number(data.freightInvoiced ?? 0),
+      payableInvoiced: Number(data.payableInvoiced ?? 0),
+    };
+  },
+
+  /** Link settlement seller (seller_in_vehicle id) to an existing registered contact. */
+  async linkSellerContact(sellerId: string, contactId: string | number): Promise<SellerRegistrationDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/contact`, {
+      method: 'PUT',
+      body: JSON.stringify({ contactId: Number(contactId) }),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to link seller to contact');
+    const data = await res.json();
+    return {
+      sellerId: String(data.sellerId ?? sellerId),
+      contactId: String(data.contactId ?? contactId),
+      sellerName: String(data.sellerName ?? ''),
+      sellerMark: String(data.sellerMark ?? ''),
+      sellerPhone: String(data.sellerPhone ?? ''),
     };
   },
 };

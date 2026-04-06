@@ -76,6 +76,51 @@ public class SettlementResource {
     }
 
     /**
+     * {@code GET  /api/settlements/sellers/:sellerId/expense-snapshot} :
+     * server-computed freight (bag share), unloading/weighing (commodity slabs), cash advance.
+     */
+    @GetMapping("/sellers/{sellerId}/expense-snapshot")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<SellerExpenseSnapshotDTO> getSellerExpenseSnapshot(@PathVariable String sellerId) {
+        LOG.debug("REST request to get Settlement seller expense snapshot for sellerId : {}", sellerId);
+        return ResponseEntity.ok(settlementService.getSellerExpenseSnapshot(sellerId));
+    }
+
+    /**
+     * {@code GET  /api/settlements/sellers/:sellerId/amount-summary} :
+     * arrival freight, invoiced freight, and invoiced payable for Sales Patti Amount card.
+     */
+    @GetMapping("/sellers/{sellerId}/amount-summary")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<SettlementAmountSummaryDTO> getSettlementAmountSummary(
+        @PathVariable String sellerId,
+        @RequestParam(required = false) String invoiceName
+    ) {
+        LOG.debug("REST request to get Settlement amount summary for sellerId : {}", sellerId);
+        SettlementAmountSummaryDTO dto = settlementService.getSettlementAmountSummary(sellerId, invoiceName);
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
+     * {@code PUT  /api/settlements/sellers/:sellerId/contact} :
+     * link this settlement seller ({@code seller_in_vehicle} id) to a registered contact.
+     */
+    @PutMapping("/sellers/{sellerId}/contact")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
+    public ResponseEntity<SellerRegistrationDTO> linkSellerContact(
+        @PathVariable String sellerId,
+        @Valid @RequestBody LinkSellerContactRequest request
+    ) {
+        LOG.debug("REST request to link Settlement seller {} to contact {}", sellerId, request.getContactId());
+        try {
+            SellerRegistrationDTO dto = settlementService.linkSellerContact(sellerId, request);
+            return ResponseEntity.ok(dto);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "linkcontactfailed");
+        }
+    }
+
+    /**
      * {@code POST  /api/settlements/pattis} : create a new patti.
      * Patti ID generated server-side (PT-YYYYMMDD-NNNN).
      */

@@ -10,8 +10,10 @@ import com.mercotrace.domain.ChartOfAccount;
 import com.mercotrace.domain.FreightCalculation;
 import com.mercotrace.domain.Patti;
 import com.mercotrace.domain.PattiDeduction;
+import com.mercotrace.domain.Lot;
 import com.mercotrace.domain.PattiRateCluster;
 import com.mercotrace.domain.SellerInVehicle;
+import com.mercotrace.domain.Vehicle;
 import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.PattiRepository;
 import com.mercotrace.repository.VoucherLineRepository;
@@ -69,6 +71,24 @@ class SettlementServiceImplTest {
     @Mock
     private VoucherLineRepository voucherLineRepository;
 
+    @Mock
+    private com.mercotrace.repository.VehicleWeightRepository vehicleWeightRepository;
+
+    @Mock
+    private com.mercotrace.repository.SalesBillLineItemRepository salesBillLineItemRepository;
+
+    @Mock
+    private com.mercotrace.repository.SalesBillRepository salesBillRepository;
+
+    @Mock
+    private com.mercotrace.service.ContactService contactService;
+
+    @Mock
+    private com.mercotrace.repository.HamaliSlabRepository hamaliSlabRepository;
+
+    @Mock
+    private com.mercotrace.repository.CommodityConfigRepository commodityConfigRepository;
+
     private SettlementServiceImpl service;
 
     @BeforeEach
@@ -85,7 +105,13 @@ class SettlementServiceImplTest {
             commodityRepository,
             freightCalculationRepository,
             chartOfAccountRepository,
-            voucherLineRepository
+            voucherLineRepository,
+            vehicleWeightRepository,
+            salesBillLineItemRepository,
+            salesBillRepository,
+            contactService,
+            hamaliSlabRepository,
+            commodityConfigRepository
         );
         // Only create stubbing when needed in specific tests to avoid UnnecessaryStubbingException.
     }
@@ -193,6 +219,16 @@ class SettlementServiceImplTest {
     }
 
     @Test
+    void getSellerExpenseSnapshot_returnsZerosWhenInvalidSellerId() {
+        SellerExpenseSnapshotDTO dto = service.getSellerExpenseSnapshot("not-a-number");
+        assertThat(dto.getFreight()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getUnloading()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getWeighing()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getCashAdvance()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getCashAdvanceJournalPending()).isTrue();
+    }
+
+    @Test
     void getSellerCharges_autoPullsFromFreightCalculationWhenAvailable() {
         SellerInVehicle siv = new SellerInVehicle();
         siv.setId(100L);
@@ -280,6 +316,39 @@ class SettlementServiceImplTest {
         assertThat(dto.getAdvance()).isEqualByComparingTo(BigDecimal.valueOf(800)); // 500 + 300
         assertThat(dto.getFreightAutoPulled()).isTrue();
         assertThat(dto.getAdvanceAutoPulled()).isTrue();
+    }
+
+    @Test
+    void getSettlementAmountSummary_aggregatesFromLotsAndBills() {
+        SellerInVehicle siv = new SellerInVehicle();
+        siv.setId(100L);
+        siv.setVehicleId(200L);
+
+        Vehicle vehicle = new Vehicle();
+        vehicle.setId(200L);
+        vehicle.setTraderId(TRADER_ID);
+
+        Lot lot = new Lot();
+        lot.setId(55L);
+        lot.setSellerVehicleId(100L);
+
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
+        when(vehicleRepository.findById(200L)).thenReturn(Optional.of(vehicle));
+        when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.empty());
+        when(lotRepository.findAllBySellerVehicleIdAndTraderId(100L, TRADER_ID)).thenReturn(List.of(lot));
+        when(salesBillLineItemRepository.sumLineAmountByTraderLots(TRADER_ID, List.of("55"), null))
+            .thenReturn(BigDecimal.valueOf(8888));
+        when(salesBillLineItemRepository.findDistinctBillIdsByTraderAndLots(TRADER_ID, List.of("55"), null))
+            .thenReturn(List.of(1L, 2L));
+        when(salesBillRepository.sumOutboundFreightByTraderAndBillIds(TRADER_ID, List.of(1L, 2L)))
+            .thenReturn(BigDecimal.valueOf(450));
+
+        SettlementAmountSummaryDTO dto = service.getSettlementAmountSummary("100", null);
+
+        assertThat(dto.getArrivalFreightAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(dto.getFreightInvoiced()).isEqualByComparingTo(BigDecimal.valueOf(450));
+        assertThat(dto.getPayableInvoiced()).isEqualByComparingTo(BigDecimal.valueOf(8888));
     }
 
     // generateNextPattiId is indirectly covered via createPatti and logging; explicit reflection-based

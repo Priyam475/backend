@@ -3,14 +3,30 @@ package com.mercotrace.service.impl;
 import com.mercotrace.domain.*;
 import com.mercotrace.domain.enumeration.VoucherLifecycleStatus;
 import com.mercotrace.domain.enumeration.VoucherType;
-import com.mercotrace.repository.*;
+import com.mercotrace.repository.ChartOfAccountRepository;
+import com.mercotrace.repository.CommodityConfigRepository;
+import com.mercotrace.repository.CommodityRepository;
+import com.mercotrace.repository.ContactRepository;
+import com.mercotrace.repository.FreightCalculationRepository;
+import com.mercotrace.repository.HamaliSlabRepository;
+import com.mercotrace.repository.LotRepository;
+import com.mercotrace.repository.PattiRepository;
+import com.mercotrace.repository.SalesBillRepository;
+import com.mercotrace.repository.SalesBillLineItemRepository;
+import com.mercotrace.repository.SellerInVehicleRepository;
+import com.mercotrace.repository.VehicleRepository;
+import com.mercotrace.repository.VehicleWeightRepository;
+import com.mercotrace.repository.VoucherLineRepository;
+import com.mercotrace.repository.WeighingSessionRepository;
 import com.mercotrace.service.AuctionService;
+import com.mercotrace.service.ContactService;
 import com.mercotrace.service.SettlementService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.AuctionResultDTO;
 import com.mercotrace.service.dto.AuctionResultEntryDTO;
 import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -51,6 +67,12 @@ public class SettlementServiceImpl implements SettlementService {
     private final FreightCalculationRepository freightCalculationRepository;
     private final ChartOfAccountRepository chartOfAccountRepository;
     private final VoucherLineRepository voucherLineRepository;
+    private final VehicleWeightRepository vehicleWeightRepository;
+    private final SalesBillLineItemRepository salesBillLineItemRepository;
+    private final SalesBillRepository salesBillRepository;
+    private final ContactService contactService;
+    private final HamaliSlabRepository hamaliSlabRepository;
+    private final CommodityConfigRepository commodityConfigRepository;
 
     public SettlementServiceImpl(
         TraderContextService traderContextService,
@@ -64,7 +86,13 @@ public class SettlementServiceImpl implements SettlementService {
         CommodityRepository commodityRepository,
         FreightCalculationRepository freightCalculationRepository,
         ChartOfAccountRepository chartOfAccountRepository,
-        VoucherLineRepository voucherLineRepository
+        VoucherLineRepository voucherLineRepository,
+        VehicleWeightRepository vehicleWeightRepository,
+        SalesBillLineItemRepository salesBillLineItemRepository,
+        SalesBillRepository salesBillRepository,
+        ContactService contactService,
+        HamaliSlabRepository hamaliSlabRepository,
+        CommodityConfigRepository commodityConfigRepository
     ) {
         this.traderContextService = traderContextService;
         this.lotRepository = lotRepository;
@@ -78,6 +106,12 @@ public class SettlementServiceImpl implements SettlementService {
         this.freightCalculationRepository = freightCalculationRepository;
         this.chartOfAccountRepository = chartOfAccountRepository;
         this.voucherLineRepository = voucherLineRepository;
+        this.vehicleWeightRepository = vehicleWeightRepository;
+        this.salesBillLineItemRepository = salesBillLineItemRepository;
+        this.salesBillRepository = salesBillRepository;
+        this.contactService = contactService;
+        this.hamaliSlabRepository = hamaliSlabRepository;
+        this.commodityConfigRepository = commodityConfigRepository;
     }
 
     @Override
@@ -146,6 +180,7 @@ public class SettlementServiceImpl implements SettlementService {
                 lotDto.setLotId(lotIdStr);
                 lotDto.setLotName(ar.getLotName() != null ? ar.getLotName() : "");
                 lotDto.setCommodityName(commodity != null ? commodity.getCommodityName() : "");
+                lotDto.setArrivalBagCount(lot.getBagCount() != null ? lot.getBagCount() : 0);
                 lotDto.setEntries(new ArrayList<>());
                 seller.getLots().add(lotDto);
             }
@@ -162,6 +197,73 @@ public class SettlementServiceImpl implements SettlementService {
                 se.setWeight(weight);
                 lotDto.getEntries().add(se);
             }
+        }
+
+        Map<String, BigDecimal> billingWeightByLotId = new HashMap<>();
+        List<String> allLotIdStrs = traderLots.stream().map(l -> String.valueOf(l.getId())).toList();
+        if (!allLotIdStrs.isEmpty()) {
+            List<Object[]> billingRows = salesBillLineItemRepository.sumWeightGroupedByLotId(traderId, allLotIdStrs);
+            for (Object[] row : billingRows) {
+                if (row[0] != null && row[1] != null) {
+                    billingWeightByLotId.put((String) row[0], (BigDecimal) row[1]);
+                }
+            }
+        }
+
+        Map<Long, BigDecimal> vehicleBillableKg = new HashMap<>();
+        for (Long vid : vehicleIds) {
+            vehicleWeightRepository
+                .findOneByVehicleId(vid)
+                .ifPresent(w -> {
+                    double net = w.getNetWeight() != null ? w.getNetWeight() : 0d;
+                    double ded = w.getDeductedWeight() != null ? w.getDeductedWeight() : 0d;
+                    vehicleBillableKg.put(vid, BigDecimal.valueOf(Math.max(0d, net - ded)));
+                });
+        }
+
+        for (SellerSettlementDTO seller : sellerMap.values()) {
+            SellerInVehicle sivRow;
+            try {
+                sivRow = sivMap.get(Long.parseLong(seller.getSellerId()));
+            } catch (NumberFormatException e) {
+                sivRow = null;
+            }
+            if (sivRow != null && sivRow.getVehicleId() != null) {
+                BigDecimal vkg = vehicleBillableKg.get(sivRow.getVehicleId());
+                seller.setVehicleArrivalNetBillableKg(vkg);
+            }
+            if (sivRow != null) {
+                if (sivRow.getContactId() != null) {
+                    seller.setContactId(String.valueOf(sivRow.getContactId()));
+                    Contact c = contactMap.get(sivRow.getContactId());
+                    if (c != null && c.getPhone() != null && !c.getPhone().isBlank()) {
+                        seller.setSellerPhone(c.getPhone());
+                    }
+                } else {
+                    seller.setContactId(null);
+                    String ph = sivRow.getSellerPhone();
+                    if (ph != null && !ph.isBlank()) {
+                        seller.setSellerPhone(ph);
+                    }
+                }
+            }
+            int arrivalBags = 0;
+            BigDecimal billingNet = BigDecimal.ZERO;
+            for (SettlementLotDTO lotDto : seller.getLots()) {
+                String lid = lotDto.getLotId();
+                lotDto.setBillingWeightKg(billingWeightByLotId.get(lid));
+                try {
+                    Lot lotEntity = lotMap.get(Long.parseLong(lid));
+                    if (lotEntity != null && lotEntity.getBagCount() != null) {
+                        arrivalBags += lotEntity.getBagCount();
+                    }
+                } catch (NumberFormatException ignored) {
+                    // ignore malformed lot id
+                }
+                billingNet = billingNet.add(billingWeightByLotId.getOrDefault(lid, BigDecimal.ZERO));
+            }
+            seller.setArrivalTotalBags(arrivalBags);
+            seller.setBillingNetWeightKg(billingNet);
         }
 
         List<SellerSettlementDTO> allSellers = new ArrayList<>(sellerMap.values());
@@ -349,6 +451,299 @@ public class SettlementServiceImpl implements SettlementService {
         dto.setFreightAutoPulled(freight.compareTo(BigDecimal.ZERO) > 0);
         dto.setAdvanceAutoPulled(totalAdvance.compareTo(BigDecimal.ZERO) > 0);
         return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SellerExpenseSnapshotDTO getSellerExpenseSnapshot(String sellerId) {
+        SellerExpenseSnapshotDTO out = new SellerExpenseSnapshotDTO();
+        out.setFreight(BigDecimal.ZERO);
+        out.setUnloading(BigDecimal.ZERO);
+        out.setWeighing(BigDecimal.ZERO);
+        out.setCashAdvance(BigDecimal.ZERO);
+        out.setFreightAutoPulled(Boolean.FALSE);
+        out.setUnloadingAutoPulled(Boolean.FALSE);
+        out.setWeighingAutoPulled(Boolean.FALSE);
+        out.setCashAdvanceJournalPending(Boolean.TRUE);
+
+        if (sellerId == null || sellerId.isBlank()) {
+            return out;
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            LOG.debug("Invalid sellerId for getSellerExpenseSnapshot: {}", sellerId);
+            return out;
+        }
+
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            return out;
+        }
+
+        Optional<SellerInVehicle> sivOpt = sellerInVehicleRepository.findById(sivId);
+        if (sivOpt.isEmpty()) {
+            return out;
+        }
+        SellerInVehicle siv = sivOpt.get();
+        Long vehicleId = siv.getVehicleId();
+        if (vehicleId == null) {
+            return out;
+        }
+
+        SellerChargesDTO charges = getSellerCharges(sellerId);
+        BigDecimal advance = charges.getAdvance() != null ? charges.getAdvance() : BigDecimal.ZERO;
+        out.setCashAdvance(advance);
+        out.setCashAdvanceJournalPending(Boolean.TRUE);
+
+        BigDecimal freightTotal = BigDecimal.ZERO;
+        Optional<FreightCalculation> fcOpt = freightCalculationRepository.findOneByVehicleId(vehicleId);
+        if (fcOpt.isPresent() && fcOpt.get().getTotalAmount() != null) {
+            freightTotal = BigDecimal.valueOf(fcOpt.get().getTotalAmount());
+        }
+
+        List<SellerInVehicle> vehicleSivs = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
+        int totalVehicleBags = 0;
+        for (SellerInVehicle vs : vehicleSivs) {
+            List<Lot> vlots = lotRepository.findAllBySellerVehicleIdAndTraderId(vs.getId(), traderId);
+            for (Lot l : vlots) {
+                totalVehicleBags += l.getBagCount() != null ? l.getBagCount() : 0;
+            }
+        }
+
+        List<Lot> sellerLots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
+        int sellerBags = 0;
+        for (Lot l : sellerLots) {
+            sellerBags += l.getBagCount() != null ? l.getBagCount() : 0;
+        }
+
+        BigDecimal sellerFreight = BigDecimal.ZERO;
+        if (totalVehicleBags > 0 && freightTotal.compareTo(BigDecimal.ZERO) > 0) {
+            sellerFreight =
+                freightTotal
+                    .multiply(BigDecimal.valueOf(sellerBags))
+                    .divide(BigDecimal.valueOf(totalVehicleBags), new MathContext(20));
+        }
+        out.setFreight(sellerFreight);
+        out.setFreightAutoPulled(sellerFreight.compareTo(BigDecimal.ZERO) > 0);
+
+        List<WeighingSession> weighingSessions =
+            weighingSessionRepository.findAllByTraderIdOrderByCreatedDateDesc(traderId, Pageable.ofSize(MAX_RESULTS_FOR_SELLERS))
+                .getContent();
+        Map<Integer, BigDecimal> bidToWeight =
+            weighingSessions
+                .stream()
+                .filter(ws -> ws.getBidNumber() != null)
+                .collect(
+                    Collectors.toMap(
+                        WeighingSession::getBidNumber,
+                        ws -> ws.getNetWeight() != null ? ws.getNetWeight() : BigDecimal.ZERO,
+                        (a, b) -> a
+                    )
+                );
+
+        List<String> lotIdStrs = sellerLots.stream().map(l -> String.valueOf(l.getId())).toList();
+        Map<String, BigDecimal> billingByLot = new HashMap<>();
+        if (!lotIdStrs.isEmpty()) {
+            List<Object[]> billingRows = salesBillLineItemRepository.sumWeightGroupedByLotId(traderId, lotIdStrs);
+            for (Object[] row : billingRows) {
+                if (row[0] != null && row[1] != null) {
+                    billingByLot.put((String) row[0], (BigDecimal) row[1]);
+                }
+            }
+        }
+
+        List<Long> lotIds = sellerLots.stream().map(Lot::getId).toList();
+        Map<Long, AuctionResultDTO> arByLot = new HashMap<>();
+        if (!lotIds.isEmpty()) {
+            Page<AuctionResultDTO> arPage = auctionService.listResultsByLotIds(lotIds, Pageable.unpaged());
+            for (AuctionResultDTO ar : arPage.getContent()) {
+                arByLot.put(ar.getLotId(), ar);
+            }
+        }
+
+        BigDecimal unloadingSum = BigDecimal.ZERO;
+        BigDecimal weighingSum = BigDecimal.ZERO;
+        for (Lot lot : sellerLots) {
+            Long commodityId = lot.getCommodityId();
+            if (commodityId == null) {
+                continue;
+            }
+            BigDecimal billingKg = billingByLot.get(String.valueOf(lot.getId()));
+            AuctionResultDTO ar = arByLot.get(lot.getId());
+            BigDecimal actualW = resolveLotWeightKgForCharges(billingKg, ar, bidToWeight);
+            double actual = actualW.doubleValue();
+
+            List<HamaliSlab> slabs = hamaliSlabRepository.findAllByCommodityIdOrderByThresholdWeight(commodityId);
+            slabs.sort(Comparator.comparing(HamaliSlab::getThresholdWeight));
+            HamaliSlab firstSlab = slabs.isEmpty() ? null : slabs.get(0);
+            if (firstSlab != null && firstSlab.getThresholdWeight() != null && firstSlab.getThresholdWeight() > 0) {
+                double fr = firstSlab.getFixedRate() != null ? firstSlab.getFixedRate() : 0d;
+                double u = computeSlabChargeTotal(actual, fr, firstSlab.getThresholdWeight());
+                unloadingSum = unloadingSum.add(BigDecimal.valueOf(u));
+            }
+
+            Optional<CommodityConfig> cfgOpt = commodityConfigRepository.findOneByCommodityId(commodityId);
+            if (cfgOpt.isPresent()) {
+                CommodityConfig cfg = cfgOpt.get();
+                Double wTh = cfg.getWeighingThreshold();
+                Double wCh = cfg.getWeighingCharge();
+                if (wTh != null && wTh > 0 && wCh != null) {
+                    double w = computeSlabChargeTotal(actual, wCh, wTh);
+                    weighingSum = weighingSum.add(BigDecimal.valueOf(w));
+                }
+            }
+        }
+
+        out.setUnloading(unloadingSum);
+        out.setWeighing(weighingSum);
+        out.setUnloadingAutoPulled(unloadingSum.compareTo(BigDecimal.ZERO) > 0);
+        out.setWeighingAutoPulled(weighingSum.compareTo(BigDecimal.ZERO) > 0);
+
+        return out;
+    }
+
+    /**
+     * Same slab formula as SettlementPage / Quick Expenses (TS {@code computeSlabChargeTotal}).
+     */
+    private static double computeSlabChargeTotal(double actualWeight, double fixedRate, double threshold) {
+        double w = Math.max(0d, actualWeight);
+        double t = Math.max(0d, threshold);
+        double f = Math.max(0d, fixedRate);
+        if (t <= 0d) {
+            return 0d;
+        }
+        if (w > t) {
+            double perKg = (f * w) / t;
+            return perKg * w;
+        }
+        return f * t;
+    }
+
+    private static BigDecimal resolveLotWeightKgForCharges(
+        BigDecimal billingKg,
+        AuctionResultDTO ar,
+        Map<Integer, BigDecimal> bidToWeight
+    ) {
+        if (billingKg != null && billingKg.compareTo(BigDecimal.ZERO) > 0) {
+            return billingKg;
+        }
+        if (ar == null || ar.getEntries() == null || ar.getEntries().isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal sum = BigDecimal.ZERO;
+        for (AuctionResultEntryDTO e : ar.getEntries()) {
+            Integer bid = e.getBidNumber();
+            BigDecimal w =
+                bid != null
+                    ? bidToWeight.getOrDefault(
+                        bid,
+                        e.getQuantity() != null ? BigDecimal.valueOf(e.getQuantity().longValue() * 50L) : BigDecimal.ZERO
+                    )
+                    : BigDecimal.ZERO;
+            sum = sum.add(w != null ? w : BigDecimal.ZERO);
+        }
+        return sum;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SettlementAmountSummaryDTO getSettlementAmountSummary(String sellerId, String invoiceNameFilter) {
+        SettlementAmountSummaryDTO out = new SettlementAmountSummaryDTO();
+        out.setArrivalFreightAmount(BigDecimal.ZERO);
+        out.setFreightInvoiced(BigDecimal.ZERO);
+        out.setPayableInvoiced(BigDecimal.ZERO);
+
+        if (sellerId == null || sellerId.isBlank()) {
+            return out;
+        }
+        Long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            LOG.debug("Invalid sellerId for getSettlementAmountSummary: {}", sellerId);
+            return out;
+        }
+
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            return out;
+        }
+
+        Optional<SellerInVehicle> sivOpt = sellerInVehicleRepository.findById(sivId);
+        if (sivOpt.isEmpty()) {
+            return out;
+        }
+        SellerInVehicle siv = sivOpt.get();
+        Optional<Vehicle> vehicleOpt = vehicleRepository.findById(siv.getVehicleId());
+        if (vehicleOpt.isEmpty() || !traderId.equals(vehicleOpt.get().getTraderId())) {
+            return out;
+        }
+
+        SellerChargesDTO charges = getSellerCharges(sellerId);
+        BigDecimal arrival = charges.getFreight() != null ? charges.getFreight() : BigDecimal.ZERO;
+        out.setArrivalFreightAmount(arrival);
+
+        List<Lot> lots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
+        if (lots.isEmpty()) {
+            return out;
+        }
+        List<String> lotIdStrs = lots.stream().map(l -> String.valueOf(l.getId())).toList();
+
+        String nameFilter = invoiceNameFilter != null && !invoiceNameFilter.isBlank() ? invoiceNameFilter.trim() : null;
+
+        BigDecimal payableInvoiced = salesBillLineItemRepository.sumLineAmountByTraderLots(traderId, lotIdStrs, nameFilter);
+        out.setPayableInvoiced(payableInvoiced != null ? payableInvoiced : BigDecimal.ZERO);
+
+        List<Long> billIds = salesBillLineItemRepository.findDistinctBillIdsByTraderAndLots(traderId, lotIdStrs, nameFilter);
+        if (billIds.isEmpty()) {
+            return out;
+        }
+        BigDecimal freightInv = salesBillRepository.sumOutboundFreightByTraderAndBillIds(traderId, billIds);
+        out.setFreightInvoiced(freightInv != null ? freightInv : BigDecimal.ZERO);
+        return out;
+    }
+
+    @Override
+    @Transactional
+    public SellerRegistrationDTO linkSellerContact(String sellerVehicleId, LinkSellerContactRequest request) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            throw new IllegalArgumentException("Trader context required");
+        }
+        if (sellerVehicleId == null || sellerVehicleId.isBlank() || request == null || request.getContactId() == null) {
+            throw new IllegalArgumentException("sellerId and contactId are required");
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerVehicleId.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid seller id");
+        }
+        SellerInVehicle siv = sellerInVehicleRepository
+            .findById(sivId)
+            .orElseThrow(() -> new IllegalArgumentException("Seller not found"));
+        List<Lot> traderLots = lotRepository.findAllByTraderId(traderId, Pageable.unpaged()).getContent();
+        boolean owns = traderLots.stream().anyMatch(l -> sivId == l.getSellerVehicleId());
+        if (!owns) {
+            throw new IllegalArgumentException("Seller not in scope for this trader");
+        }
+        Long contactId = request.getContactId();
+        contactService.ensureTraderUsesPortalContact(traderId, contactId);
+        Contact c = contactRepository.findById(contactId).orElseThrow(() -> new IllegalArgumentException("Contact not found"));
+        siv.setContactId(contactId);
+        siv.setSellerName(null);
+        siv.setSellerPhone(null);
+        siv.setSellerMark(null);
+        sellerInVehicleRepository.save(siv);
+        SellerRegistrationDTO out = new SellerRegistrationDTO();
+        out.setSellerId(sellerVehicleId.trim());
+        out.setContactId(String.valueOf(contactId));
+        out.setSellerName(c.getName());
+        out.setSellerMark(c.getMark() != null ? c.getMark() : "");
+        out.setSellerPhone(c.getPhone() != null ? c.getPhone() : "");
+        return out;
     }
 
     private PattiDTO toPattiDTO(Patti e) {
