@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, User, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp, Info
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Dialog,
   DialogContent,
@@ -381,6 +380,16 @@ interface VehicleExpenseRow {
   gunnies: number;
 }
 
+/** Add Voucher modal — selection maps to cash advance later (API TBD). */
+interface VoucherPickRow {
+  id: string;
+  voucher: string;
+  narration: string;
+  receivable: number;
+  remaining: number;
+  received: number;
+}
+
 /** Distribute total lot weight across entries (billing total or sum of entry weights). */
 function distributeLotEntryWeights(lot: SettlementLot, totalW: number): number[] {
   const sumEw = lot.entries.reduce((s, e) => s + (Number(e.weight) || 0), 0);
@@ -697,6 +706,12 @@ const SettlementPage = () => {
   const [vehicleExpenseModalOpen, setVehicleExpenseModalOpen] = useState(false);
   const [vehicleExpenseLoading, setVehicleExpenseLoading] = useState(false);
   const [vehicleExpenseRows, setVehicleExpenseRows] = useState<VehicleExpenseRow[]>([]);
+
+  const [addVoucherSellerId, setAddVoucherSellerId] = useState<string | null>(null);
+  const [voucherSearchVoucherName, setVoucherSearchVoucherName] = useState('');
+  const [voucherSearchName, setVoucherSearchName] = useState('');
+  const [voucherPickRows, setVoucherPickRows] = useState<VoucherPickRow[]>([]);
+  const [selectedVoucherRowIds, setSelectedVoucherRowIds] = useState<Record<string, boolean>>({});
 
   /** Per-seller per-lot edits for Sales report qty / weight / rate per bag. */
   const [lotSalesOverridesBySellerId, setLotSalesOverridesBySellerId] = useState<
@@ -1832,56 +1847,16 @@ const SettlementPage = () => {
               </p>
             </div>
             <div className="p-4 sm:p-5">
-              <div className="mb-4 flex flex-col gap-3 rounded-xl border border-border/40 bg-muted/15 p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="settlement-weighing-enabled"
-                      checked={settlementWeighingEnabled}
-                      onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
-                    />
-                    <label htmlFor="settlement-weighing-enabled" className="text-xs font-medium text-foreground">
-                      Use weighing charges in settlement
-                    </label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="settlement-weighing-merge"
-                      checked={settlementWeighingMergeIntoFreight}
-                      disabled={!settlementWeighingEnabled}
-                      onCheckedChange={v => setSettlementWeighingMergeIntoFreight(v === true)}
-                    />
-                    <label htmlFor="settlement-weighing-merge" className="text-xs font-medium text-foreground">
-                      Merge weighing into freight (else show separate)
-                    </label>
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground sm:max-w-xs sm:text-right">
-                  Freight / unloading / weighing values are loaded from the server (same rules as Quick Expenses). This section only
-                  controls how weighing appears in totals.
-                </p>
-              </div>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
-                <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full shrink-0 rounded-xl border-dashed border-primary/40 bg-background/60 font-semibold sm:h-10 sm:w-auto sm:min-w-[12rem]"
-                    onClick={() => void openVehicleExpenseModal()}
-                  >
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Add Quick Expenses (Alt + X)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full rounded-xl border-dashed border-border font-semibold sm:h-10 sm:w-auto sm:min-w-[10rem]"
-                    onClick={() => void openVehicleExpenseModal()}
-                  >
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Add Expenses
-                  </Button>
-                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full shrink-0 rounded-xl border-dashed border-primary/40 bg-background/60 font-semibold sm:h-10 sm:w-auto sm:min-w-[12rem]"
+                  onClick={() => void openVehicleExpenseModal()}
+                >
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  Add Quick Expenses (Alt + X)
+                </Button>
                 <div className="w-full min-w-0 flex-1 sm:max-w-md">
                   <label htmlFor="settlement-invoice-name-search" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
                     Invoice Name
@@ -2477,8 +2452,24 @@ const SettlementPage = () => {
                         <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-3 py-2.5 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20">
                           <p className="text-center text-sm font-bold text-foreground">Expenses</p>
                         </div>
-                        <TooltipProvider delayDuration={200}>
-                          <div className="space-y-2 p-3 text-xs">
+                        <div className="flex items-center justify-center gap-3 border-b border-border/40 px-2 py-1.5">
+                          <Switch
+                            id={`sw-w-${seller.sellerId}`}
+                            className="h-4 w-7 scale-90"
+                            checked={settlementWeighingEnabled}
+                            onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
+                            aria-label="Use weighing charges in settlement totals"
+                          />
+                          <Switch
+                            id={`sw-m-${seller.sellerId}`}
+                            className="h-4 w-7 scale-90"
+                            checked={settlementWeighingMergeIntoFreight}
+                            disabled={!settlementWeighingEnabled}
+                            onCheckedChange={v => setSettlementWeighingMergeIntoFreight(v === true)}
+                            aria-label="Merge weighing amount into freight"
+                          />
+                        </div>
+                        <div className="space-y-2 p-3 text-xs">
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Freight (Arrivals)</span>
                               <Input
@@ -2496,7 +2487,6 @@ const SettlementPage = () => {
                                     ? exp.freight + exp.weighman
                                     : exp.freight
                                 )}
-                                title="From server (bag share). Not editable here."
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -2507,7 +2497,6 @@ const SettlementPage = () => {
                                 type="text"
                                 className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
                                 value={formatMoney2Display(exp.unloading)}
-                                title="From commodity settings (server). Not editable here."
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -2524,22 +2513,10 @@ const SettlementPage = () => {
                                       ? 'In Freight'
                                       : formatMoney2Display(exp.weighman)
                                 }
-                                title="From commodity settings (server). Toggle weighing in Expenses & invoice."
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="flex items-center gap-1 text-muted-foreground">
-                                Cash Advance
-                                <Tooltip>
-                                  <TooltipTrigger type="button" className="inline-flex text-muted-foreground hover:text-foreground">
-                                    <Info className="h-3.5 w-3.5" />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-[14rem] text-xs">
-                                    Full Journal module integration is pending. Shown amount may include freight advance and ledger
-                                    credits from the server.
-                                  </TooltipContent>
-                                </Tooltip>
-                              </span>
+                              <span className="text-muted-foreground">Cash Advance</span>
                               <Input
                                 readOnly
                                 tabIndex={-1}
@@ -2583,7 +2560,6 @@ const SettlementPage = () => {
                               />
                             </div>
                           </div>
-                        </TooltipProvider>
                         <div className="space-y-1 border-t border-border/50 p-3 pt-2 text-xs">
                           <div className="flex justify-between font-semibold">
                             <span className="text-center">Total expenses</span>
@@ -2615,6 +2591,21 @@ const SettlementPage = () => {
                       <Button
                         type="button"
                         size="sm"
+                        variant="secondary"
+                        className="h-9 rounded-xl text-xs sm:text-sm"
+                        onClick={() => {
+                          setAddVoucherSellerId(seller.sellerId);
+                          setVoucherSearchVoucherName('');
+                          setVoucherSearchName('');
+                          setVoucherPickRows([]);
+                          setSelectedVoucherRowIds({});
+                        }}
+                      >
+                        Add Voucher
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
                         className="h-9 rounded-xl text-xs sm:text-sm"
                         onClick={() => {
                           if (selectedSeller?.sellerId === seller.sellerId) void savePatti();
@@ -2634,20 +2625,6 @@ const SettlementPage = () => {
                 );
               })}
             </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
-          >
-            <p className="text-center text-sm font-bold tracking-tight text-foreground">Receivable adjustment</p>
-            <p className="mt-2 text-center text-xs leading-relaxed text-muted-foreground">
-              Allocation against contact receivable ledgers will load open vouchers with live outstanding balances, allow edits only in
-              draft, and validate on post (no reservation at selection). Server-side locking and a dedicated allocation table are
-              required — this UI will connect when that API is ready.
-            </p>
           </motion.div>
 
           <motion.div
@@ -2854,6 +2831,163 @@ const SettlementPage = () => {
                   >
                     <PlusCircle className="mr-1.5 h-4 w-4" />
                     Apply to settlement
+                  </Button>
+                </div>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={addVoucherSellerId != null}
+            onOpenChange={open => {
+              if (!open) setAddVoucherSellerId(null);
+            }}
+          >
+            <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
+              <div className="border-b border-border/50 bg-muted/30 px-4 py-3 sm:px-5">
+                <DialogHeader className="space-y-1 text-left">
+                  <DialogTitle className="text-base font-bold tracking-tight">Add Voucher</DialogTitle>
+                  <DialogDescription className="text-[11px] text-muted-foreground">
+                    Select rows to add; cash advance link comes later.
+                  </DialogDescription>
+                </DialogHeader>
+              </div>
+              <div className="space-y-3 px-4 py-3 sm:px-5">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label htmlFor="add-voucher-name-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">
+                      Enter Voucher Name
+                    </label>
+                    <Input
+                      id="add-voucher-name-filter"
+                      value={voucherSearchVoucherName}
+                      onChange={e => setVoucherSearchVoucherName(e.target.value)}
+                      placeholder="Voucher name…"
+                      className="h-9 rounded-lg text-sm"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="add-voucher-enter-name" className="text-[10px] font-semibold uppercase text-muted-foreground">
+                      Enter Name
+                    </label>
+                    <Input
+                      id="add-voucher-enter-name"
+                      value={voucherSearchName}
+                      onChange={e => setVoucherSearchName(e.target.value)}
+                      placeholder="Name…"
+                      className="h-9 rounded-lg text-sm"
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 rounded-lg px-3 text-xs"
+                  onClick={() => {
+                    const pk = addVoucherSellerId ?? 'x';
+                    const base: VoucherPickRow[] = [
+                      {
+                        id: `${pk}-v1`,
+                        voucher: voucherSearchVoucherName.trim() || 'VOU-2026-0001',
+                        narration: 'Receivable — on account',
+                        receivable: 125000,
+                        remaining: 42000,
+                        received: 83000,
+                      },
+                      {
+                        id: `${pk}-v2`,
+                        voucher: voucherSearchVoucherName.trim() ? `${voucherSearchVoucherName.trim()}-002` : 'VOU-2026-0002',
+                        narration: 'Advance — pending allocation',
+                        receivable: 45000,
+                        remaining: 45000,
+                        received: 0,
+                      },
+                    ];
+                    const q = voucherSearchName.trim().toLowerCase();
+                    const rows = q
+                      ? base.filter(r => r.narration.toLowerCase().includes(q) || r.voucher.toLowerCase().includes(q))
+                      : base;
+                    setVoucherPickRows(rows.length > 0 ? rows : base);
+                    setSelectedVoucherRowIds({});
+                  }}
+                >
+                  Get Voucher
+                </Button>
+              </div>
+              <div className="px-4 pb-3 sm:px-5">
+                <div className="overflow-x-auto rounded-lg border border-border/50">
+                  <table className="w-full min-w-[700px] border-collapse text-left text-[11px]">
+                    <thead>
+                      <tr className="border-b border-border/60 bg-muted/40">
+                        <th className="w-10 px-2 py-2 text-center font-semibold text-muted-foreground">Action</th>
+                        <th className="px-2 py-2 font-semibold text-muted-foreground">Voucher</th>
+                        <th className="px-2 py-2 font-semibold text-muted-foreground">Narration</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Receivable</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Remaining</th>
+                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Received</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {voucherPickRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
+                            Use Get Voucher to load rows.
+                          </td>
+                        </tr>
+                      ) : (
+                        voucherPickRows.map(row => (
+                          <tr key={row.id} className="border-b border-border/40 odd:bg-background even:bg-muted/15">
+                            <td className="px-2 py-2 text-center align-middle">
+                              <Checkbox
+                                checked={selectedVoucherRowIds[row.id] === true}
+                                onCheckedChange={v => {
+                                  const on = v === true;
+                                  setSelectedVoucherRowIds(prev => ({ ...prev, [row.id]: on }));
+                                }}
+                                aria-label={`Select ${row.voucher}`}
+                              />
+                            </td>
+                            <td className="px-2 py-2 align-middle font-medium text-foreground">{row.voucher}</td>
+                            <td className="px-2 py-2 align-middle text-muted-foreground">{row.narration}</td>
+                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.receivable)}</td>
+                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.remaining)}</td>
+                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.received)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <DialogFooter className="border-t border-border/50 bg-muted/20 px-4 py-3 sm:px-5">
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => setAddVoucherSellerId(null)}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => {
+                      const picked = voucherPickRows.filter(r => selectedVoucherRowIds[r.id]);
+                      if (picked.length === 0) {
+                        toast.message('Select at least one voucher row.');
+                        return;
+                      }
+                      toast.success(`${picked.length} voucher row(s) selected — cash advance link pending.`);
+                      setAddVoucherSellerId(null);
+                    }}
+                  >
+                    Add
                   </Button>
                 </div>
               </DialogFooter>
