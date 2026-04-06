@@ -705,7 +705,7 @@ function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: Sel
 
 function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
   return {
-    // Default to unregistered; user manually checks "Registered" when needed.
+    // Keep Unregistered checked by default in UI; uncheck to work as Registered flow.
     registered: false,
     contactId: null,
     mark: seller.sellerMark || '',
@@ -735,6 +735,8 @@ const SettlementPage = () => {
   const [sellers, setSellers] = useState<SellerSettlement[]>([]);
   const [selectedSeller, setSelectedSeller] = useState<SellerSettlement | null>(null);
   const [selectedArrivalSellerIds, setSelectedArrivalSellerIds] = useState<string[]>([]);
+  const [draftMainPattiNo, setDraftMainPattiNo] = useState('');
+  const [draftPattiNoBySellerId, setDraftPattiNoBySellerId] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [settlementMainTab, setSettlementMainTab] = useState<'arrival-summary' | 'create-settlements'>('arrival-summary');
   const [arrivalSummaryTab, setArrivalSummaryTab] = useState<'new-patti' | 'saved-patti'>('new-patti');
@@ -946,7 +948,7 @@ const SettlementPage = () => {
 
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
-  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
+  const generatePatti = useCallback(async (seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
     setPattiDetailDto(null);
     setSelectedPattiVersion('latest');
     latestPattiDataSnapshotRef.current = null;
@@ -955,8 +957,11 @@ const SettlementPage = () => {
     setLotSalesOverridesBySellerId({});
     setVehicleExpenseRows([]);
     setVehicleExpenseModalOpen(false);
+    setDraftMainPattiNo('');
+    setDraftPattiNoBySellerId({});
     setSelectedSeller(seller);
-    setSelectedArrivalSellerIds(overrides?.arrivalSellerIds ?? []);
+    const scopeSellerIds = (overrides?.arrivalSellerIds?.length ? overrides.arrivalSellerIds : [seller.sellerId]).map(String);
+    setSelectedArrivalSellerIds(scopeSellerIds);
     setHasArrivalSelection(true);
 
     if (!isVehicleNumberValid(seller.vehicleNumber)) {
@@ -983,9 +988,62 @@ const SettlementPage = () => {
     const baseNetPayable = grossAmount - baseTotalDeductions;
 
     const createdAt = new Date().toISOString();
+    const parseBaseFromPattiId = (pid?: string): string => {
+      const raw = String(pid ?? '').trim();
+      const m = raw.match(/^(\d+)-\d+$/);
+      return m ? m[1] : '';
+    };
+    const parseSequenceFromPattiId = (pid?: string): number | null => {
+      const raw = String(pid ?? '').trim();
+      const m = raw.match(/^\d+-(\d+)$/);
+      if (!m) return null;
+      const n = Number(m[1]);
+      return Number.isFinite(n) ? n : null;
+    };
+    const scopedSellersOrdered: SellerSettlement[] = scopeSellerIds
+      .map(id => sellers.find(s => String(s.sellerId) === id))
+      .filter((s): s is SellerSettlement => !!s);
+    const scopedSaved = savedPattis.filter(p => scopeSellerIds.includes(String(p.sellerId ?? '').trim()));
+    const existingBase =
+      scopedSaved.map(p => String(p.pattiBaseNumber ?? '').trim()).find(v => v.length > 0) ||
+      scopedSaved.map(p => parseBaseFromPattiId(p.pattiId)).find(v => v.length > 0) ||
+      '';
+    let baseNo = existingBase;
+    const draftBySeller: Record<string, string> = {};
+    if (!baseNo && scopedSellersOrdered.some(s => !scopedSaved.some(p => String(p.sellerId ?? '').trim() === String(s.sellerId)))) {
+      try {
+        baseNo = await settlementApi.reserveNextPattiBaseNumber();
+      } catch {
+        baseNo = '';
+      }
+    }
+    if (baseNo) {
+      let seqCounter = 0;
+      for (const p of scopedSaved) {
+        const pBase = String(p.pattiBaseNumber ?? '').trim() || parseBaseFromPattiId(p.pattiId);
+        if (pBase !== baseNo) continue;
+        const seq =
+          typeof p.sellerSequenceNumber === 'number' && Number.isFinite(p.sellerSequenceNumber) && p.sellerSequenceNumber > 0
+            ? p.sellerSequenceNumber
+            : parseSequenceFromPattiId(p.pattiId);
+        if (seq != null) seqCounter = Math.max(seqCounter, seq);
+      }
+      for (const s of scopedSellersOrdered) {
+        const sid = String(s.sellerId);
+        const saved = scopedSaved.find(p => String(p.sellerId ?? '').trim() === sid);
+        if (saved?.pattiId) {
+          draftBySeller[sid] = String(saved.pattiId);
+          continue;
+        }
+        seqCounter += 1;
+        draftBySeller[sid] = `${baseNo}-${seqCounter}`;
+      }
+    }
+    setDraftMainPattiNo(baseNo);
+    setDraftPattiNoBySellerId(draftBySeller);
 
     setPattiData({
-      pattiId: '', // Server assigns pattiId on save (PT-YYYYMMDD-NNNN).
+      pattiId: draftBySeller[String(seller.sellerId)] ?? '',
       sellerName: seller.sellerName,
       rateClusters,
       grossAmount,
@@ -995,11 +1053,13 @@ const SettlementPage = () => {
       createdAt,
       useAverageWeight: false,
     });
-  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, isWeighingMergedIntoFreight]);
+  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, isWeighingMergedIntoFreight, sellers, savedPattis]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
   const openPattiForEdit = useCallback(async (id: number, arrivalSellerIds?: string[]) => {
     try {
+      setDraftMainPattiNo('');
+      setDraftPattiNoBySellerId({});
       const dto = await settlementApi.getPattiById(id);
       if (!dto) {
         toast.error('Patti not found');
@@ -1279,18 +1339,70 @@ const SettlementPage = () => {
     }
     const failures: string[] = [];
     const sellersNeedingCreate = arrivalSellersForPatti.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
-    let sharedPattiBaseNumber: string | null = null;
+    let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
+    const sellerSequenceBySellerId: Record<string, number> = {};
+    const parseSeqFromPattiId = (pid?: string): number | undefined => {
+      const m = String(pid ?? '').trim().match(/^\d+-(\d+)$/);
+      if (!m) return undefined;
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    for (const s of sellersNeedingCreate) {
+      const seq = parseSeqFromPattiId(draftPattiNoBySellerId[s.sellerId]);
+      if (seq != null) sellerSequenceBySellerId[s.sellerId] = seq;
+    }
     if (sellersNeedingCreate.length > 0) {
-      try {
-        sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
-      } catch {
-        toast.error('Failed to reserve Sales Patti number.');
-        return;
+      const scopedSids = new Set(arrivalSellersForPatti.map(s => String(s.sellerId)));
+      const scopedSaved = savedPattis.filter(p => scopedSids.has(String(p.sellerId ?? '').trim()));
+      const parseBaseFromPattiId = (pid?: string): string => {
+        const raw = String(pid ?? '').trim();
+        const m = raw.match(/^(\d+)-\d+$/);
+        return m ? m[1] : '';
+      };
+      const parseSequenceFromPattiId = (pid?: string): number | null => {
+        const raw = String(pid ?? '').trim();
+        const m = raw.match(/^\d+-(\d+)$/);
+        if (!m) return null;
+        const n = Number(m[1]);
+        return Number.isFinite(n) ? n : null;
+      };
+      const existingBase =
+        scopedSaved.map(p => String(p.pattiBaseNumber ?? '').trim()).find(v => v.length > 0) ||
+        scopedSaved.map(p => parseBaseFromPattiId(p.pattiId)).find(v => v.length > 0) ||
+        '';
+      if (!sharedPattiBaseNumber && existingBase) {
+        sharedPattiBaseNumber = existingBase;
+      } else if (!sharedPattiBaseNumber) {
+        try {
+          sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
+        } catch {
+          toast.error('Failed to reserve Sales Patti number.');
+          return;
+        }
+      }
+
+      let seqCounter = Object.values(sellerSequenceBySellerId).reduce((mx, n) => Math.max(mx, n), 0);
+      for (const p of scopedSaved) {
+        const pBase =
+          String(p.pattiBaseNumber ?? '').trim() ||
+          parseBaseFromPattiId(p.pattiId);
+        if (!pBase || pBase !== sharedPattiBaseNumber) continue;
+        const seqRaw = p.sellerSequenceNumber;
+        const seqNum =
+          typeof seqRaw === 'number' && Number.isFinite(seqRaw) && seqRaw > 0
+            ? seqRaw
+            : parseSequenceFromPattiId(p.pattiId);
+        if (seqNum != null) seqCounter = Math.max(seqCounter, seqNum);
+      }
+      for (const seller of sellersNeedingCreate) {
+        if (sellerSequenceBySellerId[seller.sellerId] != null) continue;
+        seqCounter += 1;
+        sellerSequenceBySellerId[seller.sellerId] = seqCounter;
       }
     }
     for (const seller of arrivalSellersForPatti) {
       const needsCreate = existingPattiIdBySellerId[seller.sellerId] == null;
-      const sellerSequenceNumber = needsCreate ? sellersNeedingCreate.findIndex(s => s.sellerId === seller.sellerId) + 1 : undefined;
+      const sellerSequenceNumber = needsCreate ? sellerSequenceBySellerId[seller.sellerId] : undefined;
       const ok = await savePattiForSeller(seller, {
         silent: true,
         showPrintAfterSave: false,
@@ -1354,16 +1466,8 @@ const SettlementPage = () => {
     );
   }, [savedPattis, searchQuery]);
 
-  const mainSalesPattiNumber = useMemo(() => {
-    const raw = (pattiData?.pattiId ?? '').trim();
-    if (!raw) return '';
-    const dashIndex = raw.indexOf('-');
-    if (dashIndex <= 0) return raw;
-    return raw.slice(0, dashIndex);
-  }, [pattiData?.pattiId]);
-
   const sellerSalesPattiNumberBySellerId = useMemo(() => {
-    const map: Record<string, string> = {};
+    const map: Record<string, string> = { ...draftPattiNoBySellerId };
     for (const p of savedPattis) {
       const sid = String(p.sellerId ?? '').trim();
       const pid = String(p.pattiId ?? '').trim();
@@ -1376,7 +1480,24 @@ const SettlementPage = () => {
       map[currentSid] = currentPid;
     }
     return map;
-  }, [savedPattis, selectedSeller?.sellerId, pattiData?.pattiId]);
+  }, [savedPattis, selectedSeller?.sellerId, pattiData?.pattiId, draftPattiNoBySellerId]);
+
+  const displayMainSalesPattiNo = useMemo(() => {
+    if (draftMainPattiNo) return draftMainPattiNo;
+    const dtoBase = String(pattiDetailDto?.pattiBaseNumber ?? '').trim();
+    if (dtoBase) return dtoBase;
+    const sid = String(selectedSeller?.sellerId ?? '').trim();
+    const sellerPattiNo = sid ? String(sellerSalesPattiNumberBySellerId[sid] ?? '').trim() : '';
+    const raw = sellerPattiNo || String(pattiData?.pattiId ?? '').trim();
+    const m = raw.match(/^(\d+)-\d+$/);
+    return m ? m[1] : '';
+  }, [
+    draftMainPattiNo,
+    pattiDetailDto?.pattiBaseNumber,
+    selectedSeller?.sellerId,
+    sellerSalesPattiNumberBySellerId,
+    pattiData?.pattiId,
+  ]);
 
   /** Settlement sellers that already have a saved Sales Patti — hide from New Patti tab. */
   const sellerIdsWithSavedPatti = useMemo(() => {
@@ -2370,7 +2491,7 @@ const SettlementPage = () => {
             </Button>
             <Button
               type="button"
-              onClick={() => { setShowPrint(false); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); }}
+              onClick={() => { setShowPrint(false); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
               variant="outline"
               className={arrOutlineTall}
             >
@@ -2407,7 +2528,7 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); }}
+              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -2415,7 +2536,9 @@ const SettlementPage = () => {
                 <h1 className="text-lg font-bold text-white flex items-center gap-2">
                   <FileText className="w-5 h-5" /> Sales Patti
                 </h1>
-                <p className="text-white/70 text-xs">{pattiData.pattiId || '(New Patti)'}</p>
+                <p className="text-white/70 text-xs">
+                  Sales Patti No: {displayMainSalesPattiNo || '-'}
+                </p>
               </div>
             </div>
 
@@ -2426,7 +2549,7 @@ const SettlementPage = () => {
           <div className="flex items-center gap-4 mb-4">
             <Button
               type="button"
-              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); }}
+              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
               variant="outline"
               className={cn(arrSolidMd, 'gap-1.5')}
             >
@@ -2436,7 +2559,9 @@ const SettlementPage = () => {
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <FileText className="w-5 h-5 text-emerald-600 dark:text-emerald-400" /> Sales Patti — {selectedSeller.sellerName}
               </h2>
-              <p className="text-sm text-muted-foreground">{pattiData.pattiId || '(New Patti)'} · {selectedSeller.vehicleNumber} · {totalBags} bags</p>
+              <p className="text-sm text-muted-foreground">
+                Sales Patti No: {displayMainSalesPattiNo || '-'} · {selectedSeller.vehicleNumber} · {totalBags} bags
+              </p>
             </div>
           </div>
         </div>
@@ -2495,12 +2620,12 @@ const SettlementPage = () => {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.02 }}
-            className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
+            className="glass-card rounded-2xl border border-border/50 p-5 sm:p-6 lg:-mx-2"
           >
             <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
               Expenses &amp; invoice
             </h3>
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
               <div className="min-w-0 sm:pr-4 sm:border-r sm:border-border/50">
                 <div className="flex items-start gap-3">
                   <div
@@ -2701,10 +2826,12 @@ const SettlementPage = () => {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-lg border border-border/50 bg-background/70 px-2 py-1 text-[11px] font-semibold text-foreground">
+                          Patti No: {sellerSalesPattiNumberBySellerId[seller.sellerId] || '-'}
+                        </span>
                         <Button
                           type="button"
-                          variant="outline"
-                          className={cn(arrOutlineSm, 'gap-1')}
+                          className={cn(arrSolidSm, 'gap-1')}
                           onClick={() =>
                             setSalesReportCollapsedBySellerId(prev => ({
                               ...prev,
@@ -2749,21 +2876,22 @@ const SettlementPage = () => {
                       <label className="flex cursor-pointer items-center gap-2 font-medium">
                         <Checkbox
                           className="h-4 w-4 rounded-none"
-                          checked={form.registered}
+                          checked={!form.registered}
                           onCheckedChange={v => {
-                            const on = v === true;
+                            const isUnregisteredChecked = v === true;
+                            const isRegistered = !isUnregisteredChecked;
                             setSellerFormById(prev => {
                               const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
                               return {
                                 ...prev,
                                 [seller.sellerId]: {
                                   ...cur,
-                                  registered: on,
-                                  contactSearchQuery: on ? cur.contactSearchQuery : '',
+                                  registered: isRegistered,
+                                  contactSearchQuery: isRegistered ? cur.contactSearchQuery : '',
                                 },
                               };
                             });
-                            if (on) void runSellerContactSearch(seller.sellerId, '');
+                            if (isRegistered) void runSellerContactSearch(seller.sellerId, '');
                           }}
                         />
                         <span className="text-foreground">Unregistered</span>
@@ -3020,7 +3148,7 @@ const SettlementPage = () => {
 
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
                       <div className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
-                        <table className="w-full min-w-[860px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
+                        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
                           <thead>
                             <tr className="bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 dark:from-slate-800 dark:via-slate-800/90 dark:to-slate-800">
                               <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
