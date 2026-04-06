@@ -46,6 +46,8 @@ interface SellerSettlement {
   sellerId: string;
   sellerName: string;
   sellerMark: string;
+  /** Arrivals vehicle id (from settlement API) for direct arrival freight lookup. */
+  vehicleId?: number;
   vehicleNumber: string;
   /** Arrivals: Σ lot bag counts for this seller. */
   arrivalTotalBags?: number;
@@ -1204,8 +1206,9 @@ const SettlementPage = () => {
     [arrivalSellersForPatti]
   );
   const arrivalFreightBaselineKey = useMemo(
-    () => `${selectedSeller?.sellerId ?? ''}__${arrivalSalesReportSellerIdsKey}__${pattiData?.createdAt ?? ''}`,
-    [selectedSeller?.sellerId, arrivalSalesReportSellerIdsKey, pattiData?.createdAt]
+    () =>
+      `${selectedSeller?.sellerId ?? ''}__${selectedSeller?.vehicleId ?? ''}__${arrivalSalesReportSellerIdsKey}__${pattiData?.createdAt ?? ''}`,
+    [selectedSeller?.sellerId, selectedSeller?.vehicleId, arrivalSalesReportSellerIdsKey, pattiData?.createdAt]
   );
 
   /** Vehicle-level net payable across all visible seller cards in current patti scope. */
@@ -1241,10 +1244,9 @@ const SettlementPage = () => {
       return sum + (exp?.freight ?? 0);
     }, 0);
     const runtimeInvoicePayable = vehicleNetPayableFromPatti;
-    /** Vehicle total: API (FreightCalculation), else arrivals list scan, else sum of per-seller freight shares (same as Quick Expenses). */
+    /** Arrival vehicle freight: only from API or arrivals module scan — never from expense-card edits (those drive invoiced/runtime only). */
     const apiArrival = amountSummaryFromApi.arrivalFreightAmount;
-    const arrivalDisplay =
-      apiArrival > 0 ? apiArrival : arrivalFreightBaseline > 0 ? arrivalFreightBaseline : runtimeFreight;
+    const arrivalDisplay = apiArrival > 0 ? apiArrival : arrivalFreightBaseline;
     return {
       arrivalFreightAmount: arrivalDisplay,
       freightInvoiced:
@@ -1261,12 +1263,27 @@ const SettlementPage = () => {
     }
     let cancelled = false;
     void (async () => {
+      const vidRaw =
+        selectedSeller.vehicleId ??
+        arrivalSellersForPatti.find(s => s.vehicleId != null && Number.isFinite(Number(s.vehicleId)))?.vehicleId;
+      const vid = vidRaw != null && Number(vidRaw) > 0 ? Number(vidRaw) : null;
+
+      if (vid != null) {
+        try {
+          const detail = await arrivalsApi.getById(vid);
+          if (!cancelled) setArrivalFreightBaseline(Number(detail.freightTotal ?? 0));
+        } catch {
+          if (!cancelled) setArrivalFreightBaseline(0);
+        }
+        return;
+      }
+
+      let fromArrival = 0;
       const candidateVehicle =
         selectedSeller.vehicleNumber ||
         arrivalSellersForPatti.find(s => (s.vehicleNumber || '').trim().length > 0)?.vehicleNumber ||
         '';
       const vKey = normalizeVehicleKey(candidateVehicle);
-      let fromArrival = 0;
       if (vKey) {
         try {
           const size = 200;
@@ -1289,7 +1306,7 @@ const SettlementPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [arrivalFreightBaselineKey]);
+  }, [arrivalFreightBaselineKey, arrivalSellersForPatti, selectedSeller]);
 
   useEffect(() => {
     if (!selectedSeller || !pattiData) {

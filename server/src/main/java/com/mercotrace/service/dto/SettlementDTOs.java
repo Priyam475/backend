@@ -224,6 +224,8 @@ public final class SettlementDTOs {
         private String sellerId;
         private String sellerName;
         private String sellerMark;
+        /** Arrivals vehicle PK; used to load freight without scanning the arrivals list. */
+        private Long vehicleId;
         private String vehicleNumber;
         /** Sum of {@link Lot#getBagCount()} for this seller's lots (Arrivals). */
         private Integer arrivalTotalBags;
@@ -251,6 +253,8 @@ public final class SettlementDTOs {
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
         public String getSellerMark() { return sellerMark; }
         public void setSellerMark(String sellerMark) { this.sellerMark = sellerMark; }
+        public Long getVehicleId() { return vehicleId; }
+        public void setVehicleId(Long vehicleId) { this.vehicleId = vehicleId; }
         public String getVehicleNumber() { return vehicleNumber; }
         public void setVehicleNumber(String vehicleNumber) { this.vehicleNumber = vehicleNumber; }
         public Integer getArrivalTotalBags() { return arrivalTotalBags; }

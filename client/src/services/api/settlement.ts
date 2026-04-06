@@ -74,6 +74,8 @@ export interface SellerSettlementDTO {
   sellerId: string;
   sellerName: string;
   sellerMark: string;
+  /** Arrivals `vehicle.id` — load freight via GET /arrivals/:id without list scan. */
+  vehicleId?: number;
   vehicleNumber: string;
   /** Arrivals: Σ bag counts for this seller's lots. */
   arrivalTotalBags?: number;

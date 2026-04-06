@@ -172,6 +172,7 @@ public class SettlementServiceImpl implements SettlementService {
                 dto.setSellerId(sellerIdKey);
                 dto.setSellerName(sellerName);
                 dto.setSellerMark(sellerMark);
+                dto.setVehicleId(siv.getVehicleId());
                 dto.setVehicleNumber(vehicleNumber);
                 dto.setFromLocation(vehicle != null ? vehicle.getOrigin() : null);
                 dto.setSellerSerialNo(lot.getSellerSerialNo());
