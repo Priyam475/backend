@@ -14,6 +14,7 @@ import com.mercotrace.domain.Lot;
 import com.mercotrace.domain.PattiRateCluster;
 import com.mercotrace.domain.SellerInVehicle;
 import com.mercotrace.domain.Vehicle;
+import com.mercotrace.domain.BillNumberSequence;
 import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.PattiRepository;
 import com.mercotrace.repository.VoucherLineRepository;
@@ -38,6 +39,8 @@ class SettlementServiceImplTest {
 
     @Mock
     private TraderContextService traderContextService;
+    @Mock
+    private com.mercotrace.repository.BillNumberSequenceRepository billNumberSequenceRepository;
 
     @Mock
     private com.mercotrace.repository.LotRepository lotRepository;
@@ -96,6 +99,7 @@ class SettlementServiceImplTest {
     void setUp() {
         service = new SettlementServiceImpl(
             traderContextService,
+            billNumberSequenceRepository,
             lotRepository,
             auctionService,
             pattiRepository,
@@ -149,14 +153,17 @@ class SettlementServiceImplTest {
         PattiSaveRequest req = sampleSaveRequest();
 
         when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
-        when(pattiRepository.findTopByPattiIdStartingWithOrderByIdDesc(any())).thenReturn(Optional.empty());
+        BillNumberSequence seq = new BillNumberSequence();
+        seq.setPrefix("PATTI");
+        seq.setNextValue(2255L);
+        when(billNumberSequenceRepository.findByPrefixForUpdate("PATTI")).thenReturn(Optional.of(seq));
         when(pattiRepository.save(any(Patti.class))).thenAnswer(inv -> {
             Patti p = inv.getArgument(0);
             if (p.getId() == null) {
                 p.setId(1L);
             }
             if (p.getPattiId() == null) {
-                p.setPattiId("PT-20260316-0001");
+                p.setPattiId("2255-1");
             }
             return p;
         });
@@ -164,7 +171,9 @@ class SettlementServiceImplTest {
             Patti p = new Patti();
             p.setId(1L);
             p.setTraderId(TRADER_ID);
-            p.setPattiId("PT-20260316-0001");
+            p.setPattiId("2255-1");
+            p.setPattiBaseNumber("2255");
+            p.setSellerSequenceNumber(1);
             p.setSellerId(req.getSellerId());
             p.setSellerName(req.getSellerName());
             p.setGrossAmount(req.getGrossAmount());
@@ -194,7 +203,9 @@ class SettlementServiceImplTest {
 
         // Verify basic persistence behaviour via resulting DTO rather than exact save invocations,
         // since the service intentionally saves twice (before and after mapping nested collections).
-        assertThat(dto.getPattiId()).startsWith("PT-");
+        assertThat(dto.getPattiId()).isEqualTo("2255-1");
+        assertThat(dto.getPattiBaseNumber()).isEqualTo("2255");
+        assertThat(dto.getSellerSequenceNumber()).isEqualTo(1);
         assertThat(dto.getSellerName()).isEqualTo("Test Seller");
         assertThat(dto.getRateClusters()).hasSize(1);
         assertThat(dto.getDeductions()).hasSize(1);

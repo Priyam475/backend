@@ -8,6 +8,7 @@ import com.mercotrace.repository.CommodityConfigRepository;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.repository.FreightCalculationRepository;
+import com.mercotrace.repository.BillNumberSequenceRepository;
 import com.mercotrace.repository.HamaliSlabRepository;
 import com.mercotrace.repository.LotRepository;
 import com.mercotrace.repository.PattiRepository;
@@ -31,9 +32,6 @@ import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -53,12 +51,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class SettlementServiceImpl implements SettlementService {
 
     private static final Logger LOG = LoggerFactory.getLogger(SettlementServiceImpl.class);
-    private static final DateTimeFormatter PATTI_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final int MAX_RESULTS_FOR_SELLERS = 2000;
+    private static final String PATTI_BASE_SEQUENCE_KEY = "PATTI";
 
     private static final String RECEIVABLE_CLASSIFICATION = "RECEIVABLE";
 
     private final TraderContextService traderContextService;
+    private final BillNumberSequenceRepository billNumberSequenceRepository;
     private final LotRepository lotRepository;
     private final AuctionService auctionService;
     private final PattiRepository pattiRepository;
@@ -80,6 +79,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     public SettlementServiceImpl(
         TraderContextService traderContextService,
+        BillNumberSequenceRepository billNumberSequenceRepository,
         LotRepository lotRepository,
         AuctionService auctionService,
         PattiRepository pattiRepository,
@@ -100,6 +100,7 @@ public class SettlementServiceImpl implements SettlementService {
         ObjectMapper objectMapper
     ) {
         this.traderContextService = traderContextService;
+        this.billNumberSequenceRepository = billNumberSequenceRepository;
         this.lotRepository = lotRepository;
         this.auctionService = auctionService;
         this.pattiRepository = pattiRepository;
@@ -300,10 +301,17 @@ public class SettlementServiceImpl implements SettlementService {
     @Transactional(readOnly = false)
     public PattiDTO createPatti(PattiSaveRequest request) {
         Long traderId = traderContextService.getCurrentTraderId();
-        String pattiId = generateNextPattiId();
+        String pattiBaseNumber = normalizePattiBaseNumber(request.getPattiBaseNumber());
+        if (pattiBaseNumber == null) {
+            pattiBaseNumber = reserveNextPattiBaseNumber();
+        }
+        int sellerSequence = normalizeSellerSequence(request.getSellerSequenceNumber());
+        String pattiId = buildPattiId(pattiBaseNumber, sellerSequence);
         Patti entity = new Patti();
         entity.setTraderId(traderId);
         entity.setPattiId(pattiId);
+        entity.setPattiBaseNumber(pattiBaseNumber);
+        entity.setSellerSequenceNumber(sellerSequence);
         entity.setSellerId(request.getSellerId());
         entity.setSellerName(request.getSellerName());
         entity.setGrossAmount(request.getGrossAmount());
@@ -342,21 +350,43 @@ public class SettlementServiceImpl implements SettlementService {
         }
     }
 
-    private String generateNextPattiId() {
-        String datePrefix = "PT-" + LocalDate.now(ZoneId.systemDefault()).format(PATTI_DATE) + "-";
-        Optional<Patti> last = pattiRepository.findTopByPattiIdStartingWithOrderByIdDesc(datePrefix);
-        int next = 1;
-        if (last.isPresent()) {
-            String id = last.get().getPattiId();
-            if (id != null && id.length() > datePrefix.length()) {
-                try {
-                    next = Integer.parseInt(id.substring(datePrefix.length())) + 1;
-                } catch (NumberFormatException e) {
-                    LOG.warn("Could not parse patti counter from {}", id);
-                }
-            }
+    private static String buildPattiId(String pattiBaseNumber, int sellerSequence) {
+        return pattiBaseNumber + "-" + sellerSequence;
+    }
+
+    private static int normalizeSellerSequence(Integer sellerSequenceNumber) {
+        if (sellerSequenceNumber == null || sellerSequenceNumber <= 0) {
+            return 1;
         }
-        return datePrefix + String.format("%04d", next);
+        return sellerSequenceNumber;
+    }
+
+    private static String normalizePattiBaseNumber(String base) {
+        if (base == null) {
+            return null;
+        }
+        String trimmed = base.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.replaceAll("[^0-9]", "");
+    }
+
+    @Override
+    @Transactional(readOnly = false)
+    public String reserveNextPattiBaseNumber() {
+        BillNumberSequence seq = billNumberSequenceRepository
+            .findByPrefixForUpdate(PATTI_BASE_SEQUENCE_KEY)
+            .orElseGet(() -> {
+                BillNumberSequence s = new BillNumberSequence();
+                s.setPrefix(PATTI_BASE_SEQUENCE_KEY);
+                s.setNextValue(1L);
+                return s;
+            });
+        long next = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
+        seq.setNextValue(next + 1L);
+        billNumberSequenceRepository.save(seq);
+        return String.valueOf(next);
     }
 
     @Override
@@ -791,6 +821,8 @@ public class SettlementServiceImpl implements SettlementService {
         PattiDTO dto = new PattiDTO();
         dto.setId(e.getId());
         dto.setPattiId(e.getPattiId());
+        dto.setPattiBaseNumber(e.getPattiBaseNumber());
+        dto.setSellerSequenceNumber(e.getSellerSequenceNumber());
         dto.setSellerId(e.getSellerId());
         dto.setSellerName(e.getSellerName());
         enrichPattiArrivalMeta(dto, e.getSellerId(), e.getTraderId());

@@ -121,8 +121,19 @@ public class SettlementResource {
     }
 
     /**
+     * {@code GET /api/settlements/pattis/next-base-number} :
+     * reserve next Sales Patti base number (digits only).
+     */
+    @GetMapping("/pattis/next-base-number")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_CREATE + "\")")
+    public ResponseEntity<String> reserveNextPattiBaseNumber() {
+        LOG.debug("REST request to reserve next Sales Patti base number");
+        return ResponseEntity.ok(settlementService.reserveNextPattiBaseNumber());
+    }
+
+    /**
      * {@code POST  /api/settlements/pattis} : create a new patti.
-     * Patti ID generated server-side (PT-YYYYMMDD-NNNN).
+     * Patti ID generated server-side (base-sellerSequence, e.g. 2255-1).
      */
     @PostMapping("/pattis")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_CREATE + "\")")

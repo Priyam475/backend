@@ -102,6 +102,8 @@ public final class SettlementDTOs {
         private Long id;
         @JsonProperty("pattiId")
         private String pattiId;
+        private String pattiBaseNumber;
+        private Integer sellerSequenceNumber;
         private String sellerId;
         private String sellerName;
         private String vehicleNumber;
@@ -121,6 +123,10 @@ public final class SettlementDTOs {
         public void setId(Long id) { this.id = id; }
         public String getPattiId() { return pattiId; }
         public void setPattiId(String pattiId) { this.pattiId = pattiId; }
+        public String getPattiBaseNumber() { return pattiBaseNumber; }
+        public void setPattiBaseNumber(String pattiBaseNumber) { this.pattiBaseNumber = pattiBaseNumber; }
+        public Integer getSellerSequenceNumber() { return sellerSequenceNumber; }
+        public void setSellerSequenceNumber(Integer sellerSequenceNumber) { this.sellerSequenceNumber = sellerSequenceNumber; }
         public String getSellerId() { return sellerId; }
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
         public String getSellerName() { return sellerName; }
@@ -157,6 +163,8 @@ public final class SettlementDTOs {
         private static final long serialVersionUID = 1L;
 
         private String sellerId;
+        private String pattiBaseNumber;
+        private Integer sellerSequenceNumber;
         @NotBlank
         private String sellerName;
         @NotNull
@@ -175,6 +183,10 @@ public final class SettlementDTOs {
 
         public String getSellerId() { return sellerId; }
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
+        public String getPattiBaseNumber() { return pattiBaseNumber; }
+        public void setPattiBaseNumber(String pattiBaseNumber) { this.pattiBaseNumber = pattiBaseNumber; }
+        public Integer getSellerSequenceNumber() { return sellerSequenceNumber; }
+        public void setSellerSequenceNumber(Integer sellerSequenceNumber) { this.sellerSequenceNumber = sellerSequenceNumber; }
         public String getSellerName() { return sellerName; }
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
         public List<RateClusterDTO> getRateClusters() { return rateClusters; }

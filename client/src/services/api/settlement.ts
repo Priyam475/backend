@@ -29,6 +29,8 @@ export interface PattiVersionDTO {
 export interface PattiDTO {
   id?: number;
   pattiId: string;
+  pattiBaseNumber?: string;
+  sellerSequenceNumber?: number;
   sellerId?: string;
   sellerName: string;
   vehicleNumber?: string;
@@ -48,6 +50,8 @@ export interface PattiDTO {
 
 export interface PattiSaveRequest {
   sellerId?: string;
+  pattiBaseNumber?: string;
+  sellerSequenceNumber?: number;
   sellerName: string;
   rateClusters: RateClusterDTO[];
   grossAmount: number;
@@ -169,6 +173,13 @@ async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<
 }
 
 export const settlementApi = {
+  /** Reserve next Sales Patti base number (digits only). */
+  async reserveNextPattiBaseNumber(): Promise<string> {
+    const res = await apiFetch(`${BASE}/pattis/next-base-number`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to reserve patti base number');
+    return (await res.text()).trim();
+  },
+
   /** List sellers for settlement (paginated). Backend builds from completed auctions and weighing. */
   async listSellers(params: ListSellersParams = {}): Promise<SellerSettlementDTO[]> {
     const q = new URLSearchParams();
@@ -192,7 +203,7 @@ export const settlementApi = {
     return res.json();
   },
 
-  /** Create patti. Server generates pattiId (PT-YYYYMMDD-NNNN). */
+  /** Create patti. Server generates pattiId as base-sequence (e.g. 2255-1). */
   async createPatti(body: PattiSaveRequest): Promise<PattiDTO> {
     const res = await apiFetch(`${BASE}/pattis`, { method: 'POST', body: JSON.stringify(body) });
     if (!res.ok) await parseJsonOrThrow(res, 'Failed to save patti');

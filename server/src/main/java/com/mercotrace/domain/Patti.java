@@ -11,7 +11,7 @@ import org.hibernate.annotations.CacheConcurrencyStrategy;
 
 /**
  * Sales Patti (settlement document) per seller.
- * Aligned with SettlementPage.tsx PattiData. Business key: pattiId (PT-YYYYMMDD-NNNN).
+ * Aligned with SettlementPage.tsx PattiData. Business key: pattiId (base-sellerSeq, e.g. 2255-1).
  */
 @Entity
 @Table(name = "sales_patti")
@@ -30,9 +30,15 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     @Column(name = "trader_id")
     private Long traderId;
 
-    /** Business key: PT-YYYYMMDD-NNNN */
+    /** Business key: base-sellerSeq (for example 2255-1). */
     @Column(name = "patti_id", nullable = false, unique = true, length = 32)
     private String pattiId;
+
+    @Column(name = "patti_base_number", nullable = false, length = 16)
+    private String pattiBaseNumber;
+
+    @Column(name = "seller_sequence_number")
+    private Integer sellerSequenceNumber;
 
     @Column(name = "seller_id", length = 128)
     private String sellerId;
@@ -87,6 +93,22 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
 
     public void setPattiId(String pattiId) {
         this.pattiId = pattiId;
+    }
+
+    public String getPattiBaseNumber() {
+        return pattiBaseNumber;
+    }
+
+    public void setPattiBaseNumber(String pattiBaseNumber) {
+        this.pattiBaseNumber = pattiBaseNumber;
+    }
+
+    public Integer getSellerSequenceNumber() {
+        return sellerSequenceNumber;
+    }
+
+    public void setSellerSequenceNumber(Integer sellerSequenceNumber) {
+        this.sellerSequenceNumber = sellerSequenceNumber;
     }
 
     public String getSellerId() {

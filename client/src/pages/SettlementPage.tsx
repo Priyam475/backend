@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, FileText, Search, User, Users, Package, Truck,
+  ArrowLeft, FileText, Search, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
   ChevronDown, ChevronUp, Info,
 } from 'lucide-react';
@@ -1096,7 +1096,10 @@ const SettlementPage = () => {
   }, [pattiData, selectedPattiVersion]);
 
   const computePattiSavePayloadForSeller = useCallback(
-    (seller: SellerSettlement): PattiSaveRequest | null => {
+    (
+      seller: SellerSettlement,
+      numbering?: { pattiBaseNumber?: string; sellerSequenceNumber?: number }
+    ): PattiSaveRequest | null => {
       if (!pattiData) return null;
       const removed = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
       const ov = lotSalesOverridesBySellerId[seller.sellerId];
@@ -1115,6 +1118,8 @@ const SettlementPage = () => {
       const netPayable = grossAmount - totalDeductions;
       return {
         sellerId: seller.sellerId,
+        pattiBaseNumber: numbering?.pattiBaseNumber,
+        sellerSequenceNumber: numbering?.sellerSequenceNumber,
         sellerName,
         rateClusters,
         grossAmount,
@@ -1140,6 +1145,8 @@ const SettlementPage = () => {
   type SaveSellerOptions = {
     silent?: boolean;
     showPrintAfterSave?: boolean;
+    pattiBaseNumber?: string;
+    sellerSequenceNumber?: number;
   };
 
   /** Save or update Sales Patti for one settlement seller. */
@@ -1148,7 +1155,10 @@ const SettlementPage = () => {
       if (!pattiData) return false;
       const silent = options?.silent === true;
       const showPrintAfterSave = options?.showPrintAfterSave !== false;
-      const payload = computePattiSavePayloadForSeller(seller);
+      const payload = computePattiSavePayloadForSeller(seller, {
+        pattiBaseNumber: options?.pattiBaseNumber,
+        sellerSequenceNumber: options?.sellerSequenceNumber,
+      });
       if (!payload) return false;
       const sid = seller.sellerId;
       const dbId = existingPattiIdBySellerId[sid];
@@ -1268,8 +1278,25 @@ const SettlementPage = () => {
       return;
     }
     const failures: string[] = [];
+    const sellersNeedingCreate = arrivalSellersForPatti.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
+    let sharedPattiBaseNumber: string | null = null;
+    if (sellersNeedingCreate.length > 0) {
+      try {
+        sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
+      } catch {
+        toast.error('Failed to reserve Sales Patti number.');
+        return;
+      }
+    }
     for (const seller of arrivalSellersForPatti) {
-      const ok = await savePattiForSeller(seller, { silent: true, showPrintAfterSave: false });
+      const needsCreate = existingPattiIdBySellerId[seller.sellerId] == null;
+      const sellerSequenceNumber = needsCreate ? sellersNeedingCreate.findIndex(s => s.sellerId === seller.sellerId) + 1 : undefined;
+      const ok = await savePattiForSeller(seller, {
+        silent: true,
+        showPrintAfterSave: false,
+        pattiBaseNumber: needsCreate ? sharedPattiBaseNumber ?? undefined : undefined,
+        sellerSequenceNumber: needsCreate ? sellerSequenceNumber : undefined,
+      });
       if (!ok) failures.push(seller.sellerName || seller.sellerId);
     }
     if (failures.length > 0) {
@@ -1326,6 +1353,30 @@ const SettlementPage = () => {
       (p.sellerName ?? '').toLowerCase().includes(q)
     );
   }, [savedPattis, searchQuery]);
+
+  const mainSalesPattiNumber = useMemo(() => {
+    const raw = (pattiData?.pattiId ?? '').trim();
+    if (!raw) return '';
+    const dashIndex = raw.indexOf('-');
+    if (dashIndex <= 0) return raw;
+    return raw.slice(0, dashIndex);
+  }, [pattiData?.pattiId]);
+
+  const sellerSalesPattiNumberBySellerId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of savedPattis) {
+      const sid = String(p.sellerId ?? '').trim();
+      const pid = String(p.pattiId ?? '').trim();
+      if (!sid || !pid) continue;
+      map[sid] = pid;
+    }
+    const currentSid = String(selectedSeller?.sellerId ?? '').trim();
+    const currentPid = String(pattiData?.pattiId ?? '').trim();
+    if (currentSid && currentPid) {
+      map[currentSid] = currentPid;
+    }
+    return map;
+  }, [savedPattis, selectedSeller?.sellerId, pattiData?.pattiId]);
 
   /** Settlement sellers that already have a saved Sales Patti — hide from New Patti tab. */
   const sellerIdsWithSavedPatti = useMemo(() => {
@@ -2368,24 +2419,6 @@ const SettlementPage = () => {
               </div>
             </div>
 
-            {/* Seller info strip */}
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <User className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                <p className="text-[9px] text-white/60 uppercase">Seller</p>
-                <p className="text-[11px] font-semibold text-white truncate">{selectedSeller.sellerName}</p>
-              </div>
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <Truck className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                <p className="text-[9px] text-white/60 uppercase">Vehicle</p>
-                <p className="text-[11px] font-semibold text-white truncate">{selectedSeller.vehicleNumber}</p>
-              </div>
-              <div className="bg-white/15 backdrop-blur-md rounded-xl p-2 text-center">
-                <Package className="w-3.5 h-3.5 text-white/70 mx-auto mb-0.5" />
-                <p className="text-[9px] text-white/60 uppercase">Bags</p>
-                <p className="text-[11px] font-semibold text-white">{totalBags}</p>
-              </div>
-            </div>
           </div>
         </div>
         ) : (
@@ -2406,20 +2439,6 @@ const SettlementPage = () => {
               <p className="text-sm text-muted-foreground">{pattiData.pattiId || '(New Patti)'} · {selectedSeller.vehicleNumber} · {totalBags} bags</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-rose-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Seller</p>
-              <p className="text-lg font-black text-foreground truncate">{selectedSeller.sellerName}</p>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Vehicle</p>
-              <p className="text-lg font-black text-foreground truncate">{selectedSeller.vehicleNumber}</p>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border-l-4 border-l-amber-500">
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Bags</p>
-              <p className="text-lg font-black text-foreground">{totalBags}</p>
-            </div>
-          </div>
         </div>
         )}
 
@@ -2433,7 +2452,14 @@ const SettlementPage = () => {
               <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
                 Vehicle details
               </h3>
-              <div className="grid grid-cols-2 gap-2.5 text-center sm:gap-3 xl:grid-cols-5 xl:gap-4">
+              <div className="grid grid-cols-2 gap-2.5 text-center sm:gap-3 xl:grid-cols-6 xl:gap-4">
+                <div className="col-span-2 flex flex-col items-center gap-1.5 rounded-xl border border-blue-500/20 bg-muted/30 px-2.5 py-3 sm:col-span-1 sm:rounded-2xl sm:px-3 sm:py-4">
+                  <Truck className="h-4 w-4 text-blue-600 dark:text-blue-400 sm:h-5 sm:w-5" aria-hidden />
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Vehicle No</p>
+                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl truncate max-w-full">
+                    {selectedSeller.vehicleNumber || '-'}
+                  </p>
+                </div>
                 <div className="flex flex-col items-center gap-1.5 rounded-xl border border-cyan-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
                   <Users className="h-4 w-4 text-cyan-600 dark:text-cyan-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Sellers</p>
@@ -2471,6 +2497,9 @@ const SettlementPage = () => {
             transition={{ delay: 0.02 }}
             className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
+            <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
+              Expenses &amp; invoice
+            </h3>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6">
               <div className="min-w-0 sm:pr-4 sm:border-r sm:border-border/50">
                 <div className="flex items-start gap-3">
@@ -2568,45 +2597,30 @@ const SettlementPage = () => {
                 </div>
               </div>
             </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.04 }}
-            className="glass-card overflow-hidden rounded-2xl border border-border/50"
-          >
-            <div className="border-b border-border/40 bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-4 py-3 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20 sm:px-5 sm:py-3.5">
-              <p className="text-center text-sm font-bold tracking-tight text-foreground sm:text-base">
-                Expenses &amp; invoice
-              </p>
-            </div>
-            <div className="p-4 sm:p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cn(arrSolidMd, 'w-full shrink-0 gap-1.5 sm:w-auto sm:min-w-[12rem]')}
-                  onClick={() => void openVehicleExpenseModal()}
-                >
-                  <PlusCircle className="h-4 w-4" />
-                  Add Quick Expenses (Alt + X)
-                </Button>
-                <div className="w-full min-w-0 flex-1 sm:max-w-md">
-                  <label htmlFor="settlement-invoice-name-search" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-                    Invoice Name
-                  </label>
-                  <Input
-                    id="settlement-invoice-name-search"
-                    type="search"
-                    placeholder="Search invoice name…"
-                    value={invoiceNameSearch}
-                    onChange={e => setInvoiceNameSearch(e.target.value)}
-                    className="h-10 rounded-xl border-border/60 bg-background/80"
-                    autoComplete="off"
-                  />
-                </div>
+            <div className="mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-start sm:gap-4">
+              <div className="w-full min-w-0 sm:max-w-md">
+                <label htmlFor="settlement-invoice-name-search" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
+                  Invoice Name
+                </label>
+                <Input
+                  id="settlement-invoice-name-search"
+                  type="search"
+                  placeholder="Enter invoice name"
+                  value={invoiceNameSearch}
+                  onChange={e => setInvoiceNameSearch(e.target.value)}
+                  className="h-10 rounded-xl border-border/60 bg-background/80"
+                  autoComplete="off"
+                />
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(arrSolidMd, 'w-full shrink-0 gap-1.5 sm:w-auto sm:min-w-[12rem]')}
+                onClick={() => void openVehicleExpenseModal()}
+              >
+                <PlusCircle className="h-4 w-4" />
+                Add Quick Expenses (Alt + X)
+              </Button>
             </div>
           </motion.div>
 

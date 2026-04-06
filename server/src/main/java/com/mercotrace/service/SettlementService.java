@@ -18,9 +18,14 @@ public interface SettlementService {
     Page<SellerSettlementDTO> listSellers(Pageable pageable, String search);
 
     /**
-     * Create a new patti. Patti ID generated as PT-YYYYMMDD-NNNN (REQ-PUT-008).
+     * Create a new patti. Patti ID generated as base-sellerSequence (e.g. 2255-1).
      */
     PattiDTO createPatti(PattiSaveRequest request);
+
+    /**
+     * Reserve and return next Sales Patti base number (digits only).
+     */
+    String reserveNextPattiBaseNumber();
 
     /**
      * Get patti by database id.
