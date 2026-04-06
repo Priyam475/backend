@@ -22,7 +22,15 @@ import {
 } from '@/components/ui/dialog';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
-import { printLogApi, settlementApi, arrivalsApi, commodityApi, contactApi, type PattiDTO } from '@/services/api';
+import {
+  printLogApi,
+  settlementApi,
+  arrivalsApi,
+  commodityApi,
+  contactApi,
+  type PattiDTO,
+  type PattiSaveRequest,
+} from '@/services/api';
 import type { ArrivalFullDetail, ArrivalSellerFullDetail } from '@/services/api/arrivals';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { Commodity, Contact } from '@/types/models';
@@ -41,6 +49,35 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
+/**
+ * Settlement buttons match BillingPage.tsx / ArrivalsPage:
+ * - Outline: `variant="outline"` + `rounded-xl` (+ height).
+ * - Primary: `bg-[#6075FF] text-white shadow-lg` via `arrSolid*`.
+ */
+const arrOutlineMd = 'rounded-xl h-9 text-sm font-semibold';
+const arrOutlineTall = 'rounded-xl h-12 text-sm font-semibold';
+const arrOutlineSm = 'rounded-xl h-8 text-xs font-semibold';
+const arrSolid =
+  'rounded-xl font-bold bg-[#6075FF] text-white shadow-lg hover:!bg-slate-500 hover:!text-white border-transparent transition-colors';
+const arrSolidMd = cn(arrSolid, 'h-9 px-3 text-sm');
+const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
+const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
+
+/** Desktop main tabs: underline + #6075FF bar (same as Billing). */
+const arrDeskTabBtn = (active: boolean) =>
+  cn(
+    'relative px-5 py-3 text-sm font-semibold transition-all flex items-center gap-2 shrink-0',
+    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+  );
+
+/** Mobile header tabs: pill style (`bg-[#6075FF]` when active). */
+const arrMobTabPill = (active: boolean) =>
+  cn(
+    'shrink-0 min-w-[9rem] sm:min-w-[10.5rem] px-3 sm:px-4 py-2.5 sm:py-2 rounded-full min-h-10 text-xs sm:text-sm font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm leading-none',
+    active ? 'bg-[#6075FF] text-white' : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white',
+  );
+
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
   sellerId: string;
@@ -701,7 +738,8 @@ const SettlementPage = () => {
   
   // Patti state
   const [pattiData, setPattiData] = useState<PattiData | null>(null);
-  const [existingPattiId, setExistingPattiId] = useState<number | null>(null);
+  /** DB row id per settlement seller — supports multi-seller saves without overwriting another seller's patti. */
+  const [existingPattiIdBySellerId, setExistingPattiIdBySellerId] = useState<Record<string, number>>({});
   const [savedPattis, setSavedPattis] = useState<PattiDTO[]>([]);
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
@@ -847,7 +885,7 @@ const SettlementPage = () => {
     [commodityDivisorByName]
   );
 
-  /** Contact search (registered traders) per seller card in Sales report. */
+  /** Contact search (registered sellers / contact registry) per seller card in Sales report. */
   const [sellerContactSearchById, setSellerContactSearchById] = useState<Record<string, Contact[]>>({});
   const [sellerContactSearchLoading, setSellerContactSearchLoading] = useState<Record<string, boolean>>({});
   const [sellerRegSaving, setSellerRegSaving] = useState<Record<string, boolean>>({});
@@ -886,7 +924,7 @@ const SettlementPage = () => {
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
   const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
-    setExistingPattiId(null);
+    setExistingPattiIdBySellerId({});
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
     setVehicleExpenseRows([]);
@@ -950,7 +988,10 @@ const SettlementPage = () => {
         toast.warning('Patti date is in the future — please verify');
       }
       setPattiData(data);
-      setExistingPattiId(dto.id ?? id);
+      const editSid = String(dto.sellerId ?? '').trim();
+      setExistingPattiIdBySellerId(
+        editSid && (dto.id ?? id) != null ? { [editSid]: Number(dto.id ?? id) } : {}
+      );
       setSelectedArrivalSellerIds(arrivalSellerIds ?? []);
       const sid = String(dto.sellerId ?? '');
       if (sid) {
@@ -971,57 +1012,129 @@ const SettlementPage = () => {
     }
   }, []);
 
-  // Save patti via backend: update if editing existing, else create.
-  const savePatti = async () => {
-    if (!pattiData) return;
-    const payload = {
-      sellerId: selectedSeller?.sellerId,
-      sellerName: pattiData.sellerName,
-      rateClusters: pattiData.rateClusters,
-      grossAmount: pattiData.grossAmount,
-      deductions: pattiData.deductions,
-      totalDeductions: pattiData.totalDeductions,
-      netPayable: pattiData.netPayable,
-      useAverageWeight: pattiData.useAverageWeight,
-    };
-    if (!can('Settlement', existingPattiId != null ? 'Edit' : 'Create')) {
-      toast.error('You do not have permission to save settlements.');
-      return;
-    }
-    try {
-      if (existingPattiId != null) {
-        const updated = await settlementApi.updatePatti(existingPattiId, payload);
-        if (updated) {
-          setPattiData(prev =>
-            prev ? { ...prev, pattiId: updated.pattiId ?? prev.pattiId, createdAt: updated.createdAt ?? prev.createdAt } : null
-          );
-          toast.success(`Sales Patti ${updated.pattiId} updated!`);
-          setShowPrint(true);
-          loadSavedPattis();
-        } else {
-          toast.error('Failed to update patti');
-        }
-      } else {
-        const created = await settlementApi.createPatti(payload);
-        if (created?.pattiId) {
-          setPattiData(prev =>
-            prev ? { ...prev, pattiId: created.pattiId, createdAt: created.createdAt ?? prev.createdAt } : null
-          );
-          if (created?.id != null) setExistingPattiId(created.id);
-          toast.success(`Sales Patti ${created.pattiId} saved!`);
-          setShowPrint(true);
-          loadSavedPattis();
-        } else {
-          toast.error('Failed to save patti');
-        }
+  const computePattiSavePayloadForSeller = useCallback(
+    (seller: SellerSettlement): PattiSaveRequest | null => {
+      if (!pattiData) return null;
+      const removed = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+      const ov = lotSalesOverridesBySellerId[seller.sellerId];
+      const rateClusters = buildRateClustersFromSellerLots(seller, removed, ov, getLotDivisor);
+      const grossAmount = rateClusters.reduce((s, c) => s + c.amount, 0);
+      const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
+      const form = sellerFormById[seller.sellerId] ?? defaultSellerForm(seller);
+      const sellerName = (form.name || seller.sellerName || '').trim() || seller.sellerName;
+      const deductions = buildDeductionItemsFromSellerExpenses(
+        exp,
+        coolieMode,
+        settlementWeighingEnabled,
+        settlementWeighingMergeIntoFreight
+      );
+      const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
+      const netPayable = grossAmount - totalDeductions;
+      return {
+        sellerId: seller.sellerId,
+        sellerName,
+        rateClusters,
+        grossAmount,
+        deductions,
+        totalDeductions,
+        netPayable,
+        useAverageWeight: pattiData.useAverageWeight,
+      };
+    },
+    [
+      pattiData,
+      removedLotsBySellerId,
+      lotSalesOverridesBySellerId,
+      getLotDivisor,
+      sellerExpensesById,
+      sellerFormById,
+      coolieMode,
+      settlementWeighingEnabled,
+      settlementWeighingMergeIntoFreight,
+    ]
+  );
+
+  /** Save or update Sales Patti for one settlement seller (main button uses primary seller; per-card uses that row's seller). */
+  const savePattiForSeller = useCallback(
+    async (seller: SellerSettlement) => {
+      if (!pattiData) return;
+      const payload = computePattiSavePayloadForSeller(seller);
+      if (!payload) return;
+      const sid = seller.sellerId;
+      const dbId = existingPattiIdBySellerId[sid];
+      if (!can('Settlement', dbId != null ? 'Edit' : 'Create')) {
+        toast.error('You do not have permission to save settlements.');
+        return;
       }
-    } catch {
-      toast.error(existingPattiId != null ? 'Failed to update patti' : 'Failed to save patti');
-    }
+      const applySavedToPrimaryUi = (p: PattiSaveRequest, businessPattiId: string, createdAtIso: string) => {
+        if (selectedSeller?.sellerId !== sid) return;
+        setPattiData(prev =>
+          prev
+            ? {
+                ...prev,
+                pattiId: businessPattiId || prev.pattiId,
+                sellerName: p.sellerName,
+                rateClusters: p.rateClusters,
+                grossAmount: p.grossAmount,
+                deductions: p.deductions,
+                totalDeductions: p.totalDeductions,
+                netPayable: p.netPayable,
+                createdAt: createdAtIso || prev.createdAt,
+              }
+            : null
+        );
+      };
+      try {
+        if (dbId != null) {
+          const updated = await settlementApi.updatePatti(dbId, payload);
+          if (updated) {
+            applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
+            toast.success(`Sales Patti ${updated.pattiId} updated!`);
+            setShowPrint(true);
+            loadSavedPattis();
+          } else {
+            toast.error('Failed to update patti');
+          }
+        } else {
+          const created = await settlementApi.createPatti(payload);
+          if (created?.pattiId) {
+            if (created.id != null) {
+              setExistingPattiIdBySellerId(prev => ({ ...prev, [sid]: created.id! }));
+            }
+            const at = created.createdAt ?? new Date().toISOString();
+            applySavedToPrimaryUi(payload, created.pattiId, at);
+            if (selectedSeller?.sellerId === sid) {
+              toast.success(`Sales Patti ${created.pattiId} saved!`);
+            } else {
+              toast.success(`Sales Patti ${created.pattiId} saved for ${payload.sellerName}.`);
+            }
+            setShowPrint(true);
+            loadSavedPattis();
+          } else {
+            toast.error('Failed to save patti');
+          }
+        }
+      } catch {
+        toast.error(dbId != null ? 'Failed to update patti' : 'Failed to save patti');
+      }
+    },
+    [
+      pattiData,
+      computePattiSavePayloadForSeller,
+      existingPattiIdBySellerId,
+      can,
+      selectedSeller?.sellerId,
+      loadSavedPattis,
+    ]
+  );
+
+  const savePatti = async () => {
+    if (!selectedSeller) return;
+    await savePattiForSeller(selectedSeller);
   };
 
   saveMainPattiShortcutRef.current = () => {
-    void savePatti();
+    if (selectedSeller) void savePattiForSeller(selectedSeller);
   };
 
   useEffect(() => {
@@ -1390,7 +1503,7 @@ const SettlementPage = () => {
   /** Pull freight / unloading / weighing / cash advance from backend (same rules as Quick Expenses). */
   useEffect(() => {
     if (!pattiData || arrivalSellersForPatti.length === 0) return;
-    if (existingPattiId != null) return;
+    if (Object.keys(existingPattiIdBySellerId).length > 0) return;
     let cancelled = false;
     void (async () => {
       for (const s of arrivalSellersForPatti) {
@@ -1415,7 +1528,7 @@ const SettlementPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [pattiData?.createdAt, arrivalSalesReportSellerIdsKey, existingPattiId]);
+  }, [pattiData?.createdAt, arrivalSalesReportSellerIdsKey, existingPattiIdBySellerId]);
 
   /** Main patti deduction lines mirror primary seller expenses + weighing toggles. */
   useEffect(() => {
@@ -1753,7 +1866,7 @@ const SettlementPage = () => {
             {sellers.length === 0 ? 'Complete an auction to generate settlements' : 'Try a different search'}
           </p>
           {sellers.length === 0 && (
-            <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-xl">
+            <Button type="button" variant="outline" onClick={() => navigate('/auctions')} className={cn(arrSolidMd, 'mt-4')}>
               Go to Auctions
             </Button>
           )}
@@ -1862,8 +1975,8 @@ const SettlementPage = () => {
         </div>
         ) : (
         <div className="px-8 py-5 flex items-center gap-4">
-          <Button onClick={() => setShowPrint(false)} variant="outline" size="sm" className="rounded-xl h-9">
-            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+          <Button type="button" onClick={() => setShowPrint(false)} variant="outline" className={cn(arrSolidMd, 'gap-1.5')}>
+            <ArrowLeft className="w-4 h-4" /> Back
           </Button>
           <div>
             <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -1934,7 +2047,10 @@ const SettlementPage = () => {
           </div>
 
           <div className="flex gap-3 mt-4">
-            <Button onClick={async () => {
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
               const printedAt = new Date().toISOString();
               try {
                 await printLogApi.create({
@@ -1950,11 +2066,16 @@ const SettlementPage = () => {
               if (ok) toast.success('Sales Patti sent to printer!');
               else toast.error('Printer not connected.');
             }}
-              className="flex-1 h-12 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold shadow-lg">
-              <Printer className="w-5 h-5 mr-2" /> Print Patti
+              className={cn(arrSolidTall, 'flex-1 sm:flex-none gap-2')}
+            >
+              <Printer className="w-5 h-5" /> Print Patti
             </Button>
-            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiId(null); }}
-              variant="outline" className="h-12 rounded-xl px-6">
+            <Button
+              type="button"
+              onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); }}
+              variant="outline"
+              className={arrOutlineTall}
+            >
               Done
             </Button>
           </div>
@@ -1988,7 +2109,7 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiId(null); }}
+              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiIdBySellerId({}); }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -2023,8 +2144,13 @@ const SettlementPage = () => {
         ) : (
         <div className="px-8 py-5">
           <div className="flex items-center gap-4 mb-4">
-            <Button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiId(null); }} variant="outline" size="sm" className="rounded-xl h-9">
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+            <Button
+              type="button"
+              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiIdBySellerId({}); }}
+              variant="outline"
+              className={cn(arrSolidMd, 'gap-1.5')}
+            >
+              <ArrowLeft className="w-4 h-4" /> Back
             </Button>
             <div className="flex-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -2213,10 +2339,10 @@ const SettlementPage = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 w-full shrink-0 rounded-xl border border-primary/35 bg-background/90 font-semibold shadow-sm hover:bg-primary/5 sm:h-10 sm:w-auto sm:min-w-[12rem]"
+                  className={cn(arrSolidMd, 'w-full shrink-0 gap-1.5 sm:w-auto sm:min-w-[12rem]')}
                   onClick={() => void openVehicleExpenseModal()}
                 >
-                  <PlusCircle className="mr-2 h-4 w-4 text-primary" />
+                  <PlusCircle className="h-4 w-4" />
                   Add Quick Expenses (Alt + X)
                 </Button>
                 <div className="w-full min-w-0 flex-1 sm:max-w-md">
@@ -2300,8 +2426,63 @@ const SettlementPage = () => {
                       id={`settlement-seller-card-${seller.sellerId}`}
                       className="rounded-2xl border border-border/60 bg-muted/10 p-3 sm:p-4"
                     >
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per seller sales</p>
+                        <p className="truncate text-sm font-bold text-foreground">
+                          {seller.sellerName}
+                          {seller.sellerMark ? ` – ${seller.sellerMark}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
+                          Net ₹{formatMoney2Display(netSeller)}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={cn(arrOutlineSm, 'gap-1')}
+                          onClick={() =>
+                            setSalesReportCollapsedBySellerId(prev => ({
+                              ...prev,
+                              [seller.sellerId]: !prev[seller.sellerId],
+                            }))
+                          }
+                        >
+                          {salesCollapsed ? (
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          ) : (
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          )}
+                          {salesCollapsed ? 'Expand' : 'Collapse'}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {salesCollapsed ? (
+                      <div className="mb-3 rounded-xl border border-border/30 bg-muted/10 px-3 py-2.5 text-[11px]">
+                        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-foreground sm:justify-start">
+                          <span className="font-medium text-muted-foreground">Items: {visibleLots.length}</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums">Total Qty: {qtyTot}</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums">Total Wt: {formatMoney2Display(weightTot)} kg</span>
+                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
+                            ·
+                          </span>
+                          <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
+                            Net: ₹{formatMoney2Display(netSeller)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
                     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trader</span>
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller contact</span>
                       <label className="flex cursor-pointer items-center gap-2 font-medium">
                         <Checkbox
                           checked={form.registered}
@@ -2328,13 +2509,13 @@ const SettlementPage = () => {
                       </span>
                     </div>
 
-                    <div className="mb-4 space-y-3 rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
-                      <div className="flex min-w-0 flex-nowrap items-end gap-2 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-                        <div className="relative min-w-[6.5rem] max-w-[8rem] shrink-0 sm:min-w-0 sm:max-w-none sm:flex-1">
+                    <div className="mb-4 space-y-3 overflow-visible rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
+                      <div className="grid min-w-0 grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                        <div className="relative min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Mark
                           </label>
-                          <div className="relative">
+                          <div className="relative z-[100]">
                             <Input
                               value={form.mark}
                               onChange={e => {
@@ -2350,7 +2531,7 @@ const SettlementPage = () => {
                               placeholder={form.registered && !form.contactId ? 'Type mark or name…' : ''}
                               autoComplete="off"
                               className={cn(
-                                'h-9 rounded-lg pr-8 text-sm',
+                                'h-9 w-full min-w-0 rounded-lg pr-8 text-sm',
                                 form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                               )}
                             />
@@ -2364,7 +2545,7 @@ const SettlementPage = () => {
                               </span>
                             ) : null}
                             {form.registered && !form.contactId && (sellerContactSearchById[seller.sellerId] ?? []).length > 0 ? (
-                              <ul className="absolute left-0 right-0 z-[80] mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
+                              <ul className="absolute left-0 right-0 top-full z-[200] mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-popover text-popover-foreground shadow-md">
                                 {(sellerContactSearchById[seller.sellerId] ?? []).slice(0, 12).map(c => (
                                   <li key={c.contact_id}>
                                     <button
@@ -2373,7 +2554,7 @@ const SettlementPage = () => {
                                       onClick={() => {
                                         void (async () => {
                                           if (!can('Settlement', 'Edit')) {
-                                            toast.error('You do not have permission to link traders.');
+                                            toast.error('You do not have permission to link contacts.');
                                             return;
                                           }
                                           setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
@@ -2414,9 +2595,9 @@ const SettlementPage = () => {
                                                 contactSearchQuery: '',
                                               },
                                             }));
-                                            toast.success('Trader linked to this seller');
+                                            toast.success('Contact linked to this seller');
                                           } catch {
-                                            toast.error('Could not link trader');
+                                            toast.error('Could not link contact');
                                           } finally {
                                             setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
                                           }
@@ -2435,9 +2616,9 @@ const SettlementPage = () => {
                             ) : null}
                           </div>
                         </div>
-                        <div className="min-w-[7.5rem] flex-1 sm:min-w-[8rem]">
+                        <div className="min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            Trader name
+                            Seller name
                           </label>
                           <Input
                             value={form.name}
@@ -2448,12 +2629,12 @@ const SettlementPage = () => {
                               })
                             }
                             className={cn(
-                              'h-9 min-w-0 rounded-lg text-sm',
+                              'h-9 min-w-0 w-full rounded-lg text-sm',
                               form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
                           />
                         </div>
-                        <div className="min-w-[6.5rem] max-w-[8rem] shrink-0 sm:max-w-[9rem] sm:flex-initial">
+                        <div className="min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Mobile
                           </label>
@@ -2466,7 +2647,7 @@ const SettlementPage = () => {
                               })
                             }
                             className={cn(
-                              'h-9 rounded-lg text-sm',
+                              'h-9 w-full min-w-0 rounded-lg text-sm',
                               form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
                             inputMode="tel"
@@ -2474,8 +2655,8 @@ const SettlementPage = () => {
                         </div>
                         <Button
                           type="button"
-                          size="sm"
-                          className="h-9 shrink-0 self-end rounded-xl px-3 text-xs sm:px-4 sm:text-sm"
+                          variant="outline"
+                          className={cn(arrSolidMd, 'min-w-0 shrink-0 self-end')}
                           disabled={
                             !!sellerRegSaving[seller.sellerId] ||
                             (form.registered && !form.contactId) ||
@@ -2485,7 +2666,7 @@ const SettlementPage = () => {
                           onClick={() => {
                             void (async () => {
                               if (!can('Settlement', 'Edit')) {
-                                toast.error('You do not have permission to update trader details.');
+                                toast.error('You do not have permission to update seller contact details.');
                                 return;
                               }
                               if (!form.registered) {
@@ -2521,7 +2702,7 @@ const SettlementPage = () => {
                                   };
                                   setSellerFormById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
                                   setRegisteredBaselineById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
-                                  toast.success('Trader registered and linked');
+                                  toast.success('Seller contact registered and linked');
                                 } catch (e) {
                                   toast.error(e instanceof Error ? e.message : 'Registration failed');
                                 } finally {
@@ -2530,7 +2711,7 @@ const SettlementPage = () => {
                                 return;
                               }
                               if (!form.contactId) {
-                                toast.message('Select a registered trader from search, or uncheck Registered to onboard.');
+                                toast.message('Select a registered contact from search, or uncheck Registered to onboard.');
                                 return;
                               }
                               setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
@@ -2568,7 +2749,7 @@ const SettlementPage = () => {
                           {!form.registered
                             ? 'Register seller'
                             : !form.contactId
-                              ? 'Select trader'
+                              ? 'Select contact'
                               : dirty
                                 ? 'Update'
                                 : 'Up to date'}
@@ -2576,62 +2757,6 @@ const SettlementPage = () => {
                       </div>
                     </div>
 
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per seller sales</p>
-                        <p className="truncate text-sm font-bold text-foreground">
-                          {seller.sellerName}
-                          {seller.sellerMark ? ` – ${seller.sellerMark}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
-                          Net ₹{formatMoney2Display(netSeller)}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 rounded-lg text-[10px]"
-                          onClick={() =>
-                            setSalesReportCollapsedBySellerId(prev => ({
-                              ...prev,
-                              [seller.sellerId]: !prev[seller.sellerId],
-                            }))
-                          }
-                        >
-                          {salesCollapsed ? (
-                            <ChevronDown className="mr-1 h-3.5 w-3.5" />
-                          ) : (
-                            <ChevronUp className="mr-1 h-3.5 w-3.5" />
-                          )}
-                          {salesCollapsed ? 'Expand' : 'Collapse'}
-                        </Button>
-                      </div>
-                    </div>
-
-                    {salesCollapsed ? (
-                      <div className="mb-3 rounded-xl border border-border/30 bg-muted/10 px-3 py-2.5 text-[11px]">
-                        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-foreground sm:justify-start">
-                          <span className="font-medium text-muted-foreground">Items: {visibleLots.length}</span>
-                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
-                            ·
-                          </span>
-                          <span className="font-semibold tabular-nums">Total Qty: {qtyTot}</span>
-                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
-                            ·
-                          </span>
-                          <span className="font-semibold tabular-nums">Total Wt: {formatMoney2Display(weightTot)} kg</span>
-                          <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden>
-                            ·
-                          </span>
-                          <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                            Net: ₹{formatMoney2Display(netSeller)}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
                       <div className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
                         <table className="w-full min-w-[860px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
@@ -3019,19 +3144,17 @@ const SettlementPage = () => {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        size="sm"
                         variant="outline"
-                        className="h-9 rounded-xl text-xs sm:text-sm"
+                        className={cn(arrOutlineMd, 'gap-1.5')}
                         onClick={() => void runPrintSellerSubPatti(seller)}
                       >
-                        <Printer className="mr-1.5 h-3.5 w-3.5" />
-                        Print seller sub patti
+                        <Printer className="h-3.5 w-3.5" />
+                        Print sub patti
                       </Button>
                       <Button
                         type="button"
-                        size="sm"
-                        variant="secondary"
-                        className="h-9 rounded-xl text-xs sm:text-sm"
+                        variant="outline"
+                        className={cn(arrOutlineMd, 'gap-1.5')}
                         onClick={() => {
                           setAddVoucherSellerId(seller.sellerId);
                           setVoucherSearchVoucherName('');
@@ -3044,18 +3167,11 @@ const SettlementPage = () => {
                       </Button>
                       <Button
                         type="button"
-                        size="sm"
-                        className="h-9 rounded-xl text-xs sm:text-sm"
-                        onClick={() => {
-                          if (selectedSeller?.sellerId === seller.sellerId) void savePatti();
-                          else {
-                            toast.message(
-                              'Open this seller as the primary settlement to save their main patti, or use Save Main Patti for the current primary seller.'
-                            );
-                          }
-                        }}
+                        variant="outline"
+                        className={cn(arrSolidMd, 'gap-1.5')}
+                        onClick={() => void savePattiForSeller(seller)}
                       >
-                        <Save className="mr-1.5 h-3.5 w-3.5" />
+                        <Save className="h-3.5 w-3.5" />
                         Save patti
                       </Button>
                     </div>
@@ -3074,36 +3190,33 @@ const SettlementPage = () => {
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
               <Button
+                type="button"
+                variant="outline"
                 onClick={() => void savePatti()}
                 disabled={!pattiData.rateClusters.length}
-                className={cn(
-                  'h-12 rounded-xl font-bold shadow-md sm:min-w-[11rem]',
-                  pattiData.rateClusters.length
-                    ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white'
-                    : 'cursor-not-allowed opacity-50'
-                )}
+                className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
               >
-                <Save className="mr-2 h-5 w-5" />
+                <Save className="h-5 w-5" />
                 Save Main Patti
-                <span className="ml-2 text-[10px] font-semibold opacity-90 sm:text-[11px]">(Alt S)</span>
+                <span className="text-[10px] font-semibold opacity-90 sm:text-[11px]">(Alt S)</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                className="h-12 rounded-xl border-blue-500/40 font-semibold sm:min-w-[10rem]"
+                className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
                 disabled={!pattiData.rateClusters.length}
                 onClick={() => void runPrintMainPatti()}
               >
-                <Printer className="mr-2 h-4 w-4" />
+                <Printer className="h-4 w-4" />
                 Print main patti
               </Button>
               <Button
                 type="button"
                 variant="outline"
-                className="h-12 rounded-xl border-indigo-500/40 font-semibold sm:min-w-[10rem]"
+                className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
                 onClick={() => void runPrintAllSubPatti()}
               >
-                <Printer className="mr-2 h-4 w-4" />
+                <Printer className="h-4 w-4" />
                 Print all sub patti
               </Button>
             </div>
@@ -3244,12 +3357,18 @@ const SettlementPage = () => {
 
               <DialogFooter className="border-t border-border/50 bg-muted/20 px-5 py-4 sm:px-6">
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
-                  <Button type="button" variant="outline" className="rounded-xl" onClick={() => setVehicleExpenseModalOpen(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={arrOutlineMd}
+                    onClick={() => setVehicleExpenseModalOpen(false)}
+                  >
                     Close
                   </Button>
                   <Button
                     type="button"
-                    className="rounded-xl"
+                    variant="outline"
+                    className={cn(arrSolidMd, 'gap-1.5')}
                     onClick={() => {
                       setSellerExpensesById(prev => {
                         const next = { ...prev };
@@ -3268,7 +3387,7 @@ const SettlementPage = () => {
                       toast.success('Expenses applied to per-seller Sales report.');
                     }}
                   >
-                    <PlusCircle className="mr-1.5 h-4 w-4" />
+                    <PlusCircle className="h-4 w-4" />
                     Apply to settlement
                   </Button>
                 </div>
@@ -3322,9 +3441,8 @@ const SettlementPage = () => {
                 </div>
                 <Button
                   type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="h-8 rounded-lg px-3 text-xs"
+                  variant="outline"
+                  className={arrOutlineSm}
                   onClick={() => {
                     const pk = addVoucherSellerId ?? 'x';
                     const base: VoucherPickRow[] = [
@@ -3406,16 +3524,15 @@ const SettlementPage = () => {
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg"
+                    className={arrOutlineMd}
                     onClick={() => setAddVoucherSellerId(null)}
                   >
                     Close
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
-                    className="h-8 rounded-lg"
+                    variant="outline"
+                    className={cn(arrSolidMd, 'gap-1.5')}
                     onClick={() => {
                       const picked = voucherPickRows.filter(r => selectedVoucherRowIds[r.id]);
                       if (picked.length === 0) {
@@ -3449,9 +3566,9 @@ const SettlementPage = () => {
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
+                <AlertDialogCancel className={arrOutlineMd}>Cancel</AlertDialogCancel>
                 <AlertDialogAction
-                  className="rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  className="rounded-xl h-9 px-3 text-sm font-semibold bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90"
                   onClick={() => {
                     if (!deleteLotConfirm) return;
                     const { sellerId, lotId } = deleteLotConfirm;
@@ -3501,13 +3618,14 @@ const SettlementPage = () => {
               <p className="text-white/70 text-xs mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
             </div>
           </div>
-          <div className="mb-3 flex gap-2 rounded-2xl bg-white/10 p-1 backdrop-blur-sm">
-            <button onClick={() => setSettlementMainTab('arrival-summary')}
-              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all touch-manipulation",
-                settlementMainTab === 'arrival-summary'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/70 hover:text-white')}>
-              <FileText className="w-4 h-4" /> Arrival Summary
+          <div className="mb-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
+            <button
+              type="button"
+              onClick={() => setSettlementMainTab('arrival-summary')}
+              className={arrMobTabPill(settlementMainTab === 'arrival-summary')}
+            >
+              <FileText className="w-4 h-4 shrink-0 hidden sm:block" />
+              <span>Arrival Summary</span>
             </button>
             <button
               type="button"
@@ -3520,12 +3638,10 @@ const SettlementPage = () => {
                 }
                 setSettlementMainTab('create-settlements');
               }}
-              className={cn("flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all touch-manipulation",
-                !hasArrivalSelection && "cursor-not-allowed opacity-55",
-                settlementMainTab === 'create-settlements'
-                  ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                  : 'bg-white/10 text-white/70 hover:text-white')}>
-              <Edit3 className="w-4 h-4" /> Create Sattlements
+              className={cn(arrMobTabPill(settlementMainTab === 'create-settlements'), !hasArrivalSelection && 'opacity-55')}
+            >
+              <Edit3 className="w-4 h-4 shrink-0 hidden sm:block" />
+              <span>Create Sattlements</span>
             </button>
           </div>
           {!hasArrivalSelection && (
@@ -3549,12 +3665,21 @@ const SettlementPage = () => {
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
         </div>
-        <div className="mb-4 flex items-center gap-3 flex-wrap">
-          <div className="flex gap-2 rounded-2xl bg-muted/30 p-1">
-            <button onClick={() => setSettlementMainTab('arrival-summary')}
-              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
-                settlementMainTab === 'arrival-summary' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+          <div className="flex items-center gap-1 border-b border-border/40 w-full lg:w-auto overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setSettlementMainTab('arrival-summary')}
+              className={arrDeskTabBtn(settlementMainTab === 'arrival-summary')}
+            >
               <FileText className="w-4 h-4" /> Arrival Summary
+              {settlementMainTab === 'arrival-summary' && (
+                <motion.div
+                  layoutId="settlement-main-tab-indicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
             </button>
             <button
               type="button"
@@ -3567,22 +3692,32 @@ const SettlementPage = () => {
                 }
                 setSettlementMainTab('create-settlements');
               }}
-              className={cn("px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all",
-                !hasArrivalSelection && "cursor-not-allowed opacity-55",
-                settlementMainTab === 'create-settlements' ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md' : 'glass-card text-muted-foreground hover:text-foreground')}>
+              className={cn(arrDeskTabBtn(settlementMainTab === 'create-settlements'), !hasArrivalSelection && 'opacity-55')}
+            >
               <Edit3 className="w-4 h-4" /> Create Sattlements
+              {settlementMainTab === 'create-settlements' && (
+                <motion.div
+                  layoutId="settlement-main-tab-indicator"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
             </button>
           </div>
           {!hasArrivalSelection && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground lg:order-3">
               Select any arrival bill to enable Create Sattlements.
             </p>
           )}
-          <div className="relative w-72">
+          <div className="relative w-full min-w-0 lg:flex-1 lg:max-w-md lg:order-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input aria-label="Search" placeholder="Search by vehicle, seller name..."
-              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50" />
+            <input
+              aria-label="Search"
+              placeholder="Search by vehicle, seller name..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF]"
+            />
           </div>
         </div>
       </div>
