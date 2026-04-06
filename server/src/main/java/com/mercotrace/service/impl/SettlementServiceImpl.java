@@ -685,18 +685,26 @@ public class SettlementServiceImpl implements SettlementService {
         BigDecimal arrival = charges.getFreight() != null ? charges.getFreight() : BigDecimal.ZERO;
         out.setArrivalFreightAmount(arrival);
 
-        List<Lot> lots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
+        List<SellerInVehicle> vehicleSellers = sellerInVehicleRepository.findAllByVehicleId(siv.getVehicleId());
+        List<Long> sellerVehicleIds = vehicleSellers.stream().map(SellerInVehicle::getId).toList();
+        if (sellerVehicleIds.isEmpty()) {
+            return out;
+        }
+        List<Lot> lots = lotRepository.findAllBySellerVehicleIdIn(sellerVehicleIds);
         if (lots.isEmpty()) {
             return out;
         }
-        List<String> lotIdStrs = lots.stream().map(l -> String.valueOf(l.getId())).toList();
+        List<Long> lotIdsLong = lots.stream().map(Lot::getId).distinct().toList();
+        List<String> lotIdStrs = lotIdsLong.stream().map(String::valueOf).toList();
 
         String nameFilter = invoiceNameFilter != null && !invoiceNameFilter.isBlank() ? invoiceNameFilter.trim() : null;
 
-        BigDecimal payableInvoiced = salesBillLineItemRepository.sumLineAmountByTraderLots(traderId, lotIdStrs, nameFilter);
+        BigDecimal payableInvoiced =
+            salesBillLineItemRepository.sumLineAmountByTraderLotsForSettlement(traderId, lotIdStrs, lotIdsLong, nameFilter);
         out.setPayableInvoiced(payableInvoiced != null ? payableInvoiced : BigDecimal.ZERO);
 
-        List<Long> billIds = salesBillLineItemRepository.findDistinctBillIdsByTraderAndLots(traderId, lotIdStrs, nameFilter);
+        List<Long> billIds =
+            salesBillLineItemRepository.findDistinctBillIdsByTraderAndLotsForSettlement(traderId, lotIdStrs, lotIdsLong, nameFilter);
         if (billIds.isEmpty()) {
             return out;
         }

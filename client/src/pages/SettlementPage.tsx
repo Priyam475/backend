@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, User, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Info,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -40,6 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
   sellerId: string;
@@ -192,22 +193,22 @@ function buildDeductionItemsFromSellerExpenses(
       key: 'freight',
       label: mergeWeighingIntoFreight && weighingEnabled ? 'Freight (incl. weighing)' : 'Freight',
       amount: freightAmt,
-      editable: false,
+      editable: true,
       autoPulled: true,
     },
-    { key: 'coolie', label: coolieLabel, amount: exp.unloading, editable: false, autoPulled: true },
+    { key: 'coolie', label: coolieLabel, amount: exp.unloading, editable: true, autoPulled: true },
   ];
   if (!(weighingEnabled && mergeWeighingIntoFreight)) {
     items.push({
       key: 'weighing',
       label: 'Weighing Charges',
       amount: weighingAmt,
-      editable: false,
+      editable: true,
       autoPulled: true,
     });
   }
   items.push(
-    { key: 'advance', label: 'Cash Advance', amount: exp.cashAdvance, editable: false, autoPulled: false },
+    { key: 'advance', label: 'Cash Advance', amount: exp.cashAdvance, editable: true, autoPulled: false },
     { key: 'gunnies', label: 'Gunnies', amount: exp.gunnies, editable: true, autoPulled: false },
     { key: 'others', label: 'Others', amount: exp.others, editable: true, autoPulled: false }
   );
@@ -348,6 +349,10 @@ function formatRupeeInr(value: number): string {
 /** Same visual language as Billing commodity read-only cells (computed fields). */
 const settlementReadOnlyCellClass =
   'h-9 lg:h-8 min-h-[2.25rem] px-2 lg:px-1.5 border border-dashed border-border/70 rounded-md bg-muted/50 text-muted-foreground inline-flex items-center justify-center w-full text-xs lg:text-[11px] cursor-not-allowed shadow-inner select-text tabular-nums';
+
+/** Uniform editable expense amount fields (per seller). */
+const settlementExpenseInputClass =
+  'h-9 w-full min-w-[5.5rem] max-w-[6.75rem] rounded-md border border-border bg-background px-2 text-right text-xs tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
 /** Per-seller registration (Sales report): registered = linked to contact registry. */
 interface SellerRegFormState {
@@ -652,7 +657,7 @@ const SettlementPage = () => {
   /** Toggle 1: use weighing charges in settlement totals. */
   const [settlementWeighingEnabled, setSettlementWeighingEnabled] = useState(true);
   /** Toggle 2: merge weighing into freight for display and main patti deductions. */
-  const [settlementWeighingMergeIntoFreight, setSettlementWeighingMergeIntoFreight] = useState(false);
+  const [settlementWeighingMergeIntoFreight] = useState(false);
   const [gunniesAmount, setGunniesAmount] = useState(0);
   /** Per seller: collapsed sales report shows qty / weight / gross summary only (Billing-style). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
@@ -667,8 +672,14 @@ const SettlementPage = () => {
   const [invoiceNameSearch, setInvoiceNameSearch] = useState('');
   const debouncedInvoiceName = useDebouncedValue(invoiceNameSearch, 300);
 
-  /** Auction-based gross (same source as rate clusters / Sales Pad). */
-  const payableFromSales = pattiData?.grossAmount ?? 0;
+  const [amountSummaryNonce, setAmountSummaryNonce] = useState(0);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') setAmountSummaryNonce(n => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     if (!selectedSeller?.sellerId) {
@@ -689,7 +700,7 @@ const SettlementPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedSeller?.sellerId, debouncedInvoiceName]);
+  }, [selectedSeller?.sellerId, debouncedInvoiceName, amountSummaryNonce]);
 
   /** Lot IDs removed from UI per seller (pending API sync). */
   const [removedLotsBySellerId, setRemovedLotsBySellerId] = useState<Record<string, string[]>>({});
@@ -1028,6 +1039,33 @@ const SettlementPage = () => {
     [arrivalSellersForPatti]
   );
 
+  /** Vehicle-level net payable across all visible seller cards in current patti scope. */
+  const vehicleNetPayableFromPatti = useMemo(() => {
+    if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) return 0;
+    return arrivalSellersForPatti.reduce((sum, seller) => {
+      const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
+      const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+      const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
+      const amountTot = (seller.lots ?? [])
+        .map((lot, i) => ({ lot, sid: lotStableId(lot, i) }))
+        .filter(x => !removedSet.has(x.sid))
+        .map(({ lot, sid }) => mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot)))
+        .reduce((s, r) => s + r.amount, 0);
+      const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
+      return sum + (amountTot - expenseTotal);
+    }, 0);
+  }, [
+    selectedSeller,
+    pattiData,
+    arrivalSellersForPatti,
+    sellerExpensesById,
+    removedLotsBySellerId,
+    lotSalesOverridesBySellerId,
+    getLotDivisor,
+    settlementWeighingEnabled,
+    settlementWeighingMergeIntoFreight,
+  ]);
+
   const handleSalesReportCarouselScroll = useCallback(() => {
     const el = salesReportCarouselRef.current;
     const n = arrivalSellersForPatti.length;
@@ -1165,6 +1203,17 @@ const SettlementPage = () => {
       setSellerContactSearchLoading(prev => ({ ...prev, [sellerId]: false }));
     }
   }, []);
+
+  const sellerMarkSearchTimersRef = useRef<Record<string, number>>({});
+  const scheduleMarkContactSearch = useCallback(
+    (sellerId: string, query: string) => {
+      window.clearTimeout(sellerMarkSearchTimersRef.current[sellerId]);
+      sellerMarkSearchTimersRef.current[sellerId] = window.setTimeout(() => {
+        void runSellerContactSearch(sellerId, query);
+      }, 350);
+    },
+    [runSellerContactSearch]
+  );
 
   const setLotSalesField = useCallback((sellerId: string, sid: string, field: keyof LotSalesOverride, raw: string) => {
     setLotSalesOverridesBySellerId(prev => {
@@ -1817,13 +1866,13 @@ const SettlementPage = () => {
                     <p className="text-sm font-bold text-foreground sm:text-base">Payable</p>
                     <div className="mt-3 space-y-2.5 text-sm">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">From Sales</span>
+                        <span className="text-muted-foreground">Net (Vehicle Patti)</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(payableFromSales)}
+                          {formatRupeeInr(vehicleNetPayableFromPatti)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Invoiced</span>
+                        <span className="text-muted-foreground">Payable invoiced</span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
                           {formatRupeeInr(amountSummaryFromApi.payableInvoiced)}
                         </span>
@@ -1841,7 +1890,7 @@ const SettlementPage = () => {
             transition={{ delay: 0.04 }}
             className="glass-card overflow-hidden rounded-2xl border border-border/50"
           >
-            <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-4 py-3 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20 sm:px-5 sm:py-3.5">
+            <div className="border-b border-border/40 bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-4 py-3 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20 sm:px-5 sm:py-3.5">
               <p className="text-center text-sm font-bold tracking-tight text-foreground sm:text-base">
                 Expenses &amp; invoice
               </p>
@@ -1851,10 +1900,10 @@ const SettlementPage = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 w-full shrink-0 rounded-xl border-dashed border-primary/40 bg-background/60 font-semibold sm:h-10 sm:w-auto sm:min-w-[12rem]"
+                  className="h-11 w-full shrink-0 rounded-xl border border-primary/35 bg-background/90 font-semibold shadow-sm hover:bg-primary/5 sm:h-10 sm:w-auto sm:min-w-[12rem]"
                   onClick={() => void openVehicleExpenseModal()}
                 >
-                  <PlusCircle className="mr-2 h-4 w-4" />
+                  <PlusCircle className="mr-2 h-4 w-4 text-primary" />
                   Add Quick Expenses (Alt + X)
                 </Button>
                 <div className="w-full min-w-0 flex-1 sm:max-w-md">
@@ -1938,9 +1987,9 @@ const SettlementPage = () => {
                       id={`settlement-seller-card-${seller.sellerId}`}
                       className="rounded-2xl border border-border/60 bg-muted/10 p-3 sm:p-4"
                     >
-                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trader</span>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                      <label className="flex cursor-pointer items-center gap-2 font-medium">
                         <Checkbox
                           checked={form.registered}
                           onCheckedChange={v => {
@@ -1959,137 +2008,119 @@ const SettlementPage = () => {
                             if (on) void runSellerContactSearch(seller.sellerId, '');
                           }}
                         />
-                        Registered
+                        <span className="text-foreground">Registered</span>
                       </label>
                       <span className="text-xs text-muted-foreground">
-                        {form.registered ? 'Linked to trader registry' : 'Unregistered — capture details or register below'}
+                        {form.registered ? (form.contactId ? 'Registry linked' : 'Search by mark below') : 'Unregistered — enter details to register'}
                       </span>
                     </div>
 
                     <div className="mb-4 space-y-3 rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
-                      {form.registered ? (
-                        <div className="space-y-2">
-                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            Search registered traders
-                          </label>
-                          <div className="flex flex-wrap gap-2">
-                            <Input
-                              placeholder="Mark, name, or phone…"
-                              value={form.contactSearchQuery}
-                              onChange={e =>
-                                setSellerFormById(prev => {
-                                  const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                                  return { ...prev, [seller.sellerId]: { ...cur, contactSearchQuery: e.target.value } };
-                                })
-                              }
-                              className="h-9 min-w-[12rem] flex-1 rounded-lg text-sm"
-                            />
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              className="h-9 shrink-0 rounded-lg"
-                              disabled={!!sellerContactSearchLoading[seller.sellerId]}
-                              onClick={() => void runSellerContactSearch(seller.sellerId, form.contactSearchQuery)}
-                            >
-                              {sellerContactSearchLoading[seller.sellerId] ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Search className="h-4 w-4" />
-                              )}
-                              Search
-                            </Button>
-                          </div>
-                          {(sellerContactSearchById[seller.sellerId] ?? []).length > 0 && (
-                            <ul className="max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-muted/20 text-xs">
-                              {(sellerContactSearchById[seller.sellerId] ?? []).slice(0, 12).map(c => (
-                                <li key={c.contact_id}>
-                                  <button
-                                    type="button"
-                                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-muted/50"
-                                    onClick={() => {
-                                      void (async () => {
-                                        if (!can('Settlement', 'Edit')) {
-                                          toast.error('You do not have permission to link traders.');
-                                          return;
-                                        }
-                                        setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
-                                        try {
-                                          const reg = await settlementApi.linkSellerContact(seller.sellerId, c.contact_id);
-                                          setSellers(prev =>
-                                            prev.map(x =>
-                                              x.sellerId === seller.sellerId
-                                                ? {
-                                                    ...x,
-                                                    sellerName: reg.sellerName,
-                                                    sellerMark: reg.sellerMark,
-                                                    contactId: reg.contactId,
-                                                    sellerPhone: reg.sellerPhone,
-                                                  }
-                                                : x
-                                            )
-                                          );
-                                          setSellerFormById(prev => ({
-                                            ...prev,
-                                            [seller.sellerId]: {
-                                              registered: true,
-                                              contactId: reg.contactId,
-                                              name: reg.sellerName,
-                                              mark: reg.sellerMark,
-                                              mobile: reg.sellerPhone,
-                                              contactSearchQuery: '',
-                                            },
-                                          }));
-                                          setRegisteredBaselineById(prev => ({
-                                            ...prev,
-                                            [seller.sellerId]: {
-                                              registered: true,
-                                              contactId: reg.contactId,
-                                              name: reg.sellerName,
-                                              mark: reg.sellerMark,
-                                              mobile: reg.sellerPhone,
-                                              contactSearchQuery: '',
-                                            },
-                                          }));
-                                          toast.success('Trader linked to this seller');
-                                        } catch {
-                                          toast.error('Could not link trader');
-                                        } finally {
-                                          setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
-                                        }
-                                      })();
-                                    }}
-                                  >
-                                    <span className="font-semibold text-foreground">{c.name}</span>
-                                    <span className="text-muted-foreground">
-                                      {c.phone}
-                                      {c.mark ? ` · ${c.mark}` : ''}
-                                    </span>
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ) : null}
                       <div className="flex min-w-0 flex-nowrap items-end gap-2 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-                        <div className="min-w-[6rem] max-w-[7rem] shrink-0 sm:min-w-0 sm:max-w-none sm:flex-1">
+                        <div className="relative min-w-[6.5rem] max-w-[8rem] shrink-0 sm:min-w-0 sm:max-w-none sm:flex-1">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Mark
                           </label>
-                          <Input
-                            value={form.mark}
-                            onChange={e =>
-                              setSellerFormById(prev => {
-                                const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                                return { ...prev, [seller.sellerId]: { ...cur, mark: e.target.value } };
-                              })
-                            }
-                            className={cn(
-                              'h-9 rounded-lg text-sm',
-                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
-                            )}
-                          />
+                          <div className="relative">
+                            <Input
+                              value={form.mark}
+                              onChange={e => {
+                                const v = e.target.value;
+                                setSellerFormById(prev => {
+                                  const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                  return { ...prev, [seller.sellerId]: { ...cur, mark: v } };
+                                });
+                                if (form.registered && !form.contactId) {
+                                  scheduleMarkContactSearch(seller.sellerId, v);
+                                }
+                              }}
+                              placeholder={form.registered && !form.contactId ? 'Type mark or name…' : ''}
+                              autoComplete="off"
+                              className={cn(
+                                'h-9 rounded-lg pr-8 text-sm',
+                                form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                              )}
+                            />
+                            {form.registered && !form.contactId ? (
+                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                {sellerContactSearchLoading[seller.sellerId] ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Search className="h-3.5 w-3.5 opacity-70" />
+                                )}
+                              </span>
+                            ) : null}
+                            {form.registered && !form.contactId && (sellerContactSearchById[seller.sellerId] ?? []).length > 0 ? (
+                              <ul className="absolute left-0 right-0 z-[80] mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
+                                {(sellerContactSearchById[seller.sellerId] ?? []).slice(0, 12).map(c => (
+                                  <li key={c.contact_id}>
+                                    <button
+                                      type="button"
+                                      className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs hover:bg-muted/50"
+                                      onClick={() => {
+                                        void (async () => {
+                                          if (!can('Settlement', 'Edit')) {
+                                            toast.error('You do not have permission to link traders.');
+                                            return;
+                                          }
+                                          setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
+                                          try {
+                                            const reg = await settlementApi.linkSellerContact(seller.sellerId, c.contact_id);
+                                            setSellers(prev =>
+                                              prev.map(x =>
+                                                x.sellerId === seller.sellerId
+                                                  ? {
+                                                      ...x,
+                                                      sellerName: reg.sellerName,
+                                                      sellerMark: reg.sellerMark,
+                                                      contactId: reg.contactId,
+                                                      sellerPhone: reg.sellerPhone,
+                                                    }
+                                                  : x
+                                              )
+                                            );
+                                            setSellerFormById(prev => ({
+                                              ...prev,
+                                              [seller.sellerId]: {
+                                                registered: true,
+                                                contactId: reg.contactId,
+                                                name: reg.sellerName,
+                                                mark: reg.sellerMark,
+                                                mobile: reg.sellerPhone,
+                                                contactSearchQuery: '',
+                                              },
+                                            }));
+                                            setRegisteredBaselineById(prev => ({
+                                              ...prev,
+                                              [seller.sellerId]: {
+                                                registered: true,
+                                                contactId: reg.contactId,
+                                                name: reg.sellerName,
+                                                mark: reg.sellerMark,
+                                                mobile: reg.sellerPhone,
+                                                contactSearchQuery: '',
+                                              },
+                                            }));
+                                            toast.success('Trader linked to this seller');
+                                          } catch {
+                                            toast.error('Could not link trader');
+                                          } finally {
+                                            setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
+                                          }
+                                        })();
+                                      }}
+                                    >
+                                      <span className="font-semibold text-foreground">{c.name}</span>
+                                      <span className="text-muted-foreground">
+                                        {c.phone}
+                                        {c.mark ? ` · ${c.mark}` : ''}
+                                      </span>
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="min-w-[7.5rem] flex-1 sm:min-w-[8rem]">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2235,11 +2266,14 @@ const SettlementPage = () => {
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Per seller sales</p>
-                        <p className="truncate text-sm font-bold text-foreground">{seller.sellerName}</p>
+                        <p className="truncate text-sm font-bold text-foreground">
+                          {seller.sellerName}
+                          {seller.sellerMark ? ` – ${seller.sellerMark}` : ''}
+                        </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
-                          Gross ₹{formatMoney2Display(amountTot)}
+                          Net ₹{formatMoney2Display(netSeller)}
                         </span>
                         <Button
                           type="button"
@@ -2279,7 +2313,7 @@ const SettlementPage = () => {
                             ·
                           </span>
                           <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-                            Gross: ₹{formatMoney2Display(amountTot)}
+                            Net: ₹{formatMoney2Display(netSeller)}
                           </span>
                         </div>
                       </div>
@@ -2452,77 +2486,114 @@ const SettlementPage = () => {
                         <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-3 py-2.5 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20">
                           <p className="text-center text-sm font-bold text-foreground">Expenses</p>
                         </div>
-                        <div className="flex items-center justify-center gap-3 border-b border-border/40 px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-muted-foreground">Use weighman</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
+                                  aria-label="Weighman toggle help"
+                                >
+                                  <Info className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-[240px] text-xs">
+                                ON: include weighman in expenses and net payable. OFF: ignore weighman in totals.
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Switch
                             id={`sw-w-${seller.sellerId}`}
                             className="h-4 w-7 scale-90"
                             checked={settlementWeighingEnabled}
                             onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
-                            aria-label="Use weighing charges in settlement totals"
-                          />
-                          <Switch
-                            id={`sw-m-${seller.sellerId}`}
-                            className="h-4 w-7 scale-90"
-                            checked={settlementWeighingMergeIntoFreight}
-                            disabled={!settlementWeighingEnabled}
-                            onCheckedChange={v => setSettlementWeighingMergeIntoFreight(v === true)}
-                            aria-label="Merge weighing amount into freight"
+                            aria-label="Use weighman in totals"
                           />
                         </div>
                         <div className="space-y-2 p-3 text-xs">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">Freight (Arrivals)</span>
+                              <span className="text-muted-foreground">Freight</span>
                               <Input
                                 id={`settlement-seller-expense-${seller.sellerId}-freight`}
-                                readOnly
-                                tabIndex={-1}
-                                type="text"
-                                className={cn(
-                                  'h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums',
-                                  settlementReadOnlyCellClass,
-                                  'cursor-not-allowed'
-                                )}
-                                value={formatMoney2Display(
-                                  settlementWeighingEnabled && settlementWeighingMergeIntoFreight
-                                    ? exp.freight + exp.weighman
-                                    : exp.freight
-                                )}
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                inputMode="decimal"
+                                className={settlementExpenseInputClass}
+                                value={exp.freight === 0 ? '' : exp.freight}
+                                onChange={e => {
+                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  setSellerExpensesById(prev => {
+                                    const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                    return { ...prev, [seller.sellerId]: { ...e0, freight: v } };
+                                  });
+                                }}
+                                aria-label="Freight amount"
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">Unloading (Coolie)</span>
+                              <span className="text-muted-foreground">Unloading</span>
                               <Input
-                                readOnly
-                                tabIndex={-1}
-                                type="text"
-                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
-                                value={formatMoney2Display(exp.unloading)}
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                inputMode="decimal"
+                                className={settlementExpenseInputClass}
+                                value={exp.unloading === 0 ? '' : exp.unloading}
+                                onChange={e => {
+                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  setSellerExpensesById(prev => {
+                                    const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                    return { ...prev, [seller.sellerId]: { ...e0, unloading: v } };
+                                  });
+                                }}
+                                aria-label="Unloading amount"
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Weighing</span>
                               <Input
-                                readOnly
-                                tabIndex={-1}
-                                type="text"
-                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                inputMode="decimal"
+                                disabled={!settlementWeighingEnabled}
+                                className={cn(
+                                  settlementExpenseInputClass,
+                                  settlementWeighingMergeIntoFreight && settlementWeighingEnabled && 'opacity-80'
+                                )}
                                 value={
-                                  !settlementWeighingEnabled
-                                    ? '—'
-                                    : settlementWeighingMergeIntoFreight
-                                      ? 'In Freight'
-                                      : formatMoney2Display(exp.weighman)
+                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman
                                 }
+                                onChange={e => {
+                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  setSellerExpensesById(prev => {
+                                    const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                    return { ...prev, [seller.sellerId]: { ...e0, weighman: v } };
+                                  });
+                                }}
+                                aria-label="Weighing charges"
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Cash Advance</span>
                               <Input
-                                readOnly
-                                tabIndex={-1}
-                                type="text"
-                                className={cn('h-8 w-[5.5rem] rounded-md text-right text-xs tabular-nums', settlementReadOnlyCellClass)}
-                                value={formatMoney2Display(exp.cashAdvance)}
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                inputMode="decimal"
+                                className={settlementExpenseInputClass}
+                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance}
+                                onChange={e => {
+                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  setSellerExpensesById(prev => {
+                                    const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                    return { ...prev, [seller.sellerId]: { ...e0, cashAdvance: v } };
+                                  });
+                                }}
+                                aria-label="Cash advance"
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -2531,7 +2602,7 @@ const SettlementPage = () => {
                                 type="number"
                                 min={0}
                                 step="0.01"
-                                className="h-8 w-[5.5rem] rounded-md text-center text-xs tabular-nums"
+                                className={settlementExpenseInputClass}
                                 value={exp.gunnies === 0 ? '' : exp.gunnies}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
@@ -2540,6 +2611,7 @@ const SettlementPage = () => {
                                     return { ...prev, [seller.sellerId]: { ...e0, gunnies: v } };
                                   });
                                 }}
+                                aria-label="Gunnies"
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -2548,7 +2620,7 @@ const SettlementPage = () => {
                                 type="number"
                                 min={0}
                                 step="0.01"
-                                className="h-8 w-[5.5rem] rounded-md text-center text-xs tabular-nums"
+                                className={settlementExpenseInputClass}
                                 value={exp.others === 0 ? '' : exp.others}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
@@ -2557,6 +2629,7 @@ const SettlementPage = () => {
                                     return { ...prev, [seller.sellerId]: { ...e0, others: v } };
                                   });
                                 }}
+                                aria-label="Other expenses"
                               />
                             </div>
                           </div>

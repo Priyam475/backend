@@ -334,12 +334,13 @@ class SettlementServiceImplTest {
 
         when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
         when(sellerInVehicleRepository.findById(100L)).thenReturn(Optional.of(siv));
+        when(sellerInVehicleRepository.findAllByVehicleId(200L)).thenReturn(List.of(siv));
         when(vehicleRepository.findById(200L)).thenReturn(Optional.of(vehicle));
         when(freightCalculationRepository.findOneByVehicleId(200L)).thenReturn(Optional.empty());
-        when(lotRepository.findAllBySellerVehicleIdAndTraderId(100L, TRADER_ID)).thenReturn(List.of(lot));
-        when(salesBillLineItemRepository.sumLineAmountByTraderLots(TRADER_ID, List.of("55"), null))
+        when(lotRepository.findAllBySellerVehicleIdIn(List.of(100L))).thenReturn(List.of(lot));
+        when(salesBillLineItemRepository.sumLineAmountByTraderLotsForSettlement(TRADER_ID, List.of("55"), List.of(55L), null))
             .thenReturn(BigDecimal.valueOf(8888));
-        when(salesBillLineItemRepository.findDistinctBillIdsByTraderAndLots(TRADER_ID, List.of("55"), null))
+        when(salesBillLineItemRepository.findDistinctBillIdsByTraderAndLotsForSettlement(TRADER_ID, List.of("55"), List.of(55L), null))
             .thenReturn(List.of(1L, 2L));
         when(salesBillRepository.sumOutboundFreightByTraderAndBillIds(TRADER_ID, List.of(1L, 2L)))
             .thenReturn(BigDecimal.valueOf(450));
