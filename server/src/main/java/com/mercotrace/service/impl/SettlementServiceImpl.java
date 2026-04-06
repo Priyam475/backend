@@ -158,8 +158,12 @@ public class SettlementServiceImpl implements SettlementService {
             Contact contact = contactMap.get(siv.getContactId());
             Vehicle vehicle = vehicleMap.get(siv.getVehicleId());
             Commodity commodity = lot.getCommodityId() != null ? commodityMap.get(lot.getCommodityId()) : null;
-            String sellerName = contact != null ? contact.getName() : "Unknown";
-            String sellerMark = contact != null ? (contact.getMark() != null ? contact.getMark() : "") : "";
+            String sellerName = contact != null
+                ? contact.getName()
+                : (siv.getSellerName() != null && !siv.getSellerName().isBlank() ? siv.getSellerName() : "Unknown");
+            String sellerMark = contact != null
+                ? (contact.getMark() != null ? contact.getMark() : "")
+                : (siv.getSellerMark() != null ? siv.getSellerMark() : "");
             String vehicleNumber = vehicle != null ? vehicle.getVehicleNumber() : "";
             String sellerIdKey = String.valueOf(lot.getSellerVehicleId());
 
@@ -169,6 +173,9 @@ public class SettlementServiceImpl implements SettlementService {
                 dto.setSellerName(sellerName);
                 dto.setSellerMark(sellerMark);
                 dto.setVehicleNumber(vehicleNumber);
+                dto.setFromLocation(vehicle != null ? vehicle.getOrigin() : null);
+                dto.setSellerSerialNo(lot.getSellerSerialNo());
+                dto.setDate(vehicle != null ? vehicle.getArrivalDatetime() : lot.getCreatedAt());
                 dto.setLots(new ArrayList<>());
                 return dto;
             });
@@ -676,8 +683,12 @@ public class SettlementServiceImpl implements SettlementService {
             return out;
         }
         SellerInVehicle siv = sivOpt.get();
-        Optional<Vehicle> vehicleOpt = vehicleRepository.findById(siv.getVehicleId());
-        if (vehicleOpt.isEmpty() || !traderId.equals(vehicleOpt.get().getTraderId())) {
+        if (siv.getVehicleId() == null) {
+            return out;
+        }
+        // Same access rule as expense snapshot / settlement list: trader must have lots for this seller (SIV → Vehicle join).
+        // Do not gate on vehicle.trader_id alone — it can disagree with how lots are scoped while FreightCalculation still exists.
+        if (lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId).isEmpty()) {
             return out;
         }
 
@@ -701,7 +712,7 @@ public class SettlementServiceImpl implements SettlementService {
 
         BigDecimal payableInvoiced =
             salesBillLineItemRepository.sumLineAmountByTraderLotsForSettlement(traderId, lotIdStrs, lotIdsLong, nameFilter);
-        out.setPayableInvoiced(payableInvoiced != null ? payableInvoiced : BigDecimal.ZERO);
+        BigDecimal payableGross = payableInvoiced != null ? payableInvoiced : BigDecimal.ZERO;
 
         List<Long> billIds =
             salesBillLineItemRepository.findDistinctBillIdsByTraderAndLotsForSettlement(traderId, lotIdStrs, lotIdsLong, nameFilter);
@@ -709,7 +720,9 @@ public class SettlementServiceImpl implements SettlementService {
             return out;
         }
         BigDecimal freightInv = salesBillRepository.sumOutboundFreightByTraderAndBillIds(traderId, billIds);
-        out.setFreightInvoiced(freightInv != null ? freightInv : BigDecimal.ZERO);
+        BigDecimal freightInvoiced = freightInv != null ? freightInv : BigDecimal.ZERO;
+        out.setFreightInvoiced(freightInvoiced);
+        out.setPayableInvoiced(payableGross.subtract(freightInvoiced));
         return out;
     }
 
@@ -760,6 +773,7 @@ public class SettlementServiceImpl implements SettlementService {
         dto.setPattiId(e.getPattiId());
         dto.setSellerId(e.getSellerId());
         dto.setSellerName(e.getSellerName());
+        enrichPattiArrivalMeta(dto, e.getSellerId(), e.getTraderId());
         dto.setGrossAmount(e.getGrossAmount());
         dto.setTotalDeductions(e.getTotalDeductions());
         dto.setNetPayable(e.getNetPayable());
@@ -783,5 +797,38 @@ public class SettlementServiceImpl implements SettlementService {
             dto.getDeductions().add(dd);
         }
         return dto;
+    }
+
+    private void enrichPattiArrivalMeta(PattiDTO dto, String sellerId, Long traderId) {
+        if (sellerId == null || sellerId.isBlank() || traderId == null) {
+            return;
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            return;
+        }
+        Optional<SellerInVehicle> sivOpt = sellerInVehicleRepository.findById(sivId);
+        if (sivOpt.isEmpty()) {
+            return;
+        }
+        SellerInVehicle siv = sivOpt.get();
+        if (siv.getVehicleId() != null) {
+            vehicleRepository.findById(siv.getVehicleId()).ifPresent(v -> {
+                dto.setVehicleNumber(v.getVehicleNumber());
+                dto.setFromLocation(v.getOrigin());
+                dto.setDate(v.getArrivalDatetime());
+            });
+        }
+        List<Lot> sellerLots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
+        Integer serial = sellerLots.stream()
+            .map(Lot::getSellerSerialNo)
+            .filter(Objects::nonNull)
+            .min(Integer::compareTo)
+            .orElse(null);
+        if (serial != null) {
+            dto.setSellerSerialNo(serial);
+        }
     }
 }

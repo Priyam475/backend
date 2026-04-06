@@ -70,6 +70,10 @@ public final class SettlementDTOs {
         private String pattiId;
         private String sellerId;
         private String sellerName;
+        private String vehicleNumber;
+        private String fromLocation;
+        private Integer sellerSerialNo;
+        private Instant date;
         private List<RateClusterDTO> rateClusters = new ArrayList<>();
         private BigDecimal grossAmount;
         private List<DeductionItemDTO> deductions = new ArrayList<>();
@@ -86,6 +90,14 @@ public final class SettlementDTOs {
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
         public String getSellerName() { return sellerName; }
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
+        public String getVehicleNumber() { return vehicleNumber; }
+        public void setVehicleNumber(String vehicleNumber) { this.vehicleNumber = vehicleNumber; }
+        public String getFromLocation() { return fromLocation; }
+        public void setFromLocation(String fromLocation) { this.fromLocation = fromLocation; }
+        public Integer getSellerSerialNo() { return sellerSerialNo; }
+        public void setSellerSerialNo(Integer sellerSerialNo) { this.sellerSerialNo = sellerSerialNo; }
+        public Instant getDate() { return date; }
+        public void setDate(Instant date) { this.date = date; }
         public List<RateClusterDTO> getRateClusters() { return rateClusters; }
         public void setRateClusters(List<RateClusterDTO> rateClusters) { this.rateClusters = rateClusters; }
         public BigDecimal getGrossAmount() { return grossAmount; }
@@ -228,6 +240,9 @@ public final class SettlementDTOs {
          * Phone for display: contact phone when linked, else free-text {@code seller_in_vehicle.seller_phone}.
          */
         private String sellerPhone;
+        private String fromLocation;
+        private Integer sellerSerialNo;
+        private Instant date;
         private List<SettlementLotDTO> lots = new ArrayList<>();
 
         public String getSellerId() { return sellerId; }
@@ -250,6 +265,12 @@ public final class SettlementDTOs {
         public void setContactId(String contactId) { this.contactId = contactId; }
         public String getSellerPhone() { return sellerPhone; }
         public void setSellerPhone(String sellerPhone) { this.sellerPhone = sellerPhone; }
+        public String getFromLocation() { return fromLocation; }
+        public void setFromLocation(String fromLocation) { this.fromLocation = fromLocation; }
+        public Integer getSellerSerialNo() { return sellerSerialNo; }
+        public void setSellerSerialNo(Integer sellerSerialNo) { this.sellerSerialNo = sellerSerialNo; }
+        public Instant getDate() { return date; }
+        public void setDate(Instant date) { this.date = date; }
         public List<SettlementLotDTO> getLots() { return lots; }
         public void setLots(List<SettlementLotDTO> lots) { this.lots = lots; }
     }

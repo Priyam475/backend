@@ -112,6 +112,54 @@ interface PattiData {
   useAverageWeight: boolean;
 }
 
+interface ArrivalSummaryRow {
+  key: string;
+  vehicleNumber: string;
+  fromLocation: string;
+  serialNo: string | number | null;
+  dateLabel: string;
+  sellerNames: string;
+  lots: number;
+  bids: number;
+  weighed: number;
+  sellerIds: string[];
+  representativeSeller: SellerSettlement;
+}
+
+interface SavedArrivalSummaryRow {
+  key: string;
+  vehicleNumber: string;
+  fromLocation: string;
+  serialNo: string | number | null;
+  dateLabel: string;
+  sellerNames: string;
+  sellerIds: string[];
+  representativePattiId: number | null;
+}
+
+function InlineCalcTip({ label, lines }: { label: string; lines: string[] }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted/60"
+          aria-label={label}
+        >
+          <Info className="h-3 w-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[300px] text-xs leading-relaxed">
+        <div className="space-y-0.5">
+          {lines.map((line, idx) => (
+            <p key={`${label}-${idx}`}>{line}</p>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Map backend PattiDTO to form PattiData (numbers and ISO date). */
 function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
   const toNum = (v: unknown): number => (typeof v === 'number' && !Number.isNaN(v) ? v : Number(v) || 0);
@@ -643,6 +691,7 @@ const SettlementPage = () => {
   }
   const [sellers, setSellers] = useState<SellerSettlement[]>([]);
   const [selectedSeller, setSelectedSeller] = useState<SellerSettlement | null>(null);
+  const [selectedArrivalSellerIds, setSelectedArrivalSellerIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [settlementMainTab, setSettlementMainTab] = useState<'arrival-summary' | 'create-settlements'>('arrival-summary');
   const [arrivalSummaryTab, setArrivalSummaryTab] = useState<'new-patti' | 'saved-patti'>('new-patti');
@@ -669,6 +718,11 @@ const SettlementPage = () => {
     freightInvoiced: 0,
     payableInvoiced: 0,
   });
+  const [arrivalFreightBaseline, setArrivalFreightBaseline] = useState(0);
+  const [salesPadNetWeightBaseline, setSalesPadNetWeightBaseline] = useState(0);
+  const [auctionAmountBaseline, setAuctionAmountBaseline] = useState(0);
+  const [auctionQtyBaseline, setAuctionQtyBaseline] = useState(0);
+  const [auctionWeightBaseline, setAuctionWeightBaseline] = useState(0);
   const [invoiceNameSearch, setInvoiceNameSearch] = useState('');
   const debouncedInvoiceName = useDebouncedValue(invoiceNameSearch, 300);
 
@@ -681,14 +735,23 @@ const SettlementPage = () => {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
+  const amountSummarySellerId = useMemo(() => {
+    if (selectedSeller?.sellerId) return selectedSeller.sellerId;
+    if (!selectedSeller) return '';
+    const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
+    if (!vKey) return '';
+    const candidate = sellers.find(s => normalizeVehicleKey(s.vehicleNumber) === vKey && !!s.sellerId);
+    return candidate?.sellerId ?? '';
+  }, [selectedSeller, sellers]);
+
   useEffect(() => {
-    if (!selectedSeller?.sellerId) {
+    if (!amountSummarySellerId) {
       setAmountSummaryFromApi({ arrivalFreightAmount: 0, freightInvoiced: 0, payableInvoiced: 0 });
       return;
     }
     let cancelled = false;
     settlementApi
-      .getSettlementAmountSummary(selectedSeller.sellerId, debouncedInvoiceName.trim() || undefined)
+      .getSettlementAmountSummary(amountSummarySellerId, debouncedInvoiceName.trim() || undefined)
       .then(data => {
         if (!cancelled) setAmountSummaryFromApi(data);
       })
@@ -700,7 +763,7 @@ const SettlementPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedSeller?.sellerId, debouncedInvoiceName, amountSummaryNonce]);
+  }, [amountSummarySellerId, debouncedInvoiceName, amountSummaryNonce]);
 
   /** Lot IDs removed from UI per seller (pending API sync). */
   const [removedLotsBySellerId, setRemovedLotsBySellerId] = useState<Record<string, string[]>>({});
@@ -820,13 +883,14 @@ const SettlementPage = () => {
 
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
-  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number }) => {
+  const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
     setExistingPattiId(null);
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
     setVehicleExpenseRows([]);
     setVehicleExpenseModalOpen(false);
     setSelectedSeller(seller);
+    setSelectedArrivalSellerIds(overrides?.arrivalSellerIds ?? []);
     setHasArrivalSelection(true);
 
     if (!isVehicleNumberValid(seller.vehicleNumber)) {
@@ -868,7 +932,7 @@ const SettlementPage = () => {
   }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, settlementWeighingMergeIntoFreight]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
-  const openPattiForEdit = useCallback(async (id: number) => {
+  const openPattiForEdit = useCallback(async (id: number, arrivalSellerIds?: string[]) => {
     try {
       const dto = await settlementApi.getPattiById(id);
       if (!dto) {
@@ -885,6 +949,7 @@ const SettlementPage = () => {
       }
       setPattiData(data);
       setExistingPattiId(dto.id ?? id);
+      setSelectedArrivalSellerIds(arrivalSellerIds ?? []);
       const sid = String(dto.sellerId ?? '');
       if (sid) {
         setSellerExpensesById(prev => ({
@@ -969,6 +1034,15 @@ const SettlementPage = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const getSellerLots = (seller: SellerSettlement): number =>
+    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+
+  const getSellerBids = (seller: SellerSettlement): number =>
+    seller.lots.reduce((s, l) => s + l.entries.length, 0);
+
+  const getSellerWeighed = (seller: SellerSettlement): number =>
+    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + (e.weight > 0 ? e.quantity : 0), 0), 0);
+
   const filteredSellers = useMemo(() => {
     if (!searchQuery) return sellers;
     const q = searchQuery.toLowerCase();
@@ -988,18 +1062,105 @@ const SettlementPage = () => {
     );
   }, [savedPattis, searchQuery]);
 
+  const newPattiArrivalRows = useMemo<ArrivalSummaryRow[]>(() => {
+    const groups = new Map<string, ArrivalSummaryRow>();
+    for (const seller of filteredSellers) {
+      const v = (seller.vehicleNumber || '').trim();
+      const from = (seller.fromLocation || '').trim();
+      const dateRaw = seller.createdAt ?? seller.date ?? '';
+      const dateObj = dateRaw ? new Date(dateRaw) : null;
+      const dateLabel = dateObj && !Number.isNaN(dateObj.getTime()) ? dateObj.toLocaleDateString() : '-';
+      const key = [v.toLowerCase(), from.toLowerCase(), dateRaw].join('|');
+      const existing = groups.get(key);
+      const lots = getSellerLots(seller);
+      const bids = getSellerBids(seller);
+      const weighed = getSellerWeighed(seller);
+      if (!existing) {
+        groups.set(key, {
+          key,
+          vehicleNumber: v || '-',
+          fromLocation: from || '-',
+          serialNo: seller.sellerSerialNo ?? null,
+          dateLabel,
+          sellerNames: seller.sellerName || '-',
+          lots,
+          bids,
+          weighed,
+          sellerIds: [seller.sellerId],
+          representativeSeller: seller,
+        });
+        continue;
+      }
+      const nameSet = new Set(
+        `${existing.sellerNames}, ${seller.sellerName || ''}`
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean)
+      );
+      existing.sellerNames = Array.from(nameSet).join(', ');
+      existing.lots += lots;
+      existing.bids += bids;
+      existing.weighed += weighed;
+      if (!existing.sellerIds.includes(seller.sellerId)) existing.sellerIds.push(seller.sellerId);
+      if (existing.serialNo == null && seller.sellerSerialNo != null) existing.serialNo = seller.sellerSerialNo;
+    }
+    return Array.from(groups.values());
+  }, [filteredSellers]);
+
+  const savedPattiArrivalRows = useMemo<SavedArrivalSummaryRow[]>(() => {
+    const groups = new Map<string, SavedArrivalSummaryRow>();
+    for (const p of filteredSavedPattis) {
+      const vehicleNumber = (p.vehicleNumber || '').trim();
+      const fromLocation = (p.fromLocation || '').trim();
+      const serialNo = p.sellerSerialNo ?? null;
+      const dateRaw = (p.date ?? p.createdAt ?? '').toString();
+      const dateObj = dateRaw ? new Date(dateRaw) : null;
+      const dateLabel = dateObj && !Number.isNaN(dateObj.getTime()) ? dateObj.toLocaleDateString() : '-';
+      const key = [vehicleNumber.toLowerCase(), fromLocation.toLowerCase(), dateRaw].join('|');
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          key,
+          vehicleNumber: vehicleNumber || '-',
+          fromLocation: fromLocation || '-',
+          serialNo,
+          dateLabel,
+          sellerNames: p.sellerName || '-',
+          sellerIds: p.sellerId ? [String(p.sellerId)] : [],
+          representativePattiId: p.id ?? null,
+        });
+        continue;
+      }
+      const nameSet = new Set(
+        `${existing.sellerNames}, ${p.sellerName || ''}`
+          .split(',')
+          .map(x => x.trim())
+          .filter(Boolean)
+      );
+      existing.sellerNames = Array.from(nameSet).join(', ');
+      if (p.sellerId) {
+        const sid = String(p.sellerId);
+        if (!existing.sellerIds.includes(sid)) existing.sellerIds.push(sid);
+      }
+      if (existing.serialNo == null && serialNo != null) existing.serialNo = serialNo;
+      if (existing.representativePattiId == null && p.id != null) existing.representativePattiId = p.id;
+    }
+    return Array.from(groups.values());
+  }, [filteredSavedPattis]);
+
   /** Vehicle-level summary for the patti form (first row unchanged; this drives the second card). */
   const vehicleFormDetails = useMemo(() => {
     if (!selectedSeller || !pattiData) return null;
 
-    const removed = new Set(removedLotsBySellerId[selectedSeller.sellerId] ?? []);
-    const ov = lotSalesOverridesBySellerId[selectedSeller.sellerId];
-    const recountClusters = buildRateClustersFromSellerLots(selectedSeller, removed, ov, getLotDivisor);
-    const pattiNetWeight = recountClusters.reduce((s, c) => s + (Number(c.totalWeight) || 0), 0);
-
     const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
     const sameVehicleSellers = vKey ? sellers.filter(s => normalizeVehicleKey(s.vehicleNumber) === vKey) : [];
     const scope = sameVehicleSellers.length > 0 ? sameVehicleSellers : [selectedSeller];
+    const pattiNetWeight = scope.reduce((sum, seller) => {
+      const removed = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+      const ov = lotSalesOverridesBySellerId[seller.sellerId];
+      const recountClusters = buildRateClustersFromSellerLots(seller, removed, ov, getLotDivisor);
+      return sum + recountClusters.reduce((s, c) => s + (Number(c.totalWeight) || 0), 0);
+    }, 0);
 
     const scopeHasLotData = scope.some(s => s.lots.some(l => (l.entries?.length ?? 0) > 0));
 
@@ -1028,15 +1189,23 @@ const SettlementPage = () => {
   /** All sellers on the same vehicle as the current settlement (arrival scope). */
   const arrivalSellersForPatti = useMemo(() => {
     if (!selectedSeller || !pattiData) return [];
+    if (selectedArrivalSellerIds.length > 0) {
+      const scoped = sellers.filter(s => selectedArrivalSellerIds.includes(s.sellerId));
+      if (scoped.length > 0) return scoped;
+    }
     const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
     if (!vKey) return [selectedSeller];
     const scope = sellers.filter(s => normalizeVehicleKey(s.vehicleNumber) === vKey);
     return scope.length > 0 ? scope : [selectedSeller];
-  }, [sellers, selectedSeller, pattiData]);
+  }, [sellers, selectedSeller, pattiData, selectedArrivalSellerIds]);
 
   const arrivalSalesReportSellerIdsKey = useMemo(
     () => arrivalSellersForPatti.map(s => s.sellerId).join(','),
     [arrivalSellersForPatti]
+  );
+  const arrivalFreightBaselineKey = useMemo(
+    () => `${selectedSeller?.sellerId ?? ''}__${arrivalSalesReportSellerIdsKey}__${pattiData?.createdAt ?? ''}`,
+    [selectedSeller?.sellerId, arrivalSalesReportSellerIdsKey, pattiData?.createdAt]
   );
 
   /** Vehicle-level net payable across all visible seller cards in current patti scope. */
@@ -1052,7 +1221,7 @@ const SettlementPage = () => {
         .map(({ lot, sid }) => mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot)))
         .reduce((s, r) => s + r.amount, 0);
       const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
-      return sum + (amountTot - expenseTotal);
+      return sum + (expenseTotal - amountTot);
     }, 0);
   }, [
     selectedSeller,
@@ -1065,6 +1234,89 @@ const SettlementPage = () => {
     settlementWeighingEnabled,
     settlementWeighingMergeIntoFreight,
   ]);
+
+  const amountSummaryDisplay = useMemo(() => {
+    const runtimeFreight = arrivalSellersForPatti.reduce((sum, s) => {
+      const exp = sellerExpensesById[s.sellerId];
+      return sum + (exp?.freight ?? 0);
+    }, 0);
+    const runtimeInvoicePayable = vehicleNetPayableFromPatti;
+    /** Vehicle total: API (FreightCalculation), else arrivals list scan, else sum of per-seller freight shares (same as Quick Expenses). */
+    const apiArrival = amountSummaryFromApi.arrivalFreightAmount;
+    const arrivalDisplay =
+      apiArrival > 0 ? apiArrival : arrivalFreightBaseline > 0 ? arrivalFreightBaseline : runtimeFreight;
+    return {
+      arrivalFreightAmount: arrivalDisplay,
+      freightInvoiced:
+        amountSummaryFromApi.freightInvoiced > 0 ? amountSummaryFromApi.freightInvoiced : runtimeFreight,
+      payableInvoiced:
+        amountSummaryFromApi.payableInvoiced !== 0 ? amountSummaryFromApi.payableInvoiced : runtimeInvoicePayable,
+    };
+  }, [arrivalSellersForPatti, sellerExpensesById, amountSummaryFromApi, vehicleNetPayableFromPatti, arrivalFreightBaseline]);
+
+  useEffect(() => {
+    if (!selectedSeller || !pattiData) {
+      setArrivalFreightBaseline(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const candidateVehicle =
+        selectedSeller.vehicleNumber ||
+        arrivalSellersForPatti.find(s => (s.vehicleNumber || '').trim().length > 0)?.vehicleNumber ||
+        '';
+      const vKey = normalizeVehicleKey(candidateVehicle);
+      let fromArrival = 0;
+      if (vKey) {
+        try {
+          const size = 200;
+          for (let page = 0; page < 25; page += 1) {
+            const summaries = await arrivalsApi.list(page, size);
+            if (!Array.isArray(summaries) || summaries.length === 0) break;
+            const match = summaries.find(s => normalizeVehicleKey(String(s.vehicleNumber)) === vKey);
+            if (match) {
+              fromArrival = Number(match.freightTotal ?? 0);
+              break;
+            }
+            if (summaries.length < size) break;
+          }
+        } catch {
+          fromArrival = 0;
+        }
+      }
+      if (!cancelled) setArrivalFreightBaseline(fromArrival);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [arrivalFreightBaselineKey]);
+
+  useEffect(() => {
+    if (!selectedSeller || !pattiData) {
+      setSalesPadNetWeightBaseline(0);
+      setAuctionAmountBaseline(0);
+      setAuctionQtyBaseline(0);
+      setAuctionWeightBaseline(0);
+      return;
+    }
+    const scope = arrivalSellersForPatti;
+    const salesPad = scope.reduce((acc, s) => acc + totalBillingNetWeightForSeller(s), 0);
+    const auction = scope.reduce(
+      (acc, seller) => {
+        const rows = (seller.lots ?? []).map(lot => lotBaseSalesRow(lot, getLotDivisor(lot)));
+        return {
+          qty: acc.qty + rows.reduce((s, r) => s + (Number(r.qty) || 0), 0),
+          weight: acc.weight + rows.reduce((s, r) => s + (Number(r.weight) || 0), 0),
+          amount: acc.amount + rows.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+        };
+      },
+      { qty: 0, weight: 0, amount: 0 }
+    );
+    setSalesPadNetWeightBaseline(salesPad);
+    setAuctionAmountBaseline(auction.amount);
+    setAuctionQtyBaseline(auction.qty);
+    setAuctionWeightBaseline(auction.weight);
+  }, [arrivalFreightBaselineKey]);
 
   const handleSalesReportCarouselScroll = useCallback(() => {
     const el = salesReportCarouselRef.current;
@@ -1375,8 +1627,14 @@ const SettlementPage = () => {
           )
         : arrivalSellersForPatti.reduce((acc, s) => acc + totalArrivalBagsForSeller(s), 0);
 
-      const freightTotal = arrival ? Number(arrival.freightTotal ?? 0) : amountSummaryFromApi.arrivalFreightAmount;
+      const fallbackFreightTotal = arrivalSellersForPatti.reduce((sum, s) => {
+        const exp = sellerExpensesById[s.sellerId];
+        return sum + (exp?.freight ?? 0);
+      }, 0);
+      const freightTotalRaw = arrival ? Number(arrival.freightTotal ?? 0) : amountSummaryDisplay.arrivalFreightAmount;
+      const freightTotal = freightTotalRaw > 0 ? freightTotalRaw : fallbackFreightTotal;
       const perBagFreight = totalBagsOnVehicle > 0 ? freightTotal / totalBagsOnVehicle : 0;
+      const equalShareFreight = arrivalSellersForPatti.length > 0 ? freightTotal / arrivalSellersForPatti.length : 0;
 
       const rows: VehicleExpenseRow[] = arrivalSellersForPatti.map(s => {
         const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
@@ -1399,7 +1657,12 @@ const SettlementPage = () => {
           configById,
           getDivisorLocal
         );
-        const freight = roundMoney2(perBagFreight * qty);
+        const fallbackSellerFreight = sellerExpensesById[s.sellerId]?.freight ?? 0;
+        const freight = roundMoney2(
+          perBagFreight > 0
+            ? perBagFreight * qty
+            : (fallbackSellerFreight > 0 ? fallbackSellerFreight : equalShareFreight)
+        );
 
         return {
           id: `ve_${s.sellerId}`,
@@ -1422,10 +1685,10 @@ const SettlementPage = () => {
           sellerId: s.sellerId,
           sellerName: s.sellerName || 'Seller',
           quantity: totalArrivalBagsForSeller(s),
-          freight: 0,
-          unloading: 0,
-          weighing: 0,
-          gunnies: 0,
+          freight: roundMoney2(sellerExpensesById[s.sellerId]?.freight ?? 0),
+          unloading: roundMoney2(sellerExpensesById[s.sellerId]?.unloading ?? 0),
+          weighing: roundMoney2(sellerExpensesById[s.sellerId]?.weighman ?? 0),
+          gunnies: roundMoney2(sellerExpensesById[s.sellerId]?.gunnies ?? 0),
         }))
       );
     } finally {
@@ -1437,7 +1700,8 @@ const SettlementPage = () => {
     arrivalSellersForPatti,
     removedLotsBySellerId,
     lotSalesOverridesBySellerId,
-    amountSummaryFromApi.arrivalFreightAmount,
+    amountSummaryDisplay.arrivalFreightAmount,
+    sellerExpensesById,
   ]);
 
   useEffect(() => {
@@ -1453,15 +1717,6 @@ const SettlementPage = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedSeller, pattiData, openVehicleExpenseModal]);
 
-  const getSellerLots = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
-
-  const getSellerBids = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.length, 0);
-
-  const getSellerWeighed = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + (e.weight > 0 ? e.quantity : 0), 0), 0);
-
   const sellerDateLabel = (seller: SellerSettlement): string => {
     const rawDate = seller.createdAt ?? seller.date;
     if (!rawDate) return '-';
@@ -1470,9 +1725,7 @@ const SettlementPage = () => {
   };
 
   const renderArrivalSummaryTable = (tab: 'new-patti' | 'saved-patti') => {
-    const rows = tab === 'new-patti' ? filteredSellers : filteredSavedPattis;
-
-    if (tab === 'new-patti' && filteredSellers.length === 0) {
+    if (tab === 'new-patti' && newPattiArrivalRows.length === 0) {
       return (
         <div className="glass-card rounded-2xl p-8 text-center">
           <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -1495,7 +1748,7 @@ const SettlementPage = () => {
       return <div className="glass-card rounded-2xl p-8 text-center text-sm text-muted-foreground">Loading…</div>;
     }
 
-    if (tab === 'saved-patti' && filteredSavedPattis.length === 0) {
+    if (tab === 'saved-patti' && savedPattiArrivalRows.length === 0) {
       return (
         <div className="glass-card rounded-2xl p-8 text-center">
           <Receipt className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -1515,53 +1768,51 @@ const SettlementPage = () => {
           <table className="w-full min-w-[980px] text-sm">
             <thead className="bg-muted/40">
               <tr>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Vehicle Number</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Seller Name</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">From</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">SL No</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Lots</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Bids</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Weighed</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Status</th>
-                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Date</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Vehicle Number</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Seller(s)</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">From</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">SL No</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Lots</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Bids</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Weighed</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Status</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Date</th>
               </tr>
             </thead>
             <tbody>
               {tab === 'new-patti'
-                ? filteredSellers.map((seller) => (
+                ? newPattiArrivalRows.map((row) => (
                     <tr
-                      key={seller.sellerId}
-                      onClick={() => generatePatti(seller)}
+                      key={row.key}
+                      onClick={() => generatePatti(row.representativeSeller, { arrivalSellerIds: row.sellerIds })}
                       className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
                     >
-                      <td className="px-3 py-2 text-foreground">{seller.vehicleNumber || '-'}</td>
-                      <td className="px-3 py-2 text-foreground">{seller.sellerName || '-'}</td>
-                      <td className="px-3 py-2 text-foreground">{seller.fromLocation || '-'}</td>
-                      <td className="px-3 py-2 text-foreground">{seller.sellerSerialNo || '-'}</td>
-                      <td className="px-3 py-2 text-foreground">{getSellerLots(seller)}</td>
-                      <td className="px-3 py-2 text-foreground">{getSellerBids(seller)}</td>
-                      <td className="px-3 py-2 text-foreground">{getSellerWeighed(seller)}</td>
-                      <td className="px-3 py-2 text-amber-600 dark:text-amber-400 font-medium">New Patti</td>
-                      <td className="px-3 py-2 text-foreground">{sellerDateLabel(seller)}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.vehicleNumber}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.fromLocation}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.lots}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.bids}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.weighed}</td>
+                      <td className="px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">New Patti</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
                   ))
-                : filteredSavedPattis.map((p) => (
+                : savedPattiArrivalRows.map((row) => (
                     <tr
-                      key={p.id ?? p.pattiId}
-                      onClick={() => p.id != null && openPattiForEdit(p.id)}
+                      key={row.key}
+                      onClick={() => row.representativePattiId != null && openPattiForEdit(row.representativePattiId, row.sellerIds)}
                       className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
                     >
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-foreground">{p.sellerName || '-'}</td>
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-foreground">-</td>
-                      <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
-                      <td className="px-3 py-2 text-foreground">
-                        {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '-'}
-                      </td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.vehicleNumber}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.fromLocation}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
+                      <td className="px-3 py-2 text-center text-foreground">-</td>
+                      <td className="px-3 py-2 text-center text-foreground">-</td>
+                      <td className="px-3 py-2 text-center text-foreground">-</td>
+                      <td className="px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
                   ))}
             </tbody>
@@ -1685,7 +1936,7 @@ const SettlementPage = () => {
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold shadow-lg">
               <Printer className="w-5 h-5 mr-2" /> Print Patti
             </Button>
-            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setExistingPattiId(null); }}
+            <Button onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiId(null); }}
               variant="outline" className="h-12 rounded-xl px-6">
               Done
             </Button>
@@ -1698,7 +1949,9 @@ const SettlementPage = () => {
 
   // ═══ PATTI DETAIL SCREEN ═══
   if (selectedSeller && pattiData) {
-    const totalBags = selectedSeller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+    const totalBags = Math.round(
+      (vehicleFormDetails?.arrivalQty ?? arrivalSellersForPatti.reduce((s, x) => s + totalArrivalBagsForSeller(x), 0))
+    );
 
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
@@ -1718,7 +1971,7 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setPattiData(null); setExistingPattiId(null); }}
+              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiId(null); }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -1753,7 +2006,7 @@ const SettlementPage = () => {
         ) : (
         <div className="px-8 py-5">
           <div className="flex items-center gap-4 mb-4">
-            <Button onClick={() => { setSelectedSeller(null); setPattiData(null); setExistingPattiId(null); }} variant="outline" size="sm" className="rounded-xl h-9">
+            <Button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiId(null); }} variant="outline" size="sm" className="rounded-xl h-9">
               <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
             </Button>
             <div className="flex-1">
@@ -1809,7 +2062,9 @@ const SettlementPage = () => {
                 <div className="flex flex-col items-center gap-1.5 rounded-xl border border-violet-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
                   <Gavel className="h-4 w-4 text-violet-600 dark:text-violet-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase leading-tight text-muted-foreground">Sales Pad Net Wt</p>
-                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl">{formatOptionalKg(vehicleFormDetails.salesPadNetWeightKg)}</p>
+                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                    {formatOptionalKg(salesPadNetWeightBaseline)}
+                  </p>
                 </div>
                 <div className="col-span-2 flex flex-col items-center gap-1.5 rounded-xl border border-fuchsia-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4 xl:col-span-1">
                   <Receipt className="h-4 w-4 text-fuchsia-600 dark:text-fuchsia-400 sm:h-5 sm:w-5" aria-hidden />
@@ -1839,15 +2094,34 @@ const SettlementPage = () => {
                     <p className="text-sm font-bold text-foreground sm:text-base">Freight Amount</p>
                     <div className="mt-3 space-y-2.5 text-sm">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Arrival Freight Amount</span>
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          Arrival Freight Amount
+                          <InlineCalcTip
+                            label="Arrival freight formula"
+                            lines={[
+                              'Source: Arrival freight total.',
+                              'Quick Expenses uses: per bag freight = arrival freight / total arrival bags.',
+                              `Current arrival freight: ${formatRupeeInr(amountSummaryDisplay.arrivalFreightAmount)}`,
+                            ]}
+                          />
+                        </span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(amountSummaryFromApi.arrivalFreightAmount)}
+                          {formatRupeeInr(amountSummaryDisplay.arrivalFreightAmount)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Invoiced</span>
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          Invoiced
+                          <InlineCalcTip
+                            label="Invoiced freight formula"
+                            lines={[
+                              'Source: Sum of outbound freight from matching sales bills.',
+                              `Current invoiced freight: ${formatRupeeInr(amountSummaryDisplay.freightInvoiced)}`,
+                            ]}
+                          />
+                        </span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(amountSummaryFromApi.freightInvoiced)}
+                          {formatRupeeInr(amountSummaryDisplay.freightInvoiced)}
                         </span>
                       </div>
                     </div>
@@ -1866,15 +2140,37 @@ const SettlementPage = () => {
                     <p className="text-sm font-bold text-foreground sm:text-base">Payable</p>
                     <div className="mt-3 space-y-2.5 text-sm">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Net (Vehicle Patti)</span>
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          From Sales Auction
+                          <InlineCalcTip
+                            label="Auction amount formula"
+                            lines={[
+                              'Across all sellers in current arrival scope.',
+                              `Qty used: ${Math.round(auctionQtyBaseline)} bags`,
+                              `Weight used: ${auctionWeightBaseline.toFixed(1)} kg`,
+                              'Lot amount = (Weight x Seller rate per bag) / commodity divisor.',
+                              `Current auction amount: ${formatRupeeInr(auctionAmountBaseline)}`,
+                            ]}
+                          />
+                        </span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(vehicleNetPayableFromPatti)}
+                          {formatRupeeInr(auctionAmountBaseline)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Payable invoiced</span>
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          Invoice
+                          <InlineCalcTip
+                            label="Invoice payable formula"
+                            lines={[
+                              'Source: Billing totals from matching sales bills.',
+                              'Represents invoice-side payable after bill calculations.',
+                              `Current invoice value: ${formatRupeeInr(amountSummaryDisplay.payableInvoiced)}`,
+                            ]}
+                          />
+                        </span>
                         <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                          {formatRupeeInr(amountSummaryFromApi.payableInvoiced)}
+                          {formatRupeeInr(amountSummaryDisplay.payableInvoiced)}
                         </span>
                       </div>
                     </div>
@@ -1975,7 +2271,7 @@ const SettlementPage = () => {
                 const weightTot = lotRows.reduce((s, r) => s + r.weight, 0);
                 const amountTot = lotRows.reduce((s, r) => s + r.amount, 0);
                 const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
-                const netSeller = amountTot - expenseTotal;
+                const netSeller = expenseTotal - amountTot;
                 const salesCollapsed = salesReportCollapsedBySellerId[seller.sellerId] === true;
 
                 return (
@@ -2514,7 +2810,16 @@ const SettlementPage = () => {
                         </div>
                         <div className="space-y-2 p-3 text-xs">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">Freight</span>
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                Freight
+                                <InlineCalcTip
+                                  label={`Freight formula ${seller.sellerId}`}
+                                  lines={[
+                                    'Quick Expenses default: (arrival freight / total arrival bags) x seller bags.',
+                                    `Current value: ${formatMoney2Display(exp.freight)}`,
+                                  ]}
+                                />
+                              </span>
                               <Input
                                 id={`settlement-seller-expense-${seller.sellerId}-freight`}
                                 type="number"
@@ -2534,7 +2839,17 @@ const SettlementPage = () => {
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">Unloading</span>
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                Unloading
+                                <InlineCalcTip
+                                  label={`Unloading formula ${seller.sellerId}`}
+                                  lines={[
+                                    'Per lot slab: if weight > threshold -> ((F x W) / T) x W; else F x T.',
+                                    'Seller unloading = sum of all lot slab amounts.',
+                                    `Current value: ${formatMoney2Display(exp.unloading)}`,
+                                  ]}
+                                />
+                              </span>
                               <Input
                                 type="number"
                                 min={0}
@@ -2553,7 +2868,19 @@ const SettlementPage = () => {
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-muted-foreground">Weighing</span>
+                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                Weighing
+                                <InlineCalcTip
+                                  label={`Weighing formula ${seller.sellerId}`}
+                                  lines={[
+                                    'Uses commodity weighing slab: same slab formula as unloading.',
+                                    settlementWeighingEnabled
+                                      ? 'Toggle is ON: included in total expenses.'
+                                      : 'Toggle is OFF: excluded from total expenses.',
+                                    `Current value: ${formatMoney2Display(exp.weighman)}`,
+                                  ]}
+                                />
+                              </span>
                               <Input
                                 type="number"
                                 min={0}
@@ -2635,11 +2962,33 @@ const SettlementPage = () => {
                           </div>
                         <div className="space-y-1 border-t border-border/50 p-3 pt-2 text-xs">
                           <div className="flex justify-between font-semibold">
-                            <span className="text-center">Total expenses</span>
+                            <span className="inline-flex items-center gap-1 text-center">
+                              Total expenses
+                              <InlineCalcTip
+                                label={`Total expenses formula ${seller.sellerId}`}
+                                lines={[
+                                  'Total = Freight + Unloading + (Use Weighman ? Weighing : 0) + Cash Advance + Gunnies + Others.',
+                                  `Current total expenses: ${formatMoney2Display(expenseTotal)}`,
+                                ]}
+                              />
+                            </span>
                             <span className="tabular-nums text-center">{formatMoney2Display(expenseTotal)}</span>
                           </div>
                           <div className="flex justify-between font-bold text-foreground">
-                            <span className="text-center">Net payable</span>
+                            <span className="inline-flex items-center gap-1 text-center">
+                              Net payable
+                              <InlineCalcTip
+                                label={`Net payable formula ${seller.sellerId}`}
+                                lines={[
+                                  'Net payable = Total expenses - Auction amount.',
+                                  `Qty used: ${Math.round(qtyTot)} bags`,
+                                  `Weight used: ${weightTot.toFixed(1)} kg`,
+                                  `Auction amount: ${formatMoney2Display(amountTot)}`,
+                                  `Total expenses: ${formatMoney2Display(expenseTotal)}`,
+                                  `Current net payable: ${formatMoney2Display(netSeller)}`,
+                                ]}
+                              />
+                            </span>
                             <span className="tabular-nums text-center text-emerald-600 dark:text-emerald-400">
                               {formatMoney2Display(netSeller)}
                             </span>

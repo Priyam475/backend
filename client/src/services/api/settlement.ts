@@ -23,6 +23,10 @@ export interface PattiDTO {
   pattiId: string;
   sellerId?: string;
   sellerName: string;
+  vehicleNumber?: string;
+  fromLocation?: string;
+  sellerSerialNo?: number | string;
+  date?: string;
   rateClusters: RateClusterDTO[];
   grossAmount: number;
   deductions: DeductionItemDTO[];
@@ -81,6 +85,9 @@ export interface SellerSettlementDTO {
   contactId?: string | null;
   /** Phone from contact or free-text seller phone. */
   sellerPhone?: string | null;
+  fromLocation?: string;
+  sellerSerialNo?: number | string;
+  date?: string;
   lots: SettlementLotDTO[];
 }
 
