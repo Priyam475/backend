@@ -60,6 +60,10 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     @OrderBy("sortOrder ASC, id ASC")
     private List<PattiDeduction> deductions = new ArrayList<>();
 
+    @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("versionNumber ASC")
+    private List<PattiVersion> versions = new ArrayList<>();
+
     @Override
     public Long getId() {
         return id;
@@ -147,5 +151,13 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
 
     public void setDeductions(List<PattiDeduction> deductions) {
         this.deductions = deductions;
+    }
+
+    public List<PattiVersion> getVersions() {
+        return versions;
+    }
+
+    public void setVersions(List<PattiVersion> versions) {
+        this.versions = versions;
     }
 }

@@ -35,6 +35,7 @@ export type {
   SettlementLotDTO,
   SettlementEntryDTO,
   PattiDTO,
+  PattiVersionDTO,
   PattiSaveRequest,
   RateClusterDTO,
   DeductionItemDTO,

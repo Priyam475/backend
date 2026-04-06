@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import {
@@ -173,6 +174,9 @@ interface SavedArrivalSummaryRow {
   dateLabel: string;
   sellerNames: string;
   sellerIds: string[];
+  lots: number;
+  bids: number;
+  weighed: number;
   representativePattiId: number | null;
 }
 
@@ -270,7 +274,7 @@ function buildDeductionItemsFromSellerExpenses(
 
   let freightAmt = exp.freight;
   let weighingAmt = weighingEnabled ? exp.weighman : 0;
-  if (weighingEnabled && mergeWeighingIntoFreight) {
+  if (!weighingEnabled && mergeWeighingIntoFreight) {
     freightAmt = exp.freight + exp.weighman;
     weighingAmt = 0;
   }
@@ -278,14 +282,14 @@ function buildDeductionItemsFromSellerExpenses(
   const items: DeductionItem[] = [
     {
       key: 'freight',
-      label: mergeWeighingIntoFreight && weighingEnabled ? 'Freight (incl. weighing)' : 'Freight',
+      label: !weighingEnabled && mergeWeighingIntoFreight ? 'Freight (incl. weighing)' : 'Freight',
       amount: freightAmt,
       editable: true,
       autoPulled: true,
     },
     { key: 'coolie', label: coolieLabel, amount: exp.unloading, editable: true, autoPulled: true },
   ];
-  if (!(weighingEnabled && mergeWeighingIntoFreight)) {
+  if (weighingEnabled) {
     items.push({
       key: 'weighing',
       label: 'Weighing Charges',
@@ -309,7 +313,7 @@ function totalSellerExpenses(
 ): number {
   let freight = exp.freight;
   let w = weighingEnabled ? exp.weighman : 0;
-  if (weighingEnabled && mergeWeighingIntoFreight) {
+  if (!weighingEnabled && mergeWeighingIntoFreight) {
     freight = exp.freight + exp.weighman;
     w = 0;
   } else if (!weighingEnabled) {
@@ -700,10 +704,10 @@ function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: Sel
 }
 
 function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
-  const cid = seller.contactId != null && String(seller.contactId).trim() !== '' ? String(seller.contactId).trim() : null;
   return {
-    registered: !!cid,
-    contactId: cid,
+    // Default to unregistered; user manually checks "Registered" when needed.
+    registered: false,
+    contactId: null,
     mark: seller.sellerMark || '',
     name: seller.sellerName || '',
     mobile: (seller.sellerPhone ?? '').trim(),
@@ -741,12 +745,18 @@ const SettlementPage = () => {
   /** DB row id per settlement seller — supports multi-seller saves without overwriting another seller's patti. */
   const [existingPattiIdBySellerId, setExistingPattiIdBySellerId] = useState<Record<string, number>>({});
   const [savedPattis, setSavedPattis] = useState<PattiDTO[]>([]);
+  /** Full DTO from API (includes version history after updates). */
+  const [pattiDetailDto, setPattiDetailDto] = useState<PattiDTO | null>(null);
+  const [selectedPattiVersion, setSelectedPattiVersion] = useState<'latest' | number>('latest');
+  const latestPattiDataSnapshotRef = useRef<PattiData | null>(null);
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
   /** Toggle 1: use weighing charges in settlement totals. */
   const [settlementWeighingEnabled, setSettlementWeighingEnabled] = useState(true);
-  /** Toggle 2: merge weighing into freight for display and main patti deductions. */
-  const [settlementWeighingMergeIntoFreight] = useState(false);
+  /** Toggle 2 (seller-level): merge weighing into freight for display and main patti deductions. */
+  const [settlementWeighingMergeIntoFreightBySellerId, setSettlementWeighingMergeIntoFreightBySellerId] = useState<
+    Record<string, boolean>
+  >({});
   const [gunniesAmount, setGunniesAmount] = useState(0);
   /** Per seller: collapsed sales report shows qty / weight / gross summary only (Billing-style). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
@@ -820,6 +830,19 @@ const SettlementPage = () => {
   const [vehicleExpenseModalOpen, setVehicleExpenseModalOpen] = useState(false);
   const [vehicleExpenseLoading, setVehicleExpenseLoading] = useState(false);
   const [vehicleExpenseRows, setVehicleExpenseRows] = useState<VehicleExpenseRow[]>([]);
+
+  const isWeighingMergedIntoFreight = useCallback(
+    (sellerId?: string) => (sellerId ? settlementWeighingMergeIntoFreightBySellerId[sellerId] === true : false),
+    [settlementWeighingMergeIntoFreightBySellerId]
+  );
+
+  useEffect(() => {
+    if (!settlementWeighingEnabled) return;
+    setSettlementWeighingMergeIntoFreightBySellerId(prev => {
+      if (Object.keys(prev).length === 0) return prev;
+      return {};
+    });
+  }, [settlementWeighingEnabled]);
 
   const [addVoucherSellerId, setAddVoucherSellerId] = useState<string | null>(null);
   const [voucherSearchVoucherName, setVoucherSearchVoucherName] = useState('');
@@ -907,7 +930,7 @@ const SettlementPage = () => {
   const loadSavedPattis = useCallback(() => {
     setLoadingPattis(true);
     settlementApi
-      .listPattis({ page: 0, size: 20 })
+      .listPattis({ page: 0, size: 500 })
       .then((list: PattiDTO[]) => {
         setSavedPattis(Array.isArray(list) ? list : []);
       })
@@ -924,6 +947,9 @@ const SettlementPage = () => {
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
   const generatePatti = useCallback((seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
+    setPattiDetailDto(null);
+    setSelectedPattiVersion('latest');
+    latestPattiDataSnapshotRef.current = null;
     setExistingPattiIdBySellerId({});
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
@@ -950,7 +976,7 @@ const SettlementPage = () => {
       placeholderExp,
       effectiveCoolieMode,
       settlementWeighingEnabled,
-      settlementWeighingMergeIntoFreight
+      isWeighingMergedIntoFreight(seller.sellerId)
     );
 
     const baseTotalDeductions = baseDeductions.reduce((s, d) => s + d.amount, 0);
@@ -969,7 +995,7 @@ const SettlementPage = () => {
       createdAt,
       useAverageWeight: false,
     });
-  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, settlementWeighingMergeIntoFreight]);
+  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, isWeighingMergedIntoFreight]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
   const openPattiForEdit = useCallback(async (id: number, arrivalSellerIds?: string[]) => {
@@ -988,10 +1014,23 @@ const SettlementPage = () => {
         toast.warning('Patti date is in the future — please verify');
       }
       setPattiData(data);
+      setPattiDetailDto(dto);
+      setSelectedPattiVersion('latest');
+      latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(data)) as PattiData;
+      const idMap: Record<string, number> = {};
       const editSid = String(dto.sellerId ?? '').trim();
-      setExistingPattiIdBySellerId(
-        editSid && (dto.id ?? id) != null ? { [editSid]: Number(dto.id ?? id) } : {}
-      );
+      if (editSid && (dto.id ?? id) != null) {
+        idMap[editSid] = Number(dto.id ?? id);
+      }
+      for (const rawSid of arrivalSellerIds ?? []) {
+        const sidKey = String(rawSid ?? '').trim();
+        if (!sidKey) continue;
+        const saved = savedPattis.find(p => String(p.sellerId ?? '').trim() === sidKey && p.id != null);
+        if (saved?.id != null) {
+          idMap[sidKey] = Number(saved.id);
+        }
+      }
+      setExistingPattiIdBySellerId(idMap);
       setSelectedArrivalSellerIds(arrivalSellerIds ?? []);
       const sid = String(dto.sellerId ?? '');
       if (sid) {
@@ -1000,17 +1039,61 @@ const SettlementPage = () => {
           [sid]: { ...defaultSellerExpenses(), ...deductionsToSellerExpenseForm(dto.deductions ?? []) },
         }));
       }
-      setSelectedSeller({
-        sellerId: dto.sellerId ?? '',
-        sellerName: dto.sellerName ?? '',
-        sellerMark: '',
-        vehicleNumber: '',
-        lots: [],
-      });
+      const dtoSellerId = String(dto.sellerId ?? '').trim();
+      const fromSellers = dtoSellerId ? sellers.find(s => s.sellerId === dtoSellerId) : undefined;
+      setSelectedSeller(
+        fromSellers ?? {
+          sellerId: dto.sellerId ?? '',
+          sellerName: dto.sellerName ?? '',
+          sellerMark: '',
+          vehicleId: undefined,
+          vehicleNumber: (dto.vehicleNumber ?? '').trim(),
+          fromLocation: (dto.fromLocation ?? '').trim(),
+          sellerSerialNo: dto.sellerSerialNo ?? undefined,
+          createdAt: dto.createdAt ?? undefined,
+          date: dto.date ?? dto.createdAt ?? undefined,
+          lots: [],
+        }
+      );
     } catch {
       toast.error('Failed to load patti');
     }
-  }, []);
+  }, [sellers, savedPattis]);
+
+  /** Billing-style: view historical snapshot or return to latest working copy. */
+  const applyPattiVersionSelection = useCallback((sel: 'latest' | number) => {
+    setSelectedPattiVersion(sel);
+    if (sel === 'latest') {
+      const snap = latestPattiDataSnapshotRef.current;
+      if (snap) setPattiData(JSON.parse(JSON.stringify(snap)) as PattiData);
+      return;
+    }
+    if (!pattiDetailDto?.versions?.length) {
+      toast.error(`Version v${sel} not available`);
+      return;
+    }
+    const row = pattiDetailDto.versions.find(v => Number(v.version) === Number(sel));
+    const raw = row?.data as Partial<PattiDTO> | undefined;
+    if (!raw || typeof raw !== 'object') {
+      toast.error(`Version v${sel} data not available`);
+      return;
+    }
+    const merged = { ...pattiDetailDto, ...raw, pattiId: pattiDetailDto.pattiId, sellerId: pattiDetailDto.sellerId } as PattiDTO;
+    const next = mapPattiDTOToPattiData(merged);
+    setPattiData(next);
+    const sid = String(pattiDetailDto.sellerId ?? '').trim();
+    if (sid) {
+      setSellerExpensesById(prev => ({
+        ...prev,
+        [sid]: { ...defaultSellerExpenses(), ...deductionsToSellerExpenseForm(next.deductions) },
+      }));
+    }
+  }, [pattiDetailDto]);
+
+  useEffect(() => {
+    if (!pattiData || selectedPattiVersion !== 'latest') return;
+    latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(pattiData)) as PattiData;
+  }, [pattiData, selectedPattiVersion]);
 
   const computePattiSavePayloadForSeller = useCallback(
     (seller: SellerSettlement): PattiSaveRequest | null => {
@@ -1026,7 +1109,7 @@ const SettlementPage = () => {
         exp,
         coolieMode,
         settlementWeighingEnabled,
-        settlementWeighingMergeIntoFreight
+        isWeighingMergedIntoFreight(seller.sellerId)
       );
       const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
       const netPayable = grossAmount - totalDeductions;
@@ -1050,21 +1133,29 @@ const SettlementPage = () => {
       sellerFormById,
       coolieMode,
       settlementWeighingEnabled,
-      settlementWeighingMergeIntoFreight,
+      isWeighingMergedIntoFreight,
     ]
   );
 
-  /** Save or update Sales Patti for one settlement seller (main button uses primary seller; per-card uses that row's seller). */
+  type SaveSellerOptions = {
+    silent?: boolean;
+    showPrintAfterSave?: boolean;
+  };
+
+  /** Save or update Sales Patti for one settlement seller. */
   const savePattiForSeller = useCallback(
-    async (seller: SellerSettlement) => {
-      if (!pattiData) return;
+    async (seller: SellerSettlement, options?: SaveSellerOptions): Promise<boolean> => {
+      if (!pattiData) return false;
+      const silent = options?.silent === true;
+      const showPrintAfterSave = options?.showPrintAfterSave !== false;
       const payload = computePattiSavePayloadForSeller(seller);
-      if (!payload) return;
+      if (!payload) return false;
       const sid = seller.sellerId;
       const dbId = existingPattiIdBySellerId[sid];
+      const actionWord = dbId != null ? 'updated' : 'saved';
       if (!can('Settlement', dbId != null ? 'Edit' : 'Create')) {
-        toast.error('You do not have permission to save settlements.');
-        return;
+        if (!silent) toast.error('You do not have permission to save settlements.');
+        return false;
       }
       const applySavedToPrimaryUi = (p: PattiSaveRequest, businessPattiId: string, createdAtIso: string) => {
         if (selectedSeller?.sellerId !== sid) return;
@@ -1089,11 +1180,15 @@ const SettlementPage = () => {
           const updated = await settlementApi.updatePatti(dbId, payload);
           if (updated) {
             applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
-            toast.success(`Sales Patti ${updated.pattiId} updated!`);
-            setShowPrint(true);
+            setPattiDetailDto(updated);
+            setSelectedPattiVersion('latest');
+            if (!silent) toast.success(`Sales Patti ${updated.pattiId} ${actionWord}.`);
+            if (showPrintAfterSave) setShowPrint(true);
             loadSavedPattis();
+            return true;
           } else {
-            toast.error('Failed to update patti');
+            if (!silent) toast.error('Failed to update patti');
+            return false;
           }
         } else {
           const created = await settlementApi.createPatti(payload);
@@ -1103,20 +1198,26 @@ const SettlementPage = () => {
             }
             const at = created.createdAt ?? new Date().toISOString();
             applySavedToPrimaryUi(payload, created.pattiId, at);
-            if (selectedSeller?.sellerId === sid) {
-              toast.success(`Sales Patti ${created.pattiId} saved!`);
-            } else {
-              toast.success(`Sales Patti ${created.pattiId} saved for ${payload.sellerName}.`);
+            setPattiDetailDto(created);
+            setSelectedPattiVersion('latest');
+            if (!silent && selectedSeller?.sellerId === sid) {
+              toast.success(`Sales Patti ${created.pattiId} ${actionWord}.`);
+            } else if (!silent) {
+              toast.success(`Sales Patti ${created.pattiId} ${actionWord} for ${payload.sellerName}.`);
             }
-            setShowPrint(true);
+            if (showPrintAfterSave) setShowPrint(true);
             loadSavedPattis();
+            return true;
           } else {
-            toast.error('Failed to save patti');
+            if (!silent) toast.error('Failed to save patti');
+            return false;
           }
         }
       } catch {
-        toast.error(dbId != null ? 'Failed to update patti' : 'Failed to save patti');
+        if (!silent) toast.error(dbId != null ? 'Failed to update patti' : 'Failed to save patti');
+        return false;
       }
+      return false;
     },
     [
       pattiData,
@@ -1128,13 +1229,62 @@ const SettlementPage = () => {
     ]
   );
 
+  const getSellerValidationError = useCallback(
+    (seller: SellerSettlement): string | null => {
+      const form = sellerFormById[seller.sellerId] ?? defaultSellerForm(seller);
+      const sellerName = (form.name || seller.sellerName || '').trim();
+      if (!sellerName) {
+        return `${seller.sellerName || 'Seller'}: seller name is required`;
+      }
+      const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+      const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
+      const visibleLots = (seller.lots ?? [])
+        .map((lot, i) => ({ lot, sid: lotStableId(lot, i) }))
+        .filter(x => !removedSet.has(x.sid));
+      if (visibleLots.length === 0) {
+        return `${sellerName}: at least one lot is required`;
+      }
+      for (const { lot, sid } of visibleLots) {
+        const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
+        if (!Number.isFinite(row.qty) || row.qty <= 0) {
+          return `${sellerName}: quantity must be greater than 0`;
+        }
+        if (!Number.isFinite(row.weight) || row.weight <= 0) {
+          return `${sellerName}: weight must be greater than 0`;
+        }
+        if (!Number.isFinite(row.ratePerBag) || row.ratePerBag <= 0) {
+          return `${sellerName}: rate must be greater than 0`;
+        }
+      }
+      return null;
+    },
+    [sellerFormById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]
+  );
+
   const savePatti = async () => {
-    if (!selectedSeller) return;
-    await savePattiForSeller(selectedSeller);
+    if (!selectedSeller || !pattiData) return;
+    if (!canRunMainPattiActions) {
+      toast.error(mainPattiValidationError ?? 'Please complete required fields before saving.');
+      return;
+    }
+    const failures: string[] = [];
+    for (const seller of arrivalSellersForPatti) {
+      const ok = await savePattiForSeller(seller, { silent: true, showPrintAfterSave: false });
+      if (!ok) failures.push(seller.sellerName || seller.sellerId);
+    }
+    if (failures.length > 0) {
+      toast.error(`Failed to save ${failures.length} seller patti(s): ${failures.join(', ')}`);
+      return;
+    }
+    setShowPrint(true);
+    const allInUpdateMode = arrivalSellersForPatti.every(s => existingPattiIdBySellerId[s.sellerId] != null);
+    toast.success(
+      `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${arrivalSellersForPatti.length} seller(s).`
+    );
   };
 
   saveMainPattiShortcutRef.current = () => {
-    if (selectedSeller) void savePattiForSeller(selectedSeller);
+    if (selectedSeller) void savePatti();
   };
 
   useEffect(() => {
@@ -1177,9 +1327,24 @@ const SettlementPage = () => {
     );
   }, [savedPattis, searchQuery]);
 
+  /** Settlement sellers that already have a saved Sales Patti — hide from New Patti tab. */
+  const sellerIdsWithSavedPatti = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of savedPattis) {
+      const sid = String(p.sellerId ?? '').trim();
+      if (sid) set.add(sid);
+    }
+    return set;
+  }, [savedPattis]);
+
+  const sellersEligibleForNewPatti = useMemo(
+    () => filteredSellers.filter(s => !sellerIdsWithSavedPatti.has(s.sellerId)),
+    [filteredSellers, sellerIdsWithSavedPatti]
+  );
+
   const newPattiArrivalRows = useMemo<ArrivalSummaryRow[]>(() => {
     const groups = new Map<string, ArrivalSummaryRow>();
-    for (const seller of filteredSellers) {
+    for (const seller of sellersEligibleForNewPatti) {
       const v = (seller.vehicleNumber || '').trim();
       const from = (seller.fromLocation || '').trim();
       const dateRaw = seller.createdAt ?? seller.date ?? '';
@@ -1220,10 +1385,11 @@ const SettlementPage = () => {
       if (existing.serialNo == null && seller.sellerSerialNo != null) existing.serialNo = seller.sellerSerialNo;
     }
     return Array.from(groups.values());
-  }, [filteredSellers]);
+  }, [sellersEligibleForNewPatti]);
 
   const savedPattiArrivalRows = useMemo<SavedArrivalSummaryRow[]>(() => {
     const groups = new Map<string, SavedArrivalSummaryRow>();
+    const sellerById = new Map<string, SellerSettlement>(sellers.map(s => [String(s.sellerId), s]));
     for (const p of filteredSavedPattis) {
       const vehicleNumber = (p.vehicleNumber || '').trim();
       const fromLocation = (p.fromLocation || '').trim();
@@ -1233,6 +1399,11 @@ const SettlementPage = () => {
       const dateLabel = dateObj && !Number.isNaN(dateObj.getTime()) ? dateObj.toLocaleDateString() : '-';
       const key = [vehicleNumber.toLowerCase(), fromLocation.toLowerCase(), dateRaw].join('|');
       const existing = groups.get(key);
+      const sid = p.sellerId ? String(p.sellerId) : '';
+      const seller = sid ? sellerById.get(sid) : undefined;
+      const lots = seller ? getSellerLots(seller) : 0;
+      const bids = seller ? getSellerBids(seller) : 0;
+      const weighed = seller ? getSellerWeighed(seller) : 0;
       if (!existing) {
         groups.set(key, {
           key,
@@ -1241,7 +1412,10 @@ const SettlementPage = () => {
           serialNo,
           dateLabel,
           sellerNames: p.sellerName || '-',
-          sellerIds: p.sellerId ? [String(p.sellerId)] : [],
+          sellerIds: sid ? [sid] : [],
+          lots,
+          bids,
+          weighed,
           representativePattiId: p.id ?? null,
         });
         continue;
@@ -1253,15 +1427,17 @@ const SettlementPage = () => {
           .filter(Boolean)
       );
       existing.sellerNames = Array.from(nameSet).join(', ');
-      if (p.sellerId) {
-        const sid = String(p.sellerId);
-        if (!existing.sellerIds.includes(sid)) existing.sellerIds.push(sid);
+      if (sid && !existing.sellerIds.includes(sid)) {
+        existing.sellerIds.push(sid);
+        existing.lots += lots;
+        existing.bids += bids;
+        existing.weighed += weighed;
       }
       if (existing.serialNo == null && serialNo != null) existing.serialNo = serialNo;
       if (existing.representativePattiId == null && p.id != null) existing.representativePattiId = p.id;
     }
     return Array.from(groups.values());
-  }, [filteredSavedPattis]);
+  }, [filteredSavedPattis, sellers]);
 
   /** Vehicle-level summary for the patti form (first row unchanged; this drives the second card). */
   const vehicleFormDetails = useMemo(() => {
@@ -1314,6 +1490,24 @@ const SettlementPage = () => {
     return scope.length > 0 ? scope : [selectedSeller];
   }, [sellers, selectedSeller, pattiData, selectedArrivalSellerIds]);
 
+  const mainPattiValidationError = useMemo(() => {
+    if (!pattiData) return 'Patti is not generated yet';
+    if (arrivalSellersForPatti.length === 0) return 'No sellers available for this main patti';
+    for (const seller of arrivalSellersForPatti) {
+      const err = getSellerValidationError(seller);
+      if (err) return err;
+    }
+    return null;
+  }, [pattiData, arrivalSellersForPatti, getSellerValidationError]);
+
+  const canRunMainPattiActions = mainPattiValidationError == null;
+  const isMainUpdateMode = useMemo(
+    () =>
+      arrivalSellersForPatti.length > 0 &&
+      arrivalSellersForPatti.every(s => existingPattiIdBySellerId[s.sellerId] != null),
+    [arrivalSellersForPatti, existingPattiIdBySellerId]
+  );
+
   const arrivalSalesReportSellerIdsKey = useMemo(
     () => arrivalSellersForPatti.map(s => s.sellerId).join(','),
     [arrivalSellersForPatti]
@@ -1336,7 +1530,11 @@ const SettlementPage = () => {
         .filter(x => !removedSet.has(x.sid))
         .map(({ lot, sid }) => mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot)))
         .reduce((s, r) => s + r.amount, 0);
-      const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
+      const expenseTotal = totalSellerExpenses(
+        exp,
+        settlementWeighingEnabled,
+        isWeighingMergedIntoFreight(seller.sellerId)
+      );
       return sum + (expenseTotal - amountTot);
     }, 0);
   }, [
@@ -1348,7 +1546,7 @@ const SettlementPage = () => {
     lotSalesOverridesBySellerId,
     getLotDivisor,
     settlementWeighingEnabled,
-    settlementWeighingMergeIntoFreight,
+    isWeighingMergedIntoFreight,
   ]);
 
   const amountSummaryDisplay = useMemo(() => {
@@ -1538,7 +1736,7 @@ const SettlementPage = () => {
       exp,
       coolieMode,
       settlementWeighingEnabled,
-      settlementWeighingMergeIntoFreight
+      isWeighingMergedIntoFreight(selectedSeller.sellerId)
     );
     const total = deds.reduce((s, d) => s + d.amount, 0);
     setPattiData(prev => {
@@ -1553,7 +1751,7 @@ const SettlementPage = () => {
     sellerExpensesById,
     coolieMode,
     settlementWeighingEnabled,
-    settlementWeighingMergeIntoFreight,
+    isWeighingMergedIntoFreight,
   ]);
 
   /** Keep main patti rate clusters / gross in sync with lot row edits (primary seller only). */
@@ -1624,6 +1822,10 @@ const SettlementPage = () => {
 
   const runPrintMainPatti = useCallback(async () => {
     if (!pattiData) return;
+    if (!canRunMainPattiActions) {
+      toast.error(mainPattiValidationError ?? 'Please complete required fields before printing.');
+      return;
+    }
     const printedAt = new Date().toISOString();
     try {
       await printLogApi.create({
@@ -1638,11 +1840,16 @@ const SettlementPage = () => {
     const ok = await directPrint(generateSalesPattiPrintHTML(pattiData), { mode: 'system' });
     if (ok) toast.success('Main patti sent to printer');
     else toast.error('Printer not connected.');
-  }, [pattiData]);
+  }, [pattiData, canRunMainPattiActions, mainPattiValidationError]);
 
   const runPrintSellerSubPatti = useCallback(
     async (seller: SellerSettlement) => {
       if (!pattiData) return;
+      const sellerValidation = getSellerValidationError(seller);
+      if (sellerValidation) {
+        toast.error(sellerValidation);
+        return;
+      }
       const form = sellerFormById[seller.sellerId] ?? defaultSellerForm(seller);
       const displayName = form.name || seller.sellerName;
       const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
@@ -1661,11 +1868,15 @@ const SettlementPage = () => {
       if (ok) toast.success('Seller sub-patti sent to printer');
       else toast.error('Printer not connected.');
     },
-    [pattiData, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]
+    [pattiData, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor, getSellerValidationError]
   );
 
   const runPrintAllSubPatti = useCallback(async () => {
     if (!pattiData) return;
+    if (!canRunMainPattiActions) {
+      toast.error(mainPattiValidationError ?? 'Please complete required fields before printing.');
+      return;
+    }
     for (const s of arrivalSellersForPatti) {
       const form = sellerFormById[s.sellerId] ?? defaultSellerForm(s);
       const displayName = form.name || s.sellerName;
@@ -1688,7 +1899,7 @@ const SettlementPage = () => {
       }
     }
     toast.success('All sub-pattis sent to printer');
-  }, [pattiData, arrivalSellersForPatti, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]);
+  }, [pattiData, arrivalSellersForPatti, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor, canRunMainPattiActions, mainPattiValidationError]);
 
   const vehicleExpenseTotals = useMemo(() => {
     return vehicleExpenseRows.reduce(
@@ -1938,9 +2149,9 @@ const SettlementPage = () => {
                       <td className="px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
                       <td className="px-3 py-2 text-center text-foreground">{row.fromLocation}</td>
                       <td className="px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
-                      <td className="px-3 py-2 text-center text-foreground">-</td>
-                      <td className="px-3 py-2 text-center text-foreground">-</td>
-                      <td className="px-3 py-2 text-center text-foreground">-</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.lots}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.bids}</td>
+                      <td className="px-3 py-2 text-center text-foreground">{row.weighed}</td>
                       <td className="px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
                       <td className="px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
@@ -1985,6 +2196,42 @@ const SettlementPage = () => {
             <p className="text-sm text-muted-foreground">{pattiData.pattiId}</p>
           </div>
         </div>
+        )}
+
+        {pattiDetailDto && (
+          <div className="px-4 mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold text-muted-foreground">Version:</span>
+            <Select
+              value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
+              onValueChange={val => {
+                if (val === 'latest') {
+                  applyPattiVersionSelection('latest');
+                  return;
+                }
+                const num = Number(val);
+                if (Number.isFinite(num)) applyPattiVersionSelection(num);
+              }}
+            >
+              <SelectTrigger className="h-9 min-w-0 max-w-full sm:min-w-[14rem]">
+                <SelectValue placeholder="Latest (current)" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                <SelectItem value="latest">Latest (current)</SelectItem>
+                {(pattiDetailDto.versions ?? []).map(v => (
+                  <SelectItem key={v.version} value={String(v.version)}>
+                    v{v.version}
+                    {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(!pattiDetailDto.versions || pattiDetailDto.versions.length === 0) && (
+              <span className="text-muted-foreground">No previous versions yet.</span>
+            )}
+            {selectedPattiVersion !== 'latest' && (
+              <span className="hidden text-[10px] font-semibold text-primary sm:inline">Snapshot (read-only view)</span>
+            )}
+          </div>
         )}
 
         <div className="px-4 mt-4">
@@ -2072,7 +2319,7 @@ const SettlementPage = () => {
             </Button>
             <Button
               type="button"
-              onClick={() => { setShowPrint(false); setPattiData(null); setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); }}
+              onClick={() => { setShowPrint(false); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); }}
               variant="outline"
               className={arrOutlineTall}
             >
@@ -2109,7 +2356,7 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiIdBySellerId({}); }}
+              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -2146,7 +2393,7 @@ const SettlementPage = () => {
           <div className="flex items-center gap-4 mb-4">
             <Button
               type="button"
-              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setExistingPattiIdBySellerId({}); }}
+              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); }}
               variant="outline"
               className={cn(arrSolidMd, 'gap-1.5')}
             >
@@ -2402,6 +2649,7 @@ const SettlementPage = () => {
                 const baseline = registeredBaselineById[seller.sellerId] ?? form;
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
                 const dirty = isSellerRegDirty(form, baseline);
+                const sellerValidationError = getSellerValidationError(seller);
                 const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
                 const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
                 const visibleLots = (seller.lots ?? [])
@@ -2413,7 +2661,11 @@ const SettlementPage = () => {
                 const qtyTot = lotRows.reduce((s, r) => s + r.qty, 0);
                 const weightTot = lotRows.reduce((s, r) => s + r.weight, 0);
                 const amountTot = lotRows.reduce((s, r) => s + r.amount, 0);
-                const expenseTotal = totalSellerExpenses(exp, settlementWeighingEnabled, settlementWeighingMergeIntoFreight);
+                const expenseTotal = totalSellerExpenses(
+                  exp,
+                  settlementWeighingEnabled,
+                  isWeighingMergedIntoFreight(seller.sellerId)
+                );
                 const netSeller = expenseTotal - amountTot;
                 const salesCollapsed = salesReportCollapsedBySellerId[seller.sellerId] === true;
 
@@ -2435,9 +2687,6 @@ const SettlementPage = () => {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
-                          Net ₹{formatMoney2Display(netSeller)}
-                        </span>
                         <Button
                           type="button"
                           variant="outline"
@@ -2485,6 +2734,7 @@ const SettlementPage = () => {
                       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller contact</span>
                       <label className="flex cursor-pointer items-center gap-2 font-medium">
                         <Checkbox
+                          className="h-4 w-4 rounded-none"
                           checked={form.registered}
                           onCheckedChange={v => {
                             const on = v === true;
@@ -2502,11 +2752,8 @@ const SettlementPage = () => {
                             if (on) void runSellerContactSearch(seller.sellerId, '');
                           }}
                         />
-                        <span className="text-foreground">Registered</span>
+                        <span className="text-foreground">Unregistered</span>
                       </label>
-                      <span className="text-xs text-muted-foreground">
-                        {form.registered ? (form.contactId ? 'Registry linked' : 'Search by mark below') : 'Unregistered — enter details to register'}
-                      </span>
                     </div>
 
                     <div className="mb-4 space-y-3 overflow-visible rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
@@ -2944,10 +3191,43 @@ const SettlementPage = () => {
                           </div>
                           <Switch
                             id={`sw-w-${seller.sellerId}`}
-                            className="h-4 w-7 scale-90"
+                            className="h-4 w-7 shrink-0 scale-90"
                             checked={settlementWeighingEnabled}
                             onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
                             aria-label="Use weighman in totals"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-muted-foreground">Add to freight</span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60"
+                                  aria-label="Weighing merge toggle help"
+                                >
+                                  <Info className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-[240px] text-xs">
+                                ON: move weighing amount into Freight line and hide separate weighing deduction. OFF: keep weighing as
+                                a separate line.
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <Switch
+                            id={`sw-wm-${seller.sellerId}`}
+                            className="h-4 w-7 shrink-0 scale-90"
+                            checked={isWeighingMergedIntoFreight(seller.sellerId)}
+                            onCheckedChange={v =>
+                              setSettlementWeighingMergeIntoFreightBySellerId(prev => ({
+                                ...prev,
+                                [seller.sellerId]: v === true,
+                              }))
+                            }
+                            disabled={settlementWeighingEnabled}
+                            aria-label="Add weighing amount to freight"
                           />
                         </div>
                         <div className="space-y-2 p-3 text-xs">
@@ -2962,6 +3242,11 @@ const SettlementPage = () => {
                                   ]}
                                 />
                               </span>
+                              {(() => {
+                                const mergeIntoFreightMode =
+                                  !settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId);
+                                const displayedFreight = mergeIntoFreightMode ? exp.freight + exp.weighman : exp.freight;
+                                return (
                               <Input
                                 id={`settlement-seller-expense-${seller.sellerId}-freight`}
                                 type="number"
@@ -2969,16 +3254,22 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.freight === 0 ? '' : exp.freight}
+                                value={displayedFreight === 0 ? '' : displayedFreight}
                                 onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  const entered = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                    return { ...prev, [seller.sellerId]: { ...e0, freight: v } };
+                                    if (mergeIntoFreightMode) {
+                                      const baseFreight = clampMoney(entered - e0.weighman);
+                                      return { ...prev, [seller.sellerId]: { ...e0, freight: baseFreight } };
+                                    }
+                                    return { ...prev, [seller.sellerId]: { ...e0, freight: entered } };
                                   });
                                 }}
                                 aria-label="Freight amount"
                               />
+                                );
+                              })()}
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="inline-flex items-center gap-1 text-muted-foreground">
@@ -3017,8 +3308,10 @@ const SettlementPage = () => {
                                   lines={[
                                     'Uses commodity weighing slab: same slab formula as unloading.',
                                     settlementWeighingEnabled
-                                      ? 'Toggle is ON: included in total expenses.'
-                                      : 'Toggle is OFF: excluded from total expenses.',
+                                      ? 'Use weighman ON: shown as separate weighing deduction.'
+                                      : isWeighingMergedIntoFreight(seller.sellerId)
+                                        ? 'Use weighman OFF + Add to freight ON: weighing merged into freight.'
+                                        : 'Use weighman OFF: weighing excluded until Add to freight is enabled.',
                                     `Current value: ${formatMoney2Display(exp.weighman)}`,
                                   ]}
                                 />
@@ -3031,7 +3324,9 @@ const SettlementPage = () => {
                                 disabled={!settlementWeighingEnabled}
                                 className={cn(
                                   settlementExpenseInputClass,
-                                  settlementWeighingMergeIntoFreight && settlementWeighingEnabled && 'opacity-80'
+                                  isWeighingMergedIntoFreight(seller.sellerId) &&
+                                    settlementWeighingEnabled &&
+                                    'opacity-80'
                                 )}
                                 value={
                                   !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman
@@ -3147,6 +3442,7 @@ const SettlementPage = () => {
                         variant="outline"
                         className={cn(arrOutlineMd, 'gap-1.5')}
                         onClick={() => void runPrintSellerSubPatti(seller)}
+                        disabled={!!sellerValidationError}
                       >
                         <Printer className="h-3.5 w-3.5" />
                         Print sub patti
@@ -3170,9 +3466,10 @@ const SettlementPage = () => {
                         variant="outline"
                         className={cn(arrSolidMd, 'gap-1.5')}
                         onClick={() => void savePattiForSeller(seller)}
+                        disabled={!!sellerValidationError}
                       >
                         <Save className="h-3.5 w-3.5" />
-                        Save patti
+                        {existingPattiIdBySellerId[seller.sellerId] != null ? 'Update patti' : 'Save patti'}
                       </Button>
                     </div>
                     </div>
@@ -3193,19 +3490,21 @@ const SettlementPage = () => {
                 type="button"
                 variant="outline"
                 onClick={() => void savePatti()}
-                disabled={!pattiData.rateClusters.length}
+                disabled={!canRunMainPattiActions}
                 className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
+                title={mainPattiValidationError ?? undefined}
               >
                 <Save className="h-5 w-5" />
-                Save Main Patti
+                {isMainUpdateMode ? 'Update Main Patti' : 'Save Main Patti'}
                 <span className="text-[10px] font-semibold opacity-90 sm:text-[11px]">(Alt S)</span>
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
-                disabled={!pattiData.rateClusters.length}
+                disabled={!canRunMainPattiActions}
                 onClick={() => void runPrintMainPatti()}
+                title={mainPattiValidationError ?? undefined}
               >
                 <Printer className="h-4 w-4" />
                 Print main patti
@@ -3214,11 +3513,42 @@ const SettlementPage = () => {
                 type="button"
                 variant="outline"
                 className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
+                disabled={!canRunMainPattiActions}
                 onClick={() => void runPrintAllSubPatti()}
+                title={mainPattiValidationError ?? undefined}
               >
                 <Printer className="h-4 w-4" />
                 Print all sub patti
               </Button>
+              {pattiDetailDto && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground">Version</span>
+                  <Select
+                    value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
+                    onValueChange={val => {
+                      if (val === 'latest') {
+                        applyPattiVersionSelection('latest');
+                        return;
+                      }
+                      const num = Number(val);
+                      if (Number.isFinite(num)) applyPattiVersionSelection(num);
+                    }}
+                  >
+                    <SelectTrigger className={cn(arrOutlineTall, 'min-w-[12rem]')}>
+                      <SelectValue placeholder="Latest (current)" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      <SelectItem value="latest">Latest (current)</SelectItem>
+                      {(pattiDetailDto.versions ?? []).map(v => (
+                        <SelectItem key={v.version} value={String(v.version)}>
+                          v{v.version}
+                          {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           </motion.div>
 

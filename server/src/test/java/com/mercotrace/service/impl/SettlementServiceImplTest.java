@@ -17,6 +17,7 @@ import com.mercotrace.domain.Vehicle;
 import com.mercotrace.repository.ChartOfAccountRepository;
 import com.mercotrace.repository.PattiRepository;
 import com.mercotrace.repository.VoucherLineRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
@@ -111,7 +112,8 @@ class SettlementServiceImplTest {
             salesBillRepository,
             contactService,
             hamaliSlabRepository,
-            commodityConfigRepository
+            commodityConfigRepository,
+            new ObjectMapper()
         );
         // Only create stubbing when needed in specific tests to avoid UnnecessaryStubbingException.
     }
@@ -204,7 +206,7 @@ class SettlementServiceImplTest {
         Patti other = new Patti();
         other.setId(99L);
         other.setTraderId(999L);
-        when(pattiRepository.findById(99L)).thenReturn(Optional.of(other));
+        when(pattiRepository.findByIdWithVersions(99L)).thenReturn(Optional.of(other));
 
         assertThat(service.getPattiById(99L)).isEmpty();
     }

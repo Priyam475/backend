@@ -18,6 +18,14 @@ export interface DeductionItemDTO {
   autoPulled: boolean;
 }
 
+/** Saved snapshot for audit (same idea as Billing bill versions). */
+export interface PattiVersionDTO {
+  version: number;
+  savedAt?: string;
+  /** Prior patti body JSON (rate clusters, deductions, amounts, etc.) */
+  data?: Record<string, unknown>;
+}
+
 export interface PattiDTO {
   id?: number;
   pattiId: string;
@@ -34,6 +42,8 @@ export interface PattiDTO {
   netPayable: number;
   createdAt: string;
   useAverageWeight?: boolean;
+  /** Populated on GET by id after at least one update (snapshots from previous saves). */
+  versions?: PattiVersionDTO[];
 }
 
 export interface PattiSaveRequest {

@@ -22,8 +22,11 @@ import com.mercotrace.service.AuctionService;
 import com.mercotrace.service.ContactService;
 import com.mercotrace.service.SettlementService;
 import com.mercotrace.service.TraderContextService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mercotrace.service.dto.AuctionResultDTO;
 import com.mercotrace.service.dto.AuctionResultEntryDTO;
+import com.mercotrace.service.dto.SettlementDTOs;
 import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -73,6 +76,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final ContactService contactService;
     private final HamaliSlabRepository hamaliSlabRepository;
     private final CommodityConfigRepository commodityConfigRepository;
+    private final ObjectMapper objectMapper;
 
     public SettlementServiceImpl(
         TraderContextService traderContextService,
@@ -92,7 +96,8 @@ public class SettlementServiceImpl implements SettlementService {
         SalesBillRepository salesBillRepository,
         ContactService contactService,
         HamaliSlabRepository hamaliSlabRepository,
-        CommodityConfigRepository commodityConfigRepository
+        CommodityConfigRepository commodityConfigRepository,
+        ObjectMapper objectMapper
     ) {
         this.traderContextService = traderContextService;
         this.lotRepository = lotRepository;
@@ -112,6 +117,7 @@ public class SettlementServiceImpl implements SettlementService {
         this.contactService = contactService;
         this.hamaliSlabRepository = hamaliSlabRepository;
         this.commodityConfigRepository = commodityConfigRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -358,7 +364,7 @@ public class SettlementServiceImpl implements SettlementService {
     public Optional<PattiDTO> getPattiById(Long id) {
         Long traderId = traderContextService.getCurrentTraderId();
         return pattiRepository
-            .findById(id)
+            .findByIdWithVersions(id)
             .filter(p -> traderId.equals(p.getTraderId()))
             .map(this::toPattiDTO);
     }
@@ -377,21 +383,34 @@ public class SettlementServiceImpl implements SettlementService {
     @Transactional(readOnly = false)
     public Optional<PattiDTO> updatePatti(Long id, PattiSaveRequest request) {
         Long traderId = traderContextService.getCurrentTraderId();
-        return pattiRepository
-            .findById(id)
-            .filter(p -> traderId.equals(p.getTraderId()))
-            .map(patti -> {
-                patti.setSellerName(request.getSellerName());
-                patti.setGrossAmount(request.getGrossAmount());
-                patti.setTotalDeductions(request.getTotalDeductions());
-                patti.setNetPayable(request.getNetPayable());
-                patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
-                patti.getRateClusters().clear();
-                patti.getDeductions().clear();
-                mapRequestDeductionsAndClustersToEntity(request, patti);
-                return pattiRepository.save(patti);
-            })
-            .map(this::toPattiDTO);
+        Optional<Patti> opt = pattiRepository.findByIdWithVersions(id).filter(p -> traderId.equals(p.getTraderId()));
+        if (opt.isEmpty()) {
+            return Optional.empty();
+        }
+        Patti patti = opt.get();
+        try {
+            PattiDTO snapBody = toPattiDTO(patti);
+            snapBody.setVersions(new ArrayList<>());
+            String snapshotJson = objectMapper.writeValueAsString(snapBody);
+            PattiVersion version = new PattiVersion();
+            version.setPatti(patti);
+            version.setVersionNumber(patti.getVersions().size() + 1);
+            version.setSavedAt(Instant.now());
+            version.setSnapshotJson(snapshotJson);
+            patti.getVersions().add(version);
+        } catch (JsonProcessingException e) {
+            LOG.warn("Could not serialize patti snapshot for version: {}", e.getMessage());
+        }
+        patti.setSellerName(request.getSellerName());
+        patti.setGrossAmount(request.getGrossAmount());
+        patti.setTotalDeductions(request.getTotalDeductions());
+        patti.setNetPayable(request.getNetPayable());
+        patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
+        patti.getRateClusters().clear();
+        patti.getDeductions().clear();
+        mapRequestDeductionsAndClustersToEntity(request, patti);
+        pattiRepository.save(patti);
+        return pattiRepository.findByIdWithVersions(id).map(this::toPattiDTO);
     }
 
     @Override
@@ -796,6 +815,21 @@ public class SettlementServiceImpl implements SettlementService {
             dd.setEditable(d.getEditable());
             dd.setAutoPulled(d.getAutoPulled());
             dto.getDeductions().add(dd);
+        }
+        if (e.getVersions() != null) {
+            for (PattiVersion pv : e.getVersions()) {
+                SettlementDTOs.PattiVersionDTO vd = new SettlementDTOs.PattiVersionDTO();
+                vd.setVersion(pv.getVersionNumber());
+                vd.setSavedAt(pv.getSavedAt() != null ? pv.getSavedAt().toString() : null);
+                if (pv.getSnapshotJson() != null && !pv.getSnapshotJson().isBlank()) {
+                    try {
+                        vd.setData(objectMapper.readValue(pv.getSnapshotJson(), java.util.Map.class));
+                    } catch (JsonProcessingException ex) {
+                        LOG.warn("Could not parse patti version snapshot: {}", ex.getMessage());
+                    }
+                }
+                dto.getVersions().add(vd);
+            }
         }
         return dto;
     }

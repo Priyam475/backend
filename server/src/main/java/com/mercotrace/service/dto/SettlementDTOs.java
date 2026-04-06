@@ -60,6 +60,40 @@ public final class SettlementDTOs {
         public void setAutoPulled(Boolean autoPulled) { this.autoPulled = autoPulled; }
     }
 
+    /** Version snapshot for Sales Patti (audit). Aligned with Billing BillVersionDTO. */
+    public static class PattiVersionDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private Integer version;
+        private String savedAt;
+        private Object data;
+
+        public Integer getVersion() {
+            return version;
+        }
+
+        public void setVersion(Integer version) {
+            this.version = version;
+        }
+
+        public String getSavedAt() {
+            return savedAt;
+        }
+
+        public void setSavedAt(String savedAt) {
+            this.savedAt = savedAt;
+        }
+
+        public Object getData() {
+            return data;
+        }
+
+        public void setData(Object data) {
+            this.data = data;
+        }
+    }
+
     /** Sales Patti response (matches frontend PattiData). */
     public static class PattiDTO implements Serializable {
 
@@ -81,6 +115,7 @@ public final class SettlementDTOs {
         private BigDecimal netPayable;
         private Instant createdAt;
         private Boolean useAverageWeight;
+        private List<PattiVersionDTO> versions = new ArrayList<>();
 
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
@@ -112,6 +147,8 @@ public final class SettlementDTOs {
         public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
         public Boolean getUseAverageWeight() { return useAverageWeight; }
         public void setUseAverageWeight(Boolean useAverageWeight) { this.useAverageWeight = useAverageWeight; }
+        public List<PattiVersionDTO> getVersions() { return versions; }
+        public void setVersions(List<PattiVersionDTO> versions) { this.versions = versions != null ? versions : new ArrayList<>(); }
     }
 
     /** Request to create or update a patti (frontend sends full PattiData-like payload). */
