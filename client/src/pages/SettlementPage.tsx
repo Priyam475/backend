@@ -52,15 +52,17 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 /**
- * Settlement buttons match BillingPage.tsx / ArrivalsPage:
- * - Outline: `variant="outline"` + `rounded-xl` (+ height).
- * - Primary: `bg-[#6075FF] text-white shadow-lg` via `arrSolid*`.
+ * Settlement button language:
+ * - Premium gradient (same family as table headers)
+ * - Hover highlight border + stronger glow
  */
-const arrOutlineMd = 'rounded-xl h-9 text-sm font-semibold';
-const arrOutlineTall = 'rounded-xl h-12 text-sm font-semibold';
-const arrOutlineSm = 'rounded-xl h-8 text-xs font-semibold';
+const settlementBtnGradient =
+  '!bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] !text-white border border-white/25 shadow-[0_10px_24px_-12px_rgba(91,140,255,0.85)] hover:!brightness-110 hover:border-white/45 hover:shadow-[0_14px_30px_-12px_rgba(123,97,255,0.9)] active:scale-[0.99] transition-all';
+const arrOutlineMd = cn('rounded-xl h-9 text-sm font-semibold', settlementBtnGradient);
+const arrOutlineTall = cn('rounded-xl h-12 text-sm font-semibold', settlementBtnGradient);
+const arrOutlineSm = cn('rounded-xl h-8 text-xs font-semibold', settlementBtnGradient);
 const arrSolid =
-  'rounded-xl font-bold bg-[#6075FF] text-white shadow-lg hover:!bg-slate-500 hover:!text-white border-transparent transition-colors';
+  cn('rounded-xl font-bold', settlementBtnGradient);
 const arrSolidMd = cn(arrSolid, 'h-9 px-3 text-sm');
 const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
 const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
@@ -2620,7 +2622,7 @@ const SettlementPage = () => {
     (row: VehicleExpenseRow, field: VehicleExpenseField, ariaLabel: string) => {
       const edited = isVehicleExpenseFieldEdited(row, field);
       return (
-        <div className="mx-auto flex w-full max-w-[8.5rem] items-center gap-1">
+        <div className="mx-auto flex w-full max-w-[12rem] items-center gap-1">
           <Input
             type="number"
             min={0}
@@ -2634,15 +2636,17 @@ const SettlementPage = () => {
             aria-label={ariaLabel}
           />
           {edited && (
-            <button
-              type="button"
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border/70 bg-background text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => revertVehicleExpenseCell(row.id, field)}
-              title="Restore original value"
-              aria-label={`Restore original ${ariaLabel.toLowerCase()}`}
-            >
-              <RotateCcw className="h-3 w-3" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className="inline-flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-background text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => revertVehicleExpenseCell(row.id, field)}
+                title="Restore original value"
+                aria-label={`Restore original ${ariaLabel.toLowerCase()}`}
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+            </div>
           )}
         </div>
       );
@@ -3031,7 +3035,7 @@ const SettlementPage = () => {
               className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
             >
               <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
-                Vehicle details
+                Vehicle Details
               </h3>
               <div className="grid grid-cols-2 items-stretch gap-2.5 text-center sm:gap-3 xl:grid-cols-6 xl:gap-4">
                 <div className="col-span-2 flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-blue-500/20 bg-muted/30 px-2.5 py-3 sm:col-span-1 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
@@ -3087,7 +3091,7 @@ const SettlementPage = () => {
             className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
             <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
-              Expenses &amp; invoice
+              Expenses &amp; Invoice
             </h3>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch sm:gap-4">
               <div className="flex min-h-[8.5rem] min-w-0 flex-col rounded-xl border border-teal-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[9rem] sm:rounded-2xl sm:px-3 sm:py-4">
@@ -3219,7 +3223,7 @@ const SettlementPage = () => {
             transition={{ delay: 0.06 }}
             className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
-            <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">Sales report</h3>
+            <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">Sales Report</h3>
             {arrivalSellersForPatti.length > 1 && (
               <div className="-mt-1 mb-3 flex items-center justify-center gap-1.5 lg:hidden">
                 {arrivalSellersForPatti.map((_, si) => (
