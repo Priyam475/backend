@@ -86,6 +86,25 @@ const settlementToggleTabBtnOnHero = (active: boolean) =>
       : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/10 backdrop-blur-sm',
   );
 
+/** Sales report: outer card border per seller (same accent idea as Vehicle details tiles). */
+const SALES_REPORT_SELLER_CARD_STYLES = [
+  'border-blue-500/20 bg-muted/30',
+  'border-cyan-500/20 bg-muted/30',
+  'border-amber-500/20 bg-muted/30',
+  'border-emerald-500/20 bg-muted/30',
+  'border-violet-500/20 bg-muted/30',
+  'border-fuchsia-500/20 bg-muted/30',
+] as const;
+
+/** Same gradient language as `DesktopSidebar` (linear + radial shine). */
+const DESKTOP_SIDEBAR_LIKE_GRADIENT_BG =
+  'bg-[linear-gradient(180deg,#4B7CF3_0%,#5B8CFF_30%,#7B61FF_100%)]';
+const DESKTOP_SIDEBAR_LIKE_SHINE =
+  'pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15)_0%,transparent_60%)]';
+/** Horizontal variant so the full sweep reads across column headers. */
+const SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT =
+  'bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)]';
+
 // ── Types ─────────────────────────────────────────────────
 interface SellerSettlement {
   sellerId: string;
@@ -854,7 +873,7 @@ const SettlementPage = () => {
     Record<string, boolean>
   >({});
   const [gunniesAmount, setGunniesAmount] = useState(0);
-  /** Per seller: collapsed sales report shows qty / weight / gross summary only (Billing-style). */
+  /** Per seller: `false` = expanded; missing/`true` = collapsed (default collapsed). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
   const [showPrint, setShowPrint] = useState(false);
   /** Prevents overlapping save/update requests (buttons + shortcut). */
@@ -1830,7 +1849,7 @@ const SettlementPage = () => {
         settlementWeighingEnabled,
         isWeighingMergedIntoFreight(seller.sellerId)
       );
-      return sum + (expenseTotal - amountTot);
+      return sum + (amountTot - expenseTotal);
     }, 0);
   }, [
     selectedSeller,
@@ -2601,13 +2620,13 @@ const SettlementPage = () => {
     (row: VehicleExpenseRow, field: VehicleExpenseField, ariaLabel: string) => {
       const edited = isVehicleExpenseFieldEdited(row, field);
       return (
-        <div className="mx-auto flex w-full max-w-[7.5rem] flex-col items-center gap-1">
+        <div className="mx-auto flex w-full max-w-[8.5rem] items-center gap-1">
           <Input
             type="number"
             min={0}
             step={0.01}
             className={cn(
-              'h-10 w-full rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+              'h-10 min-w-0 flex-1 rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
               edited && 'border-amber-500/70'
             )}
             value={row[field] === 0 ? '' : row[field]}
@@ -2615,21 +2634,15 @@ const SettlementPage = () => {
             aria-label={ariaLabel}
           />
           {edited && (
-            <div className="flex items-center gap-1">
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                <Edit3 className="mr-1 h-2.5 w-2.5" aria-hidden />
-                Edited
-              </span>
-              <button
-                type="button"
-                className="inline-flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-background text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => revertVehicleExpenseCell(row.id, field)}
-                title="Restore original value"
-                aria-label={`Restore original ${ariaLabel.toLowerCase()}`}
-              >
-                <RotateCcw className="h-3 w-3" />
-              </button>
-            </div>
+            <button
+              type="button"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border/70 bg-background text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => revertVehicleExpenseCell(row.id, field)}
+              title="Restore original value"
+              aria-label={`Restore original ${ariaLabel.toLowerCase()}`}
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
           )}
         </div>
       );
@@ -2642,6 +2655,12 @@ const SettlementPage = () => {
     if (!rawDate) return '-';
     const d = new Date(rawDate);
     return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString();
+  };
+
+  const shortAddressLabel = (value?: string | null): string => {
+    const v = String(value ?? '').trim();
+    if (!v) return '-';
+    return v.length > 10 ? `${v.slice(0, 10)}...` : v;
   };
 
   const renderArrivalSummaryTable = (tab: 'new-patti' | 'saved-patti') => {
@@ -2685,18 +2704,18 @@ const SettlementPage = () => {
     return (
       <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
-            <thead className="bg-muted/40">
+          <table className="w-full min-w-[980px] border border-border/50 text-sm">
+            <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
               <tr>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Vehicle Number</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Seller</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">From</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">SL No</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Lots</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Bids</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Weighed</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Status</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Date</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
+                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
+                <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Date</th>
               </tr>
             </thead>
             <tbody>
@@ -2707,15 +2726,30 @@ const SettlementPage = () => {
                       onClick={() => generatePatti(row.representativeSeller, { arrivalSellerIds: row.sellerIds })}
                       className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
                     >
-                      <td className="px-3 py-2 text-center text-foreground">{row.vehicleNumber}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.fromLocation}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.lots}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.bids}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.weighed}</td>
-                      <td className="px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">New Patti</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                        <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+                          {row.vehicleNumber}
+                        </span>
+                      </td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-block max-w-[10ch] truncate align-bottom">
+                              {shortAddressLabel(row.fromLocation)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={8} className="max-w-[260px] text-xs">
+                            {row.fromLocation || '-'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">New Patti</td>
+                      <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
                   ))
                 : savedPattiArrivalRows.map((row) => (
@@ -2724,15 +2758,30 @@ const SettlementPage = () => {
                       onClick={() => row.representativePattiId != null && openPattiForEdit(row.representativePattiId, row.sellerIds)}
                       className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
                     >
-                      <td className="px-3 py-2 text-center text-foreground">{row.vehicleNumber}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.fromLocation}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.lots}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.bids}</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.weighed}</td>
-                      <td className="px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
-                      <td className="px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                        <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+                          {row.vehicleNumber}
+                        </span>
+                      </td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-block max-w-[10ch] truncate align-bottom">
+                              {shortAddressLabel(row.fromLocation)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" sideOffset={8} className="max-w-[260px] text-xs">
+                            {row.fromLocation || '-'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
+                      <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
                   ))}
             </tbody>
@@ -2984,40 +3033,48 @@ const SettlementPage = () => {
               <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
                 Vehicle details
               </h3>
-              <div className="grid grid-cols-2 gap-2.5 text-center sm:gap-3 xl:grid-cols-6 xl:gap-4">
-                <div className="col-span-2 flex flex-col items-center gap-1.5 rounded-xl border border-blue-500/20 bg-muted/30 px-2.5 py-3 sm:col-span-1 sm:rounded-2xl sm:px-3 sm:py-4">
+              <div className="grid grid-cols-2 items-stretch gap-2.5 text-center sm:gap-3 xl:grid-cols-6 xl:gap-4">
+                <div className="col-span-2 flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-blue-500/20 bg-muted/30 px-2.5 py-3 sm:col-span-1 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
                   <Truck className="h-4 w-4 text-blue-600 dark:text-blue-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Vehicle No</p>
-                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl truncate max-w-full">
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl truncate max-w-full">
                     {selectedSeller.vehicleNumber || '-'}
                   </p>
                 </div>
-                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-cyan-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-cyan-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
                   <Users className="h-4 w-4 text-cyan-600 dark:text-cyan-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Sellers</p>
-                  <p className="text-xl font-black tabular-nums text-foreground sm:text-2xl md:text-3xl">{formatOptionalInt(vehicleFormDetails.sellersCount)}</p>
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                    {formatOptionalInt(vehicleFormDetails.sellersCount)}
+                  </p>
                 </div>
-                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-amber-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-amber-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
                   <Package className="h-4 w-4 text-amber-600 dark:text-amber-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Arrival Qty</p>
-                  <p className="text-xl font-black tabular-nums text-foreground sm:text-2xl md:text-3xl">{formatOptionalInt(vehicleFormDetails.arrivalQty)}</p>
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                    {formatOptionalInt(vehicleFormDetails.arrivalQty)}
+                  </p>
                 </div>
-                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-emerald-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
                   <Scale className="h-4 w-4 text-emerald-600 dark:text-emerald-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Arrival Weight</p>
-                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl">{formatOptionalKg(vehicleFormDetails.arrivalWeightKg)}</p>
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                    {formatOptionalKg(vehicleFormDetails.arrivalWeightKg)}
+                  </p>
                 </div>
-                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-violet-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-violet-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4">
                   <Gavel className="h-4 w-4 text-violet-600 dark:text-violet-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase leading-tight text-muted-foreground">Sales Pad Net Wt</p>
-                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
                     {formatOptionalKg(salesPadNetWeightBaseline)}
                   </p>
                 </div>
-                <div className="col-span-2 flex flex-col items-center gap-1.5 rounded-xl border border-fuchsia-500/20 bg-muted/30 px-2.5 py-3 sm:rounded-2xl sm:px-3 sm:py-4 xl:col-span-1">
+                <div className="col-span-2 flex h-full min-h-[6.75rem] flex-col items-center justify-center gap-1.5 rounded-xl border border-fuchsia-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[7rem] sm:rounded-2xl sm:px-3 sm:py-4 xl:col-span-1">
                   <Receipt className="h-4 w-4 text-fuchsia-600 dark:text-fuchsia-400 sm:h-5 sm:w-5" aria-hidden />
                   <p className="text-[10px] font-bold uppercase leading-tight text-muted-foreground">Patti Net Wt</p>
-                  <p className="text-base font-black tabular-nums text-foreground sm:text-xl md:text-2xl">{formatOptionalKg(vehicleFormDetails.pattiNetWeightKg)}</p>
+                  <p className="text-lg font-black tabular-nums text-foreground sm:text-xl md:text-2xl">
+                    {formatOptionalKg(vehicleFormDetails.pattiNetWeightKg)}
+                  </p>
                 </div>
               </div>
             </motion.div>
@@ -3027,14 +3084,14 @@ const SettlementPage = () => {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.02 }}
-            className="glass-card rounded-2xl border border-border/50 p-5 sm:p-6 lg:-mx-2"
+            className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
             <h3 className="mb-4 text-center text-base font-bold tracking-tight text-foreground sm:text-lg">
               Expenses &amp; invoice
             </h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-              <div className="min-w-0 sm:pr-4 sm:border-r sm:border-border/50">
-                <div className="flex items-start gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-stretch sm:gap-4">
+              <div className="flex min-h-[8.5rem] min-w-0 flex-col rounded-xl border border-teal-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[9rem] sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex flex-1 items-center gap-3">
                   <div
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-600 ring-1 ring-teal-500/20 dark:text-teal-400"
                     aria-hidden
@@ -3079,8 +3136,8 @@ const SettlementPage = () => {
                   </div>
                 </div>
               </div>
-              <div className="min-w-0">
-                <div className="flex items-start gap-3">
+              <div className="flex min-h-[8.5rem] min-w-0 flex-col rounded-xl border border-amber-500/20 bg-muted/30 px-2.5 py-3 sm:min-h-[9rem] sm:rounded-2xl sm:px-3 sm:py-4">
+                <div className="flex flex-1 items-center gap-3">
                   <div
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 ring-1 ring-amber-500/20 dark:text-amber-400"
                     aria-hidden
@@ -3129,7 +3186,7 @@ const SettlementPage = () => {
                 </div>
               </div>
             </div>
-            <div className="mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-start sm:gap-4">
+            <div className="mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
               <div className="w-full min-w-0 sm:max-w-md">
                 <label htmlFor="settlement-invoice-name-search" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
                   Invoice Name
@@ -3151,7 +3208,7 @@ const SettlementPage = () => {
                 onClick={() => void openVehicleExpenseModal()}
               >
                 <PlusCircle className="h-4 w-4" />
-                Add Quick Expenses (Alt + X)
+                Add Quick Adjustment (Alt X)
               </Button>
             </div>
           </motion.div>
@@ -3190,7 +3247,7 @@ const SettlementPage = () => {
               onScroll={handleSalesReportCarouselScroll}
               className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 [-webkit-overflow-scrolling:touch] lg:block lg:overflow-visible lg:snap-none lg:space-y-4 lg:pb-0"
             >
-              {arrivalSellersForPatti.map(seller => {
+              {arrivalSellersForPatti.map((seller, sellerIdx) => {
                 const form = sellerFormById[seller.sellerId] ?? defaultSellerForm(seller);
                 const baseline = registeredBaselineById[seller.sellerId] ?? form;
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
@@ -3212,8 +3269,9 @@ const SettlementPage = () => {
                   settlementWeighingEnabled,
                   isWeighingMergedIntoFreight(seller.sellerId)
                 );
-                const netSeller = expenseTotal - amountTot;
-                const salesCollapsed = salesReportCollapsedBySellerId[seller.sellerId] === true;
+                const netSeller = amountTot - expenseTotal;
+                /** Default collapsed; only explicit `false` expands. */
+                const salesCollapsed = salesReportCollapsedBySellerId[seller.sellerId] !== false;
 
                 return (
                   <div
@@ -3222,7 +3280,10 @@ const SettlementPage = () => {
                   >
                     <div
                       id={`settlement-seller-card-${seller.sellerId}`}
-                      className="rounded-2xl border border-border/60 bg-muted/10 p-3 sm:p-4"
+                      className={cn(
+                        'rounded-2xl border p-3 sm:p-4',
+                        SALES_REPORT_SELLER_CARD_STYLES[sellerIdx % SALES_REPORT_SELLER_CARD_STYLES.length],
+                      )}
                     >
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
                       <div className="min-w-0">
@@ -3240,10 +3301,10 @@ const SettlementPage = () => {
                           type="button"
                           className={cn(arrSolidSm, 'gap-1')}
                           onClick={() =>
-                            setSalesReportCollapsedBySellerId(prev => ({
-                              ...prev,
-                              [seller.sellerId]: !prev[seller.sellerId],
-                            }))
+                            setSalesReportCollapsedBySellerId(prev => {
+                              const collapsed = prev[seller.sellerId] !== false;
+                              return { ...prev, [seller.sellerId]: !collapsed };
+                            })
                           }
                         >
                           {salesCollapsed ? (
@@ -3543,43 +3604,43 @@ const SettlementPage = () => {
                           }}
                         >
                           {!form.registered
-                            ? 'Register seller'
+                            ? 'Register Seller'
                             : !form.contactId
-                              ? 'Select contact'
+                              ? 'Select Contact'
                               : dirty
                                 ? 'Update'
-                                : 'Up to date'}
+                                : 'Up To Date'}
                         </Button>
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-                      <div className="min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
-                        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
-                          <thead>
-                            <tr className="bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100 dark:from-slate-800 dark:via-slate-800/90 dark:to-slate-800">
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+                      <div className="min-h-0 min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm lg:max-w-[calc(100%-18.25rem)]">
+                        <table className="w-full min-w-[700px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
+                          <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                            <tr>
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 #
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Item (lot)
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Qty
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Wt (kg)
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Avg (kg)
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Rate (₹/bag)
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Amount
                               </th>
-                              <th className="border-b border-border/50 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground lg:px-3">
+                              <th className="border-b border-white/25 px-2 py-2.5 text-center text-[10px] font-bold uppercase tracking-wide text-white lg:px-3">
                                 Action
                               </th>
                             </tr>
@@ -3716,11 +3777,13 @@ const SettlementPage = () => {
                         </table>
                       </div>
 
-                      <div className="w-full shrink-0 overflow-hidden rounded-xl border border-border/50 bg-muted/20 lg:w-56">
-                        <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-cyan-50 px-3 py-2.5 dark:from-indigo-950/35 dark:via-blue-950/25 dark:to-cyan-950/20">
-                          <p className="text-center text-sm font-bold text-foreground">Expenses</p>
+                      <div className="flex h-full min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/20 lg:w-[19.25rem]">
+                        <div className="relative shrink-0 overflow-hidden px-3 py-2.5">
+                          <div className={cn('absolute inset-0', DESKTOP_SIDEBAR_LIKE_GRADIENT_BG)} />
+                          <div className={DESKTOP_SIDEBAR_LIKE_SHINE} />
+                          <p className="relative z-10 text-center text-sm font-bold text-white drop-shadow-sm">Expenses</p>
                         </div>
-                        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
+                        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[11px] font-medium text-muted-foreground">Use weighman</span>
                             <Tooltip>
@@ -3740,13 +3803,13 @@ const SettlementPage = () => {
                           </div>
                           <Switch
                             id={`sw-w-${seller.sellerId}`}
-                            className="h-4 w-7 shrink-0 scale-90"
+                            className="h-5 w-9 shrink-0"
                             checked={settlementWeighingEnabled}
                             onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
                             aria-label="Use weighman in totals"
                           />
                         </div>
-                        <div className="flex items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
+                        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[11px] font-medium text-muted-foreground">Add to freight</span>
                             <Tooltip>
@@ -3767,7 +3830,7 @@ const SettlementPage = () => {
                           </div>
                           <Switch
                             id={`sw-wm-${seller.sellerId}`}
-                            className="h-4 w-7 shrink-0 scale-90"
+                            className="h-5 w-9 shrink-0"
                             checked={isWeighingMergedIntoFreight(seller.sellerId)}
                             onCheckedChange={v =>
                               setSettlementWeighingMergeIntoFreightBySellerId(prev => ({
@@ -3779,7 +3842,7 @@ const SettlementPage = () => {
                             aria-label="Add weighing amount to freight"
                           />
                         </div>
-                        <div className="space-y-2 p-3 text-xs">
+                        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-xs">
                             <div className="flex items-center justify-between gap-2">
                               <span className="inline-flex items-center gap-1 text-muted-foreground">
                                 Freight
@@ -3946,7 +4009,7 @@ const SettlementPage = () => {
                               />
                             </div>
                           </div>
-                        <div className="space-y-1 border-t border-border/50 p-3 pt-2 text-xs">
+                        <div className="shrink-0 space-y-1 border-t border-border/50 p-3 pt-2 text-xs">
                           <div className="flex justify-between font-semibold">
                             <span className="inline-flex items-center gap-1 text-center">
                               Total expenses
@@ -3966,7 +4029,7 @@ const SettlementPage = () => {
                               <InlineCalcTip
                                 label={`Net payable formula ${seller.sellerId}`}
                                 lines={[
-                                  'Net payable = Total expenses - Auction amount.',
+                                  'Net payable = Auction amount - Total expenses.',
                                   `Qty used: ${Math.round(qtyTot)} bags`,
                                   `Weight used: ${weightTot.toFixed(1)} kg`,
                                   `Auction amount: ${formatMoney2Display(amountTot)}`,
@@ -3994,7 +4057,7 @@ const SettlementPage = () => {
                         disabled={!!sellerValidationError}
                       >
                         <Printer className="h-3.5 w-3.5" />
-                        Print sub patti
+                        Print Sub Patti
                       </Button>
                       <Button
                         type="button"
@@ -4018,7 +4081,7 @@ const SettlementPage = () => {
                         disabled={!!sellerValidationError || pattiSaveBusy}
                       >
                         <Save className="h-3.5 w-3.5" />
-                        {existingPattiIdBySellerId[seller.sellerId] != null ? 'Update patti' : 'Save patti'}
+                        {existingPattiIdBySellerId[seller.sellerId] != null ? 'Update Patti' : 'Save Patti'}
                       </Button>
                     </div>
                     </div>
@@ -4044,8 +4107,7 @@ const SettlementPage = () => {
                 title={mainPattiValidationError ?? undefined}
               >
                 <Save className="h-5 w-5" />
-                {isMainUpdateMode ? 'Update Main Patti' : 'Save Main Patti'}
-                <span className="text-[10px] font-semibold opacity-90 sm:text-[11px]">(Alt S)</span>
+                {isMainUpdateMode ? 'Update Main Patti (Alt S)' : 'Save Main Patti (Alt S)'}
               </Button>
               <Button
                 type="button"
@@ -4056,7 +4118,7 @@ const SettlementPage = () => {
                 title={mainPattiValidationError ?? undefined}
               >
                 <Printer className="h-4 w-4" />
-                Print main patti
+                Print Main Patti
               </Button>
               <Button
                 type="button"
@@ -4067,7 +4129,7 @@ const SettlementPage = () => {
                 title={mainPattiValidationError ?? undefined}
               >
                 <Printer className="h-4 w-4" />
-                Print all sub patti
+                Print All Sub Patti
               </Button>
               {pattiDetailDto && (
                 <div className="flex items-center gap-2">
@@ -4108,10 +4170,10 @@ const SettlementPage = () => {
             <DialogContent className="max-h-[90dvh] max-w-5xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
               <div className="border-b border-border/50 bg-muted/30 px-5 py-4 sm:px-6">
                 <DialogHeader className="space-y-1.5 text-center sm:text-center">
-                  <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Expenses</DialogTitle>
+                  <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Adjustment</DialogTitle>
                   <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
                     Sellers and quantities come from Arrivals. Freight is allocated per bag. Unloading / weighing use commodity
-                    slab rules at lot level (editable). Press Alt + X to open.
+                    slab rules at lot level (editable). Press Alt X to open.
                   </DialogDescription>
                 </DialogHeader>
               </div>
@@ -4125,24 +4187,24 @@ const SettlementPage = () => {
                 )}
                 <div className="overflow-x-auto rounded-xl border border-border/60 bg-card shadow-sm">
                   <table className="w-full min-w-[880px] border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-border/60 bg-muted/50">
-                        <th className="min-w-[11rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                      <tr>
+                        <th className="min-w-[11rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Seller
                         </th>
-                        <th className="min-w-[5.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="min-w-[5.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Qty (bags)
                         </th>
-                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Freight
                         </th>
-                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Unloading
                         </th>
-                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Weighing
                         </th>
-                        <th className="min-w-[7.5rem] px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Gunnies
                         </th>
                       </tr>
@@ -4486,7 +4548,7 @@ const SettlementPage = () => {
               className={settlementToggleTabBtnOnHero(settlementMainTab === 'arrival-summary')}
             >
               <FileText className="w-4 h-4 shrink-0" />
-              <span>Arrival summary</span>
+              <span>Arrival Summary</span>
             </button>
             <button
               type="button"
@@ -4505,7 +4567,7 @@ const SettlementPage = () => {
               )}
             >
               <Edit3 className="w-4 h-4 shrink-0" />
-              <span>Create settlements</span>
+              <span>Create Settlements</span>
             </button>
           </div>
           {!hasArrivalSelection && (
@@ -4538,7 +4600,7 @@ const SettlementPage = () => {
               onClick={() => setSettlementMainTab('arrival-summary')}
               className={settlementToggleTabBtn(settlementMainTab === 'arrival-summary')}
             >
-              <FileText className="w-4 h-4 shrink-0" /> Arrival summary
+              <FileText className="w-4 h-4 shrink-0" /> Arrival Summary
             </button>
             <button
               type="button"
@@ -4558,14 +4620,9 @@ const SettlementPage = () => {
                 !hasArrivalSelection && 'opacity-50 cursor-not-allowed',
               )}
             >
-              <Edit3 className="w-4 h-4 shrink-0" /> Create settlements
+              <Edit3 className="w-4 h-4 shrink-0" /> Create Settlements
             </button>
           </div>
-          {!hasArrivalSelection && (
-            <p className="text-xs text-muted-foreground lg:order-3">
-              Select any arrival bill to enable Create settlements.
-            </p>
-          )}
           <div className="relative w-full min-w-0 lg:flex-1 lg:max-w-md lg:order-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -4580,7 +4637,7 @@ const SettlementPage = () => {
       </div>
       )}
 
-      <div className="px-4 mt-4 space-y-4">
+      <div className="mt-4 space-y-4 px-4 lg:px-8">
         {settlementMainTab === 'arrival-summary' ? (
           <>
             <div className="flex flex-wrap gap-2" role="tablist" aria-label="Arrival summary">
