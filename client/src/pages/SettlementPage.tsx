@@ -180,6 +180,48 @@ interface SavedArrivalSummaryRow {
   representativePattiId: number | null;
 }
 
+/** Lower SL No. sorts first; missing serial sorts last (stable tie-break on sellerId). */
+function sellerSerialSortKey(serial: string | number | null | undefined): number {
+  if (serial == null || serial === '') return Number.POSITIVE_INFINITY;
+  const n = Number(serial);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function pickFirstArrivalSeller(
+  sellerIds: string[],
+  sellerById: Map<string, SellerSettlement>
+): SellerSettlement | undefined {
+  const list = sellerIds
+    .map(id => sellerById.get(String(id)))
+    .filter((s): s is SellerSettlement => s != null);
+  if (list.length === 0) return undefined;
+  list.sort((a, b) => {
+    const d = sellerSerialSortKey(a.sellerSerialNo) - sellerSerialSortKey(b.sellerSerialNo);
+    if (d !== 0) return d;
+    return String(a.sellerId).localeCompare(String(b.sellerId));
+  });
+  return list[0];
+}
+
+function formatSettlementSellerLabel(s: SellerSettlement): string {
+  const name = (s.sellerName || '').trim();
+  const mark = (s.sellerMark || '').trim();
+  if (!name && !mark) return '-';
+  return mark ? `${name} – ${mark}` : name;
+}
+
+/** One label for the arrival-summary table: first seller on the vehicle by arrival serial. */
+function firstArrivalSellerLabel(
+  sellerIds: string[],
+  sellerById: Map<string, SellerSettlement>,
+  fallbackName?: string
+): string {
+  const first = pickFirstArrivalSeller(sellerIds, sellerById);
+  if (first) return formatSettlementSellerLabel(first);
+  const fb = (fallbackName || '').trim();
+  return fb || '-';
+}
+
 function InlineCalcTip({ label, lines }: { label: string; lines: string[] }) {
   return (
     <Tooltip>
@@ -704,10 +746,11 @@ function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: Sel
 }
 
 function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
+  const linked = seller.contactId != null && String(seller.contactId).trim() !== '';
   return {
-    // Keep Unregistered checked by default in UI; uncheck to work as Registered flow.
-    registered: false,
-    contactId: null,
+    // "Unregistered" checkbox unchecked by default → registered / contact flow.
+    registered: true,
+    contactId: linked ? String(seller.contactId) : null,
     mark: seller.sellerMark || '',
     name: seller.sellerName || '',
     mobile: (seller.sellerPhone ?? '').trim(),
@@ -763,6 +806,9 @@ const SettlementPage = () => {
   /** Per seller: collapsed sales report shows qty / weight / gross summary only (Billing-style). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
   const [showPrint, setShowPrint] = useState(false);
+  /** Prevents overlapping save/update requests (buttons + shortcut). */
+  const pattiSaveBusyRef = useRef(false);
+  const [pattiSaveBusy, setPattiSaveBusy] = useState(false);
 
   /** Arrival freight + billing aggregates (invoiced freight & payable); optional invoice name filter. */
   const [amountSummaryFromApi, setAmountSummaryFromApi] = useState({
@@ -1008,15 +1054,9 @@ const SettlementPage = () => {
       scopedSaved.map(p => String(p.pattiBaseNumber ?? '').trim()).find(v => v.length > 0) ||
       scopedSaved.map(p => parseBaseFromPattiId(p.pattiId)).find(v => v.length > 0) ||
       '';
-    let baseNo = existingBase;
+    /** Only show real numbers from already-saved pattis; server assigns base+seq on first save. */
+    const baseNo = existingBase;
     const draftBySeller: Record<string, string> = {};
-    if (!baseNo && scopedSellersOrdered.some(s => !scopedSaved.some(p => String(p.sellerId ?? '').trim() === String(s.sellerId)))) {
-      try {
-        baseNo = await settlementApi.reserveNextPattiBaseNumber();
-      } catch {
-        baseNo = '';
-      }
-    }
     if (baseNo) {
       let seqCounter = 0;
       for (const p of scopedSaved) {
@@ -1204,63 +1244,72 @@ const SettlementPage = () => {
 
   type SaveSellerOptions = {
     silent?: boolean;
+    /** When true, open print preview after a successful save (default: false). */
     showPrintAfterSave?: boolean;
     pattiBaseNumber?: string;
     sellerSequenceNumber?: number;
+    /** When true, caller owns patti save busy locking (e.g. Save Main Patti batch). */
+    skipBusyGuard?: boolean;
   };
 
   /** Save or update Sales Patti for one settlement seller. */
   const savePattiForSeller = useCallback(
     async (seller: SellerSettlement, options?: SaveSellerOptions): Promise<boolean> => {
       if (!pattiData) return false;
-      const silent = options?.silent === true;
-      const showPrintAfterSave = options?.showPrintAfterSave !== false;
-      const payload = computePattiSavePayloadForSeller(seller, {
-        pattiBaseNumber: options?.pattiBaseNumber,
-        sellerSequenceNumber: options?.sellerSequenceNumber,
-      });
-      if (!payload) return false;
-      const sid = seller.sellerId;
-      const dbId = existingPattiIdBySellerId[sid];
-      const actionWord = dbId != null ? 'updated' : 'saved';
-      if (!can('Settlement', dbId != null ? 'Edit' : 'Create')) {
-        if (!silent) toast.error('You do not have permission to save settlements.');
-        return false;
+      const skipBusy = options?.skipBusyGuard === true;
+      if (!skipBusy) {
+        if (pattiSaveBusyRef.current) return false;
+        pattiSaveBusyRef.current = true;
+        setPattiSaveBusy(true);
       }
-      const applySavedToPrimaryUi = (p: PattiSaveRequest, businessPattiId: string, createdAtIso: string) => {
-        if (selectedSeller?.sellerId !== sid) return;
-        setPattiData(prev =>
-          prev
-            ? {
-                ...prev,
-                pattiId: businessPattiId || prev.pattiId,
-                sellerName: p.sellerName,
-                rateClusters: p.rateClusters,
-                grossAmount: p.grossAmount,
-                deductions: p.deductions,
-                totalDeductions: p.totalDeductions,
-                netPayable: p.netPayable,
-                createdAt: createdAtIso || prev.createdAt,
-              }
-            : null
-        );
-      };
       try {
-        if (dbId != null) {
-          const updated = await settlementApi.updatePatti(dbId, payload);
-          if (updated) {
-            applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
-            setPattiDetailDto(updated);
-            setSelectedPattiVersion('latest');
-            if (!silent) toast.success(`Sales Patti ${updated.pattiId} ${actionWord}.`);
-            if (showPrintAfterSave) setShowPrint(true);
-            loadSavedPattis();
-            return true;
-          } else {
+        const silent = options?.silent === true;
+        const showPrintAfterSave = options?.showPrintAfterSave === true;
+        const payload = computePattiSavePayloadForSeller(seller, {
+          pattiBaseNumber: options?.pattiBaseNumber,
+          sellerSequenceNumber: options?.sellerSequenceNumber,
+        });
+        if (!payload) return false;
+        const sid = seller.sellerId;
+        const dbId = existingPattiIdBySellerId[sid];
+        const actionWord = dbId != null ? 'updated' : 'saved';
+        if (!can('Settlement', dbId != null ? 'Edit' : 'Create')) {
+          if (!silent) toast.error('You do not have permission to save settlements.');
+          return false;
+        }
+        const applySavedToPrimaryUi = (p: PattiSaveRequest, businessPattiId: string, createdAtIso: string) => {
+          if (selectedSeller?.sellerId !== sid) return;
+          setPattiData(prev =>
+            prev
+              ? {
+                  ...prev,
+                  pattiId: businessPattiId || prev.pattiId,
+                  sellerName: p.sellerName,
+                  rateClusters: p.rateClusters,
+                  grossAmount: p.grossAmount,
+                  deductions: p.deductions,
+                  totalDeductions: p.totalDeductions,
+                  netPayable: p.netPayable,
+                  createdAt: createdAtIso || prev.createdAt,
+                }
+              : null
+          );
+        };
+        try {
+          if (dbId != null) {
+            const updated = await settlementApi.updatePatti(dbId, payload);
+            if (updated) {
+              applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
+              setPattiDetailDto(updated);
+              setSelectedPattiVersion('latest');
+              if (!silent) toast.success(`Sales Patti ${updated.pattiId} ${actionWord}.`);
+              if (showPrintAfterSave) setShowPrint(true);
+              loadSavedPattis();
+              return true;
+            }
             if (!silent) toast.error('Failed to update patti');
             return false;
           }
-        } else {
           const created = await settlementApi.createPatti(payload);
           if (created?.pattiId) {
             if (created.id != null) {
@@ -1278,16 +1327,19 @@ const SettlementPage = () => {
             if (showPrintAfterSave) setShowPrint(true);
             loadSavedPattis();
             return true;
-          } else {
-            if (!silent) toast.error('Failed to save patti');
-            return false;
           }
+          if (!silent) toast.error('Failed to save patti');
+          return false;
+        } catch {
+          if (!silent) toast.error(dbId != null ? 'Failed to update patti' : 'Failed to save patti');
+          return false;
         }
-      } catch {
-        if (!silent) toast.error(dbId != null ? 'Failed to update patti' : 'Failed to save patti');
-        return false;
+      } finally {
+        if (!skipBusy) {
+          pattiSaveBusyRef.current = false;
+          setPattiSaveBusy(false);
+        }
       }
-      return false;
     },
     [
       pattiData,
@@ -1333,93 +1385,101 @@ const SettlementPage = () => {
 
   const savePatti = async () => {
     if (!selectedSeller || !pattiData) return;
+    if (pattiSaveBusyRef.current) return;
     if (!canRunMainPattiActions) {
       toast.error(mainPattiValidationError ?? 'Please complete required fields before saving.');
       return;
     }
-    const failures: string[] = [];
-    const sellersNeedingCreate = arrivalSellersForPatti.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
-    let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
-    const sellerSequenceBySellerId: Record<string, number> = {};
-    const parseSeqFromPattiId = (pid?: string): number | undefined => {
-      const m = String(pid ?? '').trim().match(/^\d+-(\d+)$/);
-      if (!m) return undefined;
-      const n = Number(m[1]);
-      return Number.isFinite(n) && n > 0 ? n : undefined;
-    };
-    for (const s of sellersNeedingCreate) {
-      const seq = parseSeqFromPattiId(draftPattiNoBySellerId[s.sellerId]);
-      if (seq != null) sellerSequenceBySellerId[s.sellerId] = seq;
-    }
-    if (sellersNeedingCreate.length > 0) {
-      const scopedSids = new Set(arrivalSellersForPatti.map(s => String(s.sellerId)));
-      const scopedSaved = savedPattis.filter(p => scopedSids.has(String(p.sellerId ?? '').trim()));
-      const parseBaseFromPattiId = (pid?: string): string => {
-        const raw = String(pid ?? '').trim();
-        const m = raw.match(/^(\d+)-\d+$/);
-        return m ? m[1] : '';
-      };
-      const parseSequenceFromPattiId = (pid?: string): number | null => {
-        const raw = String(pid ?? '').trim();
-        const m = raw.match(/^\d+-(\d+)$/);
-        if (!m) return null;
+    pattiSaveBusyRef.current = true;
+    setPattiSaveBusy(true);
+    try {
+      const failures: string[] = [];
+      const sellersNeedingCreate = arrivalSellersForPatti.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
+      let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
+      const sellerSequenceBySellerId: Record<string, number> = {};
+      const parseSeqFromPattiId = (pid?: string): number | undefined => {
+        const m = String(pid ?? '').trim().match(/^\d+-(\d+)$/);
+        if (!m) return undefined;
         const n = Number(m[1]);
-        return Number.isFinite(n) ? n : null;
+        return Number.isFinite(n) && n > 0 ? n : undefined;
       };
-      const existingBase =
-        scopedSaved.map(p => String(p.pattiBaseNumber ?? '').trim()).find(v => v.length > 0) ||
-        scopedSaved.map(p => parseBaseFromPattiId(p.pattiId)).find(v => v.length > 0) ||
-        '';
-      if (!sharedPattiBaseNumber && existingBase) {
-        sharedPattiBaseNumber = existingBase;
-      } else if (!sharedPattiBaseNumber) {
-        try {
-          sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
-        } catch {
-          toast.error('Failed to reserve Sales Patti number.');
-          return;
+      for (const s of sellersNeedingCreate) {
+        const seq = parseSeqFromPattiId(draftPattiNoBySellerId[s.sellerId]);
+        if (seq != null) sellerSequenceBySellerId[s.sellerId] = seq;
+      }
+      if (sellersNeedingCreate.length > 0) {
+        const scopedSids = new Set(arrivalSellersForPatti.map(s => String(s.sellerId)));
+        const scopedSaved = savedPattis.filter(p => scopedSids.has(String(p.sellerId ?? '').trim()));
+        const parseBaseFromPattiId = (pid?: string): string => {
+          const raw = String(pid ?? '').trim();
+          const m = raw.match(/^(\d+)-\d+$/);
+          return m ? m[1] : '';
+        };
+        const parseSequenceFromPattiId = (pid?: string): number | null => {
+          const raw = String(pid ?? '').trim();
+          const m = raw.match(/^\d+-(\d+)$/);
+          if (!m) return null;
+          const n = Number(m[1]);
+          return Number.isFinite(n) ? n : null;
+        };
+        const existingBase =
+          scopedSaved.map(p => String(p.pattiBaseNumber ?? '').trim()).find(v => v.length > 0) ||
+          scopedSaved.map(p => parseBaseFromPattiId(p.pattiId)).find(v => v.length > 0) ||
+          '';
+        if (!sharedPattiBaseNumber && existingBase) {
+          sharedPattiBaseNumber = existingBase;
+        } else if (!sharedPattiBaseNumber) {
+          try {
+            sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
+          } catch {
+            toast.error('Failed to reserve Sales Patti number.');
+            return;
+          }
+        }
+
+        let seqCounter = Object.values(sellerSequenceBySellerId).reduce((mx, n) => Math.max(mx, n), 0);
+        for (const p of scopedSaved) {
+          const pBase =
+            String(p.pattiBaseNumber ?? '').trim() ||
+            parseBaseFromPattiId(p.pattiId);
+          if (!pBase || pBase !== sharedPattiBaseNumber) continue;
+          const seqRaw = p.sellerSequenceNumber;
+          const seqNum =
+            typeof seqRaw === 'number' && Number.isFinite(seqRaw) && seqRaw > 0
+              ? seqRaw
+              : parseSequenceFromPattiId(p.pattiId);
+          if (seqNum != null) seqCounter = Math.max(seqCounter, seqNum);
+        }
+        for (const seller of sellersNeedingCreate) {
+          if (sellerSequenceBySellerId[seller.sellerId] != null) continue;
+          seqCounter += 1;
+          sellerSequenceBySellerId[seller.sellerId] = seqCounter;
         }
       }
-
-      let seqCounter = Object.values(sellerSequenceBySellerId).reduce((mx, n) => Math.max(mx, n), 0);
-      for (const p of scopedSaved) {
-        const pBase =
-          String(p.pattiBaseNumber ?? '').trim() ||
-          parseBaseFromPattiId(p.pattiId);
-        if (!pBase || pBase !== sharedPattiBaseNumber) continue;
-        const seqRaw = p.sellerSequenceNumber;
-        const seqNum =
-          typeof seqRaw === 'number' && Number.isFinite(seqRaw) && seqRaw > 0
-            ? seqRaw
-            : parseSequenceFromPattiId(p.pattiId);
-        if (seqNum != null) seqCounter = Math.max(seqCounter, seqNum);
+      for (const seller of arrivalSellersForPatti) {
+        const needsCreate = existingPattiIdBySellerId[seller.sellerId] == null;
+        const sellerSequenceNumber = needsCreate ? sellerSequenceBySellerId[seller.sellerId] : undefined;
+        const ok = await savePattiForSeller(seller, {
+          silent: true,
+          showPrintAfterSave: false,
+          skipBusyGuard: true,
+          pattiBaseNumber: needsCreate ? sharedPattiBaseNumber ?? undefined : undefined,
+          sellerSequenceNumber: needsCreate ? sellerSequenceNumber : undefined,
+        });
+        if (!ok) failures.push(seller.sellerName || seller.sellerId);
       }
-      for (const seller of sellersNeedingCreate) {
-        if (sellerSequenceBySellerId[seller.sellerId] != null) continue;
-        seqCounter += 1;
-        sellerSequenceBySellerId[seller.sellerId] = seqCounter;
+      if (failures.length > 0) {
+        toast.error(`Failed to save ${failures.length} seller patti(s): ${failures.join(', ')}`);
+        return;
       }
+      const allInUpdateMode = arrivalSellersForPatti.every(s => existingPattiIdBySellerId[s.sellerId] != null);
+      toast.success(
+        `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${arrivalSellersForPatti.length} seller(s). Use Print when ready.`
+      );
+    } finally {
+      pattiSaveBusyRef.current = false;
+      setPattiSaveBusy(false);
     }
-    for (const seller of arrivalSellersForPatti) {
-      const needsCreate = existingPattiIdBySellerId[seller.sellerId] == null;
-      const sellerSequenceNumber = needsCreate ? sellerSequenceBySellerId[seller.sellerId] : undefined;
-      const ok = await savePattiForSeller(seller, {
-        silent: true,
-        showPrintAfterSave: false,
-        pattiBaseNumber: needsCreate ? sharedPattiBaseNumber ?? undefined : undefined,
-        sellerSequenceNumber: needsCreate ? sellerSequenceNumber : undefined,
-      });
-      if (!ok) failures.push(seller.sellerName || seller.sellerId);
-    }
-    if (failures.length > 0) {
-      toast.error(`Failed to save ${failures.length} seller patti(s): ${failures.join(', ')}`);
-      return;
-    }
-    setShowPrint(true);
-    const allInUpdateMode = arrivalSellersForPatti.every(s => existingPattiIdBySellerId[s.sellerId] != null);
-    toast.success(
-      `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${arrivalSellersForPatti.length} seller(s).`
-    );
   };
 
   saveMainPattiShortcutRef.current = () => {
@@ -1534,7 +1594,7 @@ const SettlementPage = () => {
           fromLocation: from || '-',
           serialNo: seller.sellerSerialNo ?? null,
           dateLabel,
-          sellerNames: seller.sellerName || '-',
+          sellerNames: '',
           lots,
           bids,
           weighed,
@@ -1543,24 +1603,26 @@ const SettlementPage = () => {
         });
         continue;
       }
-      const nameSet = new Set(
-        `${existing.sellerNames}, ${seller.sellerName || ''}`
-          .split(',')
-          .map(x => x.trim())
-          .filter(Boolean)
-      );
-      existing.sellerNames = Array.from(nameSet).join(', ');
       existing.lots += lots;
       existing.bids += bids;
       existing.weighed += weighed;
       if (!existing.sellerIds.includes(seller.sellerId)) existing.sellerIds.push(seller.sellerId);
       if (existing.serialNo == null && seller.sellerSerialNo != null) existing.serialNo = seller.sellerSerialNo;
     }
-    return Array.from(groups.values());
+    const eligibleById = new Map(sellersEligibleForNewPatti.map(s => [String(s.sellerId), s]));
+    return Array.from(groups.values()).map(row => {
+      const first = pickFirstArrivalSeller(row.sellerIds, eligibleById) ?? row.representativeSeller;
+      return {
+        ...row,
+        sellerNames: firstArrivalSellerLabel(row.sellerIds, eligibleById),
+        representativeSeller: first,
+        serialNo: first.sellerSerialNo ?? row.serialNo,
+      };
+    });
   }, [sellersEligibleForNewPatti]);
 
   const savedPattiArrivalRows = useMemo<SavedArrivalSummaryRow[]>(() => {
-    const groups = new Map<string, SavedArrivalSummaryRow>();
+    const groups = new Map<string, SavedArrivalSummaryRow & { _fallbackName?: string }>();
     const sellerById = new Map<string, SellerSettlement>(sellers.map(s => [String(s.sellerId), s]));
     for (const p of filteredSavedPattis) {
       const vehicleNumber = (p.vehicleNumber || '').trim();
@@ -1583,22 +1645,16 @@ const SettlementPage = () => {
           fromLocation: fromLocation || '-',
           serialNo,
           dateLabel,
-          sellerNames: p.sellerName || '-',
+          sellerNames: '',
           sellerIds: sid ? [sid] : [],
           lots,
           bids,
           weighed,
           representativePattiId: p.id ?? null,
+          _fallbackName: (p.sellerName || '').trim() || undefined,
         });
         continue;
       }
-      const nameSet = new Set(
-        `${existing.sellerNames}, ${p.sellerName || ''}`
-          .split(',')
-          .map(x => x.trim())
-          .filter(Boolean)
-      );
-      existing.sellerNames = Array.from(nameSet).join(', ');
       if (sid && !existing.sellerIds.includes(sid)) {
         existing.sellerIds.push(sid);
         existing.lots += lots;
@@ -1607,8 +1663,19 @@ const SettlementPage = () => {
       }
       if (existing.serialNo == null && serialNo != null) existing.serialNo = serialNo;
       if (existing.representativePattiId == null && p.id != null) existing.representativePattiId = p.id;
+      if (!existing._fallbackName && (p.sellerName || '').trim()) {
+        existing._fallbackName = (p.sellerName || '').trim();
+      }
     }
-    return Array.from(groups.values());
+    return Array.from(groups.values()).map(row => {
+      const { _fallbackName, ...rest } = row;
+      const first = pickFirstArrivalSeller(rest.sellerIds, sellerById);
+      return {
+        ...rest,
+        sellerNames: firstArrivalSellerLabel(rest.sellerIds, sellerById, _fallbackName),
+        serialNo: first?.sellerSerialNo ?? rest.serialNo,
+      };
+    });
   }, [filteredSavedPattis, sellers]);
 
   /** Vehicle-level summary for the patti form (first row unchanged; this drives the second card). */
@@ -2282,7 +2349,7 @@ const SettlementPage = () => {
             <thead className="bg-muted/40">
               <tr>
                 <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Vehicle Number</th>
-                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Seller(s)</th>
+                <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Seller</th>
                 <th className="px-3 py-2 text-center font-semibold text-muted-foreground">From</th>
                 <th className="px-3 py-2 text-center font-semibold text-muted-foreground">SL No</th>
                 <th className="px-3 py-2 text-center font-semibold text-muted-foreground">Lots</th>
@@ -2352,7 +2419,7 @@ const SettlementPage = () => {
               <h1 className="text-lg font-bold text-white flex items-center gap-2">
                 <Printer className="w-5 h-5" /> Sales Patti Print
               </h1>
-              <p className="text-white/70 text-xs">{pattiData.pattiId || '(New Patti)'}</p>
+              <p className="text-white/70 text-xs">{pattiData.pattiId || '(Number after save)'}</p>
             </div>
           </div>
         </div>
@@ -2415,7 +2482,7 @@ const SettlementPage = () => {
             </div>
 
             <div className="border-b border-dashed border-border pb-2 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Patti ID</span><span className="font-bold text-foreground">{pattiData.pattiId || '(New Patti)'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Patti ID</span><span className="font-bold text-foreground">{pattiData.pattiId || '(Number after save)'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Seller</span><span className="font-bold text-foreground">{pattiData.sellerName}</span></div>
               {pattiData.useAverageWeight && <div className="flex justify-between"><span className="text-muted-foreground">Mode</span><span className="font-bold text-amber-500">AVG WEIGHT (Quick Close)</span></div>}
             </div>
@@ -3608,7 +3675,7 @@ const SettlementPage = () => {
                         variant="outline"
                         className={cn(arrSolidMd, 'gap-1.5')}
                         onClick={() => void savePattiForSeller(seller)}
-                        disabled={!!sellerValidationError}
+                        disabled={!!sellerValidationError || pattiSaveBusy}
                       >
                         <Save className="h-3.5 w-3.5" />
                         {existingPattiIdBySellerId[seller.sellerId] != null ? 'Update patti' : 'Save patti'}
@@ -3632,7 +3699,7 @@ const SettlementPage = () => {
                 type="button"
                 variant="outline"
                 onClick={() => void savePatti()}
-                disabled={!canRunMainPattiActions}
+                disabled={!canRunMainPattiActions || pattiSaveBusy}
                 className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
                 title={mainPattiValidationError ?? undefined}
               >
