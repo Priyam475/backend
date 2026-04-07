@@ -65,18 +65,25 @@ const arrSolidMd = cn(arrSolid, 'h-9 px-3 text-sm');
 const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
 const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
 
-/** Desktop main tabs: underline + #6075FF bar (same as Billing). */
-const arrDeskTabBtn = (active: boolean) =>
+/**
+ * Settlement toggle row: same visual language as New Patti / Saved Patti (rounded-xl, gradient active).
+ * Used for main tabs (Arrival summary / Create settlements) and arrival-summary sub-tabs.
+ */
+const settlementToggleTabBtn = (active: boolean) =>
   cn(
-    'relative px-5 py-3 text-sm font-semibold transition-all flex items-center gap-2 shrink-0',
-    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+    'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
+    active
+      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      : 'glass-card text-muted-foreground hover:text-foreground',
   );
 
-/** Mobile header tabs: pill style (`bg-[#6075FF]` when active). */
-const arrMobTabPill = (active: boolean) =>
+/** Same as settlementToggleTabBtn but inactive state readable on the teal mobile hero. */
+const settlementToggleTabBtnOnHero = (active: boolean) =>
   cn(
-    'shrink-0 min-w-[9rem] sm:min-w-[10.5rem] px-3 sm:px-4 py-2.5 sm:py-2 rounded-full min-h-10 text-xs sm:text-sm font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm leading-none',
-    active ? 'bg-[#6075FF] text-white' : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white',
+    'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
+    active
+      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/10 backdrop-blur-sm',
   );
 
 // ── Types ─────────────────────────────────────────────────
@@ -4157,14 +4164,14 @@ const SettlementPage = () => {
               <p className="text-white/70 text-xs mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
             </div>
           </div>
-          <div className="mb-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
+          <div className="mb-3 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setSettlementMainTab('arrival-summary')}
-              className={arrMobTabPill(settlementMainTab === 'arrival-summary')}
+              className={settlementToggleTabBtnOnHero(settlementMainTab === 'arrival-summary')}
             >
-              <FileText className="w-4 h-4 shrink-0 hidden sm:block" />
-              <span>Arrival Summary</span>
+              <FileText className="w-4 h-4 shrink-0" />
+              <span>Arrival summary</span>
             </button>
             <button
               type="button"
@@ -4177,15 +4184,18 @@ const SettlementPage = () => {
                 }
                 setSettlementMainTab('create-settlements');
               }}
-              className={cn(arrMobTabPill(settlementMainTab === 'create-settlements'), !hasArrivalSelection && 'opacity-55')}
+              className={cn(
+                settlementToggleTabBtnOnHero(settlementMainTab === 'create-settlements'),
+                !hasArrivalSelection && 'opacity-50',
+              )}
             >
-              <Edit3 className="w-4 h-4 shrink-0 hidden sm:block" />
-              <span>Create Sattlements</span>
+              <Edit3 className="w-4 h-4 shrink-0" />
+              <span>Create settlements</span>
             </button>
           </div>
           {!hasArrivalSelection && (
             <p className="mb-3 text-center text-[11px] text-white/70">
-              Tap any arrival bill row first to enable Create Sattlements.
+              Tap any arrival bill row first to enable Create settlements.
             </p>
           )}
           <div className="relative">
@@ -4205,23 +4215,20 @@ const SettlementPage = () => {
           <p className="text-sm text-muted-foreground mt-0.5">{sellers.length} sellers · Settlement & payment reconciliation</p>
         </div>
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-          <div className="flex items-center gap-1 border-b border-border/40 w-full lg:w-auto overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto" role="tablist" aria-label="Settlement views">
             <button
               type="button"
+              role="tab"
+              aria-selected={settlementMainTab === 'arrival-summary'}
               onClick={() => setSettlementMainTab('arrival-summary')}
-              className={arrDeskTabBtn(settlementMainTab === 'arrival-summary')}
+              className={settlementToggleTabBtn(settlementMainTab === 'arrival-summary')}
             >
-              <FileText className="w-4 h-4" /> Arrival Summary
-              {settlementMainTab === 'arrival-summary' && (
-                <motion.div
-                  layoutId="settlement-main-tab-indicator"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full"
-                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                />
-              )}
+              <FileText className="w-4 h-4 shrink-0" /> Arrival summary
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={settlementMainTab === 'create-settlements'}
               disabled={!hasArrivalSelection}
               aria-disabled={!hasArrivalSelection}
               onClick={() => {
@@ -4231,21 +4238,17 @@ const SettlementPage = () => {
                 }
                 setSettlementMainTab('create-settlements');
               }}
-              className={cn(arrDeskTabBtn(settlementMainTab === 'create-settlements'), !hasArrivalSelection && 'opacity-55')}
-            >
-              <Edit3 className="w-4 h-4" /> Create Sattlements
-              {settlementMainTab === 'create-settlements' && (
-                <motion.div
-                  layoutId="settlement-main-tab-indicator"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full"
-                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                />
+              className={cn(
+                settlementToggleTabBtn(settlementMainTab === 'create-settlements'),
+                !hasArrivalSelection && 'opacity-50 cursor-not-allowed',
               )}
+            >
+              <Edit3 className="w-4 h-4 shrink-0" /> Create settlements
             </button>
           </div>
           {!hasArrivalSelection && (
             <p className="text-xs text-muted-foreground lg:order-3">
-              Select any arrival bill to enable Create Sattlements.
+              Select any arrival bill to enable Create settlements.
             </p>
           )}
           <div className="relative w-full min-w-0 lg:flex-1 lg:max-w-md lg:order-2">
@@ -4265,26 +4268,22 @@ const SettlementPage = () => {
       <div className="px-4 mt-4 space-y-4">
         {settlementMainTab === 'arrival-summary' ? (
           <>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Arrival summary">
               <button
+                type="button"
+                role="tab"
+                aria-selected={arrivalSummaryTab === 'new-patti'}
                 onClick={() => setArrivalSummaryTab('new-patti')}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-semibold transition-all",
-                  arrivalSummaryTab === 'new-patti'
-                    ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                    : 'glass-card text-muted-foreground hover:text-foreground'
-                )}
+                className={settlementToggleTabBtn(arrivalSummaryTab === 'new-patti')}
               >
                 New Patti
               </button>
               <button
+                type="button"
+                role="tab"
+                aria-selected={arrivalSummaryTab === 'saved-patti'}
                 onClick={() => setArrivalSummaryTab('saved-patti')}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-semibold transition-all",
-                  arrivalSummaryTab === 'saved-patti'
-                    ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-                    : 'glass-card text-muted-foreground hover:text-foreground'
-                )}
+                className={settlementToggleTabBtn(arrivalSummaryTab === 'saved-patti')}
               >
                 Saved Patti
               </button>
@@ -4294,7 +4293,7 @@ const SettlementPage = () => {
         ) : (
           <div className="glass-card rounded-2xl p-8 text-center">
             <Edit3 className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground font-medium">Create Sattlements form section is ready.</p>
+            <p className="text-sm text-muted-foreground font-medium">Create settlements form section is ready.</p>
             <p className="text-xs text-muted-foreground/70 mt-1">
               Structure added. Share the form layout and fields next, and I will implement it.
             </p>
