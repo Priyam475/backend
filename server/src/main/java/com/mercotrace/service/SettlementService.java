@@ -66,6 +66,16 @@ public interface SettlementService {
     SellerExpenseSnapshotDTO getSellerExpenseSnapshot(String sellerId);
 
     /**
+     * Hydrate quick-expense DB state: create missing baseline from provided defaults and return persisted original/current values.
+     */
+    QuickExpenseStateResponse hydrateQuickExpenseState(QuickExpenseStateUpsertRequest request);
+
+    /**
+     * Save quick-expense current values while preserving original baseline.
+     */
+    QuickExpenseStateResponse saveQuickExpenseState(QuickExpenseStateUpsertRequest request);
+
+    /**
      * Link a settlement seller row ({@code seller_in_vehicle} id) to an existing contact (registered trader).
      */
     SellerRegistrationDTO linkSellerContact(String sellerVehicleId, LinkSellerContactRequest request);

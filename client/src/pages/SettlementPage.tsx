@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp, Info,
+  ChevronDown, ChevronUp, Info, RotateCcw,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -524,6 +524,8 @@ interface VehicleExpenseRow {
   weighing: number;
   gunnies: number;
 }
+type VehicleExpenseField = 'freight' | 'unloading' | 'weighing' | 'gunnies';
+type VehicleExpenseFieldValues = Pick<VehicleExpenseRow, VehicleExpenseField>;
 
 /** Add Voucher modal — selection maps to cash advance later (API TBD). */
 interface VoucherPickRow {
@@ -927,6 +929,9 @@ const SettlementPage = () => {
   const [vehicleExpenseModalOpen, setVehicleExpenseModalOpen] = useState(false);
   const [vehicleExpenseLoading, setVehicleExpenseLoading] = useState(false);
   const [vehicleExpenseRows, setVehicleExpenseRows] = useState<VehicleExpenseRow[]>([]);
+  const [vehicleExpenseOriginalByRowId, setVehicleExpenseOriginalByRowId] = useState<
+    Record<string, VehicleExpenseFieldValues>
+  >({});
 
   const isWeighingMergedIntoFreight = useCallback(
     (sellerId?: string) => (sellerId ? settlementWeighingMergeIntoFreightBySellerId[sellerId] === true : false),
@@ -1051,6 +1056,7 @@ const SettlementPage = () => {
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
     setVehicleExpenseRows([]);
+    setVehicleExpenseOriginalByRowId({});
     setVehicleExpenseModalOpen(false);
     setDraftMainPattiNo('');
     setDraftPattiNoBySellerId({});
@@ -1157,6 +1163,7 @@ const SettlementPage = () => {
       setRemovedLotsBySellerId({});
       setLotSalesOverridesBySellerId({});
       setVehicleExpenseRows([]);
+      setVehicleExpenseOriginalByRowId({});
       setVehicleExpenseModalOpen(false);
       const data = mapPattiDTOToPattiData(dto);
       if (data.createdAt && new Date(data.createdAt) > new Date()) {
@@ -2334,7 +2341,7 @@ const SettlementPage = () => {
   }, [vehicleExpenseRows]);
 
   const updateVehicleExpenseCell = useCallback(
-    (id: string, field: 'freight' | 'unloading' | 'weighing' | 'gunnies', raw: string) => {
+    (id: string, field: VehicleExpenseField, raw: string) => {
       setVehicleExpenseRows(prev =>
         prev.map(row => {
           if (row.id !== id) return row;
@@ -2348,6 +2355,24 @@ const SettlementPage = () => {
       );
     },
     []
+  );
+
+  const isVehicleExpenseFieldEdited = useCallback(
+    (row: VehicleExpenseRow, field: VehicleExpenseField): boolean => {
+      const original = vehicleExpenseOriginalByRowId[row.id]?.[field];
+      if (original == null) return false;
+      return Math.abs((row[field] ?? 0) - original) > 0.009;
+    },
+    [vehicleExpenseOriginalByRowId]
+  );
+
+  const revertVehicleExpenseCell = useCallback(
+    (id: string, field: VehicleExpenseField) => {
+      const original = vehicleExpenseOriginalByRowId[id]?.[field];
+      if (original == null) return;
+      setVehicleExpenseRows(prev => prev.map(row => (row.id === id ? { ...row, [field]: original } : row)));
+    },
+    [vehicleExpenseOriginalByRowId]
   );
 
   const openVehicleExpenseModal = useCallback(async () => {
@@ -2436,11 +2461,58 @@ const SettlementPage = () => {
         };
       });
 
-      setVehicleExpenseRows(rows);
+      try {
+        const hydrated = await settlementApi.hydrateQuickExpenseState(
+          rows.map(r => ({
+            sellerId: r.sellerId,
+            freight: r.freight,
+            unloading: r.unloading,
+            weighing: r.weighing,
+            gunnies: r.gunnies,
+          }))
+        );
+        const bySellerId = new Map(hydrated.map(h => [h.sellerId, h]));
+        const mergedRows = rows.map(r => {
+          const h = bySellerId.get(r.sellerId);
+          if (!h) return r;
+          return {
+            ...r,
+            freight: roundMoney2(h.freightCurrent),
+            unloading: roundMoney2(h.unloadingCurrent),
+            weighing: roundMoney2(h.weighingCurrent),
+            gunnies: roundMoney2(h.gunniesCurrent),
+          };
+        });
+        setVehicleExpenseRows(mergedRows);
+        setVehicleExpenseOriginalByRowId(
+          mergedRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
+            const h = bySellerId.get(row.sellerId);
+            acc[row.id] = {
+              freight: roundMoney2(h?.freightOriginal ?? row.freight),
+              unloading: roundMoney2(h?.unloadingOriginal ?? row.unloading),
+              weighing: roundMoney2(h?.weighingOriginal ?? row.weighing),
+              gunnies: roundMoney2(h?.gunniesOriginal ?? row.gunnies),
+            };
+            return acc;
+          }, {})
+        );
+      } catch {
+        setVehicleExpenseRows(rows);
+        setVehicleExpenseOriginalByRowId(
+          rows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
+            acc[row.id] = {
+              freight: row.freight,
+              unloading: row.unloading,
+              weighing: row.weighing,
+              gunnies: row.gunnies,
+            };
+            return acc;
+          }, {})
+        );
+      }
     } catch {
       toast.error('Failed to load quick expenses from arrivals.');
-      setVehicleExpenseRows(
-        arrivalSellersForPatti.map(s => ({
+      const fallbackRows = arrivalSellersForPatti.map(s => ({
           id: `ve_${s.sellerId}`,
           sellerId: s.sellerId,
           sellerName: s.sellerName || 'Seller',
@@ -2449,8 +2521,56 @@ const SettlementPage = () => {
           unloading: roundMoney2(sellerExpensesById[s.sellerId]?.unloading ?? 0),
           weighing: roundMoney2(sellerExpensesById[s.sellerId]?.weighman ?? 0),
           gunnies: roundMoney2(sellerExpensesById[s.sellerId]?.gunnies ?? 0),
-        }))
-      );
+        }));
+      try {
+        const hydrated = await settlementApi.hydrateQuickExpenseState(
+          fallbackRows.map(r => ({
+            sellerId: r.sellerId,
+            freight: r.freight,
+            unloading: r.unloading,
+            weighing: r.weighing,
+            gunnies: r.gunnies,
+          }))
+        );
+        const bySellerId = new Map(hydrated.map(h => [h.sellerId, h]));
+        const mergedRows = fallbackRows.map(r => {
+          const h = bySellerId.get(r.sellerId);
+          if (!h) return r;
+          return {
+            ...r,
+            freight: roundMoney2(h.freightCurrent),
+            unloading: roundMoney2(h.unloadingCurrent),
+            weighing: roundMoney2(h.weighingCurrent),
+            gunnies: roundMoney2(h.gunniesCurrent),
+          };
+        });
+        setVehicleExpenseRows(mergedRows);
+        setVehicleExpenseOriginalByRowId(
+          mergedRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
+            const h = bySellerId.get(row.sellerId);
+            acc[row.id] = {
+              freight: roundMoney2(h?.freightOriginal ?? row.freight),
+              unloading: roundMoney2(h?.unloadingOriginal ?? row.unloading),
+              weighing: roundMoney2(h?.weighingOriginal ?? row.weighing),
+              gunnies: roundMoney2(h?.gunniesOriginal ?? row.gunnies),
+            };
+            return acc;
+          }, {})
+        );
+      } catch {
+        setVehicleExpenseRows(fallbackRows);
+        setVehicleExpenseOriginalByRowId(
+          fallbackRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
+            acc[row.id] = {
+              freight: row.freight,
+              unloading: row.unloading,
+              weighing: row.weighing,
+              gunnies: row.gunnies,
+            };
+            return acc;
+          }, {})
+        );
+      }
     } finally {
       setVehicleExpenseLoading(false);
     }
@@ -2476,6 +2596,46 @@ const SettlementPage = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedSeller, pattiData, openVehicleExpenseModal]);
+
+  const renderVehicleExpenseInputCell = useCallback(
+    (row: VehicleExpenseRow, field: VehicleExpenseField, ariaLabel: string) => {
+      const edited = isVehicleExpenseFieldEdited(row, field);
+      return (
+        <div className="mx-auto flex w-full max-w-[7.5rem] flex-col items-center gap-1">
+          <Input
+            type="number"
+            min={0}
+            step={0.01}
+            className={cn(
+              'h-10 w-full rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+              edited && 'border-amber-500/70'
+            )}
+            value={row[field] === 0 ? '' : row[field]}
+            onChange={e => updateVehicleExpenseCell(row.id, field, e.target.value)}
+            aria-label={ariaLabel}
+          />
+          {edited && (
+            <div className="flex items-center gap-1">
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                <Edit3 className="mr-1 h-2.5 w-2.5" aria-hidden />
+                Edited
+              </span>
+              <button
+                type="button"
+                className="inline-flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-background text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => revertVehicleExpenseCell(row.id, field)}
+                title="Restore original value"
+                aria-label={`Restore original ${ariaLabel.toLowerCase()}`}
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    },
+    [isVehicleExpenseFieldEdited, revertVehicleExpenseCell, updateVehicleExpenseCell]
+  );
 
   const sellerDateLabel = (seller: SellerSettlement): string => {
     const rawDate = seller.createdAt ?? seller.date;
@@ -4002,48 +4162,16 @@ const SettlementPage = () => {
                             </span>
                           </td>
                           <td className="px-2 py-2.5 text-center align-middle">
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              value={row.freight === 0 ? '' : row.freight}
-                              onChange={e => updateVehicleExpenseCell(row.id, 'freight', e.target.value)}
-                              aria-label="Freight amount"
-                            />
+                            {renderVehicleExpenseInputCell(row, 'freight', 'Freight amount')}
                           </td>
                           <td className="px-2 py-2.5 text-center align-middle">
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              value={row.unloading === 0 ? '' : row.unloading}
-                              onChange={e => updateVehicleExpenseCell(row.id, 'unloading', e.target.value)}
-                              aria-label="Unloading charges"
-                            />
+                            {renderVehicleExpenseInputCell(row, 'unloading', 'Unloading charges')}
                           </td>
                           <td className="px-2 py-2.5 text-center align-middle">
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              value={row.weighing === 0 ? '' : row.weighing}
-                              onChange={e => updateVehicleExpenseCell(row.id, 'weighing', e.target.value)}
-                              aria-label="Weighing charges"
-                            />
+                            {renderVehicleExpenseInputCell(row, 'weighing', 'Weighing charges')}
                           </td>
                           <td className="px-2 py-2.5 text-center align-middle">
-                            <Input
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              className="mx-auto h-10 w-full max-w-[7.5rem] rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                              value={row.gunnies === 0 ? '' : row.gunnies}
-                              onChange={e => updateVehicleExpenseCell(row.id, 'gunnies', e.target.value)}
-                              aria-label="Gunnies"
-                            />
+                            {renderVehicleExpenseInputCell(row, 'gunnies', 'Gunnies')}
                           </td>
                         </tr>
                       ))}
@@ -4088,7 +4216,21 @@ const SettlementPage = () => {
                     type="button"
                     variant="outline"
                     className={cn(arrSolidMd, 'gap-1.5')}
-                    onClick={() => {
+                    onClick={async () => {
+                      try {
+                        await settlementApi.saveQuickExpenseState(
+                          vehicleExpenseRows.map(r => ({
+                            sellerId: r.sellerId,
+                            freight: r.freight,
+                            unloading: r.unloading,
+                            weighing: r.weighing,
+                            gunnies: r.gunnies,
+                          }))
+                        );
+                      } catch {
+                        toast.error('Failed to save quick expense edits.');
+                        return;
+                      }
                       setSellerExpensesById(prev => {
                         const next = { ...prev };
                         for (const row of vehicleExpenseRows) {

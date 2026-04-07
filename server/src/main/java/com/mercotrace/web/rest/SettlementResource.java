@@ -87,6 +87,32 @@ public class SettlementResource {
     }
 
     /**
+     * {@code POST  /api/settlements/quick-expenses/hydrate} :
+     * return persisted quick-expense original/current values and initialize missing rows from provided defaults.
+     */
+    @PostMapping("/quick-expenses/hydrate")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<QuickExpenseStateResponse> hydrateQuickExpenseState(
+        @Valid @RequestBody QuickExpenseStateUpsertRequest request
+    ) {
+        LOG.debug("REST request to hydrate Settlement quick-expense state for {} rows", request.getRows() != null ? request.getRows().size() : 0);
+        return ResponseEntity.ok(settlementService.hydrateQuickExpenseState(request));
+    }
+
+    /**
+     * {@code POST  /api/settlements/quick-expenses/save} :
+     * persist quick-expense current values while preserving initial baseline values.
+     */
+    @PostMapping("/quick-expenses/save")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
+    public ResponseEntity<QuickExpenseStateResponse> saveQuickExpenseState(
+        @Valid @RequestBody QuickExpenseStateUpsertRequest request
+    ) {
+        LOG.debug("REST request to save Settlement quick-expense state for {} rows", request.getRows() != null ? request.getRows().size() : 0);
+        return ResponseEntity.ok(settlementService.saveQuickExpenseState(request));
+    }
+
+    /**
      * {@code GET  /api/settlements/sellers/:sellerId/amount-summary} :
      * arrival freight, invoiced freight, and invoiced payable for Sales Patti Amount card.
      */

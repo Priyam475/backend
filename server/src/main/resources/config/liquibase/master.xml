@@ -93,4 +93,5 @@
     <include file="config/liquibase/changelog/20260404130000_sales_bill_commodity_group_gst_rates.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260406120000_sales_patti_version.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260406180000_sales_patti_numbering_base_seq.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260407110000_settlement_quick_expense_state.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

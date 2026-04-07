@@ -473,6 +473,178 @@ public final class SettlementDTOs {
         }
     }
 
+    /** Request row for quick-expense state hydration/save. */
+    public static class QuickExpenseStateUpsertRowDTO implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @NotBlank
+        private String sellerId;
+        @NotNull
+        private BigDecimal freight;
+        @NotNull
+        private BigDecimal unloading;
+        @NotNull
+        private BigDecimal weighing;
+        @NotNull
+        private BigDecimal gunnies;
+
+        public String getSellerId() {
+            return sellerId;
+        }
+
+        public void setSellerId(String sellerId) {
+            this.sellerId = sellerId;
+        }
+
+        public BigDecimal getFreight() {
+            return freight;
+        }
+
+        public void setFreight(BigDecimal freight) {
+            this.freight = freight;
+        }
+
+        public BigDecimal getUnloading() {
+            return unloading;
+        }
+
+        public void setUnloading(BigDecimal unloading) {
+            this.unloading = unloading;
+        }
+
+        public BigDecimal getWeighing() {
+            return weighing;
+        }
+
+        public void setWeighing(BigDecimal weighing) {
+            this.weighing = weighing;
+        }
+
+        public BigDecimal getGunnies() {
+            return gunnies;
+        }
+
+        public void setGunnies(BigDecimal gunnies) {
+            this.gunnies = gunnies;
+        }
+    }
+
+    public static class QuickExpenseStateUpsertRequest implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @NotNull
+        private List<QuickExpenseStateUpsertRowDTO> rows;
+
+        public List<QuickExpenseStateUpsertRowDTO> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<QuickExpenseStateUpsertRowDTO> rows) {
+            this.rows = rows;
+        }
+    }
+
+    /** Persisted quick-expense state (initial/original + current values). */
+    public static class QuickExpenseStateRowDTO implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private String sellerId;
+        private BigDecimal freightOriginal;
+        private BigDecimal unloadingOriginal;
+        private BigDecimal weighingOriginal;
+        private BigDecimal gunniesOriginal;
+        private BigDecimal freightCurrent;
+        private BigDecimal unloadingCurrent;
+        private BigDecimal weighingCurrent;
+        private BigDecimal gunniesCurrent;
+
+        public String getSellerId() {
+            return sellerId;
+        }
+
+        public void setSellerId(String sellerId) {
+            this.sellerId = sellerId;
+        }
+
+        public BigDecimal getFreightOriginal() {
+            return freightOriginal;
+        }
+
+        public void setFreightOriginal(BigDecimal freightOriginal) {
+            this.freightOriginal = freightOriginal;
+        }
+
+        public BigDecimal getUnloadingOriginal() {
+            return unloadingOriginal;
+        }
+
+        public void setUnloadingOriginal(BigDecimal unloadingOriginal) {
+            this.unloadingOriginal = unloadingOriginal;
+        }
+
+        public BigDecimal getWeighingOriginal() {
+            return weighingOriginal;
+        }
+
+        public void setWeighingOriginal(BigDecimal weighingOriginal) {
+            this.weighingOriginal = weighingOriginal;
+        }
+
+        public BigDecimal getGunniesOriginal() {
+            return gunniesOriginal;
+        }
+
+        public void setGunniesOriginal(BigDecimal gunniesOriginal) {
+            this.gunniesOriginal = gunniesOriginal;
+        }
+
+        public BigDecimal getFreightCurrent() {
+            return freightCurrent;
+        }
+
+        public void setFreightCurrent(BigDecimal freightCurrent) {
+            this.freightCurrent = freightCurrent;
+        }
+
+        public BigDecimal getUnloadingCurrent() {
+            return unloadingCurrent;
+        }
+
+        public void setUnloadingCurrent(BigDecimal unloadingCurrent) {
+            this.unloadingCurrent = unloadingCurrent;
+        }
+
+        public BigDecimal getWeighingCurrent() {
+            return weighingCurrent;
+        }
+
+        public void setWeighingCurrent(BigDecimal weighingCurrent) {
+            this.weighingCurrent = weighingCurrent;
+        }
+
+        public BigDecimal getGunniesCurrent() {
+            return gunniesCurrent;
+        }
+
+        public void setGunniesCurrent(BigDecimal gunniesCurrent) {
+            this.gunniesCurrent = gunniesCurrent;
+        }
+    }
+
+    public static class QuickExpenseStateResponse implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private List<QuickExpenseStateRowDTO> rows;
+
+        public List<QuickExpenseStateRowDTO> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<QuickExpenseStateRowDTO> rows) {
+            this.rows = rows;
+        }
+    }
+
     public static class SettlementAmountSummaryDTO implements Serializable {
 
         private static final long serialVersionUID = 1L;

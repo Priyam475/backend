@@ -15,6 +15,7 @@ import com.mercotrace.repository.PattiRepository;
 import com.mercotrace.repository.SalesBillRepository;
 import com.mercotrace.repository.SalesBillLineItemRepository;
 import com.mercotrace.repository.SellerInVehicleRepository;
+import com.mercotrace.repository.SettlementQuickExpenseStateRepository;
 import com.mercotrace.repository.VehicleRepository;
 import com.mercotrace.repository.VehicleWeightRepository;
 import com.mercotrace.repository.VoucherLineRepository;
@@ -72,6 +73,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final VehicleWeightRepository vehicleWeightRepository;
     private final SalesBillLineItemRepository salesBillLineItemRepository;
     private final SalesBillRepository salesBillRepository;
+    private final SettlementQuickExpenseStateRepository settlementQuickExpenseStateRepository;
     private final ContactService contactService;
     private final HamaliSlabRepository hamaliSlabRepository;
     private final CommodityConfigRepository commodityConfigRepository;
@@ -94,6 +96,7 @@ public class SettlementServiceImpl implements SettlementService {
         VehicleWeightRepository vehicleWeightRepository,
         SalesBillLineItemRepository salesBillLineItemRepository,
         SalesBillRepository salesBillRepository,
+        SettlementQuickExpenseStateRepository settlementQuickExpenseStateRepository,
         ContactService contactService,
         HamaliSlabRepository hamaliSlabRepository,
         CommodityConfigRepository commodityConfigRepository,
@@ -115,6 +118,7 @@ public class SettlementServiceImpl implements SettlementService {
         this.vehicleWeightRepository = vehicleWeightRepository;
         this.salesBillLineItemRepository = salesBillLineItemRepository;
         this.salesBillRepository = salesBillRepository;
+        this.settlementQuickExpenseStateRepository = settlementQuickExpenseStateRepository;
         this.contactService = contactService;
         this.hamaliSlabRepository = hamaliSlabRepository;
         this.commodityConfigRepository = commodityConfigRepository;
@@ -659,6 +663,114 @@ public class SettlementServiceImpl implements SettlementService {
         out.setWeighingAutoPulled(weighingSum.compareTo(BigDecimal.ZERO) > 0);
 
         return out;
+    }
+
+    @Override
+    public QuickExpenseStateResponse hydrateQuickExpenseState(QuickExpenseStateUpsertRequest request) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        QuickExpenseStateResponse out = new QuickExpenseStateResponse();
+        if (traderId == null || request == null || request.getRows() == null || request.getRows().isEmpty()) {
+            out.setRows(List.of());
+            return out;
+        }
+
+        List<QuickExpenseStateUpsertRowDTO> rows = request.getRows();
+        List<String> sellerIds = rows.stream().map(QuickExpenseStateUpsertRowDTO::getSellerId).filter(Objects::nonNull).toList();
+        Map<String, SettlementQuickExpenseState> existingBySellerId = settlementQuickExpenseStateRepository
+            .findAllByTraderIdAndSellerIdIn(traderId, sellerIds)
+            .stream()
+            .collect(Collectors.toMap(SettlementQuickExpenseState::getSellerId, s -> s));
+
+        List<QuickExpenseStateRowDTO> resultRows = new ArrayList<>();
+        for (QuickExpenseStateUpsertRowDTO row : rows) {
+            if (row == null || row.getSellerId() == null || row.getSellerId().isBlank()) continue;
+            SettlementQuickExpenseState state = existingBySellerId.get(row.getSellerId());
+            if (state == null) {
+                state = new SettlementQuickExpenseState();
+                state.setTraderId(traderId);
+                state.setSellerId(row.getSellerId().trim());
+                BigDecimal freight = clampMoney(row.getFreight());
+                BigDecimal unloading = clampMoney(row.getUnloading());
+                BigDecimal weighing = clampMoney(row.getWeighing());
+                BigDecimal gunnies = clampMoney(row.getGunnies());
+                state.setFreightOriginal(freight);
+                state.setUnloadingOriginal(unloading);
+                state.setWeighingOriginal(weighing);
+                state.setGunniesOriginal(gunnies);
+                state.setFreightCurrent(freight);
+                state.setUnloadingCurrent(unloading);
+                state.setWeighingCurrent(weighing);
+                state.setGunniesCurrent(gunnies);
+                state = settlementQuickExpenseStateRepository.save(state);
+            }
+            resultRows.add(toQuickExpenseStateRowDTO(state));
+        }
+        out.setRows(resultRows);
+        return out;
+    }
+
+    @Override
+    public QuickExpenseStateResponse saveQuickExpenseState(QuickExpenseStateUpsertRequest request) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        QuickExpenseStateResponse out = new QuickExpenseStateResponse();
+        if (traderId == null || request == null || request.getRows() == null || request.getRows().isEmpty()) {
+            out.setRows(List.of());
+            return out;
+        }
+
+        List<QuickExpenseStateUpsertRowDTO> rows = request.getRows();
+        List<String> sellerIds = rows.stream().map(QuickExpenseStateUpsertRowDTO::getSellerId).filter(Objects::nonNull).toList();
+        Map<String, SettlementQuickExpenseState> existingBySellerId = settlementQuickExpenseStateRepository
+            .findAllByTraderIdAndSellerIdIn(traderId, sellerIds)
+            .stream()
+            .collect(Collectors.toMap(SettlementQuickExpenseState::getSellerId, s -> s));
+
+        List<QuickExpenseStateRowDTO> resultRows = new ArrayList<>();
+        for (QuickExpenseStateUpsertRowDTO row : rows) {
+            if (row == null || row.getSellerId() == null || row.getSellerId().isBlank()) continue;
+            SettlementQuickExpenseState state = existingBySellerId.get(row.getSellerId());
+            BigDecimal freight = clampMoney(row.getFreight());
+            BigDecimal unloading = clampMoney(row.getUnloading());
+            BigDecimal weighing = clampMoney(row.getWeighing());
+            BigDecimal gunnies = clampMoney(row.getGunnies());
+            if (state == null) {
+                state = new SettlementQuickExpenseState();
+                state.setTraderId(traderId);
+                state.setSellerId(row.getSellerId().trim());
+                state.setFreightOriginal(freight);
+                state.setUnloadingOriginal(unloading);
+                state.setWeighingOriginal(weighing);
+                state.setGunniesOriginal(gunnies);
+            }
+            state.setFreightCurrent(freight);
+            state.setUnloadingCurrent(unloading);
+            state.setWeighingCurrent(weighing);
+            state.setGunniesCurrent(gunnies);
+            SettlementQuickExpenseState saved = settlementQuickExpenseStateRepository.save(state);
+            resultRows.add(toQuickExpenseStateRowDTO(saved));
+        }
+        out.setRows(resultRows);
+        return out;
+    }
+
+    private static BigDecimal clampMoney(BigDecimal value) {
+        if (value == null) return BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal n = value.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : value;
+        return n.setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private static QuickExpenseStateRowDTO toQuickExpenseStateRowDTO(SettlementQuickExpenseState state) {
+        QuickExpenseStateRowDTO dto = new QuickExpenseStateRowDTO();
+        dto.setSellerId(state.getSellerId());
+        dto.setFreightOriginal(state.getFreightOriginal());
+        dto.setUnloadingOriginal(state.getUnloadingOriginal());
+        dto.setWeighingOriginal(state.getWeighingOriginal());
+        dto.setGunniesOriginal(state.getGunniesOriginal());
+        dto.setFreightCurrent(state.getFreightCurrent());
+        dto.setUnloadingCurrent(state.getUnloadingCurrent());
+        dto.setWeighingCurrent(state.getWeighingCurrent());
+        dto.setGunniesCurrent(state.getGunniesCurrent());
+        return dto;
     }
 
     /**

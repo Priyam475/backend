@@ -85,6 +85,9 @@ class SettlementServiceImplTest {
     private com.mercotrace.repository.SalesBillRepository salesBillRepository;
 
     @Mock
+    private com.mercotrace.repository.SettlementQuickExpenseStateRepository settlementQuickExpenseStateRepository;
+
+    @Mock
     private com.mercotrace.service.ContactService contactService;
 
     @Mock
@@ -114,6 +117,7 @@ class SettlementServiceImplTest {
             vehicleWeightRepository,
             salesBillLineItemRepository,
             salesBillRepository,
+            settlementQuickExpenseStateRepository,
             contactService,
             hamaliSlabRepository,
             commodityConfigRepository,

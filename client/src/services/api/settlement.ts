@@ -143,6 +143,26 @@ export interface SettlementAmountSummaryDTO {
   payableInvoiced: number;
 }
 
+export interface QuickExpenseStateRowInputDTO {
+  sellerId: string;
+  freight: number;
+  unloading: number;
+  weighing: number;
+  gunnies: number;
+}
+
+export interface QuickExpenseStateRowDTO {
+  sellerId: string;
+  freightOriginal: number;
+  unloadingOriginal: number;
+  weighingOriginal: number;
+  gunniesOriginal: number;
+  freightCurrent: number;
+  unloadingCurrent: number;
+  weighingCurrent: number;
+  gunniesCurrent: number;
+}
+
 export interface ListSellersParams {
   page?: number;
   size?: number;
@@ -288,6 +308,48 @@ export const settlementApi = {
       freightInvoiced: Number(data.freightInvoiced ?? 0),
       payableInvoiced: Number(data.payableInvoiced ?? 0),
     };
+  },
+
+  async hydrateQuickExpenseState(rows: QuickExpenseStateRowInputDTO[]): Promise<QuickExpenseStateRowDTO[]> {
+    const res = await apiFetch(`${BASE}/quick-expenses/hydrate`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to hydrate quick expense state');
+    const data = await res.json();
+    const list = Array.isArray(data?.rows) ? data.rows : [];
+    return list.map((r: Record<string, unknown>) => ({
+      sellerId: String(r.sellerId ?? ''),
+      freightOriginal: Number(r.freightOriginal ?? 0),
+      unloadingOriginal: Number(r.unloadingOriginal ?? 0),
+      weighingOriginal: Number(r.weighingOriginal ?? 0),
+      gunniesOriginal: Number(r.gunniesOriginal ?? 0),
+      freightCurrent: Number(r.freightCurrent ?? 0),
+      unloadingCurrent: Number(r.unloadingCurrent ?? 0),
+      weighingCurrent: Number(r.weighingCurrent ?? 0),
+      gunniesCurrent: Number(r.gunniesCurrent ?? 0),
+    }));
+  },
+
+  async saveQuickExpenseState(rows: QuickExpenseStateRowInputDTO[]): Promise<QuickExpenseStateRowDTO[]> {
+    const res = await apiFetch(`${BASE}/quick-expenses/save`, {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to save quick expense state');
+    const data = await res.json();
+    const list = Array.isArray(data?.rows) ? data.rows : [];
+    return list.map((r: Record<string, unknown>) => ({
+      sellerId: String(r.sellerId ?? ''),
+      freightOriginal: Number(r.freightOriginal ?? 0),
+      unloadingOriginal: Number(r.unloadingOriginal ?? 0),
+      weighingOriginal: Number(r.weighingOriginal ?? 0),
+      gunniesOriginal: Number(r.gunniesOriginal ?? 0),
+      freightCurrent: Number(r.freightCurrent ?? 0),
+      unloadingCurrent: Number(r.unloadingCurrent ?? 0),
+      weighingCurrent: Number(r.weighingCurrent ?? 0),
+      gunniesCurrent: Number(r.gunniesCurrent ?? 0),
+    }));
   },
 
   /** Link settlement seller (seller_in_vehicle id) to an existing registered contact. */
