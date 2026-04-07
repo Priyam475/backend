@@ -72,18 +72,22 @@ const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin
 const billingCommodityReadOnlyCellClass =
   'h-10 lg:h-6 px-2 lg:px-1 border border-dashed border-border/70 rounded-md bg-muted/50 text-muted-foreground inline-flex items-center justify-center w-full text-[11px] lg:text-[10px] cursor-not-allowed shadow-inner select-text';
 
-/** Desktop main tabs: same as Arrivals Summary / New Arrival (underline + #6075FF bar). */
-const arrDeskTabBtn = (active: boolean) =>
+/** Billing main tabs mirror Settlement tabs (gradient active + glass-card inactive). */
+const billingToggleTabBtn = (active: boolean) =>
   cn(
-    'relative px-5 py-3 text-sm font-semibold transition-all flex items-center gap-2 shrink-0',
-    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+    'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
+    active
+      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      : 'glass-card text-muted-foreground hover:text-foreground',
   );
 
-/** Mobile header tabs: pill style like Arrivals summary chips (`bg-[#6075FF]` when active). */
-const arrMobTabPill = (active: boolean) =>
+/** Same as billingToggleTabBtn but readable on the mobile hero background. */
+const billingToggleTabBtnOnHero = (active: boolean) =>
   cn(
-    'shrink-0 min-w-[9rem] sm:min-w-[10.5rem] px-3 sm:px-4 py-2.5 sm:py-2 rounded-full min-h-10 text-xs sm:text-sm font-semibold transition-colors flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 text-center shadow-sm leading-none',
-    active ? 'bg-[#6075FF] text-white' : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white',
+    'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
+    active
+      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/10 backdrop-blur-sm',
   );
 
 // ── Types ─────────────────────────────────────────────────
@@ -1252,8 +1256,7 @@ const BillingPage = () => {
         const buyerEntry = buyerMap.get(key)!;
         buyerEntry.tokenAdvanceTotal += tokenAdvance;
 
-        const ws = weighingSessions.find((s: any) => s.bid_number === entry.bidNumber);
-        const weight = ws ? ws.net_weight : entry.quantity * 50;
+        const weight = 0;
 
         buyerEntry.entries.push({
           bidNumber: entry.bidNumber,
@@ -1699,14 +1702,28 @@ const BillingPage = () => {
     generateBill(buyer);
   }, [autoSaveCurrentBillBeforeBuyerSwitch, findBuyerByInput, generateBill, selectedBuyer]);
 
+  const currentBillBidKeys = useMemo(() => {
+    if (!bill) return new Set<string>();
+    const keys = new Set<string>();
+    for (const group of bill.commodityGroups || []) {
+      for (const item of group.items || []) {
+        keys.add(`${item.bidNumber}::${String(item.lotId ?? '').trim()}`);
+      }
+    }
+    return keys;
+  }, [bill]);
+
   const handleSelectBidMode = useCallback(() => {
     const buyer = findBuyerByInput();
     if (!buyer) return;
     setShowBuyerSuggestions(false);
     setSelectBidBuyer(buyer);
-    setSelectedBidKeys([]);
+    const preselected = buyer.entries
+      .map(e => getBidSelectionKey(e))
+      .filter(key => currentBillBidKeys.has(key));
+    setSelectedBidKeys(preselected);
     toast.success(`Loaded ${buyer.entries.length} bids. Select required bids to create bill.`);
-  }, [findBuyerByInput]);
+  }, [currentBillBidKeys, findBuyerByInput]);
 
   const toggleBidSelection = (entry: Pick<BillEntry, 'bidNumber' | 'lotId'>) => {
     const key = getBidSelectionKey(entry);
@@ -1855,7 +1872,6 @@ const BillingPage = () => {
         toast.error('Bid saved but failed to map in bill. Refresh billing data.');
         return;
       }
-      const ws = weighingSessions.find((s: any) => s.bid_number === matchedAuction!.bid_number);
       const newBillEntry: BillEntry = {
         bidNumber: matchedAuction.bid_number,
         lotId: lotIdStr,
@@ -1867,7 +1883,7 @@ const BillingPage = () => {
         commodityName: addBidSelectedLot.commodity_name || 'Unknown',
         rate: Number(matchedAuction.bid_rate) || 0,
         quantity: matchedAuction.quantity ?? 0,
-        weight: ws ? ws.net_weight : (matchedAuction.quantity ?? 0) * 50,
+        weight: 0,
         vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? matchedAuction.quantity ?? 0,
         sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? matchedAuction.quantity ?? 0,
         presetApplied: Number(matchedAuction.preset_margin) || 0,
@@ -2087,7 +2103,9 @@ const BillingPage = () => {
       toast.error('Select at least one lot');
       return;
     }
-    const selectedEntries = searchBidSourceBuyer.entries.filter(e => searchBidSelectedKeys.includes(getBidSelectionKey(e)));
+    const selectedEntries = searchBidSourceBuyer.entries
+      .filter(e => !currentBillBidKeys.has(getBidSelectionKey(e)))
+      .filter(e => searchBidSelectedKeys.includes(getBidSelectionKey(e)));
     if (selectedEntries.length === 0) {
       toast.error('No selected lots available');
       return;
@@ -2112,33 +2130,17 @@ const BillingPage = () => {
           : b,
       ),
     );
-    const finalBill = generateBill(mergedBuyer);
-    const addedKeys = new Set(toAdd.map(e => getBidSelectionKey(e)));
-    if (finalBill) {
-      void (async () => {
-        try {
-          await syncAuctionEntriesToBillBuyer(finalBill, {
-            lineFilter: it => addedKeys.has(`${it.bidNumber}::${String(it.lotId ?? '').trim()}`),
-          });
-          await refetchAuctions();
-        } catch {
-          toast.warning(
-            'Lots added to the bill, but auction buyer update failed for some bids. Save the bill to retry sync.',
-          );
-        }
-      })();
-    }
+    generateBill(mergedBuyer);
     setSearchBidDialogOpen(false);
     setSearchBidSelectedKeys([]);
-    toast.success(`${toAdd.length} lot(s) added into current bill`);
+    toast.success(`${toAdd.length} lot(s) added into current bill. Save bill to finalize migration.`);
   }, [
     bill,
+    currentBillBidKeys,
     generateBill,
-    refetchAuctions,
     searchBidSelectedKeys,
     searchBidSourceBuyer,
     selectedBuyer,
-    syncAuctionEntriesToBillBuyer,
   ]);
 
   const searchBidBuyerOptions = useMemo(() => {
@@ -2157,6 +2159,11 @@ const BillingPage = () => {
       )
       .slice(0, 12);
   }, [bill, buyersForBilling, searchBidInput]);
+
+  const searchBidVisibleEntries = useMemo(() => {
+    if (!searchBidSourceBuyer) return [];
+    return searchBidSourceBuyer.entries.filter(e => !currentBillBidKeys.has(getBidSelectionKey(e)));
+  }, [currentBillBidKeys, searchBidSourceBuyer]);
 
   useEffect(() => {
     const onPointerDown = (e: MouseEvent) => {
@@ -2922,7 +2929,7 @@ const BillingPage = () => {
               Search & Migrate Bid - {searchBidSourceBuyer ? `${searchBidSourceBuyer.buyerName} (${searchBidSourceBuyer.buyerMark})` : 'Buyer'}
             </DialogTitle>
           </DialogHeader>
-          {!searchBidSourceBuyer || searchBidSourceBuyer.entries.length === 0 ? (
+          {!searchBidSourceBuyer || searchBidVisibleEntries.length === 0 ? (
             <p className="text-sm text-muted-foreground">No buyer lots found.</p>
           ) : (
             <div className="max-h-72 overflow-y-auto space-y-2">
@@ -2933,7 +2940,7 @@ const BillingPage = () => {
                 <span>Base Rate</span>
                 <span>Extra Rate</span>
               </div>
-              {searchBidSourceBuyer.entries.map(entry => {
+              {searchBidVisibleEntries.map(entry => {
                 const checked = searchBidSelectedKeys.includes(getBidSelectionKey(entry));
                 return (
                   <button
@@ -3330,19 +3337,19 @@ const BillingPage = () => {
               <div className="flex-shrink-0" />
             </div>
 
-            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x">
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x" role="tablist" aria-label="Billing views">
               <button type="button" onClick={() => setBillingMainTab('create')}
-                className={arrMobTabPill(billingMainTab === 'create')}>
+                className={billingToggleTabBtnOnHero(billingMainTab === 'create')}>
                 <Plus className="w-4 h-4 shrink-0 hidden sm:block" />
                 <span>Create New Bill{tabHint('Alt X')}</span>
               </button>
               <button type="button" onClick={() => setBillingMainTab('progress')}
-                className={arrMobTabPill(billingMainTab === 'progress')}>
+                className={billingToggleTabBtnOnHero(billingMainTab === 'progress')}>
                 <Clock className="w-4 h-4 shrink-0 hidden sm:block" />
                 <span>Bill In Progress{tabHint('Alt Y')}</span>
               </button>
               <button type="button" onClick={() => setBillingMainTab('saved')}
-                className={arrMobTabPill(billingMainTab === 'saved')}>
+                className={billingToggleTabBtnOnHero(billingMainTab === 'saved')}>
                 <FileText className="w-4 h-4 shrink-0 hidden sm:block" />
                 <span>Bills Saved{tabHint('Alt Z')}</span>
               </button>
@@ -3371,24 +3378,15 @@ const BillingPage = () => {
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-4">
-            <div className="flex items-center gap-1 border-b border-border/40 w-full lg:w-auto overflow-x-auto">
-              <button type="button" onClick={() => setBillingMainTab('create')} className={arrDeskTabBtn(billingMainTab === 'create')}>
+            <div className="flex items-center gap-2 w-full lg:w-auto overflow-x-auto" role="tablist" aria-label="Billing views">
+              <button type="button" onClick={() => setBillingMainTab('create')} className={billingToggleTabBtn(billingMainTab === 'create')}>
                 <Plus className="w-4 h-4" /> Create New Bill{tabHint('Alt X')}
-                {billingMainTab === 'create' && (
-                  <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                )}
               </button>
-              <button type="button" onClick={() => setBillingMainTab('progress')} className={arrDeskTabBtn(billingMainTab === 'progress')}>
+              <button type="button" onClick={() => setBillingMainTab('progress')} className={billingToggleTabBtn(billingMainTab === 'progress')}>
                 <Clock className="w-4 h-4" /> Bill In Progress{tabHint('Alt Y')}
-                {billingMainTab === 'progress' && (
-                  <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                )}
               </button>
-              <button type="button" onClick={() => setBillingMainTab('saved')} className={arrDeskTabBtn(billingMainTab === 'saved')}>
+              <button type="button" onClick={() => setBillingMainTab('saved')} className={billingToggleTabBtn(billingMainTab === 'saved')}>
                 <FileText className="w-4 h-4" /> Bills Saved{tabHint('Alt Z')}
-                {billingMainTab === 'saved' && (
-                  <motion.div layoutId="billing-main-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#6075FF] rounded-full" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                )}
               </button>
             </div>
             {(billingMainTab === 'progress' || billingMainTab === 'saved') && (
@@ -3565,6 +3563,29 @@ const BillingPage = () => {
                 </div>
                 <div className={cn("flex flex-col gap-2 shrink-0 w-full sm:w-auto sm:max-w-none sm:items-end", searchBidDialogOpen ? "z-[30]" : "z-[40]")}>
                   <div className="flex flex-col gap-2 w-full sm:flex-row sm:items-end sm:justify-end sm:gap-2">
+                    <div className="w-full sm:w-auto sm:min-w-[16rem]">
+                      <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block text-left sm:text-right">
+                        Billing Name (appears on print) <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        value={bill.billingName}
+                        onChange={e => {
+                          setBill({ ...bill, billingName: e.target.value });
+                          setValidationErrors(prev => {
+                            const n = { ...prev };
+                            delete n.billingName;
+                            return n;
+                          });
+                        }}
+                        className={cn(
+                          'h-9 rounded-xl text-xs',
+                          validationErrors.billingName && 'border-destructive ring-1 ring-destructive/30',
+                        )}
+                      />
+                      {validationErrors.billingName && (
+                        <p className="text-[10px] text-destructive mt-1 text-left sm:text-right">{validationErrors.billingName}</p>
+                      )}
+                    </div>
                     <div className="w-full sm:w-auto sm:min-w-[11rem]">
                       <Label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 block text-left sm:text-right">Search & Migrate</Label>
                       <div ref={searchBidBuyerSelectRef} className="relative w-full sm:w-48 sm:ml-auto">
@@ -3802,30 +3823,6 @@ const BillingPage = () => {
                   'items-end',
                 )}
               >
-                <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Billing Name (appears on print) <span className="text-destructive">*</span>
-                  </p>
-                  <Input
-                    value={bill.billingName}
-                    onChange={e => {
-                      setBill({ ...bill, billingName: e.target.value });
-                      setValidationErrors(prev => {
-                        const n = { ...prev };
-                        delete n.billingName;
-                        return n;
-                      });
-                    }}
-                    className={cn(
-                      'h-9 w-full min-w-0 max-w-full rounded-xl text-sm font-medium bg-muted/20 border-border/30',
-                      validationErrors.billingName && 'border-destructive ring-1 ring-destructive/30',
-                    )}
-                  />
-                  {validationErrors.billingName && (
-                    <p className="text-[10px] text-destructive mt-1">{validationErrors.billingName}</p>
-                  )}
-                </div>
-
                 <div className="min-w-0">
                   <p
                     className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
