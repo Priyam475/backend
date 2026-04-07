@@ -199,6 +199,12 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
 export interface PattiPrintData {
   pattiId: string;
   sellerName: string;
+  sellerMobile?: string;
+  sellerAddress?: string;
+  vehicleNumber?: string;
+  commodityName?: string;
+  totalBags?: number;
+  detailRows?: { mark: string; bags: number; weight: number; rate: number; amount: number }[];
   rateClusters: { rate: number; totalQuantity: number; totalWeight: number; amount: number }[];
   grossAmount: number;
   deductions: { key: string; label: string; amount: number; autoPulled?: boolean }[];
@@ -208,57 +214,147 @@ export interface PattiPrintData {
   useAverageWeight?: boolean;
 }
 
+const SALES_PATTI_PRINT_STYLE = `
+  <style>
+    @page { size: A4 portrait; margin: 10mm; }
+    .patti-a4 { font-family: Arial, sans-serif; color: #000; font-size: 14px; }
+    .patti-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
+    .patti-head-left p, .patti-head-right p { margin: 0; line-height: 1.2; }
+    .patti-head-right { text-align:right; min-width: 200px; }
+    .patti-table { width:100%; border-collapse: collapse; table-layout: fixed; }
+    .patti-table th, .patti-table td { border: 1px solid #000; padding: 3px 6px; }
+    .patti-table th { font-weight: 700; text-align: left; }
+    .right { text-align:right; }
+    .centered { text-align:center; }
+    .footer-net { margin-top: 8px; display:flex; justify-content:flex-end; font-size: 20px; font-weight: 700; gap: 16px; }
+  </style>
+`;
+
 export function generateSalesPattiPrintHTML(patti: PattiPrintData): string {
-  const dateStr = new Date(patti.createdAt).toLocaleDateString();
-  const timeStr = new Date(patti.createdAt).toLocaleTimeString();
-  let body = `
-    <div class="wrap">
-      <div class="center section">
-        <p class="bold">MERCOTRACE</p>
-        <p class="muted">Sales Patti (Settlement)</p>
-        <p class="muted">${dateStr} ${timeStr}</p>
-      </div>
-      <div class="section">
-        <div class="row"><span class="muted">Patti ID</span><span class="bold">${patti.pattiId || '(New Patti)'}</span></div>
-        <div class="row"><span class="muted">Seller</span><span class="bold">${escapeHtml(patti.sellerName)}</span></div>
-        ${patti.useAverageWeight ? '<div class="row"><span class="muted">Mode</span><span class="bold" style="color:#d97706">AVG WEIGHT (Quick Close)</span></div>' : ''}
-      </div>
-      <div class="section">
-        <p class="bold">RATE CLUSTERS</p>
-        ${patti.rateClusters.map((c) => `
-          <div class="row">
-            <span>${c.totalQuantity} bags @ ₹${c.rate} (${c.totalWeight.toFixed(0)}kg)</span>
-            <span class="bold">₹${c.amount.toLocaleString()}</span>
-          </div>
-        `).join('')}
-      </div>
-      <div class="row bold"><span>Gross Amount</span><span>₹${patti.grossAmount.toLocaleString()}</span></div>
-      <div class="section">
-        <p class="bold">DEDUCTIONS</p>
-        ${patti.deductions.filter((d) => d.amount > 0).map((d) => `
-          <div class="row">
-            <span class="muted">${escapeHtml(d.label)}${d.autoPulled ? ' (Auto)' : ''}</span>
-            <span class="destructive">−₹${d.amount.toLocaleString()}</span>
-          </div>
-        `).join('')}
-        <div class="row bold section-t">
-          <span>Total Deductions</span>
-          <span class="destructive">−₹${patti.totalDeductions.toLocaleString()}</span>
+  const dateStr = new Date(patti.createdAt).toLocaleDateString('en-GB');
+  const rows = (patti.detailRows && patti.detailRows.length > 0)
+    ? patti.detailRows
+    : patti.rateClusters.map((c) => ({
+      mark: '-',
+      bags: Number(c.totalQuantity) || 0,
+      weight: Number(c.totalWeight) || 0,
+      rate: Number(c.rate) || 0,
+      amount: Number(c.amount) || 0,
+    }));
+  const totalBags = Number(patti.totalBags ?? rows.reduce((s, r) => s + (Number(r.bags) || 0), 0)) || 0;
+  const totalWeight = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  const deductionByKey = new Map<string, number>();
+  for (const d of patti.deductions || []) {
+    deductionByKey.set(String(d.key || '').toLowerCase(), Number(d.amount) || 0);
+  }
+  const freight = deductionByKey.get('freight') ?? 0;
+  const unloading = deductionByKey.get('coolie') ?? deductionByKey.get('unloading') ?? 0;
+  const weighingPresent = deductionByKey.has('weighing') || deductionByKey.has('weighman');
+  const weighing = deductionByKey.get('weighing') ?? deductionByKey.get('weighman') ?? 0;
+  const cashAdvance = deductionByKey.get('advance') ?? deductionByKey.get('cashadvance') ?? 0;
+  const gunnies = deductionByKey.get('gunnies') ?? 0;
+  const others = deductionByKey.get('others') ?? 0;
+
+  const particularsRows: Array<{ label: string; amount: number }> = [
+    { label: 'Freight', amount: freight },
+    { label: 'Unloading', amount: unloading },
+    ...(weighingPresent ? [{ label: 'Weighing', amount: weighing }] : []),
+    { label: 'Cash Advance', amount: cashAdvance },
+    { label: 'Gunnies', amount: gunnies },
+    { label: 'Others', amount: others },
+  ];
+
+  const commodityLabel = (patti.commodityName || '').trim() || 'Commodity';
+  const soldLine = `Sold ${formatBillingInr(totalBags)} Bags of ${escapeHtml(commodityLabel)} on account and risk of`;
+  const identityLine = `${escapeHtml(patti.sellerName || '-')}${patti.sellerMobile ? `, ${escapeHtml(patti.sellerMobile)}` : ''}`;
+  const addressLine = escapeHtml((patti.sellerAddress || '').trim() || '-');
+  const vehicleLine = escapeHtml((patti.vehicleNumber || '').trim() || '-');
+
+  const body = `
+    <div class="patti-a4">
+      <div class="patti-head">
+        <div class="patti-head-left">
+          <p style="font-weight:700;">${soldLine}</p>
+          <p style="font-weight:700;">${identityLine}</p>
+          <p style="font-weight:700;">${addressLine}</p>
+          <p style="font-weight:700;">Vehicle No : ${vehicleLine}</p>
+        </div>
+        <div class="patti-head-right">
+          <p style="font-weight:700;">Patti No : ${escapeHtml(patti.pattiId || '-')}</p>
+          <p style="font-weight:700;">Date : ${dateStr}</p>
         </div>
       </div>
-      <div class="row total section-t">
-        <span class="bold">NET PAYABLE</span>
-        <span class="grand">₹${patti.netPayable.toLocaleString()}</span>
+
+      <table class="patti-table">
+        <thead>
+          <tr>
+            <th style="width:9%;">Marks</th>
+            <th style="width:9%;" class="centered">Bags</th>
+            <th style="width:13%;" class="right">Weight, kg</th>
+            <th style="width:12%;" class="right">Rate, ₹</th>
+            <th style="width:16%;" class="right">Amount, ₹</th>
+            <th style="width:23%;">Particulars</th>
+            <th style="width:18%;" class="right">Amount, ₹</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r, idx) => `
+            <tr>
+              <td>${escapeHtml(r.mark || '-')}</td>
+              <td class="centered">${formatBillingInr(r.bags)}</td>
+              <td class="right">${formatBillingInr(r.weight)}</td>
+              <td class="right">${formatBillingInr(r.rate)}</td>
+              <td class="right">${formatBillingInr(r.amount)}</td>
+              <td>${idx < particularsRows.length ? particularsRows[idx].label : '-'}</td>
+              <td class="right">${idx < particularsRows.length ? formatBillingInr(particularsRows[idx].amount) : '-'}</td>
+            </tr>
+          `).join('')}
+          ${Array.from({ length: Math.max(0, particularsRows.length - rows.length) }).map((_, i) => {
+            const pRow = particularsRows[rows.length + i];
+            return `
+              <tr>
+                <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+                <td>${pRow.label}</td>
+                <td class="right">${formatBillingInr(pRow.amount)}</td>
+              </tr>
+            `;
+          }).join('')}
+          <tr>
+            <td>-</td>
+            <td class="centered" style="font-weight:700;">${formatBillingInr(totalBags)}</td>
+            <td class="right" style="font-weight:700;">${formatBillingInr(totalWeight)}</td>
+            <td>-</td>
+            <td class="right" style="font-weight:700;">${formatBillingInr(totalAmount)}</td>
+            <td>-</td>
+            <td class="right" style="font-weight:700;">${formatBillingInr(particularsRows.reduce((s, p) => s + p.amount, 0))}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="footer-net">
+        <span>Net Payable</span>
+        <span>${formatBillingInr(patti.netPayable)}</span>
       </div>
-      <div class="center foot section-t">
-        <p>GA = Σ (NW × SR)</p>
-        <p>NP = GA − TD</p>
-        <p>TD = Freight + Coolie + Weighing + Advance + Gunnies + Other</p>
-      </div>
-      <div class="center section-t"><p class="muted">--- END OF PATTI ---</p></div>
     </div>
   `;
-  return wrapPrintDocument(body);
+  return wrapPrintDocument(`${SALES_PATTI_PRINT_STYLE}${body}`);
+}
+
+export function generateSalesPattiBatchPrintHTML(pattis: PattiPrintData[]): string {
+  const pages = (pattis || []).map((p, idx, arr) => `
+    <div${idx < arr.length - 1 ? ' style="page-break-after: always;"' : ''}>
+      ${generateSalesPattiPrintHTMLBody(p)}
+    </div>
+  `).join('');
+  return wrapPrintDocument(`${SALES_PATTI_PRINT_STYLE}${pages}`);
+}
+
+function generateSalesPattiPrintHTMLBody(patti: PattiPrintData): string {
+  const full = generateSalesPattiPrintHTML(patti);
+  const bodyMatch = full.match(/<body>([\s\S]*)<\/body>/i);
+  return bodyMatch ? bodyMatch[1] : '';
 }
 
 // ── Weighing Slip (WeighingPage) ──────────────────────────

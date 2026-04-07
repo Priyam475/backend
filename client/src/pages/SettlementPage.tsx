@@ -36,7 +36,7 @@ import type { ArrivalFullDetail, ArrivalSellerFullDetail } from '@/services/api/
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { Commodity, Contact } from '@/types/models';
 import { directPrint } from '@/utils/printTemplates';
-import { generateSalesPattiPrintHTML, type PattiPrintData } from '@/utils/printDocumentTemplates';
+import { generateSalesPattiBatchPrintHTML, generateSalesPattiPrintHTML, type PattiPrintData } from '@/utils/printDocumentTemplates';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
 import {
@@ -714,23 +714,65 @@ function buildSellerSubPattiPrintData(
   pattiId: string,
   createdAt: string,
   lotOverrides?: Record<string, LotSalesOverride>,
-  getDivisor?: (lot: SettlementLot) => number
+  getDivisor?: (lot: SettlementLot) => number,
+  weighingEnabled = true,
+  mergeWeighingIntoFreight = false,
+  sellerMobile = ''
 ): PattiPrintData {
+  const divisorFn = getDivisor ?? (() => 50);
+  const lotRows = seller.lots.flatMap((lot, lotIndex) => {
+    const sid = lotStableId(lot, lotIndex);
+    if (removedIds.has(sid)) return [];
+    const ov = lotOverrides?.[sid];
+    const row = mergeLotDisplayRow(lot, ov, divisorFn(lot));
+    return [{
+      mark: (seller.sellerMark || '-').trim() || '-',
+      bags: Number(row.qty) || 0,
+      weight: Number(row.weight) || 0,
+      rate: Number(row.ratePerBag) || 0,
+      amount: Number(row.amount) || 0,
+    }];
+  });
+
   const rateClusters = buildRateClustersFromSellerLots(seller, removedIds, lotOverrides, getDivisor);
-  const grossAmount = rateClusters.reduce((s, c) => s + c.amount, 0);
+  const grossAmount = lotRows.reduce((s, r) => s + r.amount, 0);
+  let freightAmount = expenses.freight;
+  let weighingAmount = weighingEnabled ? expenses.weighman : 0;
+  if (!weighingEnabled && mergeWeighingIntoFreight) {
+    freightAmount += expenses.weighman;
+    weighingAmount = 0;
+  }
+
   const deductions = [
-    { key: 'freight', label: 'Freight Amount', amount: expenses.freight, autoPulled: false },
+    { key: 'freight', label: 'Freight Amount', amount: freightAmount, autoPulled: false },
     { key: 'unloading', label: 'Unloading Charges', amount: expenses.unloading, autoPulled: false },
-    { key: 'weighman', label: 'Weighman Charges', amount: expenses.weighman, autoPulled: false },
     { key: 'advance', label: 'Cash Advance', amount: expenses.cashAdvance, autoPulled: false },
     { key: 'gunnies', label: 'Gunnies', amount: expenses.gunnies, autoPulled: false },
     { key: 'others', label: 'Others', amount: expenses.others, autoPulled: false },
   ];
+  if (weighingEnabled) {
+    deductions.splice(2, 0, { key: 'weighing', label: 'Weighing Charges', amount: weighingAmount, autoPulled: false });
+  }
+
   const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
   const subLabel = pattiId ? `${pattiId} · Sub` : 'Sub-patti';
+  const commodityNames = Array.from(
+    new Set(seller.lots.map(l => String(l.commodityName || '').trim()).filter(Boolean)),
+  );
+  const commodityName = commodityNames.length === 1
+    ? commodityNames[0]
+    : (commodityNames.length > 1 ? 'Mixed Commodity' : 'Commodity');
+  const totalBags = lotRows.reduce((s, r) => s + r.bags, 0);
+
   return {
     pattiId: subLabel,
     sellerName: displayName,
+    sellerMobile,
+    sellerAddress: seller.fromLocation || '',
+    vehicleNumber: seller.vehicleNumber || '',
+    commodityName,
+    totalBags,
+    detailRows: lotRows,
     rateClusters,
     grossAmount,
     deductions,
@@ -2072,6 +2114,90 @@ const SettlementPage = () => {
       toast.error(mainPattiValidationError ?? 'Please complete required fields before printing.');
       return;
     }
+    const scopeSellers = arrivalSellersForPatti;
+    if (scopeSellers.length === 0) {
+      toast.error('No sellers available for main patti print.');
+      return;
+    }
+
+    const detailRows = scopeSellers.flatMap((seller) => {
+      const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+      const lotOverrides = lotSalesOverridesBySellerId[seller.sellerId];
+      return seller.lots.flatMap((lot, lotIndex) => {
+        const sid = lotStableId(lot, lotIndex);
+        if (removedSet.has(sid)) return [];
+        const row = mergeLotDisplayRow(lot, lotOverrides?.[sid], getLotDivisor(lot));
+        return [{
+          mark: (seller.sellerMark || '-').trim() || '-',
+          bags: Number(row.qty) || 0,
+          weight: Number(row.weight) || 0,
+          rate: Number(row.ratePerBag) || 0,
+          amount: Number(row.amount) || 0,
+        }];
+      });
+    });
+
+    const totalBags = detailRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
+    const commodityNames = Array.from(
+      new Set(scopeSellers.flatMap(s => s.lots.map(l => String(l.commodityName || '').trim())).filter(Boolean)),
+    );
+    const commodityName = commodityNames.length === 1
+      ? commodityNames[0]
+      : (commodityNames.length > 1 ? 'Mixed Commodity' : 'Commodity');
+
+    const deductionTotals = {
+      freight: 0,
+      unloading: 0,
+      weighing: 0,
+      advance: 0,
+      gunnies: 0,
+      others: 0,
+    };
+    for (const seller of scopeSellers) {
+      const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
+      const mergeIntoFreight = isWeighingMergedIntoFreight(seller.sellerId);
+      deductionTotals.freight += Number(exp.freight) || 0;
+      deductionTotals.unloading += Number(exp.unloading) || 0;
+      deductionTotals.advance += Number(exp.cashAdvance) || 0;
+      deductionTotals.gunnies += Number(exp.gunnies) || 0;
+      deductionTotals.others += Number(exp.others) || 0;
+      if (settlementWeighingEnabled) {
+        deductionTotals.weighing += Number(exp.weighman) || 0;
+      } else if (mergeIntoFreight) {
+        deductionTotals.freight += Number(exp.weighman) || 0;
+      }
+    }
+    const deductions: PattiPrintData['deductions'] = [
+      { key: 'freight', label: 'Freight', amount: roundMoney2(deductionTotals.freight) },
+      { key: 'coolie', label: 'Unloading', amount: roundMoney2(deductionTotals.unloading) },
+      ...(settlementWeighingEnabled
+        ? [{ key: 'weighing', label: 'Weighing', amount: roundMoney2(deductionTotals.weighing) }]
+        : []),
+      { key: 'advance', label: 'Cash Advance', amount: roundMoney2(deductionTotals.advance) },
+      { key: 'gunnies', label: 'Gunnies', amount: roundMoney2(deductionTotals.gunnies) },
+      { key: 'others', label: 'Others', amount: roundMoney2(deductionTotals.others) },
+    ];
+
+    const primarySeller = scopeSellers[0];
+    const primaryForm = sellerFormById[primarySeller.sellerId] ?? defaultSellerForm(primarySeller);
+    const sellerNames = scopeSellers
+      .map(s => (sellerFormById[s.sellerId]?.name || s.sellerName || '').trim())
+      .filter(Boolean);
+    const mergedName = sellerNames.length <= 2 ? sellerNames.join(', ') : `${sellerNames[0]} +${sellerNames.length - 1} others`;
+
+    const printPayload: PattiPrintData = {
+      ...pattiData,
+      sellerName: mergedName || pattiData.sellerName || primarySeller.sellerName,
+      sellerMobile: primaryForm.mobile || primarySeller.sellerPhone || '',
+      sellerAddress: primarySeller.fromLocation || '',
+      vehicleNumber: primarySeller.vehicleNumber || '',
+      commodityName,
+      totalBags,
+      detailRows,
+      deductions,
+      totalDeductions: roundMoney2(deductions.reduce((s, d) => s + d.amount, 0)),
+      netPayable: roundMoney2(vehicleNetPayableFromPatti),
+    };
     const printedAt = new Date().toISOString();
     try {
       await printLogApi.create({
@@ -2083,10 +2209,23 @@ const SettlementPage = () => {
     } catch {
       /* optional */
     }
-    const ok = await directPrint(generateSalesPattiPrintHTML(pattiData), { mode: 'system' });
+    const ok = await directPrint(generateSalesPattiPrintHTML(printPayload), { mode: 'system' });
     if (ok) toast.success('Main patti sent to printer');
     else toast.error('Printer not connected.');
-  }, [pattiData, canRunMainPattiActions, mainPattiValidationError]);
+  }, [
+    pattiData,
+    canRunMainPattiActions,
+    mainPattiValidationError,
+    arrivalSellersForPatti,
+    removedLotsBySellerId,
+    lotSalesOverridesBySellerId,
+    getLotDivisor,
+    sellerExpensesById,
+    settlementWeighingEnabled,
+    isWeighingMergedIntoFreight,
+    sellerFormById,
+    vehicleNetPayableFromPatti,
+  ]);
 
   const runPrintSellerSubPatti = useCallback(
     async (seller: SellerSettlement) => {
@@ -2108,13 +2247,26 @@ const SettlementPage = () => {
         pattiData.pattiId,
         pattiData.createdAt,
         lotSalesOverridesBySellerId[seller.sellerId],
-        getLotDivisor
+        getLotDivisor,
+        settlementWeighingEnabled,
+        isWeighingMergedIntoFreight(seller.sellerId),
+        form.mobile || seller.sellerPhone || ''
       );
       const ok = await directPrint(generateSalesPattiPrintHTML(payload), { mode: 'system' });
       if (ok) toast.success('Seller sub-patti sent to printer');
       else toast.error('Printer not connected.');
     },
-    [pattiData, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor, getSellerValidationError]
+    [
+      pattiData,
+      sellerFormById,
+      sellerExpensesById,
+      removedLotsBySellerId,
+      lotSalesOverridesBySellerId,
+      getLotDivisor,
+      getSellerValidationError,
+      settlementWeighingEnabled,
+      isWeighingMergedIntoFreight,
+    ]
   );
 
   const runPrintAllSubPatti = useCallback(async () => {
@@ -2123,6 +2275,7 @@ const SettlementPage = () => {
       toast.error(mainPattiValidationError ?? 'Please complete required fields before printing.');
       return;
     }
+    const payloads: PattiPrintData[] = [];
     for (const s of arrivalSellersForPatti) {
       const form = sellerFormById[s.sellerId] ?? defaultSellerForm(s);
       const displayName = form.name || s.sellerName;
@@ -2136,16 +2289,36 @@ const SettlementPage = () => {
         pattiData.pattiId,
         pattiData.createdAt,
         lotSalesOverridesBySellerId[s.sellerId],
-        getLotDivisor
+        getLotDivisor,
+        settlementWeighingEnabled,
+        isWeighingMergedIntoFreight(s.sellerId),
+        form.mobile || s.sellerPhone || ''
       );
-      const ok = await directPrint(generateSalesPattiPrintHTML(payload), { mode: 'system' });
-      if (!ok) {
-        toast.error(`Print failed or cancelled for ${displayName}`);
-        return;
-      }
+      payloads.push(payload);
+    }
+    if (payloads.length === 0) {
+      toast.error('No seller sub-patti data found to print.');
+      return;
+    }
+    const ok = await directPrint(generateSalesPattiBatchPrintHTML(payloads), { mode: 'system' });
+    if (!ok) {
+      toast.error('Print failed or cancelled.');
+      return;
     }
     toast.success('All sub-pattis sent to printer');
-  }, [pattiData, arrivalSellersForPatti, sellerFormById, sellerExpensesById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor, canRunMainPattiActions, mainPattiValidationError]);
+  }, [
+    pattiData,
+    arrivalSellersForPatti,
+    sellerFormById,
+    sellerExpensesById,
+    removedLotsBySellerId,
+    lotSalesOverridesBySellerId,
+    getLotDivisor,
+    canRunMainPattiActions,
+    mainPattiValidationError,
+    settlementWeighingEnabled,
+    isWeighingMergedIntoFreight,
+  ]);
 
   const vehicleExpenseTotals = useMemo(() => {
     return vehicleExpenseRows.reduce(
