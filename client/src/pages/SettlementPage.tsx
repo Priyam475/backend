@@ -32,6 +32,7 @@ import {
   type PattiDTO,
   type PattiSaveRequest,
 } from '@/services/api';
+import { ContactApiError } from '@/services/api/contacts';
 import type { ArrivalFullDetail, ArrivalSellerFullDetail } from '@/services/api/arrivals';
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { Commodity, Contact } from '@/types/models';
@@ -312,8 +313,12 @@ function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
   };
 }
 
+/** INR display: always two decimals (en-IN), signed-safe (unlike `roundMoney2` which floors negatives). */
 function formatMoney2Display(n: number): string {
-  const x = Number.isFinite(n) ? n : 0;
+  if (!Number.isFinite(n)) {
+    return (0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  const x = Math.round((n + Number.EPSILON) * 100) / 100;
   return x.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -517,12 +522,15 @@ const settlementExpenseInputClass =
 
 /** Per-seller registration (Sales report): registered = linked to contact registry. */
 interface SellerRegFormState {
+  registrationChosen: boolean;
   registered: boolean;
   contactId: string | null;
   mark: string;
   name: string;
   mobile: string;
   contactSearchQuery: string;
+  addAndChangeSeller: boolean;
+  allowRegisteredEdit: boolean;
 }
 
 interface SellerExpenseFormState {
@@ -806,27 +814,18 @@ function buildSellerSubPattiPrintData(
   };
 }
 
-function isSellerRegDirty(current: SellerRegFormState | undefined, baseline: SellerRegFormState | undefined): boolean {
-  if (!current || !baseline) return false;
-  return (
-    current.registered !== baseline.registered ||
-    (current.contactId ?? '') !== (baseline.contactId ?? '') ||
-    current.mark !== baseline.mark ||
-    current.name !== baseline.name ||
-    current.mobile !== baseline.mobile
-  );
-}
-
 function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
   const linked = seller.contactId != null && String(seller.contactId).trim() !== '';
   return {
-    // "Unregistered" checkbox unchecked by default → registered / contact flow.
-    registered: true,
+    registrationChosen: false,
+    registered: false,
     contactId: linked ? String(seller.contactId) : null,
     mark: seller.sellerMark || '',
     name: seller.sellerName || '',
     mobile: (seller.sellerPhone ?? '').trim(),
     contactSearchQuery: '',
+    addAndChangeSeller: false,
+    allowRegisteredEdit: false,
   };
 }
 
@@ -1034,6 +1033,7 @@ const SettlementPage = () => {
   /** Contact search (registered sellers / contact registry) per seller card in Sales report. */
   const [sellerContactSearchById, setSellerContactSearchById] = useState<Record<string, Contact[]>>({});
   const [sellerContactSearchLoading, setSellerContactSearchLoading] = useState<Record<string, boolean>>({});
+  const [sellerLookupOpenForId, setSellerLookupOpenForId] = useState<string | null>(null);
   const [sellerRegSaving, setSellerRegSaving] = useState<Record<string, boolean>>({});
 
   // Load sellers from backend only (no localStorage or mock data).
@@ -2884,15 +2884,17 @@ const SettlementPage = () => {
               <p className="font-bold text-foreground mb-1">RATE CLUSTERS</p>
               {pattiData.rateClusters.map((c, i) => (
                 <div key={i} className="flex justify-between">
-                  <span className="text-foreground">{c.totalQuantity} bags @ ₹{c.rate} ({c.totalWeight.toFixed(0)}kg)</span>
-                  <span className="font-bold text-foreground">₹{c.amount.toLocaleString()}</span>
+                  <span className="text-foreground">
+                    {c.totalQuantity} bags @ ₹{formatMoney2Display(c.rate)} ({c.totalWeight.toFixed(0)}kg)
+                  </span>
+                  <span className="font-bold text-foreground">₹{formatMoney2Display(c.amount)}</span>
                 </div>
               ))}
             </div>
 
             <div className="flex justify-between font-bold">
               <span className="text-foreground">Gross Amount</span>
-              <span className="text-foreground">₹{pattiData.grossAmount.toLocaleString()}</span>
+              <span className="text-foreground">₹{formatMoney2Display(pattiData.grossAmount)}</span>
             </div>
 
             <div className="border-b border-dashed border-border pb-2">
@@ -2900,18 +2902,20 @@ const SettlementPage = () => {
               {pattiData.deductions.filter(d => d.amount > 0).map(d => (
                 <div key={d.key} className="flex justify-between">
                   <span className="text-muted-foreground">{d.label}{d.autoPulled ? ' (Auto)' : ''}</span>
-                  <span className="text-destructive">−₹{d.amount.toLocaleString()}</span>
+                  <span className="text-destructive">−₹{formatMoney2Display(d.amount)}</span>
                 </div>
               ))}
               <div className="flex justify-between font-bold border-t border-dashed border-border pt-1 mt-1">
                 <span className="text-foreground">Total Deductions</span>
-                <span className="text-destructive">−₹{pattiData.totalDeductions.toLocaleString()}</span>
+                <span className="text-destructive">−₹{formatMoney2Display(pattiData.totalDeductions)}</span>
               </div>
             </div>
 
             <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
               <span className="font-bold text-foreground">NET PAYABLE</span>
-              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{pattiData.netPayable.toLocaleString()}</span>
+              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">
+                ₹{formatMoney2Display(pattiData.netPayable)}
+              </span>
             </div>
 
             <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2 space-y-0.5">
@@ -3255,7 +3259,6 @@ const SettlementPage = () => {
                 const form = sellerFormById[seller.sellerId] ?? defaultSellerForm(seller);
                 const baseline = registeredBaselineById[seller.sellerId] ?? form;
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
-                const dirty = isSellerRegDirty(form, baseline);
                 const sellerValidationError = getSellerValidationError(seller);
                 const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
                 const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
@@ -3343,143 +3346,170 @@ const SettlementPage = () => {
                       </div>
                     ) : (
                       <>
-                    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller contact</span>
-                      <label className="flex cursor-pointer items-center gap-2 font-medium">
-                        <Checkbox
-                          className="h-4 w-4 rounded-none"
-                          checked={!form.registered}
-                          onCheckedChange={v => {
-                            const isUnregisteredChecked = v === true;
-                            const isRegistered = !isUnregisteredChecked;
-                            setSellerFormById(prev => {
-                              const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                              return {
-                                ...prev,
-                                [seller.sellerId]: {
-                                  ...cur,
-                                  registered: isRegistered,
-                                  contactSearchQuery: isRegistered ? cur.contactSearchQuery : '',
-                                },
-                              };
-                            });
-                            if (isRegistered) void runSellerContactSearch(seller.sellerId, '');
-                          }}
-                        />
-                        <span className="text-foreground">Unregistered</span>
-                      </label>
-                    </div>
-
                     <div className="mb-4 space-y-3 overflow-visible rounded-xl border border-border/50 bg-card/80 p-3 sm:p-4">
-                      <div className="grid min-w-0 grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-                        <div className="relative min-w-0">
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller contact</span>
+                        <label className="flex cursor-pointer items-center gap-2 font-medium">
+                          <Checkbox
+                            className="h-4 w-4 rounded-none"
+                            checked={form.registrationChosen && !form.registered}
+                            onCheckedChange={v => {
+                              setSellerFormById(prev => {
+                                const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                const nextChecked = v === true;
+                                return {
+                                  ...prev,
+                                  [seller.sellerId]: {
+                                    ...cur,
+                                    registrationChosen: nextChecked ? true : false,
+                                    registered: false,
+                                    contactId: nextChecked ? null : cur.contactId,
+                                    allowRegisteredEdit: false,
+                                  },
+                                };
+                              });
+                            }}
+                          />
+                          <span className="text-foreground">Unregistered</span>
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 font-medium">
+                          <Checkbox
+                            className="h-4 w-4 rounded-none"
+                            checked={form.registrationChosen && form.registered}
+                            onCheckedChange={v => {
+                              setSellerFormById(prev => {
+                                const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                const nextChecked = v === true;
+                                return {
+                                  ...prev,
+                                  [seller.sellerId]: {
+                                    ...cur,
+                                    registrationChosen: nextChecked ? true : false,
+                                    registered: true,
+                                    allowRegisteredEdit: nextChecked,
+                                  },
+                                };
+                              });
+                            }}
+                          />
+                          <span className="text-foreground">Registered</span>
+                        </label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={cn(arrSolidSm, 'min-w-0')}
+                          onClick={() => {
+                            setSellerLookupOpenForId(seller.sellerId);
+                            void runSellerContactSearch(seller.sellerId, '');
+                          }}
+                        >
+                          Unregistered / Registered Seller Mark Search
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={cn(arrSolidSm, 'min-w-0')}
+                          disabled={!!sellerRegSaving[seller.sellerId] || !form.registrationChosen || !form.registered}
+                          onClick={() => {
+                            void (async () => {
+                              if (!can('Settlement', 'Edit')) {
+                                toast.error('You do not have permission to update seller details.');
+                                return;
+                              }
+                              if (!form.contactId) {
+                                toast.error('Please search and select a registered seller first.');
+                                return;
+                              }
+                              setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
+                              try {
+                                const baselineContactId = baseline.contactId ? String(baseline.contactId) : null;
+                                const nextContactId = String(form.contactId);
+                                let reg = null as Awaited<ReturnType<typeof settlementApi.linkSellerContact>> | null;
+                                if (nextContactId && nextContactId !== baselineContactId) {
+                                  reg = await settlementApi.linkSellerContact(seller.sellerId, nextContactId);
+                                }
+                                await contactApi.update(nextContactId, {
+                                  name: form.name.trim(),
+                                  phone: form.mobile.trim(),
+                                  mark: form.mark.trim(),
+                                });
+                                const nextForm: SellerRegFormState = {
+                                  ...form,
+                                  registrationChosen: true,
+                                  registered: true,
+                                  contactId: reg?.contactId ?? nextContactId,
+                                  name: reg?.sellerName ?? form.name.trim(),
+                                  mark: reg?.sellerMark ?? form.mark.trim(),
+                                  mobile: reg?.sellerPhone ?? form.mobile.trim(),
+                                  contactSearchQuery: '',
+                                  allowRegisteredEdit: false,
+                                };
+                                setSellerFormById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
+                                setRegisteredBaselineById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
+                                setSellers(prev =>
+                                  prev.map(x =>
+                                    x.sellerId === seller.sellerId
+                                      ? {
+                                          ...x,
+                                          sellerName: nextForm.name,
+                                          sellerMark: nextForm.mark,
+                                          contactId: nextForm.contactId,
+                                          sellerPhone: nextForm.mobile,
+                                        }
+                                      : x
+                                  )
+                                );
+                                toast.success('Seller updated successfully');
+                              } catch {
+                                toast.error('Failed to update seller');
+                              } finally {
+                                setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
+                              }
+                            })();
+                          }}
+                        >
+                          Update Seller
+                        </Button>
+                      </div>
+
+                      <div className="grid min-w-0 grid-cols-1 items-end gap-2 sm:grid-cols-3">
+                        {form.registrationChosen && !form.registered && (
+                          <p className="col-span-full text-[10px] text-muted-foreground sm:col-span-3">
+                            <span className="font-semibold text-destructive">*</span> Mark and mobile are required to register this seller; name is optional.
+                          </p>
+                        )}
+                        <div className="min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Mark
+                            {form.registrationChosen && !form.registered ? (
+                              <>
+                                {' '}
+                                <span className="text-destructive">*</span>
+                                <span className="font-normal normal-case text-muted-foreground/70"> (unique)</span>
+                              </>
+                            ) : null}
                           </label>
-                          <div className="relative z-[100]">
-                            <Input
-                              value={form.mark}
-                              onChange={e => {
-                                const v = e.target.value;
-                                setSellerFormById(prev => {
-                                  const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                                  return { ...prev, [seller.sellerId]: { ...cur, mark: v } };
-                                });
-                                if (form.registered && !form.contactId) {
-                                  scheduleMarkContactSearch(seller.sellerId, v);
-                                }
-                              }}
-                              placeholder={form.registered && !form.contactId ? 'Type mark or name…' : ''}
-                              autoComplete="off"
-                              className={cn(
-                                'h-9 w-full min-w-0 rounded-lg pr-8 text-sm',
-                                form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
-                              )}
-                            />
-                            {form.registered && !form.contactId ? (
-                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                {sellerContactSearchLoading[seller.sellerId] ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Search className="h-3.5 w-3.5 opacity-70" />
-                                )}
-                              </span>
-                            ) : null}
-                            {form.registered && !form.contactId && (sellerContactSearchById[seller.sellerId] ?? []).length > 0 ? (
-                              <ul className="absolute left-0 right-0 top-full z-[200] mt-1 max-h-36 overflow-y-auto rounded-lg border border-border/50 bg-popover text-popover-foreground shadow-md">
-                                {(sellerContactSearchById[seller.sellerId] ?? []).slice(0, 12).map(c => (
-                                  <li key={c.contact_id}>
-                                    <button
-                                      type="button"
-                                      className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-xs hover:bg-muted/50"
-                                      onClick={() => {
-                                        void (async () => {
-                                          if (!can('Settlement', 'Edit')) {
-                                            toast.error('You do not have permission to link contacts.');
-                                            return;
-                                          }
-                                          setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
-                                          try {
-                                            const reg = await settlementApi.linkSellerContact(seller.sellerId, c.contact_id);
-                                            setSellers(prev =>
-                                              prev.map(x =>
-                                                x.sellerId === seller.sellerId
-                                                  ? {
-                                                      ...x,
-                                                      sellerName: reg.sellerName,
-                                                      sellerMark: reg.sellerMark,
-                                                      contactId: reg.contactId,
-                                                      sellerPhone: reg.sellerPhone,
-                                                    }
-                                                  : x
-                                              )
-                                            );
-                                            setSellerFormById(prev => ({
-                                              ...prev,
-                                              [seller.sellerId]: {
-                                                registered: true,
-                                                contactId: reg.contactId,
-                                                name: reg.sellerName,
-                                                mark: reg.sellerMark,
-                                                mobile: reg.sellerPhone,
-                                                contactSearchQuery: '',
-                                              },
-                                            }));
-                                            setRegisteredBaselineById(prev => ({
-                                              ...prev,
-                                              [seller.sellerId]: {
-                                                registered: true,
-                                                contactId: reg.contactId,
-                                                name: reg.sellerName,
-                                                mark: reg.sellerMark,
-                                                mobile: reg.sellerPhone,
-                                                contactSearchQuery: '',
-                                              },
-                                            }));
-                                            toast.success('Contact linked to this seller');
-                                          } catch {
-                                            toast.error('Could not link contact');
-                                          } finally {
-                                            setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
-                                          }
-                                        })();
-                                      }}
-                                    >
-                                      <span className="font-semibold text-foreground">{c.name}</span>
-                                      <span className="text-muted-foreground">
-                                        {c.phone}
-                                        {c.mark ? ` · ${c.mark}` : ''}
-                                      </span>
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
+                          <Input
+                            value={form.mark}
+                            onChange={e =>
+                              setSellerFormById(prev => {
+                                const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                return { ...prev, [seller.sellerId]: { ...cur, mark: e.target.value } };
+                              })
+                            }
+                            className={cn(
+                              'h-9 w-full min-w-0 rounded-lg text-sm',
+                              form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                            )}
+                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                          />
                         </div>
                         <div className="min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Seller name
+                            {form.registrationChosen && !form.registered ? (
+                              <span className="font-normal normal-case text-muted-foreground/70"> (optional)</span>
+                            ) : null}
                           </label>
                           <Input
                             value={form.name}
@@ -3491,55 +3521,137 @@ const SettlementPage = () => {
                             }
                             className={cn(
                               'h-9 min-w-0 w-full rounded-lg text-sm',
-                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                              form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
+                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                         <div className="min-w-0">
                           <label className="mb-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Mobile
+                            {form.registrationChosen && !form.registered ? (
+                              <>
+                                {' '}
+                                <span className="text-destructive">*</span>
+                                <span className="font-normal normal-case text-emerald-600 dark:text-emerald-400">
+                                  {' '}
+                                  (10 digits, unique)
+                                </span>
+                              </>
+                            ) : null}
                           </label>
                           <Input
                             value={form.mobile}
                             onChange={e =>
                               setSellerFormById(prev => {
                                 const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                                return { ...prev, [seller.sellerId]: { ...cur, mobile: e.target.value } };
+                                return {
+                                  ...prev,
+                                  [seller.sellerId]: {
+                                    ...cur,
+                                    mobile: e.target.value.replace(/\D/g, '').slice(0, 10),
+                                  },
+                                };
                               })
                             }
                             className={cn(
                               'h-9 w-full min-w-0 rounded-lg text-sm',
-                              form.registered && form.contactId && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                              form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
                             inputMode="tel"
+                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={cn(arrSolidMd, 'min-w-0 shrink-0 self-end')}
-                          disabled={
-                            !!sellerRegSaving[seller.sellerId] ||
-                            (form.registered && !form.contactId) ||
-                            (form.registered && !!form.contactId && !dirty) ||
-                            (!form.registered && (!form.name.trim() || !form.mobile.trim()))
-                          }
-                          onClick={() => {
-                            void (async () => {
-                              if (!can('Settlement', 'Edit')) {
-                                toast.error('You do not have permission to update seller contact details.');
-                                return;
-                              }
-                              if (!form.registered) {
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+                          <Checkbox
+                            className="h-4 w-4 rounded-none"
+                            checked={form.addAndChangeSeller}
+                            onCheckedChange={v =>
+                              setSellerFormById(prev => {
+                                const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                return { ...prev, [seller.sellerId]: { ...cur, addAndChangeSeller: v === true } };
+                              })
+                            }
+                          />
+                          <span>Add & change seller</span>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(arrSolidMd, 'min-w-[8rem]')}
+                            disabled={
+                              !!sellerRegSaving[seller.sellerId] ||
+                              !form.registrationChosen ||
+                              !form.mobile.trim() ||
+                              !form.mark.trim() ||
+                              form.registered
+                            }
+                            onClick={() => {
+                              void (async () => {
+                                if (!can('Settlement', 'Edit')) {
+                                  toast.error('You do not have permission to add seller details.');
+                                  return;
+                                }
                                 setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
                                 try {
+                                  const normalizedMark = form.mark.trim().toUpperCase();
+                                  const normalizedMobile = form.mobile.trim();
+                                  const normalizedName = form.name.trim() || normalizedMark;
+
+                                  if (!normalizedMark) {
+                                    toast.error('Mark is required');
+                                    return;
+                                  }
+                                  if (!normalizedMobile) {
+                                    toast.error('Mobile is required');
+                                    return;
+                                  }
+                                  if (!/^[6-9]\d{9}$/.test(normalizedMobile)) {
+                                    toast.error('Enter a valid 10-digit mobile number');
+                                    return;
+                                  }
+
+                                  const contactsRegistry = await contactApi.list({ scope: 'registry' });
+                                  const markExists = contactsRegistry.some(
+                                    c => (c.mark ?? '').trim().toLowerCase() === normalizedMark.toLowerCase()
+                                  );
+                                  if (markExists) {
+                                    toast.error('This mark is already in use by another contact');
+                                    return;
+                                  }
+                                  const mobileExists = contactsRegistry.some(
+                                    c => (c.phone ?? '').trim() === normalizedMobile
+                                  );
+                                  if (mobileExists) {
+                                    toast.error('This phone number is already registered');
+                                    return;
+                                  }
+
                                   const created = await contactApi.create({
-                                    name: form.name.trim(),
-                                    phone: form.mobile.trim(),
-                                    mark: form.mark.trim(),
+                                    name: normalizedName,
+                                    phone: normalizedMobile,
+                                    mark: normalizedMark,
                                     trader_id: '',
                                   });
                                   const reg = await settlementApi.linkSellerContact(seller.sellerId, created.contact_id);
+                                  const nextForm: SellerRegFormState = {
+                                    ...form,
+                                    registrationChosen: true,
+                                    registered: true,
+                                    contactId: reg.contactId,
+                                    name: reg.sellerName,
+                                    mark: reg.sellerMark,
+                                    mobile: reg.sellerPhone,
+                                    contactSearchQuery: '',
+                                    addAndChangeSeller: false,
+                                    allowRegisteredEdit: false,
+                                  };
+                                  setSellerFormById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
+                                  setRegisteredBaselineById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
                                   setSellers(prev =>
                                     prev.map(x =>
                                       x.sellerId === seller.sellerId
@@ -3553,68 +3665,48 @@ const SettlementPage = () => {
                                         : x
                                     )
                                   );
-                                  const nextForm: SellerRegFormState = {
-                                    registered: true,
-                                    contactId: reg.contactId,
-                                    name: reg.sellerName,
-                                    mark: reg.sellerMark,
-                                    mobile: reg.sellerPhone,
-                                    contactSearchQuery: '',
-                                  };
-                                  setSellerFormById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
-                                  setRegisteredBaselineById(prev => ({ ...prev, [seller.sellerId]: nextForm }));
-                                  toast.success('Seller contact registered and linked');
+                                  toast.success(
+                                    form.addAndChangeSeller
+                                      ? 'Seller added and changed for this sales bill'
+                                      : 'Seller added successfully'
+                                  );
                                 } catch (e) {
-                                  toast.error(e instanceof Error ? e.message : 'Registration failed');
+                                  if (e instanceof ContactApiError && e.errorKey === 'markexists') {
+                                    toast.error(e.message || 'This mark is already in use by another contact');
+                                    return;
+                                  }
+                                  if (e instanceof ContactApiError && e.errorKey === 'phoneexistsinactive') {
+                                    toast.error('Phone exists on inactive contact. Restore it from Contacts module first.');
+                                    return;
+                                  }
+                                  toast.error(e instanceof Error ? e.message : 'Failed to add seller');
                                 } finally {
                                   setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
                                 }
-                                return;
-                              }
-                              if (!form.contactId) {
-                                toast.message('Select a registered contact from search, or uncheck Registered to onboard.');
-                                return;
-                              }
-                              setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
-                              try {
-                                await contactApi.update(form.contactId, {
-                                  name: form.name.trim(),
-                                  phone: form.mobile.trim(),
-                                  mark: form.mark.trim(),
-                                });
-                                setRegisteredBaselineById(prev => ({
-                                  ...prev,
-                                  [seller.sellerId]: { ...form, contactSearchQuery: '' },
-                                }));
-                                setSellers(prev =>
-                                  prev.map(x =>
-                                    x.sellerId === seller.sellerId
-                                      ? {
-                                          ...x,
-                                          sellerName: form.name.trim(),
-                                          sellerMark: form.mark.trim(),
-                                          sellerPhone: form.mobile.trim(),
-                                        }
-                                      : x
-                                  )
-                                );
-                                toast.success('Contact updated');
-                              } catch {
-                                toast.error('Update failed');
-                              } finally {
-                                setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
-                              }
-                            })();
-                          }}
-                        >
-                          {!form.registered
-                            ? 'Register Seller'
-                            : !form.contactId
-                              ? 'Select Contact'
-                              : dirty
-                                ? 'Update'
-                                : 'Up To Date'}
-                        </Button>
+                              })();
+                            }}
+                          >
+                            Add
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(arrOutlineMd, 'min-w-[7rem]')}
+                            onClick={() => {
+                              setSellerFormById(prev => ({
+                                ...prev,
+                                [seller.sellerId]: {
+                                  ...(registeredBaselineById[seller.sellerId] ?? defaultSellerForm(seller)),
+                                  addAndChangeSeller: false,
+                                  allowRegisteredEdit: false,
+                                  contactSearchQuery: '',
+                                },
+                              }));
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
                       </div>
                     </div>
 
@@ -4166,6 +4258,164 @@ const SettlementPage = () => {
               )}
             </div>
           </motion.div>
+
+          <Dialog
+            open={sellerLookupOpenForId != null}
+            onOpenChange={open => {
+              if (!open) setSellerLookupOpenForId(null);
+            }}
+          >
+            <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
+              <div className="border-b border-border/50 bg-muted/30 px-5 py-4 sm:px-6">
+                <DialogHeader className="space-y-1.5">
+                  <DialogTitle className="text-base font-bold tracking-tight">Unregistered / Registered Seller Mark Search</DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    Search contacts to verify seller status. If Registered is checked, you can also pick a registered contact for update.
+                  </DialogDescription>
+                </DialogHeader>
+              </div>
+              <div className="space-y-3 px-4 py-4 sm:px-5">
+                {(() => {
+                  const sid = sellerLookupOpenForId;
+                  const query = sid ? (sellerFormById[sid]?.contactSearchQuery ?? '').trim().toLowerCase() : '';
+                  const canPickRegistered = !!sid && !!sellerFormById[sid]?.registrationChosen && !!sellerFormById[sid]?.registered;
+                  const registeredRows = sid ? (sellerContactSearchById[sid] ?? []) : [];
+                  const tempRows = sellers.filter(s => {
+                    const noLinkedContact = s.contactId == null || String(s.contactId).trim() === '';
+                    if (!noLinkedContact) return false;
+                    if (!query) return true;
+                    const hay = `${s.sellerName ?? ''} ${s.sellerMark ?? ''} ${s.sellerPhone ?? ''}`.toLowerCase();
+                    return hay.includes(query);
+                  });
+                  return (
+                    <>
+                <div className="relative">
+                  <Input
+                    value={
+                      sellerLookupOpenForId
+                        ? (sellerFormById[sellerLookupOpenForId]?.contactSearchQuery ?? '')
+                        : ''
+                    }
+                    onChange={e => {
+                      if (!sellerLookupOpenForId) return;
+                      const q = e.target.value;
+                      setSellerFormById(prev => {
+                        const sid = sellerLookupOpenForId;
+                        if (!sid) return prev;
+                        const cur = prev[sid] ?? {
+                          registrationChosen: false,
+                          registered: true,
+                          contactId: null,
+                          mark: '',
+                          name: '',
+                          mobile: '',
+                          contactSearchQuery: '',
+                          addAndChangeSeller: false,
+                          allowRegisteredEdit: false,
+                        };
+                        return { ...prev, [sid]: { ...cur, contactSearchQuery: q } };
+                      });
+                      scheduleMarkContactSearch(sellerLookupOpenForId, q);
+                    }}
+                    placeholder="Search by mark, name, or mobile..."
+                    className="h-9 pr-8 text-sm"
+                  />
+                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {sellerLookupOpenForId && sellerContactSearchLoading[sellerLookupOpenForId] ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Search className="h-3.5 w-3.5 opacity-70" />
+                    )}
+                  </span>
+                </div>
+                <div className="max-h-[18rem] overflow-y-auto rounded-xl border border-border/50 bg-card/70">
+                  {registeredRows.length === 0 && tempRows.length === 0 ? (
+                    <p className="px-3 py-6 text-center text-xs text-muted-foreground">No sellers found.</p>
+                  ) : (
+                    <ul>
+                      {registeredRows.slice(0, 30).map(c => (
+                        <li key={c.contact_id} className="border-b border-border/30 last:border-b-0">
+                          <button
+                            type="button"
+                            disabled={!canPickRegistered}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-3 px-3 py-2 text-left',
+                              canPickRegistered ? 'hover:bg-muted/40' : 'cursor-default'
+                            )}
+                            onClick={() => {
+                              if (!sid || !canPickRegistered) return;
+                              setSellerFormById(prev => {
+                                const cur = prev[sid] ?? {
+                                  registrationChosen: false,
+                                  registered: true,
+                                  contactId: null,
+                                  mark: '',
+                                  name: '',
+                                  mobile: '',
+                                  contactSearchQuery: '',
+                                  addAndChangeSeller: false,
+                                  allowRegisteredEdit: false,
+                                };
+                                return {
+                                  ...prev,
+                                  [sid]: {
+                                    ...cur,
+                                    registrationChosen: true,
+                                    registered: true,
+                                    contactId: String(c.contact_id),
+                                    mark: c.mark ?? '',
+                                    name: c.name ?? '',
+                                    mobile: c.phone ?? '',
+                                    allowRegisteredEdit: true,
+                                    contactSearchQuery: '',
+                                  },
+                                };
+                              });
+                              setSellerLookupOpenForId(null);
+                              toast.success('Registered seller selected. You can update now.');
+                            }}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">{c.name}</span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {c.phone}
+                                {c.mark ? ` · ${c.mark}` : ''}
+                              </span>
+                            </span>
+                            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              {canPickRegistered ? 'Registered · Select' : 'Registered'}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                      {tempRows.slice(0, 30).map(s => (
+                        <li key={`temp-${s.sellerId}`} className="border-b border-border/30 last:border-b-0">
+                          <div className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">{s.sellerName || '-'}</span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {s.sellerPhone || '-'}
+                                {s.sellerMark ? ` · ${s.sellerMark}` : ''}
+                              </span>
+                            </span>
+                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Temporary</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                    </>
+                  );
+                })()}
+              </div>
+              <DialogFooter className="border-t border-border/50 bg-muted/20 px-4 py-3 sm:px-5">
+                <Button type="button" variant="outline" className={arrOutlineMd} onClick={() => setSellerLookupOpenForId(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog
             open={vehicleExpenseModalOpen}
