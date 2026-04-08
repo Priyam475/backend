@@ -677,4 +677,182 @@ public final class SettlementDTOs {
             this.payableInvoiced = payableInvoiced;
         }
     }
+
+    /** Create a temporary settlement voucher row (no fetch/list flow yet). */
+    public static class SettlementVoucherTempCreateRequest implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @NotBlank
+        private String voucherName;
+
+        private String description;
+
+        @NotNull
+        private BigDecimal expenseAmount;
+
+        public String getVoucherName() {
+            return voucherName;
+        }
+
+        public void setVoucherName(String voucherName) {
+            this.voucherName = voucherName;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public BigDecimal getExpenseAmount() {
+            return expenseAmount;
+        }
+
+        public void setExpenseAmount(BigDecimal expenseAmount) {
+            this.expenseAmount = expenseAmount;
+        }
+    }
+
+    public static class SettlementVoucherTempDTO implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private Long id;
+        private String sellerId;
+        private String voucherName;
+        private String description;
+        private BigDecimal expenseAmount;
+        private Instant createdAt;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getSellerId() {
+            return sellerId;
+        }
+
+        public void setSellerId(String sellerId) {
+            this.sellerId = sellerId;
+        }
+
+        public String getVoucherName() {
+            return voucherName;
+        }
+
+        public void setVoucherName(String voucherName) {
+            this.voucherName = voucherName;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public BigDecimal getExpenseAmount() {
+            return expenseAmount;
+        }
+
+        public void setExpenseAmount(BigDecimal expenseAmount) {
+            this.expenseAmount = expenseAmount;
+        }
+
+        public Instant getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(Instant createdAt) {
+            this.createdAt = createdAt;
+        }
+    }
+
+    public static class SettlementVoucherTempUpsertRowDTO implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private Long id;
+        @NotBlank
+        private String voucherName;
+        private String description;
+        @NotNull
+        private BigDecimal expenseAmount;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public String getVoucherName() {
+            return voucherName;
+        }
+
+        public void setVoucherName(String voucherName) {
+            this.voucherName = voucherName;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public void setDescription(String description) {
+            this.description = description;
+        }
+
+        public BigDecimal getExpenseAmount() {
+            return expenseAmount;
+        }
+
+        public void setExpenseAmount(BigDecimal expenseAmount) {
+            this.expenseAmount = expenseAmount;
+        }
+    }
+
+    public static class SettlementVoucherTempUpsertRequest implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        @NotNull
+        @Valid
+        private List<SettlementVoucherTempUpsertRowDTO> rows = new ArrayList<>();
+
+        public List<SettlementVoucherTempUpsertRowDTO> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<SettlementVoucherTempUpsertRowDTO> rows) {
+            this.rows = rows;
+        }
+    }
+
+    public static class SettlementVoucherTempListResponse implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private List<SettlementVoucherTempDTO> rows = new ArrayList<>();
+        private BigDecimal totalExpenseAmount = BigDecimal.ZERO;
+
+        public List<SettlementVoucherTempDTO> getRows() {
+            return rows;
+        }
+
+        public void setRows(List<SettlementVoucherTempDTO> rows) {
+            this.rows = rows;
+        }
+
+        public BigDecimal getTotalExpenseAmount() {
+            return totalExpenseAmount;
+        }
+
+        public void setTotalExpenseAmount(BigDecimal totalExpenseAmount) {
+            this.totalExpenseAmount = totalExpenseAmount;
+        }
+    }
 }

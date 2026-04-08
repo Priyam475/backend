@@ -163,6 +163,33 @@ export interface QuickExpenseStateRowDTO {
   gunniesCurrent: number;
 }
 
+export interface SettlementVoucherTempCreateRequestDTO {
+  voucherName: string;
+  description?: string;
+  expenseAmount: number;
+}
+
+export interface SettlementVoucherTempDTO {
+  id: number;
+  sellerId: string;
+  voucherName: string;
+  description?: string;
+  expenseAmount: number;
+  createdAt?: string;
+}
+
+export interface SettlementVoucherTempUpsertRowDTO {
+  id?: number;
+  voucherName: string;
+  description?: string;
+  expenseAmount: number;
+}
+
+export interface SettlementVoucherTempListResponseDTO {
+  rows: SettlementVoucherTempDTO[];
+  totalExpenseAmount: number;
+}
+
 export interface ListSellersParams {
   page?: number;
   size?: number;
@@ -366,6 +393,68 @@ export const settlementApi = {
       sellerName: String(data.sellerName ?? ''),
       sellerMark: String(data.sellerMark ?? ''),
       sellerPhone: String(data.sellerPhone ?? ''),
+    };
+  },
+
+  async createTemporaryVoucher(
+    sellerId: string,
+    body: SettlementVoucherTempCreateRequestDTO
+  ): Promise<SettlementVoucherTempDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/vouchers/temp`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to save voucher');
+    const data = await res.json();
+    return {
+      id: Number(data.id ?? 0),
+      sellerId: String(data.sellerId ?? sellerId),
+      voucherName: String(data.voucherName ?? ''),
+      description: data.description != null ? String(data.description) : undefined,
+      expenseAmount: Number(data.expenseAmount ?? 0),
+      createdAt: data.createdAt != null ? String(data.createdAt) : undefined,
+    };
+  },
+
+  async listTemporaryVouchers(sellerId: string): Promise<SettlementVoucherTempListResponseDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/vouchers/temp`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load vouchers');
+    const data = await res.json();
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    return {
+      rows: rows.map((r: Record<string, unknown>) => ({
+        id: Number(r.id ?? 0),
+        sellerId: String(r.sellerId ?? sellerId),
+        voucherName: String(r.voucherName ?? ''),
+        description: r.description != null ? String(r.description) : undefined,
+        expenseAmount: Number(r.expenseAmount ?? 0),
+        createdAt: r.createdAt != null ? String(r.createdAt) : undefined,
+      })),
+      totalExpenseAmount: Number(data?.totalExpenseAmount ?? 0),
+    };
+  },
+
+  async saveTemporaryVouchers(
+    sellerId: string,
+    rows: SettlementVoucherTempUpsertRowDTO[]
+  ): Promise<SettlementVoucherTempListResponseDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sellerId)}/vouchers/temp`, {
+      method: 'PUT',
+      body: JSON.stringify({ rows }),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to save vouchers');
+    const data = await res.json();
+    const outRows = Array.isArray(data?.rows) ? data.rows : [];
+    return {
+      rows: outRows.map((r: Record<string, unknown>) => ({
+        id: Number(r.id ?? 0),
+        sellerId: String(r.sellerId ?? sellerId),
+        voucherName: String(r.voucherName ?? ''),
+        description: r.description != null ? String(r.description) : undefined,
+        expenseAmount: Number(r.expenseAmount ?? 0),
+        createdAt: r.createdAt != null ? String(r.createdAt) : undefined,
+      })),
+      totalExpenseAmount: Number(data?.totalExpenseAmount ?? 0),
     };
   },
 };

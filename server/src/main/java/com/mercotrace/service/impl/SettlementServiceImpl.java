@@ -16,6 +16,7 @@ import com.mercotrace.repository.SalesBillRepository;
 import com.mercotrace.repository.SalesBillLineItemRepository;
 import com.mercotrace.repository.SellerInVehicleRepository;
 import com.mercotrace.repository.SettlementQuickExpenseStateRepository;
+import com.mercotrace.repository.SettlementVoucherTempRepository;
 import com.mercotrace.repository.VehicleRepository;
 import com.mercotrace.repository.VehicleWeightRepository;
 import com.mercotrace.repository.VoucherLineRepository;
@@ -74,6 +75,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final SalesBillLineItemRepository salesBillLineItemRepository;
     private final SalesBillRepository salesBillRepository;
     private final SettlementQuickExpenseStateRepository settlementQuickExpenseStateRepository;
+    private final SettlementVoucherTempRepository settlementVoucherTempRepository;
     private final ContactService contactService;
     private final HamaliSlabRepository hamaliSlabRepository;
     private final CommodityConfigRepository commodityConfigRepository;
@@ -97,6 +99,7 @@ public class SettlementServiceImpl implements SettlementService {
         SalesBillLineItemRepository salesBillLineItemRepository,
         SalesBillRepository salesBillRepository,
         SettlementQuickExpenseStateRepository settlementQuickExpenseStateRepository,
+        SettlementVoucherTempRepository settlementVoucherTempRepository,
         ContactService contactService,
         HamaliSlabRepository hamaliSlabRepository,
         CommodityConfigRepository commodityConfigRepository,
@@ -119,6 +122,7 @@ public class SettlementServiceImpl implements SettlementService {
         this.salesBillLineItemRepository = salesBillLineItemRepository;
         this.salesBillRepository = salesBillRepository;
         this.settlementQuickExpenseStateRepository = settlementQuickExpenseStateRepository;
+        this.settlementVoucherTempRepository = settlementVoucherTempRepository;
         this.contactService = contactService;
         this.hamaliSlabRepository = hamaliSlabRepository;
         this.commodityConfigRepository = commodityConfigRepository;
@@ -938,6 +942,136 @@ public class SettlementServiceImpl implements SettlementService {
         out.setSellerPhone(c.getPhone() != null ? c.getPhone() : "");
         return out;
     }
+
+    @Override
+    @Transactional
+    public SettlementVoucherTempDTO createSettlementVoucherTemp(String sellerId, SettlementVoucherTempCreateRequest request) {
+        if (sellerId == null || sellerId.isBlank()) {
+            throw new IllegalArgumentException("sellerId is required");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("Voucher payload is required");
+        }
+        String normalizedName = request.getVoucherName() != null ? request.getVoucherName().trim() : "";
+        if (normalizedName.isBlank()) {
+            throw new IllegalArgumentException("Voucher name is required");
+        }
+        BigDecimal amount = clampMoney(request.getExpenseAmount());
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            throw new IllegalArgumentException("Trader context required");
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid seller id");
+        }
+        if (lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId).isEmpty()) {
+            throw new IllegalArgumentException("Seller not in scope for this trader");
+        }
+
+        SettlementVoucherTemp entity = new SettlementVoucherTemp();
+        entity.setTraderId(traderId);
+        entity.setSellerId(sellerId.trim());
+        entity.setVoucherName(normalizedName);
+        entity.setDescription(request.getDescription() != null ? request.getDescription().trim() : null);
+        entity.setExpenseAmount(amount);
+        SettlementVoucherTemp saved = settlementVoucherTempRepository.save(entity);
+
+        SettlementVoucherTempDTO dto = new SettlementVoucherTempDTO();
+        dto.setId(saved.getId());
+        dto.setSellerId(saved.getSellerId());
+        dto.setVoucherName(saved.getVoucherName());
+        dto.setDescription(saved.getDescription());
+        dto.setExpenseAmount(saved.getExpenseAmount());
+        dto.setCreatedAt(saved.getCreatedDate());
+        return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SettlementVoucherTempListResponse listSettlementVoucherTemps(String sellerId) {
+        Scope scope = validateSellerScope(sellerId);
+        List<SettlementVoucherTempDTO> rows = settlementVoucherTempRepository
+            .findAllByTraderIdAndSellerIdOrderByCreatedDateAsc(scope.traderId(), scope.sellerId())
+            .stream()
+            .map(this::toSettlementVoucherTempDTO)
+            .toList();
+        SettlementVoucherTempListResponse out = new SettlementVoucherTempListResponse();
+        out.setRows(rows);
+        out.setTotalExpenseAmount(rows.stream().map(SettlementVoucherTempDTO::getExpenseAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
+        return out;
+    }
+
+    @Override
+    @Transactional
+    public SettlementVoucherTempListResponse saveSettlementVoucherTemps(String sellerId, SettlementVoucherTempUpsertRequest request) {
+        Scope scope = validateSellerScope(sellerId);
+        if (request == null || request.getRows() == null) {
+            throw new IllegalArgumentException("Voucher rows are required");
+        }
+        settlementVoucherTempRepository.deleteAllByTraderIdAndSellerId(scope.traderId(), scope.sellerId());
+        List<SettlementVoucherTempDTO> savedRows = new ArrayList<>();
+        for (SettlementVoucherTempUpsertRowDTO row : request.getRows()) {
+            if (row == null) {
+                continue;
+            }
+            String name = row.getVoucherName() != null ? row.getVoucherName().trim() : "";
+            if (name.isBlank()) {
+                continue;
+            }
+            BigDecimal amount = clampMoney(row.getExpenseAmount());
+            if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            SettlementVoucherTemp entity = new SettlementVoucherTemp();
+            entity.setTraderId(scope.traderId());
+            entity.setSellerId(scope.sellerId());
+            entity.setVoucherName(name);
+            entity.setDescription(row.getDescription() != null ? row.getDescription().trim() : null);
+            entity.setExpenseAmount(amount);
+            savedRows.add(toSettlementVoucherTempDTO(settlementVoucherTempRepository.save(entity)));
+        }
+
+        SettlementVoucherTempListResponse out = new SettlementVoucherTempListResponse();
+        out.setRows(savedRows);
+        out.setTotalExpenseAmount(savedRows.stream().map(SettlementVoucherTempDTO::getExpenseAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
+        return out;
+    }
+
+    private SettlementVoucherTempDTO toSettlementVoucherTempDTO(SettlementVoucherTemp saved) {
+        SettlementVoucherTempDTO dto = new SettlementVoucherTempDTO();
+        dto.setId(saved.getId());
+        dto.setSellerId(saved.getSellerId());
+        dto.setVoucherName(saved.getVoucherName());
+        dto.setDescription(saved.getDescription());
+        dto.setExpenseAmount(saved.getExpenseAmount());
+        dto.setCreatedAt(saved.getCreatedDate());
+        return dto;
+    }
+
+    private Scope validateSellerScope(String sellerId) {
+        if (sellerId == null || sellerId.isBlank()) {
+            throw new IllegalArgumentException("sellerId is required");
+        }
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            throw new IllegalArgumentException("Trader context required");
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid seller id");
+        }
+        if (lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId).isEmpty()) {
+            throw new IllegalArgumentException("Seller not in scope for this trader");
+        }
+        return new Scope(traderId, sellerId.trim());
+    }
+
+    private record Scope(Long traderId, String sellerId) {}
 
     private PattiDTO toPattiDTO(Patti e) {
         PattiDTO dto = new PattiDTO();

@@ -79,4 +79,19 @@ public interface SettlementService {
      * Link a settlement seller row ({@code seller_in_vehicle} id) to an existing contact (registered trader).
      */
     SellerRegistrationDTO linkSellerContact(String sellerVehicleId, LinkSellerContactRequest request);
+
+    /**
+     * Create a temporary voucher entry for Settlement seller and return persisted row.
+     */
+    SettlementVoucherTempDTO createSettlementVoucherTemp(String sellerId, SettlementVoucherTempCreateRequest request);
+
+    /**
+     * List temporary settlement vouchers for one seller.
+     */
+    SettlementVoucherTempListResponse listSettlementVoucherTemps(String sellerId);
+
+    /**
+     * Replace seller temporary vouchers with current rows and return saved rows + total.
+     */
+    SettlementVoucherTempListResponse saveSettlementVoucherTemps(String sellerId, SettlementVoucherTempUpsertRequest request);
 }

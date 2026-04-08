@@ -147,6 +147,49 @@ public class SettlementResource {
     }
 
     /**
+     * {@code POST /api/settlements/sellers/:sellerId/vouchers/temp} :
+     * create a temporary settlement voucher row to be migrated later.
+     */
+    @PostMapping("/sellers/{sellerId}/vouchers/temp")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
+    public ResponseEntity<SettlementVoucherTempDTO> createSettlementVoucherTemp(
+        @PathVariable String sellerId,
+        @Valid @RequestBody SettlementVoucherTempCreateRequest request
+    ) {
+        LOG.debug("REST request to create temporary settlement voucher for sellerId : {}", sellerId);
+        try {
+            return ResponseEntity.ok(settlementService.createSettlementVoucherTemp(sellerId, request));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "createtempvoucherfailed");
+        }
+    }
+
+    @GetMapping("/sellers/{sellerId}/vouchers/temp")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<SettlementVoucherTempListResponse> listSettlementVoucherTemps(@PathVariable String sellerId) {
+        LOG.debug("REST request to list temporary settlement vouchers for sellerId : {}", sellerId);
+        try {
+            return ResponseEntity.ok(settlementService.listSettlementVoucherTemps(sellerId));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "listtempvoucherfailed");
+        }
+    }
+
+    @PutMapping("/sellers/{sellerId}/vouchers/temp")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
+    public ResponseEntity<SettlementVoucherTempListResponse> saveSettlementVoucherTemps(
+        @PathVariable String sellerId,
+        @Valid @RequestBody SettlementVoucherTempUpsertRequest request
+    ) {
+        LOG.debug("REST request to save temporary settlement vouchers for sellerId : {}", sellerId);
+        try {
+            return ResponseEntity.ok(settlementService.saveSettlementVoucherTemps(sellerId, request));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "savetempvoucherfailed");
+        }
+    }
+
+    /**
      * {@code GET /api/settlements/pattis/next-base-number} :
      * reserve next Sales Patti base number (digits only).
      */

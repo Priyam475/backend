@@ -556,14 +556,12 @@ interface VehicleExpenseRow {
 type VehicleExpenseField = 'freight' | 'unloading' | 'weighing' | 'gunnies';
 type VehicleExpenseFieldValues = Pick<VehicleExpenseRow, VehicleExpenseField>;
 
-/** Add Voucher modal — selection maps to cash advance later (API TBD). */
-interface VoucherPickRow {
-  id: string;
-  voucher: string;
-  narration: string;
-  receivable: number;
-  remaining: number;
-  received: number;
+interface AddVoucherRowState {
+  id?: number;
+  localId: string;
+  voucherName: string;
+  description: string;
+  expenseAmount: string;
 }
 
 /** Distribute total lot weight across entries (billing total or sum of entry weights). */
@@ -967,10 +965,51 @@ const SettlementPage = () => {
   }, [settlementWeighingEnabled]);
 
   const [addVoucherSellerId, setAddVoucherSellerId] = useState<string | null>(null);
-  const [voucherSearchVoucherName, setVoucherSearchVoucherName] = useState('');
-  const [voucherSearchName, setVoucherSearchName] = useState('');
-  const [voucherPickRows, setVoucherPickRows] = useState<VoucherPickRow[]>([]);
-  const [selectedVoucherRowIds, setSelectedVoucherRowIds] = useState<Record<string, boolean>>({});
+  const [addVoucherRows, setAddVoucherRows] = useState<AddVoucherRowState[]>([]);
+  const [addVoucherLoading, setAddVoucherLoading] = useState(false);
+  const [addVoucherSaving, setAddVoucherSaving] = useState(false);
+  const [unloadingDraftBySellerId, setUnloadingDraftBySellerId] = useState<Record<string, string>>({});
+  const [weighmanDraftBySellerId, setWeighmanDraftBySellerId] = useState<Record<string, string>>({});
+
+  const buildEmptyVoucherRow = useCallback((): AddVoucherRowState => ({
+    localId: `v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    voucherName: '',
+    description: '',
+    expenseAmount: '',
+  }), []);
+
+  useEffect(() => {
+    if (!addVoucherSellerId) return;
+    let cancelled = false;
+    setAddVoucherLoading(true);
+    (async () => {
+      try {
+        const response = await settlementApi.listTemporaryVouchers(addVoucherSellerId);
+        if (cancelled) return;
+        const rows =
+          response.rows.length > 0
+            ? response.rows.map(r => ({
+                id: r.id,
+                localId: `v_${r.id ?? Math.random().toString(36).slice(2, 8)}`,
+                voucherName: r.voucherName ?? '',
+                description: r.description ?? '',
+                expenseAmount: (Number(r.expenseAmount ?? 0) || 0).toFixed(2),
+              }))
+            : [buildEmptyVoucherRow()];
+        setAddVoucherRows(rows);
+      } catch {
+        if (!cancelled) {
+          setAddVoucherRows([buildEmptyVoucherRow()]);
+          toast.error('Failed to load vouchers.');
+        }
+      } finally {
+        if (!cancelled) setAddVoucherLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [addVoucherSellerId, buildEmptyVoucherRow]);
 
   /** Per-seller per-lot edits for Sales report qty / weight / rate per bag. */
   const [lotSalesOverridesBySellerId, setLotSalesOverridesBySellerId] = useState<
@@ -4065,17 +4104,29 @@ const SettlementPage = () => {
                                 />
                               </span>
                               <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
+                                type="text"
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.unloading === 0 ? '' : exp.unloading}
+                                value={
+                                  unloadingDraftBySellerId[seller.sellerId] ??
+                                  (exp.unloading === 0 ? '' : exp.unloading.toFixed(2))
+                                }
                                 onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  const raw = e.target.value;
+                                  if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
+                                  setUnloadingDraftBySellerId(prev => ({ ...prev, [seller.sellerId]: raw }));
+                                }}
+                                onBlur={() => {
+                                  const raw = unloadingDraftBySellerId[seller.sellerId] ?? '';
+                                  const v = clampMoney(parseFloat(raw) || 0);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
                                     return { ...prev, [seller.sellerId]: { ...e0, unloading: v } };
+                                  });
+                                  setUnloadingDraftBySellerId(prev => {
+                                    const next = { ...prev };
+                                    delete next[seller.sellerId];
+                                    return next;
                                   });
                                 }}
                                 aria-label="Unloading amount"
@@ -4098,9 +4149,7 @@ const SettlementPage = () => {
                                 />
                               </span>
                               <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
+                                type="text"
                                 inputMode="decimal"
                                 disabled={!settlementWeighingEnabled}
                                 className={cn(
@@ -4110,13 +4159,27 @@ const SettlementPage = () => {
                                     'opacity-80'
                                 )}
                                 value={
-                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman
+                                  !settlementWeighingEnabled
+                                    ? ''
+                                    : weighmanDraftBySellerId[seller.sellerId] ??
+                                      (exp.weighman === 0 ? '' : exp.weighman.toFixed(2))
                                 }
                                 onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                                  const raw = e.target.value;
+                                  if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
+                                  setWeighmanDraftBySellerId(prev => ({ ...prev, [seller.sellerId]: raw }));
+                                }}
+                                onBlur={() => {
+                                  const raw = weighmanDraftBySellerId[seller.sellerId] ?? '';
+                                  const v = clampMoney(parseFloat(raw) || 0);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
                                     return { ...prev, [seller.sellerId]: { ...e0, weighman: v } };
+                                  });
+                                  setWeighmanDraftBySellerId(prev => {
+                                    const next = { ...prev };
+                                    delete next[seller.sellerId];
+                                    return next;
                                   });
                                 }}
                                 aria-label="Weighing charges"
@@ -4234,10 +4297,6 @@ const SettlementPage = () => {
                         className={cn(arrOutlineMd, 'gap-1.5')}
                         onClick={() => {
                           setAddVoucherSellerId(seller.sellerId);
-                          setVoucherSearchVoucherName('');
-                          setVoucherSearchName('');
-                          setVoucherPickRows([]);
-                          setSelectedVoucherRowIds({});
                         }}
                       >
                         Add Voucher
@@ -4682,118 +4741,84 @@ const SettlementPage = () => {
                 <DialogHeader className="space-y-1 text-left">
                   <DialogTitle className="text-base font-bold tracking-tight">Add Voucher</DialogTitle>
                   <DialogDescription className="text-[11px] text-muted-foreground">
-                    Select rows to add; cash advance link comes later.
+                    Add or edit multiple voucher rows. Total is synced to Others charges.
                   </DialogDescription>
                 </DialogHeader>
               </div>
               <div className="space-y-3 px-4 py-3 sm:px-5">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <label htmlFor="add-voucher-name-filter" className="text-[10px] font-semibold uppercase text-muted-foreground">
-                      Enter Voucher Name
-                    </label>
-                    <Input
-                      id="add-voucher-name-filter"
-                      value={voucherSearchVoucherName}
-                      onChange={e => setVoucherSearchVoucherName(e.target.value)}
-                      placeholder="Voucher name…"
-                      className="h-9 rounded-lg text-sm"
-                      autoComplete="off"
-                    />
+                {addVoucherLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading vouchers...
                   </div>
-                  <div className="space-y-1">
-                    <label htmlFor="add-voucher-enter-name" className="text-[10px] font-semibold uppercase text-muted-foreground">
-                      Enter Name
-                    </label>
-                    <Input
-                      id="add-voucher-enter-name"
-                      value={voucherSearchName}
-                      onChange={e => setVoucherSearchName(e.target.value)}
-                      placeholder="Name…"
-                      className="h-9 rounded-lg text-sm"
-                      autoComplete="off"
-                    />
+                ) : (
+                  <div className="space-y-2">
+                    {addVoucherRows.map((row, idx) => (
+                      <div key={row.localId} className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                        <Input
+                          value={row.voucherName}
+                          onChange={e =>
+                            setAddVoucherRows(prev =>
+                              prev.map(r => (r.localId === row.localId ? { ...r, voucherName: e.target.value } : r))
+                            )
+                          }
+                          placeholder="Voucher name"
+                          className="h-9 rounded-lg text-sm"
+                          autoComplete="off"
+                        />
+                        <Input
+                          value={row.description}
+                          onChange={e =>
+                            setAddVoucherRows(prev =>
+                              prev.map(r => (r.localId === row.localId ? { ...r, description: e.target.value } : r))
+                            )
+                          }
+                          placeholder="Description"
+                          className="h-9 rounded-lg text-sm"
+                          autoComplete="off"
+                        />
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.expenseAmount}
+                            onChange={e => {
+                              const raw = e.target.value;
+                              if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
+                              setAddVoucherRows(prev =>
+                                prev.map(r => (r.localId === row.localId ? { ...r, expenseAmount: raw } : r))
+                              );
+                            }}
+                            placeholder="0.00"
+                            className="h-9 rounded-lg text-sm"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={arrOutlineSm}
+                            disabled={addVoucherRows.length === 1}
+                            onClick={() => {
+                              setAddVoucherRows(prev => (prev.length > 1 ? prev.filter(r => r.localId !== row.localId) : prev));
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={arrOutlineSm}
+                        onClick={() => setAddVoucherRows(prev => [...prev, buildEmptyVoucherRow()])}
+                      >
+                        <PlusCircle className="h-3.5 w-3.5" />
+                        Add Row
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={arrOutlineSm}
-                  onClick={() => {
-                    const pk = addVoucherSellerId ?? 'x';
-                    const base: VoucherPickRow[] = [
-                      {
-                        id: `${pk}-v1`,
-                        voucher: voucherSearchVoucherName.trim() || 'VOU-2026-0001',
-                        narration: 'Receivable — on account',
-                        receivable: 125000,
-                        remaining: 42000,
-                        received: 83000,
-                      },
-                      {
-                        id: `${pk}-v2`,
-                        voucher: voucherSearchVoucherName.trim() ? `${voucherSearchVoucherName.trim()}-002` : 'VOU-2026-0002',
-                        narration: 'Advance — pending allocation',
-                        receivable: 45000,
-                        remaining: 45000,
-                        received: 0,
-                      },
-                    ];
-                    const q = voucherSearchName.trim().toLowerCase();
-                    const rows = q
-                      ? base.filter(r => r.narration.toLowerCase().includes(q) || r.voucher.toLowerCase().includes(q))
-                      : base;
-                    setVoucherPickRows(rows.length > 0 ? rows : base);
-                    setSelectedVoucherRowIds({});
-                  }}
-                >
-                  Get Voucher
-                </Button>
-              </div>
-              <div className="px-4 pb-3 sm:px-5">
-                <div className="overflow-x-auto rounded-lg border border-border/50">
-                  <table className="w-full min-w-[700px] border-collapse text-left text-[11px]">
-                    <thead>
-                      <tr className="border-b border-border/60 bg-muted/40">
-                        <th className="w-10 px-2 py-2 text-center font-semibold text-muted-foreground">Action</th>
-                        <th className="px-2 py-2 font-semibold text-muted-foreground">Voucher</th>
-                        <th className="px-2 py-2 font-semibold text-muted-foreground">Narration</th>
-                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Receivable</th>
-                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Remaining</th>
-                        <th className="px-2 py-2 text-right font-semibold text-muted-foreground">Received</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {voucherPickRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
-                            Use Get Voucher to load rows.
-                          </td>
-                        </tr>
-                      ) : (
-                        voucherPickRows.map(row => (
-                          <tr key={row.id} className="border-b border-border/40 odd:bg-background even:bg-muted/15">
-                            <td className="px-2 py-2 text-center align-middle">
-                              <Checkbox
-                                checked={selectedVoucherRowIds[row.id] === true}
-                                onCheckedChange={v => {
-                                  const on = v === true;
-                                  setSelectedVoucherRowIds(prev => ({ ...prev, [row.id]: on }));
-                                }}
-                                aria-label={`Select ${row.voucher}`}
-                              />
-                            </td>
-                            <td className="px-2 py-2 align-middle font-medium text-foreground">{row.voucher}</td>
-                            <td className="px-2 py-2 align-middle text-muted-foreground">{row.narration}</td>
-                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.receivable)}</td>
-                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.remaining)}</td>
-                            <td className="px-2 py-2 text-right align-middle tabular-nums">{formatMoney2Display(row.received)}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                )}
               </div>
               <DialogFooter className="border-t border-border/50 bg-muted/20 px-4 py-3 sm:px-5">
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
@@ -4809,17 +4834,67 @@ const SettlementPage = () => {
                     type="button"
                     variant="outline"
                     className={cn(arrSolidMd, 'gap-1.5')}
-                    onClick={() => {
-                      const picked = voucherPickRows.filter(r => selectedVoucherRowIds[r.id]);
-                      if (picked.length === 0) {
-                        toast.message('Select at least one voucher row.');
+                    disabled={addVoucherSaving || addVoucherLoading}
+                    onClick={async () => {
+                      if (!addVoucherSellerId) {
+                        toast.error('Seller is required.');
                         return;
                       }
-                      toast.success(`${picked.length} voucher row(s) selected — cash advance link pending.`);
-                      setAddVoucherSellerId(null);
+                      const rows = addVoucherRows
+                        .map(r => ({
+                          id: r.id,
+                          voucherName: r.voucherName.trim(),
+                          description: r.description.trim(),
+                          expenseAmount: clampMoney(parseFloat(r.expenseAmount || '0') || 0),
+                        }))
+                        .filter(r => r.voucherName !== '' || r.description !== '' || r.expenseAmount > 0);
+                      const invalid = rows.some(r => r.voucherName === '' || r.expenseAmount <= 0);
+                      if (invalid) {
+                        toast.message('Each voucher row needs name and amount > 0.');
+                        return;
+                      }
+                      setAddVoucherSaving(true);
+                      try {
+                        const response = await settlementApi.saveTemporaryVouchers(addVoucherSellerId, rows);
+                        setSellerExpensesById(prev => {
+                          const e0 = prev[addVoucherSellerId] ?? defaultSellerExpenses();
+                          return {
+                            ...prev,
+                            [addVoucherSellerId]: {
+                              ...e0,
+                              others: clampMoney(response.totalExpenseAmount ?? 0),
+                            },
+                          };
+                        });
+                        setAddVoucherRows(
+                          response.rows.length > 0
+                            ? response.rows.map(r => ({
+                                id: r.id,
+                                localId: `v_${r.id ?? Math.random().toString(36).slice(2, 8)}`,
+                                voucherName: r.voucherName ?? '',
+                                description: r.description ?? '',
+                                expenseAmount: (Number(r.expenseAmount ?? 0) || 0).toFixed(2),
+                              }))
+                            : [buildEmptyVoucherRow()]
+                        );
+                        toast.success('Vouchers saved and summed in Others.');
+                        setAddVoucherSellerId(null);
+                      } catch (e) {
+                        const msg = e instanceof Error ? e.message : 'Failed to save voucher.';
+                        toast.error(msg);
+                      } finally {
+                        setAddVoucherSaving(false);
+                      }
                     }}
                   >
-                    Add
+                    {addVoucherSaving ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      'Add'
+                    )}
                   </Button>
                 </div>
               </DialogFooter>
