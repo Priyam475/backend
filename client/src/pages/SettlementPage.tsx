@@ -2014,35 +2014,71 @@ const SettlementPage = () => {
     });
   }, [arrivalSellersForPatti, selectedSeller, pattiData]);
 
-  /** Pull freight / unloading / weighing / cash advance from backend (same rules as Quick Expenses). */
+  /** Pull unloading / weighing / cash advance from backend, and align freight with Quick Adjustment weight-share logic. */
   useEffect(() => {
     if (!pattiData || arrivalSellersForPatti.length === 0) return;
     if (Object.keys(existingPattiIdBySellerId).length > 0) return;
     let cancelled = false;
     void (async () => {
+      const snapBySellerId: Record<string, Awaited<ReturnType<typeof settlementApi.getSellerExpenseSnapshot>> | null> = {};
+      await Promise.all(
+        arrivalSellersForPatti.map(async s => {
+          try {
+            snapBySellerId[s.sellerId] = await settlementApi.getSellerExpenseSnapshot(s.sellerId);
+          } catch {
+            snapBySellerId[s.sellerId] = null;
+          }
+        })
+      );
+      if (cancelled) return;
+
+      const sellerActualWeightById: Record<string, number> = {};
+      let totalActualWeight = 0;
       for (const s of arrivalSellersForPatti) {
-        try {
-          const snap = await settlementApi.getSellerExpenseSnapshot(s.sellerId);
-          if (cancelled) return;
-          setSellerExpensesById(prev => ({
-            ...prev,
-            [s.sellerId]: {
-              ...(prev[s.sellerId] ?? defaultSellerExpenses()),
-              freight: snap.freight,
-              unloading: snap.unloading,
-              weighman: snap.weighing,
-              cashAdvance: snap.cashAdvance,
-            },
-          }));
-        } catch {
-          /* keep existing row */
-        }
+        const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
+        const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
+        const sellerWeight = s.lots.reduce((sum, lot, i) => {
+          const sid = lotStableId(lot, i);
+          if (removed.has(sid)) return sum;
+          const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
+          return sum + (Number(row.weight) || 0);
+        }, 0);
+        sellerActualWeightById[s.sellerId] = sellerWeight;
+        totalActualWeight += sellerWeight;
       }
+
+      const freightTotal = Math.max(0, Number(amountSummaryDisplay.arrivalFreightAmount) || 0);
+      const perKgFreight = totalActualWeight > 0 ? freightTotal / totalActualWeight : 0;
+
+      setSellerExpensesById(prev => {
+        const next = { ...prev };
+        for (const s of arrivalSellersForPatti) {
+          const snap = snapBySellerId[s.sellerId];
+          const prevRow = prev[s.sellerId] ?? defaultSellerExpenses();
+          const computedFreight = perKgFreight > 0 ? roundMoney2(perKgFreight * (sellerActualWeightById[s.sellerId] ?? 0)) : prevRow.freight;
+          next[s.sellerId] = {
+            ...prevRow,
+            freight: computedFreight,
+            unloading: snap != null ? Number(snap.unloading ?? prevRow.unloading) : prevRow.unloading,
+            weighman: snap != null ? Number(snap.weighing ?? prevRow.weighman) : prevRow.weighman,
+            cashAdvance: snap != null ? Number(snap.cashAdvance ?? prevRow.cashAdvance) : prevRow.cashAdvance,
+          };
+        }
+        return next;
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [pattiData?.createdAt, arrivalSalesReportSellerIdsKey, existingPattiIdBySellerId]);
+  }, [
+    pattiData?.createdAt,
+    arrivalSalesReportSellerIdsKey,
+    existingPattiIdBySellerId,
+    removedLotsBySellerId,
+    lotSalesOverridesBySellerId,
+    getLotDivisor,
+    amountSummaryDisplay.arrivalFreightAmount,
+  ]);
 
   /** Main patti deduction lines mirror primary seller expenses + weighing toggles. */
   useEffect(() => {
@@ -2378,6 +2414,18 @@ const SettlementPage = () => {
     []
   );
 
+  const updateVehicleExpenseQty = useCallback((id: string, raw: string) => {
+    setVehicleExpenseRows(prev =>
+      prev.map(row => {
+        if (row.id !== id) return row;
+        if (raw.trim() === '') return { ...row, quantity: 0 };
+        const n = parseInt(raw, 10);
+        if (!Number.isFinite(n)) return row;
+        return { ...row, quantity: Math.max(0, n) };
+      })
+    );
+  }, []);
+
   const isVehicleExpenseFieldEdited = useCallback(
     (row: VehicleExpenseRow, field: VehicleExpenseField): boolean => {
       const original = vehicleExpenseOriginalByRowId[row.id]?.[field];
@@ -2404,21 +2452,34 @@ const SettlementPage = () => {
     setVehicleExpenseModalOpen(true);
     setVehicleExpenseLoading(true);
     try {
+      const selectedVehicleId = selectedSeller.vehicleId != null && Number(selectedSeller.vehicleId) > 0
+        ? Number(selectedSeller.vehicleId)
+        : null;
       const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
-      const summaries = await arrivalsApi.list(0, 500);
-      const match = summaries.find(s => normalizeVehicleKey(String(s.vehicleNumber)) === vKey);
+      let match: { vehicleId: number } | null = null;
+      if (selectedVehicleId == null && vKey) {
+        const summaries = await arrivalsApi.list(0, 500);
+        const found = summaries.find(s => normalizeVehicleKey(String(s.vehicleNumber)) === vKey);
+        const foundVehicleId = found != null ? Number(found.vehicleId) : NaN;
+        match = Number.isFinite(foundVehicleId) && foundVehicleId > 0 ? { vehicleId: foundVehicleId } : null;
+      }
 
-      const [configs, commodities] = await Promise.all([
-        commodityApi.getAllFullConfigs(),
-        commodityApi.list(),
-      ]);
+      const [configs, commodities] = fullCommodityConfigs.length > 0 && commodityList.length > 0
+        ? [fullCommodityConfigs, commodityList]
+        : await Promise.all([commodityApi.getAllFullConfigs(), commodityApi.list()]);
       const nameToId = new Map(
         commodities.map(c => [String(c.commodity_name || '').trim().toLowerCase(), Number(c.commodity_id)])
       );
       const configById = new Map(configs.map(c => [c.commodityId, c]));
 
       let arrival: ArrivalFullDetail | null = null;
-      if (match) {
+      if (selectedVehicleId != null) {
+        try {
+          arrival = await arrivalsApi.getById(selectedVehicleId);
+        } catch {
+          arrival = null;
+        }
+      } else if (match != null) {
         try {
           arrival = await arrivalsApi.getById(match.vehicleId);
         } catch {
@@ -2426,23 +2487,14 @@ const SettlementPage = () => {
         }
       }
 
-      const totalBagsOnVehicle = arrival
-        ? arrival.sellers.reduce(
-            (acc, s) => acc + s.lots.reduce((a, l) => a + (Number(l.bagCount) || 0), 0),
-            0
-          )
-        : arrivalSellersForPatti.reduce((acc, s) => acc + totalArrivalBagsForSeller(s), 0);
-
       const fallbackFreightTotal = arrivalSellersForPatti.reduce((sum, s) => {
         const exp = sellerExpensesById[s.sellerId];
         return sum + (exp?.freight ?? 0);
       }, 0);
       const freightTotalRaw = arrival ? Number(arrival.freightTotal ?? 0) : amountSummaryDisplay.arrivalFreightAmount;
       const freightTotal = freightTotalRaw > 0 ? freightTotalRaw : fallbackFreightTotal;
-      const perBagFreight = totalBagsOnVehicle > 0 ? freightTotal / totalBagsOnVehicle : 0;
       const equalShareFreight = arrivalSellersForPatti.length > 0 ? freightTotal / arrivalSellersForPatti.length : 0;
-
-      const rows: VehicleExpenseRow[] = arrivalSellersForPatti.map(s => {
+      const sellerComputedBase = arrivalSellersForPatti.map(s => {
         const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
         const qtyRaw = arrSeller ? bagsFromArrivalSeller(arrSeller) : totalArrivalBagsForSeller(s);
         const qty = Math.max(0, Math.round(qtyRaw));
@@ -2463,21 +2515,40 @@ const SettlementPage = () => {
           configById,
           getDivisorLocal
         );
+        const actualWeight = s.lots.reduce((sum, lot, i) => {
+          const sid = lotStableId(lot, i);
+          if (removed.has(sid)) return sum;
+          const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisorLocal(lot));
+          return sum + (Number(merged.weight) || 0);
+        }, 0);
+        return {
+          sellerId: s.sellerId,
+          sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
+          quantity: qty,
+          unloading,
+          weighing,
+          actualWeight,
+        };
+      });
+      const totalActualWeightOnSettlement = sellerComputedBase.reduce((sum, s) => sum + s.actualWeight, 0);
+      const perKgFreight = totalActualWeightOnSettlement > 0 ? freightTotal / totalActualWeightOnSettlement : 0;
+
+      const rows: VehicleExpenseRow[] = sellerComputedBase.map(s => {
         const fallbackSellerFreight = sellerExpensesById[s.sellerId]?.freight ?? 0;
         const freight = roundMoney2(
-          perBagFreight > 0
-            ? perBagFreight * qty
+          perKgFreight > 0
+            ? perKgFreight * s.actualWeight
             : (fallbackSellerFreight > 0 ? fallbackSellerFreight : equalShareFreight)
         );
 
         return {
           id: `ve_${s.sellerId}`,
           sellerId: s.sellerId,
-          sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
-          quantity: qty,
+          sellerName: s.sellerName,
+          quantity: s.quantity,
           freight,
-          unloading: roundMoney2(unloading),
-          weighing: roundMoney2(weighing),
+          unloading: roundMoney2(s.unloading),
+          weighing: roundMoney2(s.weighing),
           gunnies: 0,
         };
       });
@@ -2603,6 +2674,8 @@ const SettlementPage = () => {
     lotSalesOverridesBySellerId,
     amountSummaryDisplay.arrivalFreightAmount,
     sellerExpensesById,
+    fullCommodityConfigs,
+    commodityList,
   ]);
 
   useEffect(() => {
@@ -2631,7 +2704,7 @@ const SettlementPage = () => {
               'h-10 min-w-0 flex-1 rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
               edited && 'border-amber-500/70'
             )}
-            value={row[field] === 0 ? '' : row[field]}
+            value={row[field] === 0 ? '' : row[field].toFixed(2)}
             onChange={e => updateVehicleExpenseCell(row.id, field, e.target.value)}
             aria-label={ariaLabel}
           />
@@ -3116,7 +3189,7 @@ const SettlementPage = () => {
                             label="Arrival freight formula"
                             lines={[
                               'Source: Arrival freight total.',
-                              'Quick Expenses uses: per bag freight = arrival freight / total arrival bags.',
+                              'Quick Expenses uses: seller freight = (seller settlement weight / total settlement weight) x arrival freight.',
                               `Current arrival freight: ${formatRupeeInr(amountSummaryDisplay.arrivalFreightAmount)}`,
                             ]}
                           />
@@ -3945,7 +4018,7 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label={`Freight formula ${seller.sellerId}`}
                                   lines={[
-                                    'Quick Expenses default: (arrival freight / total arrival bags) x seller bags.',
+                                    'Quick Expenses default: (seller settlement weight / total settlement weight) x arrival freight.',
                                     `Current value: ${formatMoney2Display(exp.freight)}`,
                                   ]}
                                 />
@@ -3962,7 +4035,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={displayedFreight === 0 ? '' : displayedFreight}
+                                value={displayedFreight === 0 ? '' : displayedFreight.toFixed(2)}
                                 onChange={e => {
                                   const entered = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -3997,7 +4070,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.unloading === 0 ? '' : exp.unloading}
+                                value={exp.unloading === 0 ? '' : exp.unloading.toFixed(2)}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4037,7 +4110,7 @@ const SettlementPage = () => {
                                     'opacity-80'
                                 )}
                                 value={
-                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman
+                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman.toFixed(2)
                                 }
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
@@ -4057,7 +4130,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance}
+                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance.toFixed(2)}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4075,7 +4148,7 @@ const SettlementPage = () => {
                                 min={0}
                                 step="0.01"
                                 className={settlementExpenseInputClass}
-                                value={exp.gunnies === 0 ? '' : exp.gunnies}
+                                value={exp.gunnies === 0 ? '' : exp.gunnies.toFixed(2)}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4093,7 +4166,7 @@ const SettlementPage = () => {
                                 min={0}
                                 step="0.01"
                                 className={settlementExpenseInputClass}
-                                value={exp.others === 0 ? '' : exp.others}
+                                value={exp.others === 0 ? '' : exp.others.toFixed(2)}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4426,7 +4499,7 @@ const SettlementPage = () => {
                 <DialogHeader className="space-y-1.5 text-center sm:text-center">
                   <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Adjustment</DialogTitle>
                   <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
-                    Sellers and quantities come from Arrivals. Freight is allocated per bag. Unloading / weighing use commodity
+                    Sellers and quantities come from Arrivals. Freight is allocated by settlement actual-weight share. Unloading / weighing use commodity
                     slab rules at lot level (editable). Press Alt X to open.
                   </DialogDescription>
                 </DialogHeader>
@@ -4450,7 +4523,26 @@ const SettlementPage = () => {
                           Qty (bags)
                         </th>
                         <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
-                          Freight
+                          <span className="inline-flex items-center gap-1.5">
+                            Freight
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-white/90 hover:bg-white/15"
+                                  aria-label="Quick adjustment freight formula"
+                                >
+                                  <Info className="h-3 w-3" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[320px] text-xs leading-relaxed">
+                                <div className="space-y-0.5 text-left normal-case tracking-normal">
+                                  <p>Freight = (seller settlement weight / total settlement weight) x arrival freight amount.</p>
+                                  <p>If total settlement weight is 0, fallback to saved seller freight; otherwise equal share.</p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </span>
                         </th>
                         <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Unloading
@@ -4473,9 +4565,16 @@ const SettlementPage = () => {
                             <span className="line-clamp-2 text-xs font-medium text-foreground sm:text-sm">{row.sellerName}</span>
                           </td>
                           <td className="px-3 py-3 text-center align-middle">
-                            <span className="inline-flex min-h-9 min-w-[4rem] items-center justify-center rounded-md border border-border/50 bg-muted/40 px-2 text-xs font-semibold tabular-nums text-foreground sm:text-sm">
-                              {row.quantity}
-                            </span>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={1}
+                              inputMode="numeric"
+                              className="mx-auto h-9 w-20 rounded-md border-border/70 bg-background px-2 text-center text-xs font-semibold tabular-nums text-foreground shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none sm:text-sm"
+                              value={row.quantity === 0 ? '' : row.quantity}
+                              onChange={e => updateVehicleExpenseQty(row.id, e.target.value)}
+                              aria-label="Quantity (bags)"
+                            />
                           </td>
                           <td className="px-2 py-2.5 text-center align-middle">
                             {renderVehicleExpenseInputCell(row, 'freight', 'Freight amount')}

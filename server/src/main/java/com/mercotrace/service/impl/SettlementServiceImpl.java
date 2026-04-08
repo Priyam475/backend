@@ -565,29 +565,14 @@ public class SettlementServiceImpl implements SettlementService {
         }
 
         List<SellerInVehicle> vehicleSivs = sellerInVehicleRepository.findAllByVehicleId(vehicleId);
-        int totalVehicleBags = 0;
+        Map<Long, List<Lot>> lotsBySellerVehicleId = new HashMap<>();
+        List<Lot> allVehicleLots = new ArrayList<>();
         for (SellerInVehicle vs : vehicleSivs) {
             List<Lot> vlots = lotRepository.findAllBySellerVehicleIdAndTraderId(vs.getId(), traderId);
-            for (Lot l : vlots) {
-                totalVehicleBags += l.getBagCount() != null ? l.getBagCount() : 0;
-            }
+            lotsBySellerVehicleId.put(vs.getId(), vlots);
+            allVehicleLots.addAll(vlots);
         }
-
-        List<Lot> sellerLots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
-        int sellerBags = 0;
-        for (Lot l : sellerLots) {
-            sellerBags += l.getBagCount() != null ? l.getBagCount() : 0;
-        }
-
-        BigDecimal sellerFreight = BigDecimal.ZERO;
-        if (totalVehicleBags > 0 && freightTotal.compareTo(BigDecimal.ZERO) > 0) {
-            sellerFreight =
-                freightTotal
-                    .multiply(BigDecimal.valueOf(sellerBags))
-                    .divide(BigDecimal.valueOf(totalVehicleBags), new MathContext(20));
-        }
-        out.setFreight(sellerFreight);
-        out.setFreightAutoPulled(sellerFreight.compareTo(BigDecimal.ZERO) > 0);
+        List<Lot> sellerLots = lotsBySellerVehicleId.getOrDefault(sivId, List.of());
 
         List<WeighingSession> weighingSessions =
             weighingSessionRepository.findAllByTraderIdOrderByCreatedDateDesc(traderId, Pageable.ofSize(MAX_RESULTS_FOR_SELLERS))
@@ -604,10 +589,10 @@ public class SettlementServiceImpl implements SettlementService {
                     )
                 );
 
-        List<String> lotIdStrs = sellerLots.stream().map(l -> String.valueOf(l.getId())).toList();
+        List<String> allLotIdStrs = allVehicleLots.stream().map(l -> String.valueOf(l.getId())).toList();
         Map<String, BigDecimal> billingByLot = new HashMap<>();
-        if (!lotIdStrs.isEmpty()) {
-            List<Object[]> billingRows = salesBillLineItemRepository.sumWeightGroupedByLotId(traderId, lotIdStrs);
+        if (!allLotIdStrs.isEmpty()) {
+            List<Object[]> billingRows = salesBillLineItemRepository.sumWeightGroupedByLotId(traderId, allLotIdStrs);
             for (Object[] row : billingRows) {
                 if (row[0] != null && row[1] != null) {
                     billingByLot.put((String) row[0], (BigDecimal) row[1]);
@@ -615,7 +600,7 @@ public class SettlementServiceImpl implements SettlementService {
             }
         }
 
-        List<Long> lotIds = sellerLots.stream().map(Lot::getId).toList();
+        List<Long> lotIds = allVehicleLots.stream().map(Lot::getId).toList();
         Map<Long, AuctionResultDTO> arByLot = new HashMap<>();
         if (!lotIds.isEmpty()) {
             Page<AuctionResultDTO> arPage = auctionService.listResultsByLotIds(lotIds, Pageable.unpaged());
@@ -623,6 +608,31 @@ public class SettlementServiceImpl implements SettlementService {
                 arByLot.put(ar.getLotId(), ar);
             }
         }
+
+        double totalVehicleActualWeightKg = 0d;
+        for (Lot lot : allVehicleLots) {
+            BigDecimal billingKg = billingByLot.get(String.valueOf(lot.getId()));
+            AuctionResultDTO ar = arByLot.get(lot.getId());
+            BigDecimal actualW = resolveLotWeightKgForCharges(billingKg, ar, bidToWeight);
+            totalVehicleActualWeightKg += actualW.doubleValue();
+        }
+        double sellerActualWeightKg = 0d;
+        for (Lot lot : sellerLots) {
+            BigDecimal billingKg = billingByLot.get(String.valueOf(lot.getId()));
+            AuctionResultDTO ar = arByLot.get(lot.getId());
+            BigDecimal actualW = resolveLotWeightKgForCharges(billingKg, ar, bidToWeight);
+            sellerActualWeightKg += actualW.doubleValue();
+        }
+
+        BigDecimal sellerFreight = BigDecimal.ZERO;
+        if (totalVehicleActualWeightKg > 0d && freightTotal.compareTo(BigDecimal.ZERO) > 0) {
+            sellerFreight =
+                freightTotal
+                    .multiply(BigDecimal.valueOf(sellerActualWeightKg))
+                    .divide(BigDecimal.valueOf(totalVehicleActualWeightKg), new MathContext(20));
+        }
+        out.setFreight(sellerFreight);
+        out.setFreightAutoPulled(sellerFreight.compareTo(BigDecimal.ZERO) > 0);
 
         BigDecimal unloadingSum = BigDecimal.ZERO;
         BigDecimal weighingSum = BigDecimal.ZERO;
