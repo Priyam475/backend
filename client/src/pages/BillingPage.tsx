@@ -593,11 +593,6 @@ const BillingPage = () => {
   const [selectedPrintVersion, setSelectedPrintVersion] = useState<'latest' | number>('latest');
   const [showPrint, setShowPrint] = useState(false);
 
-  const isBillingDirty = !!bill && !showPrint && !isBackendBillId(bill.billId);
-  const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
-    when: isBillingDirty,
-  });
-
   // Validation
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
@@ -2473,6 +2468,30 @@ const BillingPage = () => {
     toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
     loadSavedBills();
   };
+
+  const isBillingDirty = !!bill && !showPrint && !isBackendBillId(bill.billId);
+  const handleBillingPartialSave = async (): Promise<boolean> => {
+    if (!bill) return true;
+    const hasItems = bill.commodityGroups.some(g => (g.items?.length ?? 0) > 0);
+    if (!hasItems) return true;
+    const saved = await persistBill();
+    if (!saved) {
+      toast.error('Failed to save bill progress.');
+      return false;
+    }
+    setHasSavedOnce(isBackendBillId(String(saved.billId)));
+    loadSavedBills();
+    toast.success('Bill progress saved.');
+    return true;
+  };
+  const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
+    when: isBillingDirty,
+    title: 'Save your progress?',
+    description: 'You have unsaved changes. Would you like to save your progress before leaving?',
+    continueLabel: 'Save',
+    stayLabel: 'Cancel',
+    onBeforeContinue: handleBillingPartialSave,
+  });
 
   // Save bill and open print preview (bill number assigned via separate assign-number call)
   const saveAndPreparePrint = async () => {
