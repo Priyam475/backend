@@ -326,6 +326,7 @@ public class SettlementServiceImpl implements SettlementService {
         entity.setTotalDeductions(request.getTotalDeductions());
         entity.setNetPayable(request.getNetPayable());
         entity.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
+        entity.setInProgress(Boolean.TRUE.equals(request.getInProgress()));
         entity = pattiRepository.save(entity);
         mapRequestDeductionsAndClustersToEntity(request, entity);
         pattiRepository.save(entity);
@@ -444,6 +445,7 @@ public class SettlementServiceImpl implements SettlementService {
         patti.setTotalDeductions(request.getTotalDeductions());
         patti.setNetPayable(request.getNetPayable());
         patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
+        patti.setInProgress(Boolean.TRUE.equals(request.getInProgress()));
         patti.getRateClusters().clear();
         patti.getDeductions().clear();
         mapRequestDeductionsAndClustersToEntity(request, patti);
@@ -455,7 +457,14 @@ public class SettlementServiceImpl implements SettlementService {
     @Transactional(readOnly = true)
     public Page<PattiDTO> listPattis(Pageable pageable) {
         Long traderId = traderContextService.getCurrentTraderId();
-        return pattiRepository.findAllByTraderIdOrderByCreatedDateDesc(traderId, pageable).map(this::toPattiDTO);
+        return pattiRepository.findAllByTraderIdAndInProgressFalseOrderByCreatedDateDesc(traderId, pageable).map(this::toPattiDTO);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PattiDTO> listInProgressPattis(Pageable pageable) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        return pattiRepository.findAllByTraderIdAndInProgressTrueOrderByCreatedDateDesc(traderId, pageable).map(this::toPattiDTO);
     }
 
     @Override
@@ -1087,6 +1096,7 @@ public class SettlementServiceImpl implements SettlementService {
         dto.setNetPayable(e.getNetPayable());
         dto.setCreatedAt(e.getCreatedDate());
         dto.setUseAverageWeight(e.getUseAverageWeight());
+        dto.setInProgress(Boolean.TRUE.equals(e.getInProgress()));
         for (PattiRateCluster c : e.getRateClusters()) {
             RateClusterDTO rc = new RateClusterDTO();
             rc.setRate(c.getRate());

@@ -40,6 +40,7 @@ import { directPrint } from '@/utils/printTemplates';
 import { generateSalesPattiBatchPrintHTML, generateSalesPattiPrintHTML, type PattiPrintData } from '@/utils/printDocumentTemplates';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -208,6 +209,25 @@ interface SavedArrivalSummaryRow {
   weighed: number;
   representativePattiId: number | null;
 }
+
+type InProgressSettlementDraft = {
+  key: string;
+  updatedAt: string;
+  representativeSellerId: string;
+  sellerIds: string[];
+  vehicleNumber?: string;
+  sellerNames?: string;
+  fromLocation?: string;
+  serialNo?: string;
+  dateLabel?: string;
+  lots?: number;
+  bids?: number;
+  weighed?: number;
+  pattiData: PattiData;
+  sellerExpensesById?: Record<string, SellerExpenseFormState>;
+  removedLotsBySellerId?: Record<string, string[]>;
+  lotSalesOverridesBySellerId?: Record<string, Record<string, LotSalesOverride>>;
+};
 
 /** Lower SL No. sorts first; missing serial sorts last (stable tie-break on sellerId). */
 function sellerSerialSortKey(serial: string | number | null | undefined): number {
@@ -851,7 +871,8 @@ const SettlementPage = () => {
   const [draftPattiNoBySellerId, setDraftPattiNoBySellerId] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [settlementMainTab, setSettlementMainTab] = useState<'arrival-summary' | 'create-settlements'>('arrival-summary');
-  const [arrivalSummaryTab, setArrivalSummaryTab] = useState<'new-patti' | 'saved-patti'>('new-patti');
+  const [arrivalSummaryTab, setArrivalSummaryTab] = useState<'new-patti' | 'in-progress-patti' | 'saved-patti'>('new-patti');
+  const [inProgressPattiDrafts, setInProgressPattiDrafts] = useState<InProgressSettlementDraft[]>([]);
   const [hasArrivalSelection, setHasArrivalSelection] = useState(false);
   
   // Patti state
@@ -1106,6 +1127,38 @@ const SettlementPage = () => {
     }
   }, [selectedSeller, pattiData, loadSavedPattis]);
 
+  const loadInProgressPattis = useCallback(() => {
+    settlementApi
+      .listInProgressPattis({ page: 0, size: 500 })
+      .then((list: PattiDTO[]) => {
+        const rows = (Array.isArray(list) ? list : [])
+          .filter(p => p.id != null)
+          .map((p): InProgressSettlementDraft => ({
+            key: `db:${p.id}`,
+            updatedAt: String(p.createdAt ?? ''),
+            representativeSellerId: String(p.sellerId ?? ''),
+            sellerIds: String(p.sellerId ?? '') ? [String(p.sellerId)] : [],
+            vehicleNumber: p.vehicleNumber ?? '',
+            sellerNames: p.sellerName ?? '',
+            fromLocation: p.fromLocation ?? '',
+            serialNo: p.sellerSerialNo != null ? String(p.sellerSerialNo) : '',
+            dateLabel: p.date ? new Date(p.date).toLocaleDateString() : '-',
+            lots: 0,
+            bids: 0,
+            weighed: 0,
+            pattiData: mapPattiDTOToPattiData(p),
+          }));
+        setInProgressPattiDrafts(rows);
+      })
+      .catch(() => setInProgressPattiDrafts([]));
+  }, []);
+
+  useEffect(() => {
+    if (selectedSeller == null && pattiData == null) {
+      loadInProgressPattis();
+    }
+  }, [selectedSeller, pattiData, loadInProgressPattis]);
+
   // Generate Patti when seller is selected (new patti; clear edit id).
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
   const generatePatti = useCallback(async (seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
@@ -1276,6 +1329,18 @@ const SettlementPage = () => {
     }
   }, [sellers, savedPattis]);
 
+  const openInProgressDraft = useCallback(async (draft: InProgressSettlementDraft) => {
+    const idRaw = String(draft.key).replace('db:', '');
+    const id = Number(idRaw);
+    if (!Number.isFinite(id) || id <= 0) {
+      toast.error('Invalid in-progress patti id.');
+      return;
+    }
+    await openPattiForEdit(id, draft.sellerIds);
+    setSettlementMainTab('create-settlements');
+    toast.success('In-progress patti restored.');
+  }, [openPattiForEdit]);
+
   /** Billing-style: view historical snapshot or return to latest working copy. */
   const applyPattiVersionSelection = useCallback((sel: 'latest' | number) => {
     setSelectedPattiVersion(sel);
@@ -1366,6 +1431,7 @@ const SettlementPage = () => {
     sellerSequenceNumber?: number;
     /** When true, caller owns patti save busy locking (e.g. Save Main Patti batch). */
     skipBusyGuard?: boolean;
+    inProgress?: boolean;
   };
 
   /** Save or update Sales Patti for one settlement seller. */
@@ -1386,6 +1452,7 @@ const SettlementPage = () => {
           sellerSequenceNumber: options?.sellerSequenceNumber,
         });
         if (!payload) return false;
+        payload.inProgress = options?.inProgress === true;
         const sid = seller.sellerId;
         const dbId = existingPattiIdBySellerId[sid];
         const actionWord = dbId != null ? 'updated' : 'saved';
@@ -1418,9 +1485,10 @@ const SettlementPage = () => {
               applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
               setPattiDetailDto(updated);
               setSelectedPattiVersion('latest');
-              if (!silent) toast.success(`Sales Patti ${updated.pattiId} ${actionWord}.`);
+              if (!silent) toast.success(payload.inProgress ? `Sales Patti ${updated.pattiId} saved in progress.` : `Sales Patti ${updated.pattiId} ${actionWord}.`);
               if (showPrintAfterSave) setShowPrint(true);
               loadSavedPattis();
+              loadInProgressPattis();
               return true;
             }
             if (!silent) toast.error('Failed to update patti');
@@ -1436,12 +1504,13 @@ const SettlementPage = () => {
             setPattiDetailDto(created);
             setSelectedPattiVersion('latest');
             if (!silent && selectedSeller?.sellerId === sid) {
-              toast.success(`Sales Patti ${created.pattiId} ${actionWord}.`);
+              toast.success(payload.inProgress ? `Sales Patti ${created.pattiId} saved in progress.` : `Sales Patti ${created.pattiId} ${actionWord}.`);
             } else if (!silent) {
-              toast.success(`Sales Patti ${created.pattiId} ${actionWord} for ${payload.sellerName}.`);
+              toast.success(payload.inProgress ? `Sales Patti ${created.pattiId} saved in progress for ${payload.sellerName}.` : `Sales Patti ${created.pattiId} ${actionWord} for ${payload.sellerName}.`);
             }
             if (showPrintAfterSave) setShowPrint(true);
             loadSavedPattis();
+            loadInProgressPattis();
             return true;
           }
           if (!silent) toast.error('Failed to save patti');
@@ -1464,6 +1533,7 @@ const SettlementPage = () => {
       can,
       selectedSeller?.sellerId,
       loadSavedPattis,
+      loadInProgressPattis,
     ]
   );
 
@@ -1499,18 +1569,23 @@ const SettlementPage = () => {
     [sellerFormById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]
   );
 
-  const savePatti = async () => {
-    if (!selectedSeller || !pattiData) return;
-    if (pattiSaveBusyRef.current) return;
+  const savePatti = async (): Promise<boolean> => {
+    if (!selectedSeller || !pattiData) return false;
+    if (pattiSaveBusyRef.current) return false;
     if (!canRunMainPattiActions) {
       toast.error(mainPattiValidationError ?? 'Please complete required fields before saving.');
-      return;
+      return false;
     }
     pattiSaveBusyRef.current = true;
     setPattiSaveBusy(true);
     try {
+      const scopeSellers = (
+        selectedArrivalSellerIds.length > 0
+          ? selectedArrivalSellerIds.map(id => sellers.find(s => String(s.sellerId) === String(id)))
+          : [selectedSeller]
+      ).filter((s): s is SellerSettlement => !!s);
       const failures: string[] = [];
-      const sellersNeedingCreate = arrivalSellersForPatti.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
+      const sellersNeedingCreate = scopeSellers.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
       let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
       const sellerSequenceBySellerId: Record<string, number> = {};
       const parseSeqFromPattiId = (pid?: string): number | undefined => {
@@ -1524,7 +1599,7 @@ const SettlementPage = () => {
         if (seq != null) sellerSequenceBySellerId[s.sellerId] = seq;
       }
       if (sellersNeedingCreate.length > 0) {
-        const scopedSids = new Set(arrivalSellersForPatti.map(s => String(s.sellerId)));
+        const scopedSids = new Set(scopeSellers.map(s => String(s.sellerId)));
         const scopedSaved = savedPattis.filter(p => scopedSids.has(String(p.sellerId ?? '').trim()));
         const parseBaseFromPattiId = (pid?: string): string => {
           const raw = String(pid ?? '').trim();
@@ -1549,7 +1624,7 @@ const SettlementPage = () => {
             sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
           } catch {
             toast.error('Failed to reserve Sales Patti number.');
-            return;
+            return false;
           }
         }
 
@@ -1572,7 +1647,7 @@ const SettlementPage = () => {
           sellerSequenceBySellerId[seller.sellerId] = seqCounter;
         }
       }
-      for (const seller of arrivalSellersForPatti) {
+      for (const seller of scopeSellers) {
         const needsCreate = existingPattiIdBySellerId[seller.sellerId] == null;
         const sellerSequenceNumber = needsCreate ? sellerSequenceBySellerId[seller.sellerId] : undefined;
         const ok = await savePattiForSeller(seller, {
@@ -1586,17 +1661,78 @@ const SettlementPage = () => {
       }
       if (failures.length > 0) {
         toast.error(`Failed to save ${failures.length} seller patti(s): ${failures.join(', ')}`);
-        return;
+        return false;
       }
-      const allInUpdateMode = arrivalSellersForPatti.every(s => existingPattiIdBySellerId[s.sellerId] != null);
+      const allInUpdateMode = scopeSellers.every(s => existingPattiIdBySellerId[s.sellerId] != null);
       toast.success(
-        `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${arrivalSellersForPatti.length} seller(s). Use Print when ready.`
+        `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${scopeSellers.length} seller(s). Use Print when ready.`
       );
+      loadInProgressPattis();
+      return true;
     } finally {
       pattiSaveBusyRef.current = false;
       setPattiSaveBusy(false);
     }
   };
+
+  const savePattiInProgress = useCallback(async (): Promise<boolean> => {
+    if (!selectedSeller || !pattiData) return false;
+    if (pattiSaveBusyRef.current) return false;
+    pattiSaveBusyRef.current = true;
+    setPattiSaveBusy(true);
+    try {
+      const scopeSellers = (
+        selectedArrivalSellerIds.length > 0
+          ? selectedArrivalSellerIds.map(id => sellers.find(s => String(s.sellerId) === String(id)))
+          : [selectedSeller]
+      ).filter((s): s is SellerSettlement => !!s);
+      const failures: string[] = [];
+      for (const seller of scopeSellers) {
+        const ok = await savePattiForSeller(seller, {
+          silent: true,
+          showPrintAfterSave: false,
+          skipBusyGuard: true,
+          inProgress: true,
+        });
+        if (!ok) failures.push(seller.sellerName || seller.sellerId);
+      }
+      if (failures.length > 0) {
+        toast.error(`Failed to save in-progress patti for ${failures.join(', ')}`);
+        return false;
+      }
+      toast.success('Settlement progress saved.');
+      return true;
+    } finally {
+      pattiSaveBusyRef.current = false;
+      setPattiSaveBusy(false);
+    }
+  }, [pattiData, savePattiForSeller, selectedArrivalSellerIds, selectedSeller, sellers]);
+
+  const clearActiveSettlementScreen = useCallback(() => {
+    setSelectedSeller(null);
+    setSelectedArrivalSellerIds([]);
+    setPattiData(null);
+    setPattiDetailDto(null);
+    setSelectedPattiVersion('latest');
+    latestPattiDataSnapshotRef.current = null;
+    setExistingPattiIdBySellerId({});
+    setDraftMainPattiNo('');
+    setDraftPattiNoBySellerId({});
+  }, []);
+
+  const isSettlementDirty = !!selectedSeller && !!pattiData && !showPrint;
+  const saveSettlementProgressBeforeLeave = useCallback(async (): Promise<boolean> => {
+    if (!selectedSeller || !pattiData) return true;
+    return await savePattiInProgress();
+  }, [pattiData, savePattiInProgress, selectedSeller]);
+  const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
+    when: isSettlementDirty,
+    title: 'Save your progress?',
+    description: 'You have unsaved changes. Would you like to save your progress before leaving?',
+    continueLabel: 'Save',
+    stayLabel: 'Cancel',
+    onBeforeContinue: saveSettlementProgressBeforeLeave,
+  });
 
   saveMainPattiShortcutRef.current = () => {
     if (selectedSeller) void savePatti();
@@ -1614,14 +1750,17 @@ const SettlementPage = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const getSellerLots = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+  function getSellerLots(seller: SellerSettlement): number {
+    return seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
+  }
 
-  const getSellerBids = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.length, 0);
+  function getSellerBids(seller: SellerSettlement): number {
+    return seller.lots.reduce((s, l) => s + l.entries.length, 0);
+  }
 
-  const getSellerWeighed = (seller: SellerSettlement): number =>
-    seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + (e.weight > 0 ? e.quantity : 0), 0), 0);
+  function getSellerWeighed(seller: SellerSettlement): number {
+    return seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + (e.weight > 0 ? e.quantity : 0), 0), 0);
+  }
 
   const filteredSellers = useMemo(() => {
     if (!searchQuery) return sellers;
@@ -2779,7 +2918,7 @@ const SettlementPage = () => {
     return v.length > 10 ? `${v.slice(0, 10)}...` : v;
   };
 
-  const renderArrivalSummaryTable = (tab: 'new-patti' | 'saved-patti') => {
+  const renderArrivalSummaryTable = (tab: 'new-patti' | 'in-progress-patti' | 'saved-patti') => {
     if (tab === 'new-patti' && newPattiArrivalRows.length === 0) {
       return (
         <div className="glass-card rounded-2xl p-8 text-center">
@@ -2813,6 +2952,75 @@ const SettlementPage = () => {
           <p className="text-xs text-muted-foreground/70 mt-1">
             {savedPattis.length === 0 ? 'Create a patti from New Patti tab' : 'Try a different search'}
           </p>
+        </div>
+      );
+    }
+
+    if (tab === 'in-progress-patti') {
+      const q = searchQuery.trim().toLowerCase();
+      const rows = inProgressPattiDrafts
+        .filter(r => {
+          if (!q) return true;
+          return (
+            String(r.vehicleNumber ?? '').toLowerCase().includes(q) ||
+            String(r.sellerNames ?? '').toLowerCase().includes(q) ||
+            String(r.fromLocation ?? '').toLowerCase().includes(q)
+          );
+        })
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+      if (rows.length === 0) {
+        return (
+          <div className="glass-card rounded-2xl p-8 text-center">
+            <Edit3 className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground font-medium">
+              {inProgressPattiDrafts.length === 0 ? 'No in-progress pattis found' : 'No matching in-progress pattis'}
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              {inProgressPattiDrafts.length === 0 ? 'Open a patti and start editing to create in-progress entries.' : 'Try a different search'}
+            </p>
+          </div>
+        );
+      }
+      return (
+        <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] border border-border/50 text-sm">
+              <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                <tr>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
+                  <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.key}
+                    onClick={() => void openInProgressDraft(row)}
+                    className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
+                  >
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.vehicleNumber || '-'}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{shortAddressLabel(row.fromLocation)}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo || '-'}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots ?? 0}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids ?? 0}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed ?? 0}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">In Progress</td>
+                    <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">
+                      {row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
@@ -2911,6 +3119,7 @@ const SettlementPage = () => {
   if (showPrint && pattiData) {
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        <UnsavedChangesDialog />
         {!isDesktop ? (
         <div className="bg-gradient-to-br from-teal-500 via-emerald-500 to-cyan-600 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-3xl mb-4 relative overflow-hidden">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.18)_0%,transparent_50%)]" />
@@ -3067,7 +3276,7 @@ const SettlementPage = () => {
             </Button>
             <Button
               type="button"
-              onClick={() => { setShowPrint(false); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setSelectedSeller(null); setSelectedArrivalSellerIds([]); setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
+              onClick={() => { setShowPrint(false); clearActiveSettlementScreen(); }}
               variant="outline"
               className={arrOutlineTall}
             >
@@ -3088,6 +3297,7 @@ const SettlementPage = () => {
 
     return (
       <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+        <UnsavedChangesDialog />
         {/* Header */}
         {!isDesktop ? (
         <div className="bg-gradient-to-br from-teal-500 via-emerald-500 to-cyan-600 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-3xl mb-4 relative overflow-hidden">
@@ -3104,7 +3314,13 @@ const SettlementPage = () => {
           </div>
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-3">
-              <button onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
+              <button onClick={() => {
+                void (async () => {
+                  const ok = await confirmIfDirty();
+                  if (!ok) return;
+                  clearActiveSettlementScreen();
+                })();
+              }}
                 aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
               </button>
@@ -3125,7 +3341,13 @@ const SettlementPage = () => {
           <div className="flex items-center gap-4 mb-4">
             <Button
               type="button"
-              onClick={() => { setSelectedSeller(null); setSelectedArrivalSellerIds([]); setPattiData(null); setPattiDetailDto(null); setSelectedPattiVersion('latest'); latestPattiDataSnapshotRef.current = null; setExistingPattiIdBySellerId({}); setDraftMainPattiNo(''); setDraftPattiNoBySellerId({}); }}
+              onClick={() => {
+                void (async () => {
+                  const ok = await confirmIfDirty();
+                  if (!ok) return;
+                  clearActiveSettlementScreen();
+                })();
+              }}
               variant="outline"
               className={cn(arrSolidMd, 'gap-1.5')}
             >
@@ -4944,6 +5166,7 @@ const SettlementPage = () => {
   // ═══ SELLER LIST SCREEN ═══
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <UnsavedChangesDialog />
       {!isDesktop ? (
       <div className="bg-gradient-to-br from-teal-500 via-emerald-500 to-cyan-600 pt-[max(1.5rem,env(safe-area-inset-top))] pb-6 px-4 rounded-b-3xl mb-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.18)_0%,transparent_50%)]" />
@@ -4959,7 +5182,13 @@ const SettlementPage = () => {
         </div>
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-3">
-            <button onClick={() => navigate('/home')} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+            <button onClick={() => {
+              void (async () => {
+                const ok = await confirmIfDirty();
+                if (!ok) return;
+                navigate('/home');
+              })();
+            }} aria-label="Go back" className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
             <div className="flex-1">
@@ -5077,6 +5306,15 @@ const SettlementPage = () => {
                 className={settlementToggleTabBtn(arrivalSummaryTab === 'new-patti')}
               >
                 New Patti
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={arrivalSummaryTab === 'in-progress-patti'}
+                onClick={() => setArrivalSummaryTab('in-progress-patti')}
+                className={settlementToggleTabBtn(arrivalSummaryTab === 'in-progress-patti')}
+              >
+                In Progress
               </button>
               <button
                 type="button"

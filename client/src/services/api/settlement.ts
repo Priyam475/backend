@@ -44,6 +44,7 @@ export interface PattiDTO {
   netPayable: number;
   createdAt: string;
   useAverageWeight?: boolean;
+  inProgress?: boolean;
   /** Populated on GET by id after at least one update (snapshots from previous saves). */
   versions?: PattiVersionDTO[];
 }
@@ -59,6 +60,7 @@ export interface PattiSaveRequest {
   totalDeductions: number;
   netPayable: number;
   useAverageWeight?: boolean;
+  inProgress?: boolean;
 }
 
 export interface SettlementEntryDTO {
@@ -247,6 +249,17 @@ export const settlementApi = {
     if (params.sort) q.set('sort', params.sort);
     const res = await apiFetch(`${BASE}/pattis?${q}`, { method: 'GET' });
     if (!res.ok) await parseJsonOrThrow(res, 'Failed to load pattis');
+    return res.json();
+  },
+
+  /** List in-progress pattis (paginated). */
+  async listInProgressPattis(params: ListPattisParams = {}): Promise<PattiDTO[]> {
+    const q = new URLSearchParams();
+    if (params.page != null) q.set('page', String(params.page));
+    if (params.size != null) q.set('size', String(params.size));
+    if (params.sort) q.set('sort', params.sort);
+    const res = await apiFetch(`${BASE}/pattis/in-progress?${q}`, { method: 'GET' });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load in-progress pattis');
     return res.json();
   },
 

@@ -48,6 +48,11 @@ public interface SettlementService {
     Page<PattiDTO> listPattis(Pageable pageable);
 
     /**
+     * List in-progress pattis for current trader. Paginated.
+     */
+    Page<PattiDTO> listInProgressPattis(Pageable pageable);
+
+    /**
      * Compute seller-level charges (e.g. freight, advance) for a new Patti.
      * This replaces prototype localStorage-based voucher lookups.
      */

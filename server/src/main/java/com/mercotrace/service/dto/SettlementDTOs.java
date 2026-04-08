@@ -117,6 +117,7 @@ public final class SettlementDTOs {
         private BigDecimal netPayable;
         private Instant createdAt;
         private Boolean useAverageWeight;
+        private Boolean inProgress;
         private List<PattiVersionDTO> versions = new ArrayList<>();
 
         public Long getId() { return id; }
@@ -153,6 +154,8 @@ public final class SettlementDTOs {
         public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
         public Boolean getUseAverageWeight() { return useAverageWeight; }
         public void setUseAverageWeight(Boolean useAverageWeight) { this.useAverageWeight = useAverageWeight; }
+        public Boolean getInProgress() { return inProgress; }
+        public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
         public List<PattiVersionDTO> getVersions() { return versions; }
         public void setVersions(List<PattiVersionDTO> versions) { this.versions = versions != null ? versions : new ArrayList<>(); }
     }
@@ -180,6 +183,7 @@ public final class SettlementDTOs {
         @NotNull
         private BigDecimal netPayable;
         private Boolean useAverageWeight;
+        private Boolean inProgress;
 
         public String getSellerId() { return sellerId; }
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
@@ -201,6 +205,8 @@ public final class SettlementDTOs {
         public void setNetPayable(BigDecimal netPayable) { this.netPayable = netPayable; }
         public Boolean getUseAverageWeight() { return useAverageWeight; }
         public void setUseAverageWeight(Boolean useAverageWeight) { this.useAverageWeight = useAverageWeight; }
+        public Boolean getInProgress() { return inProgress; }
+        public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
     }
 
     /** Seller entry for settlement list (one per seller with lots/entries summary). */

@@ -58,6 +58,9 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     @Column(name = "use_average_weight", nullable = false)
     private Boolean useAverageWeight = false;
 
+    @Column(name = "in_progress", nullable = false)
+    private Boolean inProgress = false;
+
     @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("rate DESC")
     private List<PattiRateCluster> rateClusters = new ArrayList<>();
@@ -157,6 +160,14 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
 
     public void setUseAverageWeight(Boolean useAverageWeight) {
         this.useAverageWeight = useAverageWeight;
+    }
+
+    public Boolean getInProgress() {
+        return inProgress;
+    }
+
+    public void setInProgress(Boolean inProgress) {
+        this.inProgress = inProgress;
     }
 
     public List<PattiRateCluster> getRateClusters() {

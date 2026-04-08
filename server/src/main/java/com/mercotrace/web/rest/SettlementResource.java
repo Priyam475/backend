@@ -64,6 +64,20 @@ public class SettlementResource {
     }
 
     /**
+     * {@code GET  /api/settlements/pattis/in-progress} : list in-progress pattis (paginated).
+     */
+    @GetMapping("/pattis/in-progress")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_VIEW + "\")")
+    public ResponseEntity<List<PattiDTO>> listInProgressPattis(
+        @org.springdoc.core.annotations.ParameterObject Pageable pageable
+    ) {
+        LOG.debug("REST request to get in-progress Pattis page: {}", pageable);
+        var page = settlementService.listInProgressPattis(pageable);
+        HttpHeaders headers = PaginationUtil.generatePaginationHttpHeaders(ServletUriComponentsBuilder.fromCurrentRequest(), page);
+        return ResponseEntity.ok().headers(headers).body(page.getContent());
+    }
+
+    /**
      * {@code GET  /api/settlements/sellers/:sellerId/charges} :
      * compute seller-level charges (freight, advance) for a new Patti.
      */
