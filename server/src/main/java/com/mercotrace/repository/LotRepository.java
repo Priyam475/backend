@@ -105,5 +105,14 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
         @Param("normalizedMark") String normalizedMark,
         @Param("traderId") Long traderId
     );
+
+    /**
+     * Highest lot serial on any historical lot for this trader.
+     */
+    @Query(
+        "SELECT MAX(l.lotSerialNo) FROM Lot l, SellerInVehicle siv, Vehicle v WHERE l.sellerVehicleId = siv.id AND siv.vehicleId = v.id " +
+        "AND v.traderId = :traderId"
+    )
+    Optional<Integer> findMaxLotSerialNoByTraderId(@Param("traderId") Long traderId);
 }
 

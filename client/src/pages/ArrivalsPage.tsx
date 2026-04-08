@@ -1824,23 +1824,6 @@ const ArrivalsPage = () => {
     expandOnlySeller(seller.seller_vehicle_id);
 
     setSellers(prev => {
-      const existingLotSerials = new Set(
-        prev
-          .flatMap((entry) => entry.lots)
-          .map((lot) => lot.lot_serial_number)
-          .filter((lotSerialNumber): lotSerialNumber is number => lotSerialNumber != null && lotSerialNumber >= 1)
-      );
-      let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
-      let nextLotSerialNumber: number | null = null;
-      for (let attempt = 0; attempt < 9999; attempt += 1) {
-        candidate = candidate >= 9999 ? 1 : candidate + 1;
-        if (!existingLotSerials.has(candidate)) {
-          nextLotSerialNumber = candidate;
-          break;
-        }
-      }
-      if (nextLotSerialNumber == null) return prev;
-
       return prev.map((s, i) => {
         if (i !== sellerIdx) return s;
         if (!canAddAnotherLot(s)) return s;
@@ -1849,7 +1832,8 @@ const ArrivalsPage = () => {
           lots: [...s.lots, {
             lot_id: crypto.randomUUID(),
             lot_name: '',
-            lot_serial_number: nextLotSerialNumber,
+            // Lot serial is assigned by backend (global across arrivals).
+            lot_serial_number: null,
             quantity: 0,
             commodity_name: commodities[0]?.commodity_name || '',
             broker_tag: '',
@@ -1906,21 +1890,8 @@ const ArrivalsPage = () => {
       return;
     }
 
-    // Create mode: reuse serial-number logic from addLot
+    // Create mode: lot serial remains backend-assigned.
     setSellers(prev => {
-      const existingLotSerials = new Set(
-        prev.flatMap(e => e.lots)
-          .map(l => l.lot_serial_number)
-          .filter((n): n is number => n != null && n >= 1)
-      );
-      let candidate = existingLotSerials.size > 0 ? Math.max(...existingLotSerials) : 0;
-      let nextSerial: number | null = null;
-      for (let attempt = 0; attempt < 9999; attempt++) {
-        candidate = candidate >= 9999 ? 1 : candidate + 1;
-        if (!existingLotSerials.has(candidate)) { nextSerial = candidate; break; }
-      }
-      if (nextSerial == null) return prev;
-
       return prev.map((s, i) => {
         if (i !== sellerIdx) return s;
         return {
@@ -1928,7 +1899,7 @@ const ArrivalsPage = () => {
           lots: [...s.lots, {
             lot_id: crypto.randomUUID(),
             lot_name: trimmedName,
-            lot_serial_number: nextSerial,
+            lot_serial_number: null,
             quantity: bagsNum,
             commodity_name: addLotForm.commodityName,
             broker_tag: '',
@@ -4238,7 +4209,7 @@ const ArrivalsPage = () => {
                                                 <td className="py-1 px-2.5 align-middle text-center">
                                                   {lotSerialLabel !== "-" ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                                      {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
+                                                      {lotSerialLabel}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-[9px] sm:text-[10px]">—</span>
