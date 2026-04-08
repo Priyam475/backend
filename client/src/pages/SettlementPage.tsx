@@ -2704,7 +2704,7 @@ const SettlementPage = () => {
               'h-10 min-w-0 flex-1 rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
               edited && 'border-amber-500/70'
             )}
-            value={row[field] === 0 ? '' : row[field].toFixed(2)}
+            value={row[field] === 0 ? '' : row[field]}
             onChange={e => updateVehicleExpenseCell(row.id, field, e.target.value)}
             aria-label={ariaLabel}
           />
@@ -4035,7 +4035,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={displayedFreight === 0 ? '' : displayedFreight.toFixed(2)}
+                                value={displayedFreight === 0 ? '' : displayedFreight}
                                 onChange={e => {
                                   const entered = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4070,7 +4070,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.unloading === 0 ? '' : exp.unloading.toFixed(2)}
+                                value={exp.unloading === 0 ? '' : exp.unloading}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4110,7 +4110,7 @@ const SettlementPage = () => {
                                     'opacity-80'
                                 )}
                                 value={
-                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman.toFixed(2)
+                                  !settlementWeighingEnabled ? '' : exp.weighman === 0 ? '' : exp.weighman
                                 }
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
@@ -4130,7 +4130,7 @@ const SettlementPage = () => {
                                 step={0.01}
                                 inputMode="decimal"
                                 className={settlementExpenseInputClass}
-                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance.toFixed(2)}
+                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4148,7 +4148,7 @@ const SettlementPage = () => {
                                 min={0}
                                 step="0.01"
                                 className={settlementExpenseInputClass}
-                                value={exp.gunnies === 0 ? '' : exp.gunnies.toFixed(2)}
+                                value={exp.gunnies === 0 ? '' : exp.gunnies}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
@@ -4166,7 +4166,7 @@ const SettlementPage = () => {
                                 min={0}
                                 step="0.01"
                                 className={settlementExpenseInputClass}
-                                value={exp.others === 0 ? '' : exp.others.toFixed(2)}
+                                value={exp.others === 0 ? '' : exp.others}
                                 onChange={e => {
                                   const v = clampMoney(parseFloat(e.target.value) || 0);
                                   setSellerExpensesById(prev => {
