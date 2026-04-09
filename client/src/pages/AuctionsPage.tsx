@@ -615,6 +615,7 @@ const AuctionsPage = () => {
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const userClearedRateRef = useRef(false);
+  const [preferRateForFirstBidFormFocus, setPreferRateForFirstBidFormFocus] = useState(true);
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -2079,6 +2080,10 @@ const AuctionsPage = () => {
     setQty('');
     setLotNumberSearch('');
     userClearedRateRef.current = false;
+    // Available lots have no bids yet — user must enter a rate, so focus Rate first.
+    // Sold/partial/pending lots already have bids and the rate auto-fills from the
+    // last bid, so focus Mark instead (existing behaviour).
+    setPreferRateForFirstBidFormFocus(lot.status === 'available' || !lot.status);
     setSessionLoading(true);
     const loadSession = source === 'self_sale'
       ? auctionApi.getOrStartSelfSaleSession(lot.selfSaleUnitId ?? lot.lot_id)
@@ -2810,6 +2815,7 @@ const AuctionsPage = () => {
                     />
                     <Input
                       ref={markInputRef}
+                      data-skip-route-autofocus={preferRateForFirstBidFormFocus ? 'true' : undefined}
                       type="text"
                       value={scribbleMark}
                       readOnly={!!editingBidId}
@@ -3012,6 +3018,7 @@ const AuctionsPage = () => {
                         if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
                       }}
                       onFocus={(e) => {
+                        if (preferRateForFirstBidFormFocus) setPreferRateForFirstBidFormFocus(false);
                         setActiveNumpadField('rate');
                         if (isTouchLayout && !mobileKeyboardEnabled) {
                           e.currentTarget.blur();
@@ -3445,6 +3452,7 @@ const AuctionsPage = () => {
                   if (editingBidId) setEditBidDraft((d) => (d ? { ...d, rate: v } : d));
                 }}
                 onFocus={(e) => {
+                  if (preferRateForFirstBidFormFocus) setPreferRateForFirstBidFormFocus(false);
                   setActiveNumpadField('rate');
                   if (!mobileKeyboardEnabled) {
                     e.currentTarget.blur();
@@ -3469,6 +3477,7 @@ const AuctionsPage = () => {
               <Input
                 id="sales-pad-mark-mobile"
                 ref={markInputRef}
+                data-skip-route-autofocus={preferRateForFirstBidFormFocus ? 'true' : undefined}
                 type="text"
                 autoComplete="off"
                 value={scribbleMark}
