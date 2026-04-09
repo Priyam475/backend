@@ -50,16 +50,15 @@ import {
 import { BillingMoneyInput } from '@/components/billing/BillingMoneyInput';
 
 /**
- * Billing buttons/tabs match ArrivalsPage.tsx:
- * - Outline: `variant="outline"` + `rounded-xl` (+ height), same as e.g. "Show completed arrivals" / Add seller.
- * - Primary: `bg-[#6075FF] text-white shadow-lg hover:bg-[#5060e8]` (mobile "New Arrival" FAB pattern).
+ * Billing buttons follow Settlement premium gradient language for visual consistency.
  */
-const arrOutlineLg = 'rounded-xl h-11 sm:h-12 font-bold text-sm';
-const arrOutlineMd = 'rounded-xl h-9 text-sm font-semibold';
-const arrOutlineTall = 'rounded-xl h-12 text-sm font-semibold';
-const arrOutlineSm = 'rounded-xl h-8 text-xs font-semibold';
-const arrSolid =
-  'rounded-xl font-bold bg-[#6075FF] text-white shadow-lg hover:!bg-slate-500 hover:!text-white border-transparent transition-colors';
+const billingBtnGradient =
+  '!bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] !text-white border border-white/25 shadow-[0_10px_24px_-12px_rgba(91,140,255,0.85)] hover:!brightness-110 hover:border-white/45 hover:shadow-[0_14px_30px_-12px_rgba(123,97,255,0.9)] active:scale-[0.99] transition-all';
+const arrOutlineLg = cn('rounded-xl h-11 sm:h-12 font-bold text-sm', billingBtnGradient);
+const arrOutlineMd = cn('rounded-xl h-9 text-sm font-semibold', billingBtnGradient);
+const arrOutlineTall = cn('rounded-xl h-12 text-sm font-semibold', billingBtnGradient);
+const arrOutlineSm = cn('rounded-xl h-8 text-xs font-semibold', billingBtnGradient);
+const arrSolid = cn('rounded-xl font-bold', billingBtnGradient);
 const arrSolidLg = cn(arrSolid, 'h-11 sm:h-12 px-4 text-sm');
 const arrSolidMd = cn(arrSolid, 'h-9 px-3 text-sm');
 const arrSolidTall = cn(arrSolid, 'h-12 px-6 text-sm');
@@ -729,6 +728,7 @@ const BillingPage = () => {
   const [showSearchBidBuyerSuggestions, setShowSearchBidBuyerSuggestions] = useState(false);
   const searchBidBuyerSelectRef = useRef<HTMLDivElement | null>(null);
   const searchBidInputRef = useRef<HTMLInputElement | null>(null);
+  const versionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [pendingDeleteTarget, setPendingDeleteTarget] = useState<{ commIdx: number; itemIdx: number } | null>(null);
 
   useEffect(() => {
@@ -904,7 +904,7 @@ const BillingPage = () => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === 'x' || k === 'y' || k === 'z' || k === 'e' || k === 's' || k === 'p' || k === 'n') {
+      if (k === 'x' || k === 'y' || k === 'z' || k === 'e' || k === 's' || k === 'p' || k === 'n' || k === 'v') {
         e.preventDefault();
       }
       if (k === 'x') setBillingMainTab('create');
@@ -930,6 +930,14 @@ const BillingPage = () => {
       }
       if (k === 'n') {
         handleCreateNewBill();
+      }
+      if (
+        k === 'v'
+        && Array.isArray((bill as any).versions)
+        && (bill as any).versions.length > 0
+      ) {
+        versionTriggerRef.current?.focus();
+        versionTriggerRef.current?.click();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -3500,19 +3508,39 @@ const BillingPage = () => {
             </p>
             {selectBidBuyer && (
               <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-bold text-foreground">{selectBidBuyer.buyerName} ({selectBidBuyer.buyerMark})</p>
                     <p className="text-xs text-muted-foreground">{selectBidBuyer.entries.length} bid(s) found</p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => { setSelectBidBuyer(null); setSelectedBidKeys([]); }}
-                    className={arrSolidSm}
-                  >
-                    Clear
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSelectedBidKeys(selectBidBuyer.entries.map(getBidSelectionKey))}
+                      disabled={selectBidBuyer.entries.length === 0}
+                      className={arrSolidSm}
+                    >
+                      Select All
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSelectedBidKeys([])}
+                      disabled={selectedBidKeys.length === 0}
+                      className={arrSolidSm}
+                    >
+                      Deselect All
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => { setSelectBidBuyer(null); setSelectedBidKeys([]); }}
+                      className={arrSolidSm}
+                    >
+                      Clear
+                    </Button>
+                  </div>
                 </div>
                 <div className="max-h-64 overflow-y-auto space-y-1.5">
                   {selectBidBuyer.entries.map((entry) => {
@@ -3571,11 +3599,14 @@ const BillingPage = () => {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-2 min-w-0 flex-1">
                   <Receipt className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" aria-hidden />
-                  <div className="min-w-0">
-                    <h3 className="text-sm sm:text-base font-bold text-foreground">
-                      Sales bill — {bill.buyerName} ({bill.buyerMark})
+                  <div className="min-w-0 flex-1">
+                    <h3
+                      className="text-sm sm:text-base font-bold text-foreground truncate"
+                      title={`Sales bill — ${(bill.billingName || bill.buyerName)} (${bill.buyerMark})`}
+                    >
+                      Sales bill — {bill.billingName || bill.buyerName} ({bill.buyerMark})
                     </h3>
-                    <p className="text-[10px] sm:text-sm text-muted-foreground">
+                    <p className="text-[10px] sm:text-sm text-muted-foreground truncate">
                       {bill.billNumber || 'New Bill'} · {bill.commodityGroups.reduce((s, g) => s + g.items.length, 0)} item(s) · ₹{formatBillingInr(bill.grandTotal)}
                     </p>
                   </div>
@@ -3696,7 +3727,12 @@ const BillingPage = () => {
             </div>
             {/* Select Or Replace Buyer & broker — one row (wraps on narrow screens); no separate Save */}
             <div className={cn("glass-card rounded-2xl p-3 space-y-2 relative overflow-visible", searchBidDialogOpen ? "z-[20]" : "z-[30]")}>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="space-y-3">
+                <div className="min-w-0 rounded-xl border border-border/40 bg-muted/10 p-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+                    BUYER & BROKER
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
                 <RadioGroup
                   value={replaceTarget}
                   onValueChange={v => {
@@ -3705,7 +3741,7 @@ const BillingPage = () => {
                       clearReplacementInline();
                     }
                   }}
-                  className="flex flex-row flex-wrap gap-x-3 gap-y-1 min-h-9 shrink-0 items-center rounded-xl border border-border/30 bg-muted/20 px-2.5 py-1.5"
+                  className="flex flex-row gap-x-3 min-h-9 shrink-0 items-center rounded-xl border border-border/30 bg-muted/20 px-2.5 py-1.5"
                   disabled={!bill}
                 >
                   <div className="flex items-center gap-1.5">
@@ -3721,7 +3757,7 @@ const BillingPage = () => {
                     </Label>
                   </div>
                 </RadioGroup>
-                <div className="relative min-w-[7rem] flex-1 basis-0 max-w-none">
+                <div className="relative min-w-[7rem] flex-1 basis-[10rem]">
                   <Input
                     value={replaceMarkInput}
                     onChange={e => {
@@ -3773,32 +3809,11 @@ const BillingPage = () => {
                   }}
                   placeholder="Name"
                   className={cn(
-                    'h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium min-w-[5.5rem] flex-1 basis-[5.5rem] max-w-[14rem]',
+                    'h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium min-w-[5.5rem] flex-1 basis-[10rem] max-w-[14rem]',
                     replaceErrors.name && 'border-destructive',
                   )}
                   disabled={!bill}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cn(arrSolidMd, 'whitespace-nowrap shrink-0')}
-                  onClick={() => void submitReplacement()}
-                  disabled={
-                    !bill || (!replaceSelectedContact && !canCreateContact)
-                  }
-                  title={
-                    !replaceSelectedContact && !canCreateContact
-                      ? 'You do not have permission to create contacts.'
-                      : undefined
-                  }
-                >
-                  {replaceSelectedContact
-                    ? `Update ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`
-                    : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
-                </Button>
-                <Button type="button" variant="outline" className={cn(arrSolidMd, 'shrink-0')} onClick={clearReplacementInline}>
-                  Clear
-                </Button>
                 <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
                   <input
                     type="checkbox"
@@ -3825,84 +3840,102 @@ const BillingPage = () => {
                   />
                   Use buyer as broker
                 </label>
-              </div>
-              {(replaceErrors.mark || replaceErrors.name || replaceErrors.phone) && (
-                <p className="text-[11px] text-destructive">
-                  {[replaceErrors.mark, replaceErrors.name, replaceErrors.phone].filter(Boolean).join(' · ')}
-                </p>
-              )}
-            </div>
-
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-              className="glass-card rounded-2xl p-3">
-              <div
-                className={cn(
-                  'grid w-full min-w-0 gap-3 sm:gap-3 lg:gap-4',
-                  'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
-                  'items-end',
-                )}
-              >
-                <div className="min-w-0">
-                  <p
-                    className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
-                    onClick={() =>
-                      setBill({
-                        ...bill,
-                        brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
-                      })
-                    }
-                    title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
-                  >
-                    BROKERAGE
-                  </p>
-                  <BillingMoneyInput
-                    value={bill.brokerageValue}
-                    min={0}
-                    onCommit={n => {
-                      setBill({ ...bill, brokerageValue: n });
-                      setValidationErrors(prev => {
-                        const err = { ...prev };
-                        delete err.brokerageValue;
-                        return err;
-                      });
-                    }}
-                    placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
-                    className={cn(
-                      'h-9 w-full min-w-0 max-w-full rounded-lg text-xs text-center font-bold bg-muted/10',
-                      validationErrors.brokerageValue && 'border-destructive ring-1 ring-destructive/30',
-                      numberInputNoSpinnerClass,
-                    )}
-                  />
-                  {validationErrors.brokerageValue && (
-                    <p className="text-[9px] text-destructive mt-0.5 text-right">
-                      {validationErrors.brokerageValue}
-                    </p>
-                  )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(arrSolidMd, 'whitespace-nowrap shrink-0')}
+                  onClick={() => void submitReplacement()}
+                  disabled={
+                    !bill || (!replaceSelectedContact && !canCreateContact)
+                  }
+                  title={
+                    !replaceSelectedContact && !canCreateContact
+                      ? 'You do not have permission to create contacts.'
+                      : undefined
+                  }
+                >
+                  {replaceSelectedContact
+                    ? `Update ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`
+                    : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
+                </Button>
+                <Button type="button" variant="outline" className={cn(arrSolidMd, 'shrink-0')} onClick={clearReplacementInline}>
+                  Clear
+                </Button>
+                  </div>
                 </div>
-
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
-                    OTHER CHARGES
+                <div className="min-w-0 rounded-xl border border-border/40 bg-muted/10 p-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+                    CHARGES
                   </p>
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <BillingMoneyInput
-                      value={bill.globalOtherCharges}
-                      min={0}
-                      onCommit={n => {
-                        setBill({ ...bill, globalOtherCharges: n });
-                        setValidationErrors(prev => {
-                          const err = { ...prev };
-                          delete err.globalOtherCharges;
-                          return err;
-                        });
-                      }}
-                      placeholder="Other Charges (₹)"
-                      className={cn(
-                        'h-9 min-w-0 flex-1 rounded-lg text-xs text-center font-bold bg-muted/10',
-                        validationErrors.globalOtherCharges && 'border-destructive ring-1 ring-destructive/30',
-                        numberInputNoSpinnerClass,
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
+                        onClick={() =>
+                          setBill({
+                            ...bill,
+                            brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                          })
+                        }
+                        title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
+                      >
+                        BROKERAGE
+                      </p>
+                      <BillingMoneyInput
+                        value={bill.brokerageValue}
+                        min={0}
+                        onCommit={n => {
+                          setBill({ ...bill, brokerageValue: n });
+                          setValidationErrors(prev => {
+                            const err = { ...prev };
+                            delete err.brokerageValue;
+                            return err;
+                          });
+                        }}
+                        placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
+                        className={cn(
+                          'h-9 w-full rounded-lg text-xs text-center font-bold bg-muted/10',
+                          validationErrors.brokerageValue && 'border-destructive ring-1 ring-destructive/30',
+                          numberInputNoSpinnerClass,
+                        )}
+                      />
+                      {validationErrors.brokerageValue && (
+                        <p className="text-[9px] text-destructive mt-0.5 text-right">
+                          {validationErrors.brokerageValue}
+                        </p>
                       )}
-                    />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide">
+                        OTHER CHARGES
+                      </p>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <BillingMoneyInput
+                          value={bill.globalOtherCharges}
+                          min={0}
+                          onCommit={n => {
+                            setBill({ ...bill, globalOtherCharges: n });
+                            setValidationErrors(prev => {
+                              const err = { ...prev };
+                              delete err.globalOtherCharges;
+                              return err;
+                            });
+                          }}
+                          placeholder="Other Charges (₹)"
+                          className={cn(
+                            'h-9 min-w-0 flex-1 rounded-lg text-xs text-center font-bold bg-muted/10',
+                            validationErrors.globalOtherCharges && 'border-destructive ring-1 ring-destructive/30',
+                            numberInputNoSpinnerClass,
+                          )}
+                        />
+                      </div>
+                      {validationErrors.globalOtherCharges && (
+                        <p className="text-[9px] text-destructive mt-0.5 text-right">
+                          {validationErrors.globalOtherCharges}
+                        </p>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -3912,17 +3945,17 @@ const BillingPage = () => {
                       Apply to All
                     </Button>
                   </div>
-                  {validationErrors.globalOtherCharges && (
-                    <p className="text-[9px] text-destructive mt-0.5 text-right">
-                      {validationErrors.globalOtherCharges}
-                    </p>
-                  )}
                 </div>
               </div>
-              <p className="mt-2 text-[9px] text-muted-foreground text-center sm:text-left">
+              <p className="text-[9px] text-muted-foreground">
                 Global charges: brokerage and other amounts apply to all items in this bill.
               </p>
-            </motion.div>
+              {(replaceErrors.mark || replaceErrors.name || replaceErrors.phone) && (
+                <p className="text-[11px] text-destructive">
+                  {[replaceErrors.mark, replaceErrors.name, replaceErrors.phone].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
 
             {bill.commodityGroups.length > 1 && (
               <div className="lg:hidden flex items-center justify-center gap-1.5 -mt-1 mb-1">
@@ -3968,13 +4001,13 @@ const BillingPage = () => {
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <p className="text-base font-bold text-foreground leading-snug">{group.commodityName}</p>
                           <div className="flex flex-wrap gap-1.5 items-center">
-                            <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-[9px] font-bold text-emerald-700 dark:text-emerald-200">
-                              Gross: ₹{formatBillingInr(group.subtotal)}
-                            </span>
                             <button
                               type="button"
                               onClick={() => toggleCommodityCollapse(gi)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-border/50 bg-background/80 hover:bg-muted/40 text-[10px] font-semibold text-foreground transition-colors"
+                              className={cn(
+                                'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold',
+                                billingBtnGradient,
+                              )}
                               aria-label={isCollapsed ? 'Expand commodity details' : 'Collapse commodity details'}
                               aria-expanded={!isCollapsed}
                             >
@@ -3984,26 +4017,6 @@ const BillingPage = () => {
                             {group.hsnCode && (
                               <span className="px-2 py-0.5 rounded bg-muted/40 text-[9px] font-bold text-muted-foreground">
                                 HSN: {group.hsnCode}
-                              </span>
-                            )}
-                            {(group.gstRate ?? 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-[9px] font-bold text-amber-800 dark:text-amber-200">
-                                GST: {formatBillingInr(group.gstRate)}%
-                              </span>
-                            )}
-                            {(group.sgstRate ?? 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
-                                SGST: {formatBillingInr(group.sgstRate)}%
-                              </span>
-                            )}
-                            {(group.cgstRate ?? 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
-                                CGST: {formatBillingInr(group.cgstRate)}%
-                              </span>
-                            )}
-                            {(group.igstRate ?? 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-900/25 text-[9px] font-bold text-amber-800 dark:text-amber-200">
-                                IGST: {formatBillingInr(group.igstRate)}%
                               </span>
                             )}
                           </div>
@@ -4895,8 +4908,49 @@ const BillingPage = () => {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className="glass-card rounded-2xl p-4 border-2 border-emerald-500/30">
               <div className="mt-1 space-y-2">
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+                <div className="flex justify-center">
+                  <div className="flex w-full flex-wrap items-center justify-center gap-2">
+                    {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
+                      <div className="flex w-full items-center justify-center gap-2 text-[10px] text-muted-foreground sm:w-auto">
+                        <span className="font-semibold">Version{tabHint('Alt V')}:</span>
+                        <Select
+                          value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
+                          onValueChange={val => {
+                            if (val === 'latest') {
+                              setSelectedPrintVersion('latest');
+                              applySelectedVersion('latest');
+                              return;
+                            }
+                            const num = Number(val);
+                            const next = Number.isFinite(num) ? num : 'latest';
+                            setSelectedPrintVersion(next);
+                            if (next === 'latest') {
+                              applySelectedVersion('latest');
+                            } else {
+                              applySelectedVersion(next);
+                            }
+                          }}
+                        >
+                          <SelectTrigger
+                            ref={versionTriggerRef}
+                            className="h-8 min-w-0 flex-1 text-[10px] sm:w-auto sm:min-w-[14rem] sm:flex-none"
+                          >
+                            <SelectValue placeholder="Latest (current)" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            <SelectItem value="latest">Latest (current)</SelectItem>
+                            {(bill as any).versions.map((v: any) => (
+                              <SelectItem key={v.version} value={String(v.version)}>
+                                v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {selectedPrintVersion !== 'latest' && (
+                          <span className="hidden lg:inline text-[10px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
+                        )}
+                      </div>
+                    )}
                     <Button
                       type="button"
                       variant="outline"
@@ -4904,7 +4958,7 @@ const BillingPage = () => {
                       onClick={() => setEditLocked(false)}
                       disabled={!isBackendBillId(bill.billId)}
                     >
-                      <Edit3 className="w-4 h-4" /> Edit
+                      <Edit3 className="w-4 h-4" /> Edit{tabHint('Alt E')}
                     </Button>
                     <Button
                       type="button"
@@ -4912,7 +4966,7 @@ const BillingPage = () => {
                       className={cn(arrSolidMd, 'gap-1.5')}
                       onClick={() => void handleSaveDraft()}
                     >
-                      <Save className="w-4 h-4" /> {bill.billId && isBackendBillId(bill.billId) ? 'Update' : 'Save'}
+                      <Save className="w-4 h-4" /> {bill.billId && isBackendBillId(bill.billId) ? `Update${tabHint('Alt S')}` : `Save${tabHint('Alt S')}`}
                     </Button>
                     <Button
                       type="button"
@@ -4921,7 +4975,7 @@ const BillingPage = () => {
                       onClick={() => void saveAndPreparePrint()}
                       disabled={!hasSavedOnce}
                     >
-                      <Printer className="w-4 h-4" /> Print
+                      <Printer className="w-4 h-4" /> Print{tabHint('Alt P')}
                     </Button>
                     <Button
                       type="button"
@@ -4929,47 +4983,9 @@ const BillingPage = () => {
                       className={cn(arrSolidMd, 'gap-1.5')}
                       onClick={handleCreateNewBill}
                     >
-                      <Plus className="w-4 h-4" /> New Bill
+                      <Plus className="w-4 h-4" /> New Bill{tabHint('Alt N')}
                     </Button>
                   </div>
-                  {Array.isArray((bill as any).versions) && (bill as any).versions.length > 0 && (
-                    <div className="flex w-full items-center gap-2 text-[10px] text-muted-foreground lg:w-auto lg:justify-end">
-                      <span className="font-semibold">Version:</span>
-                      <Select
-                        value={selectedPrintVersion === 'latest' ? 'latest' : String(selectedPrintVersion)}
-                        onValueChange={val => {
-                          if (val === 'latest') {
-                            setSelectedPrintVersion('latest');
-                            applySelectedVersion('latest');
-                            return;
-                          }
-                          const num = Number(val);
-                          const next = Number.isFinite(num) ? num : 'latest';
-                          setSelectedPrintVersion(next);
-                          if (next === 'latest') {
-                            applySelectedVersion('latest');
-                          } else {
-                            applySelectedVersion(next);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-8 min-w-0 flex-1 text-[10px] lg:w-auto lg:min-w-[14rem] lg:flex-none">
-                          <SelectValue placeholder="Latest (current)" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-72">
-                          <SelectItem value="latest">Latest (current)</SelectItem>
-                          {(bill as any).versions.map((v: any) => (
-                            <SelectItem key={v.version} value={String(v.version)}>
-                              v{v.version}{v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {selectedPrintVersion !== 'latest' && (
-                        <span className="hidden lg:inline text-[10px] text-primary font-semibold">v{selectedPrintVersion} selected</span>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             </motion.div>
