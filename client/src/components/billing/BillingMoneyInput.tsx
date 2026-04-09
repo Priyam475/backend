@@ -7,6 +7,8 @@ type BillingMoneyInputProps = {
   value: number;
   /** Called on every keystroke while focused (live recalc) and again on blur (final normalize). */
   onCommit: (n: number) => void;
+  /** live: commit on each keypress; blur: commit only on blur/finalize. */
+  commitMode?: 'live' | 'blur';
   disabled?: boolean;
   className?: string;
   placeholder?: string;
@@ -42,6 +44,7 @@ function parseDraftToNumber(raw: string, min?: number): number | null {
 export function BillingMoneyInput({
   value,
   onCommit,
+  commitMode = 'live',
   disabled,
   className,
   placeholder,
@@ -66,9 +69,11 @@ export function BillingMoneyInput({
       onChange={e => {
         const next = e.target.value;
         setDraft(next);
-        const live = parseDraftToNumber(next, min);
-        if (live !== null) {
-          onCommit(live);
+        if (commitMode === 'live') {
+          const live = parseDraftToNumber(next, min);
+          if (live !== null) {
+            onCommit(live);
+          }
         }
       }}
       onBlur={() => {

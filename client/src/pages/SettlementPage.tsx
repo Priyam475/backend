@@ -904,6 +904,7 @@ const SettlementPage = () => {
   const [selectedPattiVersion, setSelectedPattiVersion] = useState<'latest' | number>('latest');
   const [isLatestEditUnlocked, setIsLatestEditUnlocked] = useState(true);
   const latestPattiDataSnapshotRef = useRef<PattiData | null>(null);
+  const settlementDirtyBaselineRef = useRef<string | null>(null);
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
   /** Toggle 1: use weighing charges in settlement totals. */
@@ -979,6 +980,10 @@ const SettlementPage = () => {
     null
   );
   const saveMainPattiShortcutRef = useRef<() => void>(() => {});
+
+  const serializeSettlementForDirty = useCallback((data: PattiData): string => {
+    return JSON.stringify(data);
+  }, []);
   const salesReportCarouselRef = useRef<HTMLDivElement | null>(null);
   const [activeSalesReportSlide, setActiveSalesReportSlide] = useState(0);
 
@@ -1184,6 +1189,7 @@ const SettlementPage = () => {
     setPattiDetailDto(null);
     setSelectedPattiVersion('latest');
     latestPattiDataSnapshotRef.current = null;
+    settlementDirtyBaselineRef.current = null;
     setExistingPattiIdBySellerId({});
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
@@ -1270,7 +1276,7 @@ const SettlementPage = () => {
     setDraftMainPattiNo(baseNo);
     setDraftPattiNoBySellerId(draftBySeller);
 
-    setPattiData({
+    const initialPattiData: PattiData = {
       pattiId: draftBySeller[String(seller.sellerId)] ?? '',
       sellerName: seller.sellerName,
       rateClusters,
@@ -1280,12 +1286,15 @@ const SettlementPage = () => {
       netPayable: baseNetPayable,
       createdAt,
       useAverageWeight: false,
-    });
+    };
+    setPattiData(initialPattiData);
+    settlementDirtyBaselineRef.current = serializeSettlementForDirty(initialPattiData);
   }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, isWeighingMergedIntoFreight, sellers, savedPattis]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
   const openPattiForEdit = useCallback(async (id: number, arrivalSellerIds?: string[]) => {
     try {
+      settlementDirtyBaselineRef.current = null;
       setDraftMainPattiNo('');
       setDraftPattiNoBySellerId({});
       const dto = await settlementApi.getPattiById(id);
@@ -1303,6 +1312,7 @@ const SettlementPage = () => {
         toast.warning('Patti date is in the future — please verify');
       }
       setPattiData(data);
+      settlementDirtyBaselineRef.current = serializeSettlementForDirty(data);
       setPattiDetailDto(dto);
       setSelectedPattiVersion('latest');
       setIsLatestEditUnlocked(false);
@@ -1348,7 +1358,7 @@ const SettlementPage = () => {
     } catch {
       toast.error('Failed to load patti');
     }
-  }, [sellers, savedPattis]);
+  }, [sellers, savedPattis, serializeSettlementForDirty]);
 
   const openInProgressDraft = useCallback(async (draft: InProgressSettlementDraft) => {
     const idRaw = String(draft.key).replace('db:', '');
@@ -1367,7 +1377,10 @@ const SettlementPage = () => {
     setSelectedPattiVersion(sel);
     if (sel === 'latest') {
       const snap = latestPattiDataSnapshotRef.current;
-      if (snap) setPattiData(JSON.parse(JSON.stringify(snap)) as PattiData);
+      if (snap) {
+        settlementDirtyBaselineRef.current = null;
+        setPattiData(JSON.parse(JSON.stringify(snap)) as PattiData);
+      }
       return;
     }
     setIsLatestEditUnlocked(false);
@@ -1383,6 +1396,7 @@ const SettlementPage = () => {
     }
     const merged = { ...pattiDetailDto, ...raw, pattiId: pattiDetailDto.pattiId, sellerId: pattiDetailDto.sellerId } as PattiDTO;
     const next = mapPattiDTOToPattiData(merged);
+    settlementDirtyBaselineRef.current = null;
     setPattiData(next);
     const sid = String(pattiDetailDto.sellerId ?? '').trim();
     if (sid) {
@@ -1397,6 +1411,16 @@ const SettlementPage = () => {
     if (!pattiData || selectedPattiVersion !== 'latest') return;
     latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(pattiData)) as PattiData;
   }, [pattiData, selectedPattiVersion]);
+
+  useEffect(() => {
+    if (!selectedSeller || !pattiData) {
+      settlementDirtyBaselineRef.current = null;
+      return;
+    }
+    if (settlementDirtyBaselineRef.current == null) {
+      settlementDirtyBaselineRef.current = serializeSettlementForDirty(pattiData);
+    }
+  }, [selectedSeller, pattiData, serializeSettlementForDirty]);
   const editLatestPattiVersion = useCallback(() => {
     if (selectedPattiVersion !== 'latest') {
       applyPattiVersionSelection('latest');
@@ -1706,6 +1730,7 @@ const SettlementPage = () => {
       toast.success(
         `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${scopeSellers.length} seller(s). Use Print when ready.`
       );
+      settlementDirtyBaselineRef.current = serializeSettlementForDirty(pattiData);
       loadInProgressPattis();
       return true;
     } finally {
@@ -1740,6 +1765,7 @@ const SettlementPage = () => {
         return false;
       }
       toast.success('Settlement progress saved.');
+      settlementDirtyBaselineRef.current = serializeSettlementForDirty(pattiData);
       loadInProgressPattis();
       return true;
     } finally {
@@ -1756,12 +1782,18 @@ const SettlementPage = () => {
     setSelectedPattiVersion('latest');
     setIsLatestEditUnlocked(true);
     latestPattiDataSnapshotRef.current = null;
+    settlementDirtyBaselineRef.current = null;
     setExistingPattiIdBySellerId({});
     setDraftMainPattiNo('');
     setDraftPattiNoBySellerId({});
   }, []);
 
-  const isSettlementDirty = !!selectedSeller && !!pattiData && !showPrint;
+  const isSettlementDirty = useMemo(() => {
+    if (!selectedSeller || !pattiData || showPrint) return false;
+    if (!isLatestEditUnlocked) return false;
+    if (!settlementDirtyBaselineRef.current) return false;
+    return serializeSettlementForDirty(pattiData) !== settlementDirtyBaselineRef.current;
+  }, [selectedSeller, pattiData, showPrint, isLatestEditUnlocked, serializeSettlementForDirty]);
   const saveSettlementProgressBeforeLeave = useCallback(async (): Promise<boolean> => {
     if (!selectedSeller || !pattiData) return true;
     return await savePattiInProgress();
@@ -1771,7 +1803,7 @@ const SettlementPage = () => {
     title: 'Save your progress?',
     description: 'You have unsaved changes. Would you like to save your progress before leaving?',
     continueLabel: 'Save',
-    stayLabel: 'Cancel',
+    stayLabel: 'Discard',
     onBeforeContinue: saveSettlementProgressBeforeLeave,
   });
 

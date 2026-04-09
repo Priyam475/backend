@@ -32,7 +32,7 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
     title = DEFAULT_TITLE,
     description = DEFAULT_DESCRIPTION,
     continueLabel = "Yes",
-    stayLabel = "No",
+    stayLabel = "Discard",
     onBeforeContinue,
   } = options;
 
@@ -73,6 +73,11 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
   const handleStay = React.useCallback(() => {
     if (isRouteBlocked) blocker.reset();
     else resolveLocal(false);
+  }, [isRouteBlocked, blocker, resolveLocal]);
+
+  const handleDiscard = React.useCallback(() => {
+    if (isRouteBlocked) blocker.proceed();
+    else resolveLocal(true);
   }, [isRouteBlocked, blocker, resolveLocal]);
 
   const handleContinue = React.useCallback(async () => {
@@ -118,7 +123,7 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
             <AlertDialogDescription>{description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleStay} disabled={saving}>{stayLabel}</AlertDialogCancel>
+            <AlertDialogCancel onClick={handleDiscard} disabled={saving}>{stayLabel}</AlertDialogCancel>
             <AlertDialogAction onClick={handleContinue} disabled={saving}>
               {saving ? 'Saving…' : continueLabel}
             </AlertDialogAction>
@@ -126,7 +131,7 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
         </AlertDialogContent>
       </AlertDialog>
     );
-  }, [isOpen, handleOpenChange, title, description, stayLabel, continueLabel, handleStay, handleContinue, saving]);
+  }, [isOpen, handleOpenChange, title, description, stayLabel, continueLabel, handleDiscard, handleContinue, saving]);
 
   return { confirmIfDirty, UnsavedChangesDialog };
 }
