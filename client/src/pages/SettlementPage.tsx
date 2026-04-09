@@ -90,6 +90,25 @@ const settlementToggleTabBtnOnHero = (active: boolean) =>
       : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/10 backdrop-blur-sm',
   );
 
+/** Lightweight inline hint for keyboard shortcuts (same pattern as Billing). */
+const tabHint = (key: string) => ` (${key})`;
+
+/** Commodity-settings style toggle shell for settlement expense card. */
+const settlementExpenseToggleBtnClass = (
+  checked: boolean,
+  tone: 'emerald' | 'violet',
+  disabled?: boolean
+) =>
+  cn(
+    'w-[54px] h-[30px] rounded-full transition-all relative shadow-inner',
+    checked
+      ? tone === 'emerald'
+        ? 'bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-[0_8px_20px_-12px_rgba(91,140,255,0.9)]'
+        : 'bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-[0_8px_20px_-12px_rgba(123,97,255,0.9)]'
+      : 'bg-slate-300 dark:bg-slate-600',
+    disabled && 'opacity-60 cursor-not-allowed'
+  );
+
 /** Sales report: outer card border per seller (same accent idea as Vehicle details tiles). */
 const SALES_REPORT_SELLER_CARD_STYLES = [
   'border-blue-500/20 bg-muted/30',
@@ -1750,6 +1769,25 @@ const SettlementPage = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      // Only apply on seller list screen; avoid conflict with Alt+X inside patti form.
+      if (selectedSeller || pattiData || showPrint) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'x' && k !== 'y' && k !== 'z') return;
+      e.preventDefault();
+      setSettlementMainTab('arrival-summary');
+      if (k === 'x') setArrivalSummaryTab('new-patti');
+      else if (k === 'y') setArrivalSummaryTab('in-progress-patti');
+      else setArrivalSummaryTab('saved-patti');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedSeller, pattiData, showPrint]);
+
   function getSellerLots(seller: SellerSettlement): number {
     return seller.lots.reduce((s, l) => s + l.entries.reduce((s2, e) => s2 + e.quantity, 0), 0);
   }
@@ -2950,7 +2988,7 @@ const SettlementPage = () => {
             {savedPattis.length === 0 ? 'No saved pattis found' : 'No matching pattis'}
           </p>
           <p className="text-xs text-muted-foreground/70 mt-1">
-            {savedPattis.length === 0 ? 'Create a patti from New Patti tab' : 'Try a different search'}
+            {savedPattis.length === 0 ? 'Create a patti from Create New Patti tab' : 'Try a different search'}
           </p>
         </div>
       );
@@ -2983,8 +3021,8 @@ const SettlementPage = () => {
       }
       return (
         <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] border border-border/50 text-sm">
+          <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+            <table className="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
               <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
                 <tr>
                   <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
@@ -3027,8 +3065,8 @@ const SettlementPage = () => {
 
     return (
       <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border border-border/50 text-sm">
+        <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+          <table className="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
             <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
               <tr>
                 <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
@@ -4209,7 +4247,7 @@ const SettlementPage = () => {
 
                       <div className="flex h-full min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-muted/20 lg:w-[19.25rem]">
                         <div className="relative shrink-0 overflow-hidden px-3 py-2.5">
-                          <div className={cn('absolute inset-0', DESKTOP_SIDEBAR_LIKE_GRADIENT_BG)} />
+                          <div className={cn('absolute inset-0', SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT)} />
                           <div className={DESKTOP_SIDEBAR_LIKE_SHINE} />
                           <p className="relative z-10 text-center text-sm font-bold text-white drop-shadow-sm">Expenses</p>
                         </div>
@@ -4231,13 +4269,20 @@ const SettlementPage = () => {
                               </TooltipContent>
                             </Tooltip>
                           </div>
-                          <Switch
+                          <button
+                            type="button"
                             id={`sw-w-${seller.sellerId}`}
-                            className="h-5 w-9 shrink-0"
-                            checked={settlementWeighingEnabled}
-                            onCheckedChange={v => setSettlementWeighingEnabled(v === true)}
+                            className={settlementExpenseToggleBtnClass(settlementWeighingEnabled, 'emerald')}
+                            onClick={() => setSettlementWeighingEnabled(v => !v)}
                             aria-label="Use weighman in totals"
-                          />
+                            aria-pressed={settlementWeighingEnabled}
+                          >
+                            <motion.div
+                              className="absolute top-1 h-[22px] w-[22px] rounded-full bg-white shadow-md"
+                              animate={{ x: settlementWeighingEnabled ? 28 : 4 }}
+                              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                            />
+                          </button>
                         </div>
                         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 px-2 py-1.5">
                           <div className="flex items-center gap-1.5">
@@ -4258,19 +4303,31 @@ const SettlementPage = () => {
                               </TooltipContent>
                             </Tooltip>
                           </div>
-                          <Switch
+                          <button
+                            type="button"
                             id={`sw-wm-${seller.sellerId}`}
-                            className="h-5 w-9 shrink-0"
-                            checked={isWeighingMergedIntoFreight(seller.sellerId)}
-                            onCheckedChange={v =>
+                            className={settlementExpenseToggleBtnClass(
+                              isWeighingMergedIntoFreight(seller.sellerId),
+                              'violet',
+                              settlementWeighingEnabled
+                            )}
+                            onClick={() => {
+                              if (settlementWeighingEnabled) return;
                               setSettlementWeighingMergeIntoFreightBySellerId(prev => ({
                                 ...prev,
-                                [seller.sellerId]: v === true,
-                              }))
-                            }
+                                [seller.sellerId]: !isWeighingMergedIntoFreight(seller.sellerId),
+                              }));
+                            }}
                             disabled={settlementWeighingEnabled}
                             aria-label="Add weighing amount to freight"
-                          />
+                            aria-pressed={isWeighingMergedIntoFreight(seller.sellerId)}
+                          >
+                            <motion.div
+                              className="absolute top-1 h-[22px] w-[22px] rounded-full bg-white shadow-md"
+                              animate={{ x: isWeighingMergedIntoFreight(seller.sellerId) ? 28 : 4 }}
+                              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                            />
+                          </button>
                         </div>
                         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 text-xs">
                             <div className="flex items-center justify-between gap-2">
@@ -5305,7 +5362,7 @@ const SettlementPage = () => {
                 onClick={() => setArrivalSummaryTab('new-patti')}
                 className={settlementToggleTabBtn(arrivalSummaryTab === 'new-patti')}
               >
-                New Patti
+                Create New Patti{tabHint('Alt X')}
               </button>
               <button
                 type="button"
@@ -5314,7 +5371,7 @@ const SettlementPage = () => {
                 onClick={() => setArrivalSummaryTab('in-progress-patti')}
                 className={settlementToggleTabBtn(arrivalSummaryTab === 'in-progress-patti')}
               >
-                In Progress
+                Patti In Progress{tabHint('Alt Y')}
               </button>
               <button
                 type="button"
@@ -5323,7 +5380,7 @@ const SettlementPage = () => {
                 onClick={() => setArrivalSummaryTab('saved-patti')}
                 className={settlementToggleTabBtn(arrivalSummaryTab === 'saved-patti')}
               >
-                Saved Patti
+                Saved Patti{tabHint('Alt Z')}
               </button>
             </div>
             {renderArrivalSummaryTable(arrivalSummaryTab)}
