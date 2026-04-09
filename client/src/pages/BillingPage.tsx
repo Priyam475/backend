@@ -190,6 +190,7 @@ function resolveSelfSaleUnitIdFromResults(lotId: string, auctions: AuctionResult
 interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
+  taxMode?: 'GST' | 'IGST' | 'NONE';
   gstRate: number;
   /** Optional SGST/CGST (intra) or IGST (inter) split; see `effectiveGstPercent` in billingMoney. */
   sgstRate: number;
@@ -369,12 +370,25 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
   }
   const groups = (b.commodityGroups || []).map((g: any) => {
     const fromCfg = configByCommName.get(g.commodityName);
+    const resolvedGstRate = g.gstRate ?? fromCfg?.gstRate ?? 0;
+    const resolvedSgstRate = g.sgstRate ?? g.sgst_rate ?? fromCfg?.sgstRate ?? 0;
+    const resolvedCgstRate = g.cgstRate ?? g.cgst_rate ?? fromCfg?.cgstRate ?? 0;
+    const resolvedIgstRate = g.igstRate ?? g.igst_rate ?? fromCfg?.igstRate ?? 0;
+    const hasAnyTaxConfigured =
+      Number(fromCfg?.gstRate ?? 0) > 0
+      || Number(fromCfg?.sgstRate ?? 0) > 0
+      || Number(fromCfg?.cgstRate ?? 0) > 0
+      || Number(fromCfg?.igstRate ?? 0) > 0;
+    const preferredTaxMode: 'GST' | 'IGST' | 'NONE' = hasAnyTaxConfigured
+      ? (Number(resolvedIgstRate) > 0 ? 'IGST' : 'GST')
+      : 'NONE';
     return {
     ...g,
-    gstRate: g.gstRate ?? fromCfg?.gstRate ?? 0,
-    sgstRate: g.sgstRate ?? g.sgst_rate ?? fromCfg?.sgstRate ?? 0,
-    cgstRate: g.cgstRate ?? g.cgst_rate ?? fromCfg?.cgstRate ?? 0,
-    igstRate: g.igstRate ?? g.igst_rate ?? fromCfg?.igstRate ?? 0,
+    taxMode: preferredTaxMode,
+    gstRate: preferredTaxMode === 'NONE' ? 0 : resolvedGstRate,
+    sgstRate: preferredTaxMode === 'NONE' ? 0 : (preferredTaxMode === 'IGST' ? 0 : resolvedSgstRate),
+    cgstRate: preferredTaxMode === 'NONE' ? 0 : (preferredTaxMode === 'IGST' ? 0 : resolvedCgstRate),
+    igstRate: preferredTaxMode === 'NONE' ? 0 : (preferredTaxMode === 'GST' ? 0 : resolvedIgstRate),
     divisor: g.divisor ?? fromCfg?.divisor ?? 50,
     items: (g.items || []).map((item: any) => {
       const base = Number(item.baseRate) || 0;
@@ -613,6 +627,8 @@ const BillingPage = () => {
   const [activeLotSlides, setActiveLotSlides] = useState<Record<number, number>>({});
   const [savedBills, setSavedBills] = useState<SalesBillDTO[]>([]);
   const [savedBillsLoading, setSavedBillsLoading] = useState(false);
+  const [billPersisting, setBillPersisting] = useState(false);
+  const persistBillPromiseRef = useRef<Promise<SalesBillDTO | null> | null>(null);
   const [commodities, setCommodities] = useState<any[]>([]);
   const [fullConfigs, setFullConfigs] = useState<FullCommodityConfigDto[]>([]);
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
@@ -678,6 +694,26 @@ const BillingPage = () => {
     });
     return map;
   }, [fullConfigs, commodities]);
+
+  const commodityTaxConfigByName = useMemo(() => {
+    const map = new Map<string, { hasTax: boolean; defaultMode: 'GST' | 'IGST' | 'NONE' }>();
+    if (!fullConfigs.length || !commodities.length) return map;
+    commodities.forEach((c: any) => {
+      const name = c.commodity_name ?? c.commodityName;
+      if (!name) return;
+      const cfg = fullConfigs.find(
+        (f: FullCommodityConfigDto) => String(f.commodityId) === String(c.commodity_id),
+      );
+      const gstRate = Number(cfg?.config?.gstRate ?? 0);
+      const sgstRate = Number(cfg?.config?.sgstRate ?? 0);
+      const cgstRate = Number(cfg?.config?.cgstRate ?? 0);
+      const igstRate = Number(cfg?.config?.igstRate ?? 0);
+      const hasTax = gstRate > 0 || sgstRate > 0 || cgstRate > 0 || igstRate > 0;
+      const defaultMode: 'GST' | 'IGST' | 'NONE' = !hasTax ? 'NONE' : (igstRate > 0 ? 'IGST' : 'GST');
+      map.set(name, { hasTax, defaultMode });
+    });
+    return map;
+  }, [commodities, fullConfigs]);
 
   // Add contact from billing (same fields/validation as Contacts module — add only)
   const [contactSheetOpen, setContactSheetOpen] = useState(false);
@@ -1367,6 +1403,29 @@ const BillingPage = () => {
     return roundBillMoneyValues({ ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance });
   }, []);
 
+  useEffect(() => {
+    if (!bill) return;
+    let mutated = false;
+    const nextGroups = bill.commodityGroups.map(group => {
+      const taxCfg = commodityTaxConfigByName.get(group.commodityName);
+      const hasTax = taxCfg?.hasTax ?? false;
+      if (!hasTax) {
+        if ((group.gstRate ?? 0) !== 0 || (group.sgstRate ?? 0) !== 0 || (group.cgstRate ?? 0) !== 0 || (group.igstRate ?? 0) !== 0 || group.taxMode !== 'NONE') {
+          mutated = true;
+          return { ...group, taxMode: 'NONE', gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: 0 };
+        }
+        return group;
+      }
+      if (group.taxMode === 'NONE') {
+        mutated = true;
+        return { ...group, taxMode: taxCfg?.defaultMode === 'IGST' ? 'IGST' : 'GST' };
+      }
+      return group;
+    });
+    if (!mutated) return;
+    setBill(recalcGrandTotal({ ...bill, commodityGroups: nextGroups }));
+  }, [bill, commodityTaxConfigByName, recalcGrandTotal]);
+
   // Generate Bill (commodity config from API)
   const generateBill = useCallback((buyer: BuyerPurchase) => {
     setSelectedBuyer(buyer);
@@ -1480,6 +1539,13 @@ const BillingPage = () => {
         commodityMap.set(commName, {
           commodityName: commName,
           hsnCode: config?.hsnCode || '',
+          taxMode:
+            Number(config?.gstRate ?? 0) > 0
+            || Number(config?.sgstRate ?? 0) > 0
+            || Number(config?.cgstRate ?? 0) > 0
+            || Number(config?.igstRate ?? 0) > 0
+              ? (Number(config?.igstRate ?? 0) > 0 ? 'IGST' : 'GST')
+              : 'NONE',
           gstRate: config?.gstRate ?? 0,
           sgstRate: config?.sgstRate ?? 0,
           cgstRate: config?.cgstRate ?? 0,
@@ -2386,10 +2452,12 @@ const BillingPage = () => {
       brokerAddress: bill.buyerAsBroker ? '' : (bill.brokerAddress ?? ''),
       billingName: bill.billingName,
       billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
-      // Backend DTO excludes frontend-only fields (`divisor`, `coolieRate`, `coolieAmount`, `weighmanChargeRate`, `weighmanChargeAmount`).
-      // Per-commodity discount and round-off are now in commodityGroups, not at bill level.
-      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, coolieRate: _cr, coolieAmount: _ca, weighmanChargeRate: _wcr, weighmanChargeAmount: _wca, ...g }: any) => ({
+      // Keep all persisted commodity-group values; only remove frontend-only helper fields.
+      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, taxMode: _taxMode, ...g }: any) => ({
         ...g,
+        ...(g.taxMode === 'IGST'
+          ? { gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: Number(g.igstRate) || 0 }
+          : { gstRate: Number(g.gstRate) || 0, sgstRate: Number(g.sgstRate) || 0, cgstRate: Number(g.cgstRate) || 0, igstRate: 0 }),
         items: (g.items ?? []).map((it: any) => {
           const {
             sellerOtherCharges: _soc,
@@ -2407,6 +2475,7 @@ const BillingPage = () => {
       grandTotal: bill.grandTotal,
       brokerageType: bill.brokerageType ?? 'AMOUNT',
       brokerageValue: bill.brokerageValue ?? 0,
+      globalOtherCharges: bill.globalOtherCharges ?? 0,
       pendingBalance: bill.pendingBalance ?? bill.grandTotal,
     };
     const canCreate = can('Billing', 'Create');
@@ -2420,6 +2489,11 @@ const BillingPage = () => {
   };
 
   const persistBill = async (): Promise<SalesBillDTO | null> => {
+    if (persistBillPromiseRef.current) {
+      return persistBillPromiseRef.current;
+    }
+    const run = (async (): Promise<SalesBillDTO | null> => {
+      setBillPersisting(true);
     const built = buildSavePayload();
     if (!built) return null;
     const { payload, isUpdate } = built;
@@ -2443,7 +2517,13 @@ const BillingPage = () => {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save bill');
       return null;
+    } finally {
+      setBillPersisting(false);
+      persistBillPromiseRef.current = null;
     }
+    })();
+    persistBillPromiseRef.current = run;
+    return run;
   };
 
   async function autoSaveCurrentBillBeforeBuyerSwitch(): Promise<boolean> {
@@ -4371,17 +4451,17 @@ const BillingPage = () => {
               >
                 <table className="w-full min-w-[720px] text-[11px] leading-tight border-separate border-spacing-0">
                   <thead>
-                    <tr className="bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-700 dark:to-slate-700 shadow-sm">
-                      <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest whitespace-normal bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 border-b border-border/40 border-r border-border/50 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
+                    <tr className="bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] shadow-sm">
+                      <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-white uppercase tracking-widest whitespace-normal bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] border-b border-white/30 border-r border-white/20 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
                       {bill.commodityGroups.map((g, gi) => (
                         <th
                           key={`${g.commodityName}-${gi}`}
                           className={cn(
-                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-slate-800 dark:text-slate-100 uppercase tracking-widest min-w-[150px] border-b border-border/40 border-l border-border/50 dark:border-border/70 bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-700 shadow-sm',
-                            gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-white uppercase tracking-widest min-w-[150px] border-b border-white/30 border-l border-white/20 bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] shadow-sm',
+                            gi === bill.commodityGroups.length - 1 && 'border-r border-white/20',
                           )}
                         >
-                          <span className="text-xs font-bold text-blue-600 dark:text-blue-300">📦</span>
+                          <span className="text-xs font-bold text-blue-100">📦</span>
                           <div>{g.commodityName || `Commodity ${gi + 1}`}</div>
                         </th>
                       ))}
@@ -4570,12 +4650,78 @@ const BillingPage = () => {
 
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
+                        Tax Type
+                      </td>
+                      {bill.commodityGroups.map((g, gi) => {
+                        const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                        const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                        const selectedMode: 'GST' | 'IGST' = (g.taxMode === 'IGST' ? 'IGST' : 'GST');
+                        return (
+                          <td
+                            key={`tax-mode-${gi}`}
+                            className={cn(
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
+                            )}
+                          >
+                            {!hasTax ? (
+                              <span className="text-[10px] font-semibold text-muted-foreground">Not Applicable</span>
+                            ) : (
+                              <RadioGroup
+                                value={selectedMode}
+                                onValueChange={(value: 'GST' | 'IGST') => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.taxMode = value;
+                                  if (value === 'GST') {
+                                    cg.igstRate = 0;
+                                  } else {
+                                    cg.sgstRate = 0;
+                                    cg.cgstRate = 0;
+                                  }
+                                  cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                  cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                  const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                  cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className="flex items-center gap-3"
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  <RadioGroupItem value="GST" id={`gst-mode-${gi}`} />
+                                  <label htmlFor={`gst-mode-${gi}`} className="text-[10px] font-semibold">GST</label>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <RadioGroupItem value="IGST" id={`igst-mode-${gi}`} />
+                                  <label htmlFor={`igst-mode-${gi}`} className="text-[10px] font-semibold">IGST</label>
+                                </div>
+                              </RadioGroup>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {bill.commodityGroups.some((g) => {
+                      const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                      const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                      const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                      return hasTax && gstMode;
+                    }) && (
+                    <tr className="border-t border-border/30">
+                      <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
                         <span className="block">GST</span>
                         <span className="block text-[8px] font-normal text-muted-foreground leading-snug mt-0.5 max-w-[7.5rem]">
                           Combined % drives tax. If 0, tax uses SGST+CGST or IGST.
                         </span>
                       </td>
-                      {bill.commodityGroups.map((g, gi) => (
+                      {bill.commodityGroups.map((g, gi) => {
+                        const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                        const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                        const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                        return (
                         <td
                           key={`gst-${gi}`}
                           className={cn(
@@ -4583,38 +4729,55 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
-                            <BillingMoneyInput
-                              value={g.gstRate}
-                              min={0}
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.gstRate = v;
-                                cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
-                                cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
-                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
-                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">
-                              ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)))}
-                            </span>
-                          </div>
+                          {!hasTax || !gstMode ? (
+                            <div className="text-[10px] text-muted-foreground font-semibold">—</div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                              <BillingMoneyInput
+                                value={g.gstRate}
+                                min={0}
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.gstRate = v;
+                                  cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                  cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                  const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                  cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={cn(
+                                  `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
+                                )}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                              <span className="text-[10px] font-semibold text-foreground ml-1">
+                                ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)))}
+                              </span>
+                            </div>
+                          )}
                         </td>
-                      ))}
+                      )})}
                     </tr>
+                    )}
+                    {bill.commodityGroups.some((g) => {
+                      const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                      const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                      const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                      return hasTax && gstMode;
+                    }) && (
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
                         SGST <span className="text-muted-foreground font-normal">(opt.)</span>
                       </td>
-                      {bill.commodityGroups.map((g, gi) => (
+                      {bill.commodityGroups.map((g, gi) => {
+                        const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                        const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                        const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                        return (
                         <td
                           key={`sgst-${gi}`}
                           className={cn(
@@ -4622,6 +4785,9 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
+                          {!hasTax || !gstMode ? (
+                            <div className="text-[10px] text-muted-foreground font-semibold">—</div>
+                          ) : (
                           <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
                             <BillingMoneyInput
                               value={g.sgstRate}
@@ -4634,21 +4800,35 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                              className={cn(
+                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
+                              )}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0))}
                             </span>
                           </div>
+                          )}
                         </td>
-                      ))}
+                      )})}
                     </tr>
+                    )}
+                    {bill.commodityGroups.some((g) => {
+                      const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                      const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                      const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                      return hasTax && gstMode;
+                    }) && (
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
                         CGST <span className="text-muted-foreground font-normal">(opt.)</span>
                       </td>
-                      {bill.commodityGroups.map((g, gi) => (
+                      {bill.commodityGroups.map((g, gi) => {
+                        const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                        const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                        const gstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'GST';
+                        return (
                         <td
                           key={`cgst-${gi}`}
                           className={cn(
@@ -4656,6 +4836,9 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
+                          {!hasTax || !gstMode ? (
+                            <div className="text-[10px] text-muted-foreground font-semibold">—</div>
+                          ) : (
                           <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
                             <BillingMoneyInput
                               value={g.cgstRate}
@@ -4668,21 +4851,35 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                              className={cn(
+                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
+                              )}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0))}
                             </span>
                           </div>
+                          )}
                         </td>
-                      ))}
+                      )})}
                     </tr>
+                    )}
+                    {bill.commodityGroups.some((g) => {
+                      const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                      const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                      const igstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'IGST';
+                      return hasTax && igstMode;
+                    }) && (
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">
                         IGST <span className="text-muted-foreground font-normal">(opt.)</span>
                       </td>
-                      {bill.commodityGroups.map((g, gi) => (
+                      {bill.commodityGroups.map((g, gi) => {
+                        const taxCfg = commodityTaxConfigByName.get(g.commodityName);
+                        const hasTax = taxCfg?.hasTax ?? ((g.gstRate ?? 0) > 0 || (g.sgstRate ?? 0) > 0 || (g.cgstRate ?? 0) > 0 || (g.igstRate ?? 0) > 0);
+                        const igstMode = (g.taxMode ?? taxCfg?.defaultMode ?? 'GST') === 'IGST';
+                        return (
                         <td
                           key={`igst-${gi}`}
                           className={cn(
@@ -4690,6 +4887,9 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
+                          {!hasTax || !igstMode ? (
+                            <div className="text-[10px] text-muted-foreground font-semibold">—</div>
+                          ) : (
                           <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
                             <BillingMoneyInput
                               value={g.igstRate}
@@ -4702,16 +4902,20 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                              className={cn(
+                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
+                              )}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
                             <span className="text-[10px] font-semibold text-foreground ml-1">
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0))}
                             </span>
                           </div>
+                          )}
                         </td>
-                      ))}
+                      )})}
                     </tr>
+                    )}
 
                     <tr>
                       <td
@@ -4965,8 +5169,12 @@ const BillingPage = () => {
                       variant="outline"
                       className={cn(arrSolidMd, 'gap-1.5')}
                       onClick={() => void handleSaveDraft()}
+                      disabled={billPersisting}
                     >
-                      <Save className="w-4 h-4" /> {bill.billId && isBackendBillId(bill.billId) ? `Update${tabHint('Alt S')}` : `Save${tabHint('Alt S')}`}
+                      {billPersisting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {billPersisting
+                        ? (bill.billId && isBackendBillId(bill.billId) ? 'Updating...' : 'Saving...')
+                        : (bill.billId && isBackendBillId(bill.billId) ? `Update${tabHint('Alt S')}` : `Save${tabHint('Alt S')}`)}
                     </Button>
                     <Button
                       type="button"
