@@ -902,6 +902,7 @@ const SettlementPage = () => {
   /** Full DTO from API (includes version history after updates). */
   const [pattiDetailDto, setPattiDetailDto] = useState<PattiDTO | null>(null);
   const [selectedPattiVersion, setSelectedPattiVersion] = useState<'latest' | number>('latest');
+  const [isLatestEditUnlocked, setIsLatestEditUnlocked] = useState(true);
   const latestPattiDataSnapshotRef = useRef<PattiData | null>(null);
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
@@ -1112,7 +1113,6 @@ const SettlementPage = () => {
   /** Contact search (registered sellers / contact registry) per seller card in Sales report. */
   const [sellerContactSearchById, setSellerContactSearchById] = useState<Record<string, Contact[]>>({});
   const [sellerContactSearchLoading, setSellerContactSearchLoading] = useState<Record<string, boolean>>({});
-  const [sellerLookupOpenForId, setSellerLookupOpenForId] = useState<string | null>(null);
   const [sellerRegSaving, setSellerRegSaving] = useState<Record<string, boolean>>({});
 
   // Load sellers from backend only (no localStorage or mock data).
@@ -1195,6 +1195,7 @@ const SettlementPage = () => {
     setSelectedSeller(seller);
     const scopeSellerIds = (overrides?.arrivalSellerIds?.length ? overrides.arrivalSellerIds : [seller.sellerId]).map(String);
     setSelectedArrivalSellerIds(scopeSellerIds);
+    setIsLatestEditUnlocked(true);
     setHasArrivalSelection(true);
 
     if (!isVehicleNumberValid(seller.vehicleNumber)) {
@@ -1223,14 +1224,14 @@ const SettlementPage = () => {
     const createdAt = new Date().toISOString();
     const parseBaseFromPattiId = (pid?: string): string => {
       const raw = String(pid ?? '').trim();
-      const m = raw.match(/^(\d+)-\d+$/);
+      const m = raw.match(/^(.*)-(\d+)$/);
       return m ? m[1] : '';
     };
     const parseSequenceFromPattiId = (pid?: string): number | null => {
       const raw = String(pid ?? '').trim();
-      const m = raw.match(/^\d+-(\d+)$/);
+      const m = raw.match(/^(.*)-(\d+)$/);
       if (!m) return null;
-      const n = Number(m[1]);
+      const n = Number(m[2]);
       return Number.isFinite(n) ? n : null;
     };
     const scopedSellersOrdered: SellerSettlement[] = scopeSellerIds
@@ -1304,6 +1305,7 @@ const SettlementPage = () => {
       setPattiData(data);
       setPattiDetailDto(dto);
       setSelectedPattiVersion('latest');
+      setIsLatestEditUnlocked(false);
       latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(data)) as PattiData;
       const idMap: Record<string, number> = {};
       const editSid = String(dto.sellerId ?? '').trim();
@@ -1368,6 +1370,7 @@ const SettlementPage = () => {
       if (snap) setPattiData(JSON.parse(JSON.stringify(snap)) as PattiData);
       return;
     }
+    setIsLatestEditUnlocked(false);
     if (!pattiDetailDto?.versions?.length) {
       toast.error(`Version v${sel} not available`);
       return;
@@ -1394,6 +1397,14 @@ const SettlementPage = () => {
     if (!pattiData || selectedPattiVersion !== 'latest') return;
     latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(pattiData)) as PattiData;
   }, [pattiData, selectedPattiVersion]);
+  const editLatestPattiVersion = useCallback(() => {
+    if (selectedPattiVersion !== 'latest') {
+      applyPattiVersionSelection('latest');
+    }
+    setIsLatestEditUnlocked(true);
+    toast.success('Latest version unlocked for editing.');
+  }, [applyPattiVersionSelection, selectedPattiVersion]);
+  const isPattiEditLocked = !!selectedSeller && !!pattiData && !isLatestEditUnlocked;
 
   const computePattiSavePayloadForSeller = useCallback(
     (
@@ -1473,7 +1484,15 @@ const SettlementPage = () => {
         if (!payload) return false;
         payload.inProgress = options?.inProgress === true;
         const sid = seller.sellerId;
-        const dbId = existingPattiIdBySellerId[sid];
+        const existingDbId = existingPattiIdBySellerId[sid];
+        const inProgressDbId = (() => {
+          if (!payload.inProgress) return undefined;
+          const row = inProgressPattiDrafts.find(d => String(d.representativeSellerId ?? '').trim() === String(sid).trim());
+          if (!row) return undefined;
+          const idNum = Number(String(row.key ?? '').replace('db:', ''));
+          return Number.isFinite(idNum) && idNum > 0 ? idNum : undefined;
+        })();
+        const dbId = existingDbId ?? inProgressDbId;
         const actionWord = dbId != null ? 'updated' : 'saved';
         if (!can('Settlement', dbId != null ? 'Edit' : 'Create')) {
           if (!silent) toast.error('You do not have permission to save settlements.');
@@ -1549,6 +1568,7 @@ const SettlementPage = () => {
       pattiData,
       computePattiSavePayloadForSeller,
       existingPattiIdBySellerId,
+      inProgressPattiDrafts,
       can,
       selectedSeller?.sellerId,
       loadSavedPattis,
@@ -1608,9 +1628,9 @@ const SettlementPage = () => {
       let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
       const sellerSequenceBySellerId: Record<string, number> = {};
       const parseSeqFromPattiId = (pid?: string): number | undefined => {
-        const m = String(pid ?? '').trim().match(/^\d+-(\d+)$/);
+        const m = String(pid ?? '').trim().match(/^(.*)-(\d+)$/);
         if (!m) return undefined;
-        const n = Number(m[1]);
+        const n = Number(m[2]);
         return Number.isFinite(n) && n > 0 ? n : undefined;
       };
       for (const s of sellersNeedingCreate) {
@@ -1622,14 +1642,14 @@ const SettlementPage = () => {
         const scopedSaved = savedPattis.filter(p => scopedSids.has(String(p.sellerId ?? '').trim()));
         const parseBaseFromPattiId = (pid?: string): string => {
           const raw = String(pid ?? '').trim();
-          const m = raw.match(/^(\d+)-\d+$/);
+          const m = raw.match(/^(.*)-(\d+)$/);
           return m ? m[1] : '';
         };
         const parseSequenceFromPattiId = (pid?: string): number | null => {
           const raw = String(pid ?? '').trim();
-          const m = raw.match(/^\d+-(\d+)$/);
+          const m = raw.match(/^(.*)-(\d+)$/);
           if (!m) return null;
-          const n = Number(m[1]);
+          const n = Number(m[2]);
           return Number.isFinite(n) ? n : null;
         };
         const existingBase =
@@ -1640,7 +1660,7 @@ const SettlementPage = () => {
           sharedPattiBaseNumber = existingBase;
         } else if (!sharedPattiBaseNumber) {
           try {
-            sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber();
+            sharedPattiBaseNumber = await settlementApi.reserveNextPattiBaseNumber(sellersNeedingCreate[0]?.sellerId);
           } catch {
             toast.error('Failed to reserve Sales Patti number.');
             return false;
@@ -1720,12 +1740,13 @@ const SettlementPage = () => {
         return false;
       }
       toast.success('Settlement progress saved.');
+      loadInProgressPattis();
       return true;
     } finally {
       pattiSaveBusyRef.current = false;
       setPattiSaveBusy(false);
     }
-  }, [pattiData, savePattiForSeller, selectedArrivalSellerIds, selectedSeller, sellers]);
+  }, [pattiData, savePattiForSeller, selectedArrivalSellerIds, selectedSeller, sellers, loadInProgressPattis]);
 
   const clearActiveSettlementScreen = useCallback(() => {
     setSelectedSeller(null);
@@ -1733,6 +1754,7 @@ const SettlementPage = () => {
     setPattiData(null);
     setPattiDetailDto(null);
     setSelectedPattiVersion('latest');
+    setIsLatestEditUnlocked(true);
     latestPattiDataSnapshotRef.current = null;
     setExistingPattiIdBySellerId({});
     setDraftMainPattiNo('');
@@ -1754,7 +1776,7 @@ const SettlementPage = () => {
   });
 
   saveMainPattiShortcutRef.current = () => {
-    if (selectedSeller) void savePatti();
+    if (selectedSeller && !isPattiEditLocked) void savePatti();
   };
 
   useEffect(() => {
@@ -1768,6 +1790,20 @@ const SettlementPage = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'm' && e.key !== 'M')) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (!selectedSeller || !pattiData || showPrint) return;
+      if (selectedPattiVersion === 'latest' && !isPattiEditLocked) return;
+      e.preventDefault();
+      editLatestPattiVersion();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editLatestPattiVersion, isPattiEditLocked, pattiData, selectedPattiVersion, selectedSeller, showPrint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1842,7 +1878,7 @@ const SettlementPage = () => {
     const sid = String(selectedSeller?.sellerId ?? '').trim();
     const sellerPattiNo = sid ? String(sellerSalesPattiNumberBySellerId[sid] ?? '').trim() : '';
     const raw = sellerPattiNo || String(pattiData?.pattiId ?? '').trim();
-    const m = raw.match(/^(\d+)-\d+$/);
+    const m = raw.match(/^(.*)-(\d+)$/);
     return m ? m[1] : '';
   }, [
     draftMainPattiNo,
@@ -1862,9 +1898,23 @@ const SettlementPage = () => {
     return set;
   }, [savedPattis]);
 
+  /** Sellers already present in in-progress drafts — hide from New Patti tab to avoid duplicates. */
+  const sellerIdsWithInProgressPatti = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of inProgressPattiDrafts) {
+      const rep = String(d.representativeSellerId ?? '').trim();
+      if (rep) set.add(rep);
+      for (const sid of d.sellerIds ?? []) {
+        const s = String(sid ?? '').trim();
+        if (s) set.add(s);
+      }
+    }
+    return set;
+  }, [inProgressPattiDrafts]);
+
   const sellersEligibleForNewPatti = useMemo(
-    () => filteredSellers.filter(s => !sellerIdsWithSavedPatti.has(s.sellerId)),
-    [filteredSellers, sellerIdsWithSavedPatti]
+    () => filteredSellers.filter(s => !sellerIdsWithSavedPatti.has(s.sellerId) && !sellerIdsWithInProgressPatti.has(s.sellerId)),
+    [filteredSellers, sellerIdsWithSavedPatti, sellerIdsWithInProgressPatti]
   );
 
   const newPattiArrivalRows = useMemo<ArrivalSummaryRow[]>(() => {
@@ -2748,13 +2798,33 @@ const SettlementPage = () => {
       });
       const totalActualWeightOnSettlement = sellerComputedBase.reduce((sum, s) => sum + s.actualWeight, 0);
       const perKgFreight = totalActualWeightOnSettlement > 0 ? freightTotal / totalActualWeightOnSettlement : 0;
+      const unloadingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.unloading) || 0), 0);
+      const weighingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.weighing) || 0), 0);
+      const perKgUnloading = totalActualWeightOnSettlement > 0 ? unloadingTotal / totalActualWeightOnSettlement : 0;
+      const perKgWeighing = totalActualWeightOnSettlement > 0 ? weighingTotal / totalActualWeightOnSettlement : 0;
+      const equalShareUnloading =
+        arrivalSellersForPatti.length > 0 ? unloadingTotal / arrivalSellersForPatti.length : 0;
+      const equalShareWeighing =
+        arrivalSellersForPatti.length > 0 ? weighingTotal / arrivalSellersForPatti.length : 0;
 
       const rows: VehicleExpenseRow[] = sellerComputedBase.map(s => {
         const fallbackSellerFreight = sellerExpensesById[s.sellerId]?.freight ?? 0;
+        const fallbackSellerUnloading = sellerExpensesById[s.sellerId]?.unloading ?? s.unloading;
+        const fallbackSellerWeighing = sellerExpensesById[s.sellerId]?.weighman ?? s.weighing;
         const freight = roundMoney2(
           perKgFreight > 0
             ? perKgFreight * s.actualWeight
             : (fallbackSellerFreight > 0 ? fallbackSellerFreight : equalShareFreight)
+        );
+        const unloading = roundMoney2(
+          perKgUnloading > 0
+            ? perKgUnloading * s.actualWeight
+            : (equalShareUnloading > 0 ? equalShareUnloading : fallbackSellerUnloading)
+        );
+        const weighing = roundMoney2(
+          perKgWeighing > 0
+            ? perKgWeighing * s.actualWeight
+            : (equalShareWeighing > 0 ? equalShareWeighing : fallbackSellerWeighing)
         );
 
         return {
@@ -2763,8 +2833,8 @@ const SettlementPage = () => {
           sellerName: s.sellerName,
           quantity: s.quantity,
           freight,
-          unloading: roundMoney2(s.unloading),
-          weighing: roundMoney2(s.weighing),
+          unloading,
+          weighing,
           gunnies: 0,
         };
       });
@@ -3191,7 +3261,6 @@ const SettlementPage = () => {
 
         {pattiDetailDto && (
           <div className="px-4 mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-semibold text-muted-foreground">Version:</span>
             <Select
               value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
               onValueChange={val => {
@@ -3203,7 +3272,7 @@ const SettlementPage = () => {
                 if (Number.isFinite(num)) applyPattiVersionSelection(num);
               }}
             >
-              <SelectTrigger className="h-9 min-w-0 max-w-full sm:min-w-[14rem]">
+              <SelectTrigger className="h-9 min-w-0 max-w-full justify-center text-center sm:min-w-[14rem]">
                 <SelectValue placeholder="Latest (current)" />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -3579,6 +3648,7 @@ const SettlementPage = () => {
                   onChange={e => setInvoiceNameSearch(e.target.value)}
                   className="h-10 rounded-xl border-border/60 bg-background/80"
                   autoComplete="off"
+                  disabled={isPattiEditLocked}
                 />
               </div>
               <Button
@@ -3586,6 +3656,7 @@ const SettlementPage = () => {
                 variant="outline"
                 className={cn(arrSolidMd, 'w-full shrink-0 gap-1.5 sm:w-auto sm:min-w-[12rem]')}
                 onClick={() => void openVehicleExpenseModal()}
+                disabled={isPattiEditLocked}
               >
                 <PlusCircle className="h-4 w-4" />
                 Add Quick Adjustment (Alt X)
@@ -3632,6 +3703,17 @@ const SettlementPage = () => {
                 const baseline = registeredBaselineById[seller.sellerId] ?? form;
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
                 const sellerValidationError = getSellerValidationError(seller);
+                const contactSearchQuery = (form.contactSearchQuery ?? '').trim();
+                const contactSearchQueryLower = contactSearchQuery.toLowerCase();
+                const registeredContactRows = sellerContactSearchById[seller.sellerId] ?? [];
+                const tempContactRows = sellers.filter(s => {
+                  const noLinkedContact = s.contactId == null || String(s.contactId).trim() === '';
+                  if (!noLinkedContact) return false;
+                  if (!contactSearchQueryLower) return true;
+                  const hay = `${s.sellerName ?? ''} ${s.sellerMark ?? ''} ${s.sellerPhone ?? ''}`.toLowerCase();
+                  return hay.includes(contactSearchQueryLower);
+                });
+                const showContactSearchDropdown = contactSearchQuery.length > 0;
                 const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
                 const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
                 const visibleLots = (seller.lots ?? [])
@@ -3744,44 +3826,97 @@ const SettlementPage = () => {
                           />
                           <span className="text-foreground">Unregistered</span>
                         </label>
-                        <label className="flex cursor-pointer items-center gap-2 font-medium">
-                          <Checkbox
-                            className="h-4 w-4 rounded-none"
-                            checked={form.registrationChosen && form.registered}
-                            onCheckedChange={v => {
+                        <div className="relative ml-auto w-full min-w-0 sm:w-[18rem]">
+                          <Input
+                            value={form.contactSearchQuery}
+                            onChange={e => {
+                              const q = e.target.value;
                               setSellerFormById(prev => {
                                 const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
-                                const nextChecked = v === true;
-                                return {
-                                  ...prev,
-                                  [seller.sellerId]: {
-                                    ...cur,
-                                    registrationChosen: nextChecked ? true : false,
-                                    registered: true,
-                                    allowRegisteredEdit: nextChecked,
-                                  },
-                                };
+                                return { ...prev, [seller.sellerId]: { ...cur, contactSearchQuery: q } };
                               });
+                              scheduleMarkContactSearch(seller.sellerId, q);
                             }}
+                            placeholder="Search seller by mark, name, or mobile..."
+                            className="h-8 pr-8 text-xs sm:text-sm"
+                            disabled={isPattiEditLocked}
                           />
-                          <span className="text-foreground">Registered</span>
-                        </label>
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                            {sellerContactSearchLoading[seller.sellerId] ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Search className="h-3.5 w-3.5 opacity-70" />
+                            )}
+                          </span>
+                          {showContactSearchDropdown ? (
+                            <div className="absolute left-0 top-[calc(100%+0.25rem)] z-20 w-full max-h-[14rem] overflow-y-auto rounded-xl border border-border/50 bg-card shadow-lg">
+                              {registeredContactRows.length === 0 && tempContactRows.length === 0 ? (
+                                <p className="px-3 py-4 text-center text-xs text-muted-foreground">No sellers found.</p>
+                              ) : (
+                                <ul>
+                                  {registeredContactRows.slice(0, 30).map(c => (
+                                    <li key={c.contact_id} className="border-b border-border/30 last:border-b-0">
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40"
+                                        onClick={() => {
+                                          setSellerFormById(prev => {
+                                            const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                            return {
+                                              ...prev,
+                                              [seller.sellerId]: {
+                                                ...cur,
+                                                registrationChosen: true,
+                                                registered: true,
+                                                contactId: String(c.contact_id),
+                                                mark: c.mark ?? '',
+                                                name: c.name ?? '',
+                                                mobile: c.phone ?? '',
+                                                allowRegisteredEdit: true,
+                                                contactSearchQuery: '',
+                                              },
+                                            };
+                                          });
+                                          toast.success('Registered seller selected. You can update now.');
+                                        }}
+                                      >
+                                        <span className="min-w-0">
+                                          <span className="block truncate text-sm font-semibold text-foreground">{c.name}</span>
+                                          <span className="block truncate text-xs text-muted-foreground">
+                                            {c.phone}
+                                            {c.mark ? ` · ${c.mark}` : ''}
+                                          </span>
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                          Registered · Select
+                                        </span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                  {tempContactRows.slice(0, 30).map(s => (
+                                    <li key={`temp-${s.sellerId}`} className="border-b border-border/30 last:border-b-0">
+                                      <div className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
+                                        <span className="min-w-0">
+                                          <span className="block truncate text-sm font-semibold text-foreground">{s.sellerName || '-'}</span>
+                                          <span className="block truncate text-xs text-muted-foreground">
+                                            {s.sellerPhone || '-'}
+                                            {s.sellerMark ? ` · ${s.sellerMark}` : ''}
+                                          </span>
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Temporary</span>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
                         <Button
                           type="button"
                           variant="outline"
-                          className={cn(arrSolidSm, 'min-w-0')}
-                          onClick={() => {
-                            setSellerLookupOpenForId(seller.sellerId);
-                            void runSellerContactSearch(seller.sellerId, '');
-                          }}
-                        >
-                          Unregistered / Registered Seller Mark Search
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={cn(arrSolidSm, 'min-w-0')}
-                          disabled={!!sellerRegSaving[seller.sellerId] || !form.registrationChosen || !form.registered}
+                          className={cn(arrSolidMd, 'min-w-[8rem]')}
+                          disabled={isPattiEditLocked || !!sellerRegSaving[seller.sellerId] || !form.contactId}
                           onClick={() => {
                             void (async () => {
                               if (!can('Settlement', 'Edit')) {
@@ -3843,7 +3978,6 @@ const SettlementPage = () => {
                           Update Seller
                         </Button>
                       </div>
-
                       <div className="grid min-w-0 grid-cols-1 items-end gap-2 sm:grid-cols-3">
                         {form.registrationChosen && !form.registered && (
                           <p className="col-span-full text-[10px] text-muted-foreground sm:col-span-3">
@@ -3873,7 +4007,7 @@ const SettlementPage = () => {
                               'h-9 w-full min-w-0 rounded-lg text-sm',
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
-                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                         <div className="min-w-0">
@@ -3895,7 +4029,7 @@ const SettlementPage = () => {
                               'h-9 min-w-0 w-full rounded-lg text-sm',
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
-                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                         <div className="min-w-0">
@@ -3931,7 +4065,7 @@ const SettlementPage = () => {
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
                             inputMode="tel"
-                            disabled={!form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                       </div>
@@ -3941,6 +4075,7 @@ const SettlementPage = () => {
                           <Checkbox
                             className="h-4 w-4 rounded-none"
                             checked={form.addAndChangeSeller}
+                            disabled={isPattiEditLocked}
                             onCheckedChange={v =>
                               setSellerFormById(prev => {
                                 const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
@@ -4148,6 +4283,7 @@ const SettlementPage = () => {
                                         value={row.qty}
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'qty', e.target.value)}
                                         aria-label="Quantity"
+                                        disabled={isPattiEditLocked}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -4159,6 +4295,7 @@ const SettlementPage = () => {
                                         value={Number.isFinite(row.weight) ? row.weight : 0}
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'weight', e.target.value)}
                                         aria-label="Weight kg"
+                                        disabled={isPattiEditLocked}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -4189,6 +4326,7 @@ const SettlementPage = () => {
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'ratePerBag', e.target.value)}
                                         aria-label="Rate per bag"
                                         title="Seller settlement rate per bag; amount uses commodity divisor from settings"
+                                        disabled={isPattiEditLocked}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -4273,6 +4411,7 @@ const SettlementPage = () => {
                             type="button"
                             id={`sw-w-${seller.sellerId}`}
                             className={settlementExpenseToggleBtnClass(settlementWeighingEnabled, 'emerald')}
+                            disabled={isPattiEditLocked}
                             onClick={() => setSettlementWeighingEnabled(v => !v)}
                             aria-label="Use weighman in totals"
                             aria-pressed={settlementWeighingEnabled}
@@ -4309,16 +4448,17 @@ const SettlementPage = () => {
                             className={settlementExpenseToggleBtnClass(
                               isWeighingMergedIntoFreight(seller.sellerId),
                               'violet',
-                              settlementWeighingEnabled
+                              settlementWeighingEnabled || isPattiEditLocked
                             )}
                             onClick={() => {
+                              if (isPattiEditLocked) return;
                               if (settlementWeighingEnabled) return;
                               setSettlementWeighingMergeIntoFreightBySellerId(prev => ({
                                 ...prev,
                                 [seller.sellerId]: !isWeighingMergedIntoFreight(seller.sellerId),
                               }));
                             }}
-                            disabled={settlementWeighingEnabled}
+                            disabled={isPattiEditLocked || settlementWeighingEnabled}
                             aria-label="Add weighing amount to freight"
                             aria-pressed={isWeighingMergedIntoFreight(seller.sellerId)}
                           >
@@ -4366,6 +4506,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Freight amount"
+                                disabled={isPattiEditLocked}
                               />
                                 );
                               })()}
@@ -4376,8 +4517,8 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label={`Unloading formula ${seller.sellerId}`}
                                   lines={[
-                                    'Per lot slab: if weight > threshold -> ((F x W) / T) x W; else F x T.',
-                                    'Seller unloading = sum of all lot slab amounts.',
+                                    'Quick Adjustment auto distribution: (seller settlement weight / total settlement weight) x total unloading pool.',
+                                    'Total unloading pool is computed from lot-level commodity slab rules.',
                                     `Current value: ${formatMoney2Display(exp.unloading)}`,
                                   ]}
                                 />
@@ -4409,6 +4550,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Unloading amount"
+                                disabled={isPattiEditLocked}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -4417,7 +4559,8 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label={`Weighing formula ${seller.sellerId}`}
                                   lines={[
-                                    'Uses commodity weighing slab: same slab formula as unloading.',
+                                    'Quick Adjustment auto distribution: (seller settlement weight / total settlement weight) x total weighing pool.',
+                                    'Total weighing pool is computed from commodity weighing slab rules.',
                                     settlementWeighingEnabled
                                       ? 'Use weighman ON: shown as separate weighing deduction.'
                                       : isWeighingMergedIntoFreight(seller.sellerId)
@@ -4430,7 +4573,7 @@ const SettlementPage = () => {
                               <Input
                                 type="text"
                                 inputMode="decimal"
-                                disabled={!settlementWeighingEnabled}
+                                disabled={isPattiEditLocked || !settlementWeighingEnabled}
                                 className={cn(
                                   settlementExpenseInputClass,
                                   isWeighingMergedIntoFreight(seller.sellerId) &&
@@ -4481,6 +4624,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Cash advance"
+                                disabled={isPattiEditLocked}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -4499,6 +4643,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Gunnies"
+                                disabled={isPattiEditLocked}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -4517,6 +4662,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Other expenses"
+                                disabled={isPattiEditLocked}
                               />
                             </div>
                           </div>
@@ -4605,11 +4751,59 @@ const SettlementPage = () => {
             className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
+              {pattiDetailDto && (
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
+                    onValueChange={val => {
+                      if (val === 'latest') {
+                        applyPattiVersionSelection('latest');
+                        return;
+                      }
+                      const num = Number(val);
+                      if (Number.isFinite(num)) applyPattiVersionSelection(num);
+                    }}
+                  >
+                    <SelectTrigger className={cn(arrOutlineTall, 'min-w-[12rem] justify-center text-center')}>
+                      <SelectValue placeholder="Latest (current)" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      <SelectItem value="latest">Latest (current)</SelectItem>
+                      {(pattiDetailDto.versions ?? []).map(v => (
+                        <SelectItem key={v.version} value={String(v.version)}>
+                          v{v.version}
+                          {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedPattiVersion !== 'latest' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(arrSolidTall, 'gap-2 sm:min-w-[10rem]')}
+                      onClick={editLatestPattiVersion}
+                    >
+                      Edit Latest (Alt M)
+                    </Button>
+                  )}
+                  {selectedPattiVersion === 'latest' && isPattiEditLocked && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(arrSolidTall, 'gap-2 sm:min-w-[10rem]')}
+                      onClick={editLatestPattiVersion}
+                    >
+                      Enable Edit (Alt M)
+                    </Button>
+                  )}
+                </div>
+              )}
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void savePatti()}
-                disabled={!canRunMainPattiActions || pattiSaveBusy}
+                disabled={!canRunMainPattiActions || pattiSaveBusy || isPattiEditLocked}
                 className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
                 title={mainPattiValidationError ?? undefined}
               >
@@ -4638,201 +4832,17 @@ const SettlementPage = () => {
                 <Printer className="h-4 w-4" />
                 Print All Sub Patti
               </Button>
-              {pattiDetailDto && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-muted-foreground">Version</span>
-                  <Select
-                    value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
-                    onValueChange={val => {
-                      if (val === 'latest') {
-                        applyPattiVersionSelection('latest');
-                        return;
-                      }
-                      const num = Number(val);
-                      if (Number.isFinite(num)) applyPattiVersionSelection(num);
-                    }}
-                  >
-                    <SelectTrigger className={cn(arrOutlineTall, 'min-w-[12rem]')}>
-                      <SelectValue placeholder="Latest (current)" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      <SelectItem value="latest">Latest (current)</SelectItem>
-                      {(pattiDetailDto.versions ?? []).map(v => (
-                        <SelectItem key={v.version} value={String(v.version)}>
-                          v{v.version}
-                          {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
             </div>
           </motion.div>
-
-          <Dialog
-            open={sellerLookupOpenForId != null}
-            onOpenChange={open => {
-              if (!open) setSellerLookupOpenForId(null);
-            }}
-          >
-            <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
-              <div className="border-b border-border/50 bg-muted/30 px-5 py-4 sm:px-6">
-                <DialogHeader className="space-y-1.5">
-                  <DialogTitle className="text-base font-bold tracking-tight">Unregistered / Registered Seller Mark Search</DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    Search contacts to verify seller status. If Registered is checked, you can also pick a registered contact for update.
-                  </DialogDescription>
-                </DialogHeader>
-              </div>
-              <div className="space-y-3 px-4 py-4 sm:px-5">
-                {(() => {
-                  const sid = sellerLookupOpenForId;
-                  const query = sid ? (sellerFormById[sid]?.contactSearchQuery ?? '').trim().toLowerCase() : '';
-                  const canPickRegistered = !!sid && !!sellerFormById[sid]?.registrationChosen && !!sellerFormById[sid]?.registered;
-                  const registeredRows = sid ? (sellerContactSearchById[sid] ?? []) : [];
-                  const tempRows = sellers.filter(s => {
-                    const noLinkedContact = s.contactId == null || String(s.contactId).trim() === '';
-                    if (!noLinkedContact) return false;
-                    if (!query) return true;
-                    const hay = `${s.sellerName ?? ''} ${s.sellerMark ?? ''} ${s.sellerPhone ?? ''}`.toLowerCase();
-                    return hay.includes(query);
-                  });
-                  return (
-                    <>
-                <div className="relative">
-                  <Input
-                    value={
-                      sellerLookupOpenForId
-                        ? (sellerFormById[sellerLookupOpenForId]?.contactSearchQuery ?? '')
-                        : ''
-                    }
-                    onChange={e => {
-                      if (!sellerLookupOpenForId) return;
-                      const q = e.target.value;
-                      setSellerFormById(prev => {
-                        const sid = sellerLookupOpenForId;
-                        if (!sid) return prev;
-                        const cur = prev[sid] ?? {
-                          registrationChosen: false,
-                          registered: true,
-                          contactId: null,
-                          mark: '',
-                          name: '',
-                          mobile: '',
-                          contactSearchQuery: '',
-                          addAndChangeSeller: false,
-                          allowRegisteredEdit: false,
-                        };
-                        return { ...prev, [sid]: { ...cur, contactSearchQuery: q } };
-                      });
-                      scheduleMarkContactSearch(sellerLookupOpenForId, q);
-                    }}
-                    placeholder="Search by mark, name, or mobile..."
-                    className="h-9 pr-8 text-sm"
-                  />
-                  <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    {sellerLookupOpenForId && sellerContactSearchLoading[sellerLookupOpenForId] ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Search className="h-3.5 w-3.5 opacity-70" />
-                    )}
-                  </span>
-                </div>
-                <div className="max-h-[18rem] overflow-y-auto rounded-xl border border-border/50 bg-card/70">
-                  {registeredRows.length === 0 && tempRows.length === 0 ? (
-                    <p className="px-3 py-6 text-center text-xs text-muted-foreground">No sellers found.</p>
-                  ) : (
-                    <ul>
-                      {registeredRows.slice(0, 30).map(c => (
-                        <li key={c.contact_id} className="border-b border-border/30 last:border-b-0">
-                          <button
-                            type="button"
-                            disabled={!canPickRegistered}
-                            className={cn(
-                              'flex w-full items-center justify-between gap-3 px-3 py-2 text-left',
-                              canPickRegistered ? 'hover:bg-muted/40' : 'cursor-default'
-                            )}
-                            onClick={() => {
-                              if (!sid || !canPickRegistered) return;
-                              setSellerFormById(prev => {
-                                const cur = prev[sid] ?? {
-                                  registrationChosen: false,
-                                  registered: true,
-                                  contactId: null,
-                                  mark: '',
-                                  name: '',
-                                  mobile: '',
-                                  contactSearchQuery: '',
-                                  addAndChangeSeller: false,
-                                  allowRegisteredEdit: false,
-                                };
-                                return {
-                                  ...prev,
-                                  [sid]: {
-                                    ...cur,
-                                    registrationChosen: true,
-                                    registered: true,
-                                    contactId: String(c.contact_id),
-                                    mark: c.mark ?? '',
-                                    name: c.name ?? '',
-                                    mobile: c.phone ?? '',
-                                    allowRegisteredEdit: true,
-                                    contactSearchQuery: '',
-                                  },
-                                };
-                              });
-                              setSellerLookupOpenForId(null);
-                              toast.success('Registered seller selected. You can update now.');
-                            }}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold text-foreground">{c.name}</span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {c.phone}
-                                {c.mark ? ` · ${c.mark}` : ''}
-                              </span>
-                            </span>
-                            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                              {canPickRegistered ? 'Registered · Select' : 'Registered'}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                      {tempRows.slice(0, 30).map(s => (
-                        <li key={`temp-${s.sellerId}`} className="border-b border-border/30 last:border-b-0">
-                          <div className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold text-foreground">{s.sellerName || '-'}</span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {s.sellerPhone || '-'}
-                                {s.sellerMark ? ` · ${s.sellerMark}` : ''}
-                              </span>
-                            </span>
-                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Temporary</span>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                    </>
-                  );
-                })()}
-              </div>
-              <DialogFooter className="border-t border-border/50 bg-muted/20 px-4 py-3 sm:px-5">
-                <Button type="button" variant="outline" className={arrOutlineMd} onClick={() => setSellerLookupOpenForId(null)}>
-                  Close
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
 
           <Dialog
             open={vehicleExpenseModalOpen}
             onOpenChange={setVehicleExpenseModalOpen}
           >
-            <DialogContent className="max-h-[90dvh] max-w-5xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0">
+            <DialogContent
+              onOpenAutoFocus={e => e.preventDefault()}
+              className="max-h-[90dvh] max-w-5xl overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:p-0"
+            >
               <div className="border-b border-border/50 bg-muted/30 px-5 py-4 sm:px-6">
                 <DialogHeader className="space-y-1.5 text-center sm:text-center">
                   <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Adjustment</DialogTitle>
@@ -4883,10 +4893,48 @@ const SettlementPage = () => {
                           </span>
                         </th>
                         <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
-                          Unloading
+                          <span className="inline-flex items-center gap-1.5">
+                            Unloading
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-white/90 hover:bg-white/15"
+                                  aria-label="Quick adjustment unloading formula"
+                                >
+                                  <Info className="h-3 w-3" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[320px] text-xs leading-relaxed">
+                                <div className="space-y-0.5 text-left normal-case tracking-normal">
+                                  <p>Unloading = (seller settlement weight / total settlement weight) x total unloading pool.</p>
+                                  <p>If total settlement weight is 0, fallback to equal share or existing seller unloading.</p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </span>
                         </th>
                         <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
-                          Weighing
+                          <span className="inline-flex items-center gap-1.5">
+                            Weighing
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-white/90 hover:bg-white/15"
+                                  aria-label="Quick adjustment weighing formula"
+                                >
+                                  <Info className="h-3 w-3" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[320px] text-xs leading-relaxed">
+                                <div className="space-y-0.5 text-left normal-case tracking-normal">
+                                  <p>Weighing = (seller settlement weight / total settlement weight) x total weighing pool.</p>
+                                  <p>If total settlement weight is 0, fallback to equal share or existing seller weighing.</p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </span>
                         </th>
                         <th className="min-w-[7.5rem] border-b border-white/25 px-3 py-3.5 text-center text-[11px] font-semibold uppercase tracking-wide text-white">
                           Gunnies

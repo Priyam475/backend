@@ -23,9 +23,10 @@ public interface SettlementService {
     PattiDTO createPatti(PattiSaveRequest request);
 
     /**
-     * Reserve and return next Sales Patti base number (digits only).
+     * Reserve and return next Sales Patti base number.
+     * Uses commodity bill-prefix when available for the given seller scope; otherwise plain numeric sequence.
      */
-    String reserveNextPattiBaseNumber();
+    String reserveNextPattiBaseNumber(String sellerId);
 
     /**
      * Get patti by database id.

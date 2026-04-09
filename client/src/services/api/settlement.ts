@@ -222,9 +222,11 @@ async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<
 }
 
 export const settlementApi = {
-  /** Reserve next Sales Patti base number (digits only). */
-  async reserveNextPattiBaseNumber(): Promise<string> {
-    const res = await apiFetch(`${BASE}/pattis/next-base-number`, { method: 'GET' });
+  /** Reserve next Sales Patti base number (commodity prefix when available). */
+  async reserveNextPattiBaseNumber(sellerId?: string): Promise<string> {
+    const q = new URLSearchParams();
+    if (sellerId != null && sellerId.trim() !== '') q.set('sellerId', sellerId.trim());
+    const res = await apiFetch(`${BASE}/pattis/next-base-number${q.toString() ? `?${q.toString()}` : ''}`, { method: 'GET' });
     if (!res.ok) await parseJsonOrThrow(res, 'Failed to reserve patti base number');
     return (await res.text()).trim();
   },

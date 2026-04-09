@@ -311,7 +311,7 @@ public class SettlementServiceImpl implements SettlementService {
         Long traderId = traderContextService.getCurrentTraderId();
         String pattiBaseNumber = normalizePattiBaseNumber(request.getPattiBaseNumber());
         if (pattiBaseNumber == null) {
-            pattiBaseNumber = reserveNextPattiBaseNumber();
+            pattiBaseNumber = reserveNextPattiBaseNumber(request.getSellerId());
         }
         int sellerSequence = normalizeSellerSequence(request.getSellerSequenceNumber());
         String pattiId = buildPattiId(pattiBaseNumber, sellerSequence);
@@ -378,24 +378,65 @@ public class SettlementServiceImpl implements SettlementService {
         if (trimmed.isEmpty()) {
             return null;
         }
-        return trimmed.replaceAll("[^0-9]", "");
+        String cleaned = trimmed.toUpperCase().replaceAll("[^A-Z0-9-]", "");
+        return cleaned.isBlank() ? null : cleaned;
     }
 
     @Override
     @Transactional(readOnly = false)
-    public String reserveNextPattiBaseNumber() {
+    public String reserveNextPattiBaseNumber(String sellerId) {
+        String billPrefix = resolveCommodityPrefixForSeller(sellerId);
+        String seqKey = billPrefix != null ? billPrefix : PATTI_BASE_SEQUENCE_KEY;
         BillNumberSequence seq = billNumberSequenceRepository
-            .findByPrefixForUpdate(PATTI_BASE_SEQUENCE_KEY)
+            .findByPrefixForUpdate(seqKey)
             .orElseGet(() -> {
                 BillNumberSequence s = new BillNumberSequence();
-                s.setPrefix(PATTI_BASE_SEQUENCE_KEY);
+                s.setPrefix(seqKey);
                 s.setNextValue(1L);
                 return s;
             });
         long next = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
         seq.setNextValue(next + 1L);
         billNumberSequenceRepository.save(seq);
+        if (billPrefix != null) {
+            return billPrefix + "-" + String.format("%05d", next);
+        }
         return String.valueOf(next);
+    }
+
+    private String resolveCommodityPrefixForSeller(String sellerId) {
+        if (sellerId == null || sellerId.isBlank()) {
+            return null;
+        }
+        long sivId;
+        try {
+            sivId = Long.parseLong(sellerId.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            return null;
+        }
+        List<Lot> sellerLots = lotRepository.findAllBySellerVehicleIdAndTraderId(sivId, traderId);
+        if (sellerLots.isEmpty()) {
+            return null;
+        }
+        Set<String> prefixes = new LinkedHashSet<>();
+        for (Lot lot : sellerLots) {
+            Long commodityId = lot.getCommodityId();
+            if (commodityId == null) continue;
+            commodityConfigRepository
+                .findOneByCommodityId(commodityId)
+                .map(CommodityConfig::getBillPrefix)
+                .map(p -> p != null ? p.trim().toUpperCase() : "")
+                .filter(p -> !p.isBlank())
+                .ifPresent(prefixes::add);
+        }
+        if (prefixes.size() == 1) {
+            return prefixes.iterator().next();
+        }
+        return null;
     }
 
     @Override

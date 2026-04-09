@@ -205,13 +205,13 @@ public class SettlementResource {
 
     /**
      * {@code GET /api/settlements/pattis/next-base-number} :
-     * reserve next Sales Patti base number (digits only).
+     * reserve next Sales Patti base number (commodity-prefix when available, else numeric).
      */
     @GetMapping("/pattis/next-base-number")
     @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_CREATE + "\")")
-    public ResponseEntity<String> reserveNextPattiBaseNumber() {
-        LOG.debug("REST request to reserve next Sales Patti base number");
-        return ResponseEntity.ok(settlementService.reserveNextPattiBaseNumber());
+    public ResponseEntity<String> reserveNextPattiBaseNumber(@RequestParam(required = false) String sellerId) {
+        LOG.debug("REST request to reserve next Sales Patti base number (sellerId={})", sellerId);
+        return ResponseEntity.ok(settlementService.reserveNextPattiBaseNumber(sellerId));
     }
 
     /**
