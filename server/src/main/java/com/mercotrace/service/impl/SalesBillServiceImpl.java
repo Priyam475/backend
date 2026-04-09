@@ -349,9 +349,13 @@ public class SalesBillServiceImpl implements SalesBillService {
             group.setDiscountType(g.getDiscountType() != null ? g.getDiscountType() : "AMOUNT");
             group.setManualRoundOff(nullToZero(g.getManualRoundOff()));
             group.setGstRate(g.getGstRate());
+            group.setGstInputMode(g.getGstInputMode());
             group.setSgstRate(g.getSgstRate());
+            group.setSgstInputMode(g.getSgstInputMode());
             group.setCgstRate(g.getCgstRate());
+            group.setCgstInputMode(g.getCgstInputMode());
             group.setIgstRate(g.getIgstRate());
+            group.setIgstInputMode(g.getIgstInputMode());
             group.setSortOrder(go++);
             bill.getCommodityGroups().add(group);
             int io = 0;
@@ -428,9 +432,13 @@ public class SalesBillServiceImpl implements SalesBillService {
             gdto.setDiscountType(g.getDiscountType());
             gdto.setManualRoundOff(g.getManualRoundOff());
             gdto.setGstRate(g.getGstRate());
+            gdto.setGstInputMode(g.getGstInputMode());
             gdto.setSgstRate(g.getSgstRate());
+            gdto.setSgstInputMode(g.getSgstInputMode());
             gdto.setCgstRate(g.getCgstRate());
+            gdto.setCgstInputMode(g.getCgstInputMode());
             gdto.setIgstRate(g.getIgstRate());
+            gdto.setIgstInputMode(g.getIgstInputMode());
             List<BillLineItemDTO> items = new ArrayList<>();
             for (SalesBillLineItem it : g.getItems()) {
                 BillLineItemDTO idto = new BillLineItemDTO();

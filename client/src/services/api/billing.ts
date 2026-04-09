@@ -35,9 +35,13 @@ export interface CommodityGroupDTO {
   totalCharges?: number;
   /** Per-bill GST % (combined and split); persisted on sales_bill_commodity_group. */
   gstRate?: number;
+  gstInputMode?: 'PERCENT' | 'AMOUNT';
   sgstRate?: number;
+  sgstInputMode?: 'PERCENT' | 'AMOUNT';
   cgstRate?: number;
+  cgstInputMode?: 'PERCENT' | 'AMOUNT';
   igstRate?: number;
+  igstInputMode?: 'PERCENT' | 'AMOUNT';
 }
 
 /** Version snapshot (backend BillVersionDTO). */

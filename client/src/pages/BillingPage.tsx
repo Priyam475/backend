@@ -66,6 +66,9 @@ const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
 const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
 const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
 const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+const billingSummaryInputClass = `h-10 w-24 lg:h-6 lg:w-20 rounded text-right tabular-nums text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`;
+const billingSummaryValueClass = 'text-[10px] font-semibold text-foreground ml-auto tabular-nums min-w-[5.75rem] text-right inline-block';
+const billingLoginImage = '/login-bg.webp';
 
 /** Commodity line: computed fields (not inputs). Muted + dashed border + not-allowed cursor so they read as read-only. */
 const billingCommodityReadOnlyCellClass =
@@ -76,7 +79,7 @@ const billingToggleTabBtn = (active: boolean) =>
   cn(
     'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
     active
-      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      ? 'bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] text-white shadow-md'
       : 'glass-card text-muted-foreground hover:text-foreground',
   );
 
@@ -85,7 +88,7 @@ const billingToggleTabBtnOnHero = (active: boolean) =>
   cn(
     'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
     active
-      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
+      ? 'bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] text-white shadow-md'
       : 'bg-white/15 text-white/90 hover:bg-white/25 border border-white/10 backdrop-blur-sm',
   );
 
@@ -191,6 +194,10 @@ interface CommodityGroup {
   commodityName: string;
   hsnCode: string;
   taxMode?: 'GST' | 'IGST' | 'NONE';
+  gstInputMode?: 'PERCENT' | 'AMOUNT';
+  sgstInputMode?: 'PERCENT' | 'AMOUNT';
+  cgstInputMode?: 'PERCENT' | 'AMOUNT';
+  igstInputMode?: 'PERCENT' | 'AMOUNT';
   gstRate: number;
   /** Optional SGST/CGST (intra) or IGST (inter) split; see `effectiveGstPercent` in billingMoney. */
   sgstRate: number;
@@ -385,6 +392,10 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     return {
     ...g,
     taxMode: preferredTaxMode,
+    gstInputMode: (g.gstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
+    sgstInputMode: (g.sgstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
+    cgstInputMode: (g.cgstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
+    igstInputMode: (g.igstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
     gstRate: preferredTaxMode === 'NONE' ? 0 : resolvedGstRate,
     sgstRate: preferredTaxMode === 'NONE' ? 0 : (preferredTaxMode === 'IGST' ? 0 : resolvedSgstRate),
     cgstRate: preferredTaxMode === 'NONE' ? 0 : (preferredTaxMode === 'IGST' ? 0 : resolvedCgstRate),
@@ -1546,6 +1557,10 @@ const BillingPage = () => {
             || Number(config?.igstRate ?? 0) > 0
               ? (Number(config?.igstRate ?? 0) > 0 ? 'IGST' : 'GST')
               : 'NONE',
+          gstInputMode: 'PERCENT',
+          sgstInputMode: 'PERCENT',
+          cgstInputMode: 'PERCENT',
+          igstInputMode: 'PERCENT',
           gstRate: config?.gstRate ?? 0,
           sgstRate: config?.sgstRate ?? 0,
           cgstRate: config?.cgstRate ?? 0,
@@ -4444,20 +4459,24 @@ const BillingPage = () => {
               <p className="text-[11px] font-bold text-foreground uppercase tracking-wider">
                 Bill Summary
               </p>
-              <div
-                ref={summaryTableScrollRef}
-                onScroll={handleSummaryTableScroll}
-                className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm"
-              >
-                <table className="w-full min-w-[720px] text-[11px] leading-tight border-separate border-spacing-0">
+              <div className="flex items-stretch gap-2">
+                <div
+                  ref={summaryTableScrollRef}
+                  onScroll={handleSummaryTableScroll}
+                  className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm xl:flex-none xl:w-fit xl:max-w-[78%]"
+                >
+                  <table
+                    className="w-max text-[11px] leading-tight border-separate border-spacing-0"
+                    style={{ minWidth: `${110 + (bill.commodityGroups.length * 150)}px` }}
+                  >
                   <thead>
-                    <tr className="bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] shadow-sm">
-                      <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-white uppercase tracking-widest whitespace-normal bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] border-b border-white/30 border-r border-white/20 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
+                    <tr className="bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-sm">
+                      <th className="sticky top-0 left-0 z-30 text-center px-2 py-2.5 font-extrabold text-white uppercase tracking-widest whitespace-normal bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] border-b border-white/30 border-r border-white/20 min-w-[110px] max-w-[110px] w-[110px] shadow-sm text-[10px]">Activity</th>
                       {bill.commodityGroups.map((g, gi) => (
                         <th
                           key={`${g.commodityName}-${gi}`}
                           className={cn(
-                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-white uppercase tracking-widest min-w-[150px] border-b border-white/30 border-l border-white/20 bg-[linear-gradient(120deg,#4b2e83_0%,#6d3fd1_45%,#2563eb_100%)] shadow-sm',
+                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-white uppercase tracking-widest min-w-[150px] border-b border-white/30 border-l border-white/20 bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-sm',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-white/20',
                           )}
                         >
@@ -4501,7 +4520,7 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center justify-start gap-1 w-full">
                             <BillingMoneyInput
                               value={g.commissionPercent}
                               min={0}
@@ -4517,10 +4536,10 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                              className={billingSummaryInputClass}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.commissionAmount || 0)}</span>
+                            <span className={billingSummaryValueClass}>₹{formatBillingInr(g.commissionAmount || 0)}</span>
                           </div>
                         </td>
                       ))}
@@ -4535,7 +4554,7 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center justify-start gap-1 w-full">
                             <BillingMoneyInput
                               value={g.userFeePercent}
                               min={0}
@@ -4551,10 +4570,10 @@ const BillingPage = () => {
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={`h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                              className={billingSummaryInputClass}
                             />
                             <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.userFeeAmount || 0)}</span>
+                            <span className={billingSummaryValueClass}>₹{formatBillingInr(g.userFeeAmount || 0)}</span>
                           </div>
                         </td>
                       ))}
@@ -4572,7 +4591,7 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center justify-start gap-1 w-full">
                               <BillingMoneyInput
                                 value={g.coolieRate || 0}
                                 min={0}
@@ -4590,14 +4609,14 @@ const BillingPage = () => {
                                     return err;
                                   });
                                 }}
-                                className={cn('h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
+                                className={cn(billingSummaryInputClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
                               <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
                                 {formatBillingInr(qty)}
                               </span>
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.coolieAmount || 0)}</span>
+                              <span className={billingSummaryValueClass}>₹{formatBillingInr(g.coolieAmount || 0)}</span>
                             </div>
                           </td>
                         );
@@ -4616,7 +4635,7 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center justify-start gap-1 w-full">
                               <BillingMoneyInput
                                 value={g.weighmanChargeRate || 0}
                                 min={0}
@@ -4634,14 +4653,14 @@ const BillingPage = () => {
                                     return err;
                                   });
                                 }}
-                                className={cn('h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
+                                className={cn(billingSummaryInputClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
                               <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
                                 {formatBillingInr(qty)}
                               </span>
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(g.weighmanChargeAmount || 0)}</span>
+                              <span className={billingSummaryValueClass}>₹{formatBillingInr(g.weighmanChargeAmount || 0)}</span>
                             </div>
                           </td>
                         );
@@ -4732,15 +4751,38 @@ const BillingPage = () => {
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                            <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
+                            <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                              <Select
+                                value={g.gstInputMode || 'PERCENT'}
+                                onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.gstInputMode = value;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                              >
+                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                  <SelectValue placeholder="%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERCENT">%</SelectItem>
+                                  <SelectItem value="AMOUNT">₹</SelectItem>
+                                </SelectContent>
+                              </Select>
                               <BillingMoneyInput
-                                value={g.gstRate}
+                                value={g.gstInputMode === 'AMOUNT'
+                                  ? gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g))
+                                  : g.gstRate}
                                 min={0}
                                 onCommit={val => {
                                   const v = Math.max(0, val);
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
-                                  cg.gstRate = v;
+                                  cg.gstRate = (cg.gstInputMode === 'AMOUNT')
+                                    ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                    : v;
                                   cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
                                   cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
                                   const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
@@ -4749,12 +4791,12 @@ const BillingPage = () => {
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
                                 }}
-                                className={cn(
-                                  `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
-                                )}
+                                className={billingSummaryInputClass}
                               />
-                              <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                              <span className="text-[10px] font-semibold text-foreground ml-1">
+                              <span className="text-[10px] font-semibold text-muted-foreground">
+                                {g.gstInputMode === 'AMOUNT' ? '₹' : '%'}
+                              </span>
+                              <span className={billingSummaryValueClass}>
                                 ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, effectiveGstPercent(g)))}
                               </span>
                             </div>
@@ -4788,24 +4830,48 @@ const BillingPage = () => {
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
-                            <BillingMoneyInput
-                              value={g.sgstRate}
-                              min={0}
-                              onCommit={val => {
-                                const v = Math.max(0, val);
+                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                            <Select
+                              value={g.sgstInputMode || 'PERCENT'}
+                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
                                 const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi], sgstRate: v };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.sgstInputMode = value;
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={cn(
-                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
-                              )}
+                            >
+                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                <SelectValue placeholder="%" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PERCENT">%</SelectItem>
+                                <SelectItem value="AMOUNT">₹</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <BillingMoneyInput
+                              value={g.sgstInputMode === 'AMOUNT'
+                                ? gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0)
+                                : g.sgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.sgstRate = (cg.sgstInputMode === 'AMOUNT')
+                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                  : v;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={billingSummaryInputClass}
                             />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                            <span className="text-[10px] font-semibold text-muted-foreground">
+                              {g.sgstInputMode === 'AMOUNT' ? '₹' : '%'}
+                            </span>
+                            <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0))}
                             </span>
                           </div>
@@ -4839,24 +4905,48 @@ const BillingPage = () => {
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
-                            <BillingMoneyInput
-                              value={g.cgstRate}
-                              min={0}
-                              onCommit={val => {
-                                const v = Math.max(0, val);
+                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                            <Select
+                              value={g.cgstInputMode || 'PERCENT'}
+                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
                                 const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi], cgstRate: v };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.cgstInputMode = value;
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={cn(
-                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
-                              )}
+                            >
+                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                <SelectValue placeholder="%" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PERCENT">%</SelectItem>
+                                <SelectItem value="AMOUNT">₹</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <BillingMoneyInput
+                              value={g.cgstInputMode === 'AMOUNT'
+                                ? gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0)
+                                : g.cgstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.cgstRate = (cg.cgstInputMode === 'AMOUNT')
+                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                  : v;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={billingSummaryInputClass}
                             />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                            <span className="text-[10px] font-semibold text-muted-foreground">
+                              {g.cgstInputMode === 'AMOUNT' ? '₹' : '%'}
+                            </span>
+                            <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0))}
                             </span>
                           </div>
@@ -4890,24 +4980,48 @@ const BillingPage = () => {
                           {!hasTax || !igstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-end sm:justify-start">
-                            <BillingMoneyInput
-                              value={g.igstRate}
-                              min={0}
-                              onCommit={val => {
-                                const v = Math.max(0, val);
+                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                            <Select
+                              value={g.igstInputMode || 'PERCENT'}
+                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
                                 const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi], igstRate: v };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.igstInputMode = value;
                                 updated.commodityGroups = [...updated.commodityGroups];
                                 updated.commodityGroups[gi] = cg;
                                 setBill(recalcGrandTotal(updated));
                               }}
-                              className={cn(
-                                `h-10 w-16 lg:h-6 lg:w-14 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`,
-                              )}
+                            >
+                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                <SelectValue placeholder="%" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PERCENT">%</SelectItem>
+                                <SelectItem value="AMOUNT">₹</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <BillingMoneyInput
+                              value={g.igstInputMode === 'AMOUNT'
+                                ? gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0)
+                                : g.igstRate}
+                              min={0}
+                              onCommit={val => {
+                                const v = Math.max(0, val);
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.igstRate = (cg.igstInputMode === 'AMOUNT')
+                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                  : v;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={billingSummaryInputClass}
                             />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
-                            <span className="text-[10px] font-semibold text-foreground ml-1">
+                            <span className="text-[10px] font-semibold text-muted-foreground">
+                              {g.igstInputMode === 'AMOUNT' ? '₹' : '%'}
+                            </span>
+                            <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0))}
                             </span>
                           </div>
@@ -4944,7 +5058,7 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center justify-start gap-1 w-full">
                               <Select value={g.discountType || 'AMOUNT'} onValueChange={(value: any) => {
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
@@ -4973,10 +5087,10 @@ const BillingPage = () => {
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
                                 }}
-                                className={`h-10 w-20 lg:h-6 lg:w-16 rounded text-right text-[10px] lg:text-[9px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                                className={billingSummaryInputClass}
                                 placeholder="0"
                               />
-                              <span className="text-[10px] font-semibold text-foreground ml-1">₹{formatBillingInr(discountAmount)}</span>
+                              <span className={billingSummaryValueClass}>₹{formatBillingInr(discountAmount)}</span>
                             </div>
                           </td>
                         );
@@ -5003,7 +5117,7 @@ const BillingPage = () => {
                               updated.commodityGroups[gi] = cg;
                               setBill(recalcGrandTotal(updated));
                             }}
-                            className={`h-10 w-24 lg:h-6 lg:w-20 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
+                            className={billingSummaryInputClass}
                             placeholder="0"
                           />
                         </td>
@@ -5025,7 +5139,7 @@ const BillingPage = () => {
                           <td
                             key={`overallrate-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500 font-bold',
+                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500 font-bold tabular-nums text-right',
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
@@ -5046,7 +5160,7 @@ const BillingPage = () => {
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Outbound Freight (Rate/Value)</td>
                       <td colSpan={bill.commodityGroups.length} className="px-2 py-1.5 bg-white text-foreground dark:text-neutral-900 border-l border-border/30 border-b border-border/30 border-r border-border/30 dark:border-border/70 dark:[&_.text-muted-foreground]:text-neutral-500">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
                           <BillingMoneyInput
                             value={bill.outboundFreight || 0}
                             min={0}
@@ -5058,7 +5172,7 @@ const BillingPage = () => {
                                 return err;
                               });
                             }}
-                            className={cn('h-10 w-28 lg:h-6 lg:w-24 rounded text-right text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50', numberInputNoSpinnerClass, validationErrors.outboundFreight && 'border-destructive ring-1 ring-destructive/30')}
+                            className={cn(billingSummaryInputClass, validationErrors.outboundFreight && 'border-destructive ring-1 ring-destructive/30')}
                           />
                           {validationErrors.outboundFreight && <span className="text-[10px] text-destructive">{validationErrors.outboundFreight}</span>}
                         </div>
@@ -5105,7 +5219,16 @@ const BillingPage = () => {
                       </td>
                     </tr>
                   </tbody>
-                </table>
+                  </table>
+                </div>
+                <div className="hidden xl:flex xl:flex-1 rounded-xl border border-border/40 bg-background/30 overflow-hidden items-center justify-center">
+                  <img
+                    src={billingLoginImage}
+                    alt="Billing visual"
+                    className="h-full w-full object-cover opacity-85"
+                    loading="lazy"
+                  />
+                </div>
               </div>
             </motion.div>
 
@@ -5214,27 +5337,72 @@ const BillingPage = () => {
               <p className="text-xs text-muted-foreground/70 mt-1">Drafts without a bill number appear here</p>
             </div>
           ) : (
-            filteredInProgressBills.map((b: SalesBillDTO, i: number) => (
-              <motion.button type="button" key={String(b.billId)}
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                onClick={() => openBillFromList(b)}
-                className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md flex-shrink-0">
-                    <Clock className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-foreground truncate">{b.billingName || b.buyerName}</p>
-                    <p className="text-xs text-muted-foreground">{b.buyerMark} · In progress</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
-                    <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
-                  </div>
+            isDesktop ? (
+              <div className="glass-card rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] border-b border-white/25">
+                        <th className="px-4 py-3 text-center font-semibold text-white first:rounded-tl-xl">Mark</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Buyer Name</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Broker Name</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Bids</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Bag Quantity</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white last:rounded-tr-xl">Bill Name</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredInProgressBills.map((b: SalesBillDTO) => {
+                        const bidsCount = (b.commodityGroups || []).reduce((sum, g) => sum + (g.items?.length || 0), 0);
+                        const bagQuantity = (b.commodityGroups || []).reduce(
+                          (sum, g) => sum + (g.items || []).reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0),
+                          0,
+                        );
+                        const brokerDisplay = b.buyerAsBroker
+                          ? (b.buyerName || b.buyerMark || '-')
+                          : (b.brokerName || b.brokerMark || '-');
+                        return (
+                          <tr
+                            key={String(b.billId)}
+                            onClick={() => openBillFromList(b)}
+                            className="border-b border-border/40 hover:bg-muted/30 cursor-pointer transition-colors"
+                          >
+                            <td className="px-4 py-3 text-center text-foreground">{b.buyerMark || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{b.buyerName || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{brokerDisplay}</td>
+                            <td className="px-4 py-3 text-center text-foreground tabular-nums">{bidsCount}</td>
+                            <td className="px-4 py-3 text-center text-foreground tabular-nums">{roundMoney2(bagQuantity).toLocaleString()}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{b.billingName || '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              </motion.button>
-            ))
+              </div>
+            ) : (
+              filteredInProgressBills.map((b: SalesBillDTO, i: number) => (
+                <motion.button type="button" key={String(b.billId)}
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  onClick={() => openBillFromList(b)}
+                  className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md flex-shrink-0">
+                      <Clock className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{b.billingName || b.buyerName}</p>
+                      <p className="text-xs text-muted-foreground">{b.buyerMark} · In progress</p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
+                      <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+                </motion.button>
+              ))
+            )
           )
         )}
 
@@ -5249,27 +5417,82 @@ const BillingPage = () => {
               <p className="text-sm text-muted-foreground font-medium">No saved bills found</p>
             </div>
           ) : (
-            filteredSavedBillsOnly.map((b: SalesBillDTO, i: number) => (
-              <motion.button type="button" key={String(b.billId)}
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03 }}
-                onClick={() => openBillFromList(b)}
-                className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center shadow-md flex-shrink-0">
-                    <FileText className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-foreground">{b.billNumber}</p>
-                    <p className="text-xs text-muted-foreground truncate">{b.billingName} ({b.buyerMark})</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
-                    <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
-                  </div>
+            isDesktop ? (
+              <div className="glass-card rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1100px] text-sm">
+                    <thead>
+                      <tr className="bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] border-b border-white/25">
+                        <th className="px-4 py-3 text-center font-semibold text-white first:rounded-tl-xl">Bill Number</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Buyer</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Broker</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">No of Bids</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Amount</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Balance</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Date</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Pending Since</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white">Print Status</th>
+                        <th className="px-4 py-3 text-center font-semibold text-white last:rounded-tr-xl">Billing Name</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSavedBillsOnly.map((b: SalesBillDTO) => {
+                        const bidsCount = (b.commodityGroups || []).reduce((sum, g) => sum + (g.items?.length || 0), 0);
+                        const pendingDays = Math.max(
+                          0,
+                          Math.floor((Date.now() - new Date(b.billDate).getTime()) / (1000 * 60 * 60 * 24)),
+                        );
+                        const brokerDisplay = b.buyerAsBroker
+                          ? (b.buyerName || b.buyerMark || '-')
+                          : (b.brokerName || b.brokerMark || '-');
+                        return (
+                          <tr
+                            key={String(b.billId)}
+                            onClick={() => openBillFromList(b)}
+                            className="border-b border-border/40 hover:bg-muted/30 cursor-pointer transition-colors"
+                          >
+                            <td className="px-4 py-3 text-center text-foreground">{b.billNumber || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{b.buyerName || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{brokerDisplay}</td>
+                            <td className="px-4 py-3 text-center text-foreground tabular-nums">{bidsCount}</td>
+                            <td className="px-4 py-3 text-center text-foreground tabular-nums">₹{formatBillingInr(b.grandTotal ?? 0)}</td>
+                            <td className="px-4 py-3 text-center text-foreground tabular-nums">₹{formatBillingInr(b.pendingBalance ?? 0)}</td>
+                            <td className="px-4 py-3 text-center text-foreground">{new Date(b.billDate).toLocaleDateString()}</td>
+                            <td className="px-4 py-3 text-center text-foreground">
+                              {(b.pendingBalance ?? 0) > 0 ? `${pendingDays} day${pendingDays === 1 ? '' : 's'}` : '-'}
+                            </td>
+                            <td className="px-4 py-3 text-center text-foreground">-</td>
+                            <td className="px-4 py-3 text-center text-foreground">{b.billingName || '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              </motion.button>
-            ))
+              </div>
+            ) : (
+              filteredSavedBillsOnly.map((b: SalesBillDTO, i: number) => (
+                <motion.button type="button" key={String(b.billId)}
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  onClick={() => openBillFromList(b)}
+                  className="w-full glass-card rounded-2xl p-4 text-left hover:shadow-lg transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center shadow-md flex-shrink-0">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground">{b.billNumber}</p>
+                      <p className="text-xs text-muted-foreground truncate">{b.billingName} ({b.buyerMark})</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-foreground">₹{formatBillingInr(b.grandTotal ?? 0)}</p>
+                      <p className="text-[10px] text-muted-foreground">{new Date(b.billDate).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+                </motion.button>
+              ))
+            )
           )
         )}
       </div>

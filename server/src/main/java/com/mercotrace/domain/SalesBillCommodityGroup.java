@@ -91,14 +91,26 @@ public class SalesBillCommodityGroup implements Serializable {
     @Column(name = "gst_rate", precision = 8, scale = 2)
     private BigDecimal gstRate;
 
+    @Column(name = "gst_input_mode", length = 10)
+    private String gstInputMode;
+
     @Column(name = "sgst_rate", precision = 8, scale = 2)
     private BigDecimal sgstRate;
+
+    @Column(name = "sgst_input_mode", length = 10)
+    private String sgstInputMode;
 
     @Column(name = "cgst_rate", precision = 8, scale = 2)
     private BigDecimal cgstRate;
 
+    @Column(name = "cgst_input_mode", length = 10)
+    private String cgstInputMode;
+
     @Column(name = "igst_rate", precision = 8, scale = 2)
     private BigDecimal igstRate;
+
+    @Column(name = "igst_input_mode", length = 10)
+    private String igstInputMode;
 
     @NotNull
     @Column(name = "sort_order", nullable = false)
@@ -144,12 +156,20 @@ public class SalesBillCommodityGroup implements Serializable {
     public void setManualRoundOff(BigDecimal manualRoundOff) { this.manualRoundOff = manualRoundOff; }
     public BigDecimal getGstRate() { return gstRate; }
     public void setGstRate(BigDecimal gstRate) { this.gstRate = gstRate; }
+    public String getGstInputMode() { return gstInputMode; }
+    public void setGstInputMode(String gstInputMode) { this.gstInputMode = gstInputMode; }
     public BigDecimal getSgstRate() { return sgstRate; }
     public void setSgstRate(BigDecimal sgstRate) { this.sgstRate = sgstRate; }
+    public String getSgstInputMode() { return sgstInputMode; }
+    public void setSgstInputMode(String sgstInputMode) { this.sgstInputMode = sgstInputMode; }
     public BigDecimal getCgstRate() { return cgstRate; }
     public void setCgstRate(BigDecimal cgstRate) { this.cgstRate = cgstRate; }
+    public String getCgstInputMode() { return cgstInputMode; }
+    public void setCgstInputMode(String cgstInputMode) { this.cgstInputMode = cgstInputMode; }
     public BigDecimal getIgstRate() { return igstRate; }
     public void setIgstRate(BigDecimal igstRate) { this.igstRate = igstRate; }
+    public String getIgstInputMode() { return igstInputMode; }
+    public void setIgstInputMode(String igstInputMode) { this.igstInputMode = igstInputMode; }
     public Integer getSortOrder() { return sortOrder; }
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
     public List<SalesBillLineItem> getItems() { return items; }
