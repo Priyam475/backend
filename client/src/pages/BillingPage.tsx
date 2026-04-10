@@ -618,9 +618,6 @@ const BillingPage = () => {
   const [billingPrintSize, setBillingPrintSize] = useState<'A4' | 'A5'>('A4');
   const [billingIncludeHeader, setBillingIncludeHeader] = useState(true);
 
-  // Validation
-  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
-
   type BillingMainTab = 'create' | 'progress' | 'saved';
   const [billingMainTab, setBillingMainTab] = useState<BillingMainTab>('create');
   const [buyerBidMarkInput, setBuyerBidMarkInput] = useState('');
@@ -721,6 +718,24 @@ const BillingPage = () => {
     return map;
   }, [fullConfigs, commodities]);
 
+  /** Live validation for inline errors, Save/Update disable, and Alt+S gating. */
+  const billValidation = useMemo(
+    () =>
+      bill
+        ? validateBill(bill, commodityAvgWeightBounds)
+        : { isValid: true as const, errors: {} as ValidationErrors },
+    [bill, commodityAvgWeightBounds],
+  );
+  const validationErrors = billValidation.errors;
+  const canPersistSalesBill = useMemo(() => {
+    if (!bill) return false;
+    const canCreate = can('Billing', 'Create');
+    const canEdit = can('Billing', 'Edit');
+    const isUpdate = !!(bill.billId && isBackendBillId(bill.billId));
+    return isUpdate ? canEdit : canCreate;
+  }, [bill, can]);
+  const billSaveActionEnabled = billValidation.isValid && canPersistSalesBill;
+
   const commodityTaxConfigByName = useMemo(() => {
     const map = new Map<string, { hasTax: boolean; defaultMode: 'GST' | 'IGST' | 'NONE' }>();
     if (!fullConfigs.length || !commodities.length) return map;
@@ -791,6 +806,7 @@ const BillingPage = () => {
   const searchBidBuyerSelectRef = useRef<HTMLDivElement | null>(null);
   const searchBidInputRef = useRef<HTMLInputElement | null>(null);
   const versionTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const openPrintPreviewRef = useRef<() => void>(() => {});
   const [pendingDeleteTarget, setPendingDeleteTarget] = useState<{ commIdx: number; itemIdx: number } | null>(null);
   const billDirtyBaselineRef = useRef<string | null>(null);
   const billDirtyIdentityRef = useRef<string | null>(null);
@@ -987,10 +1003,15 @@ const BillingPage = () => {
         setEditLocked(false);
       }
       if (k === 's') {
+        if (!bill) return;
+        const { isValid } = validateBill(bill, commodityAvgWeightBounds);
+        const upd = bill.billId && isBackendBillId(bill.billId);
+        const okPerm = (upd && can('Billing', 'Edit')) || (!upd && can('Billing', 'Create'));
+        if (!isValid || !okPerm) return;
         void handleSaveDraft();
       }
-      if (k === 'p' && hasSavedOnce) {
-        void saveAndPreparePrint();
+      if (k === 'p') {
+        openPrintPreviewRef.current();
       }
       if (k === 'n') {
         handleCreateNewBill();
@@ -1006,7 +1027,7 @@ const BillingPage = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isDesktop, bill, showPrint, hasSavedOnce]);
+  }, [isDesktop, bill, showPrint, commodityAvgWeightBounds, can]);
 
   const openContactFromBilling = async () => {
     if (!canCreateContact) {
@@ -1749,6 +1770,7 @@ const BillingPage = () => {
       const filter = options?.lineFilter ?? (() => true);
       const body = billingBuyerPatchBody(billData);
       const auctions: AuctionResultDTO[] = Array.isArray(auctionData) ? (auctionData as AuctionResultDTO[]) : [];
+      const tasks: Promise<unknown>[] = [];
       for (const g of billData.commodityGroups || []) {
         for (const rawItem of g.items || []) {
           const item = rawItem as BillLineItem;
@@ -1765,11 +1787,16 @@ const BillingPage = () => {
               ? Number(item.selfSaleUnitId)
               : resolveSelfSaleUnitIdFromResults(lotId, auctions);
           if (selfSaleUnitId != null) {
-            await auctionApi.updateSelfSaleBid(selfSaleUnitId, entryId, body);
+            tasks.push(auctionApi.updateSelfSaleBid(selfSaleUnitId, entryId, body));
           } else {
-            await auctionApi.updateBid(lotId, entryId, body);
+            tasks.push(auctionApi.updateBid(lotId, entryId, body));
           }
         }
+      }
+      // Was sequential await per line (N round-trips); batch parallel requests to cap server load.
+      const concurrency = 12;
+      for (let i = 0; i < tasks.length; i += concurrency) {
+        await Promise.all(tasks.slice(i, i + concurrency));
       }
     },
     [auctionData, billingBuyerPatchBody],
@@ -2505,7 +2532,6 @@ const BillingPage = () => {
   const buildSavePayload = () => {
     if (!bill) return;
     const { isValid, errors } = validateBill(bill, commodityAvgWeightBounds);
-    setValidationErrors(errors);
     if (!isValid) {
       const count = Object.keys(errors).length;
       toast.error(`Please fix ${count} validation ${count === 1 ? 'error' : 'errors'} before saving`);
@@ -2585,7 +2611,7 @@ const BillingPage = () => {
           'Bill saved, but some auction bids could not be updated to match this buyer. Refresh billing data or check Sales Pad.',
         );
       }
-      await refetchAuctions();
+      void refetchAuctions().catch(() => {});
       return result;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to save bill');
@@ -2612,7 +2638,7 @@ const BillingPage = () => {
     }
 
     setHasSavedOnce(isBackendBillId(String(saved.billId)));
-    loadSavedBills();
+    void loadSavedBills();
     toast.success(`Draft for ${currentBuyerLabel} moved to Bill In Progress.`);
     return true;
   }
@@ -2623,12 +2649,19 @@ const BillingPage = () => {
     if (!result) return;
     // Assign bill number on save (completed bill), idempotent if already numbered.
     const assigned = await billingApi.assignNumber(result.billId);
-    const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
-    setBill(recalcGrandTotal(normalized));
+    const normalized = recalcGrandTotal(normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData);
+    setBill(normalized);
+    billDirtyBaselineRef.current = serializeBillForDirty(normalized);
     setHasSavedOnce(true);
     toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
-    loadSavedBills();
+    void loadSavedBills();
   };
+
+  /** True when local bill differs from last baseline (load or successful save). Used to require Save before Print for persisted bills. */
+  const billHasUnsavedEditsSinceSave = useMemo(() => {
+    if (!bill || !billDirtyBaselineRef.current) return false;
+    return serializeBillForDirty(bill) !== billDirtyBaselineRef.current;
+  }, [bill, serializeBillForDirty]);
 
   const isBillingDirty = useMemo(() => {
     if (!bill || showPrint) return false;
@@ -2646,7 +2679,8 @@ const BillingPage = () => {
       return false;
     }
     setHasSavedOnce(isBackendBillId(String(saved.billId)));
-    loadSavedBills();
+    billDirtyBaselineRef.current = serializeBillForDirty(bill);
+    void loadSavedBills();
     toast.success('Bill progress saved.');
     return true;
   };
@@ -2659,24 +2693,43 @@ const BillingPage = () => {
     onBeforeContinue: handleBillingPartialSave,
   });
 
-  // Save bill and open print preview (bill number assigned via separate assign-number call)
-  const saveAndPreparePrint = async () => {
+  /** Opens print preview only — does not persist. Use Save/Update first. */
+  const canPrintBill = useMemo(
+    () =>
+      !!bill
+      && hasSavedOnce
+      && isBackendBillId(bill.billId)
+      && selectedPrintVersion === 'latest'
+      && billValidation.isValid
+      && !billPersisting
+      && !billHasUnsavedEditsSinceSave,
+    [
+      bill,
+      hasSavedOnce,
+      selectedPrintVersion,
+      billValidation.isValid,
+      billPersisting,
+      billHasUnsavedEditsSinceSave,
+    ],
+  );
+
+  const openPrintPreview = () => {
     if (!bill) return;
-    const result = await persistBill();
-    if (!result) return;
-    try {
-      const assigned = await billingApi.assignNumber(result.billId);
-      const normalized = normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData;
-      setBill(recalcGrandTotal(normalized));
-      setHasSavedOnce(true);
-      toast.success(`Bill ${assigned.billNumber} ready for print.`);
-      setShowPrint(true);
-      loadSavedBills();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to prepare bill for print');
+    if (!canPrintBill) {
+      if (selectedPrintVersion !== 'latest') {
+        toast.error('Only the latest version can be printed. Select “Latest (current)” in the version dropdown.');
+      } else if (billHasUnsavedEditsSinceSave) {
+        toast.error('Save your changes before printing.');
+      } else if (!billValidation.isValid) {
+        toast.error('Fix validation errors, save the bill, then print.');
+      } else if (!hasSavedOnce || !isBackendBillId(bill.billId)) {
+        toast.error('Save the bill before printing.');
+      }
       return;
     }
+    setShowPrint(true);
   };
+  openPrintPreviewRef.current = openPrintPreview;
 
   const filteredBuyerOptions = useMemo(() => {
     const q = buyerBidMarkInput.trim().toLowerCase();
@@ -2733,6 +2786,30 @@ const BillingPage = () => {
       b.outboundVehicle?.toLowerCase().includes(q)
     );
   }, [numberedBills, searchQuery]);
+
+  const applySelectedVersion = useCallback((versionSel: 'latest' | number) => {
+    if (!bill) return;
+    if (versionSel === 'latest') {
+      const latestSource = latestVersionSnapshotRef.current ?? bill;
+      const normalizedLatest = normalizeBillFromApi(latestSource, fullConfigs, commodities) as BillData;
+      setBill(recalcGrandTotal(normalizedLatest));
+      return;
+    }
+    const versions = Array.isArray((bill as any).versions) ? (bill as any).versions : [];
+    const picked = versions.find((v: any) => Number(v?.version) === Number(versionSel));
+    const rawSnapshot = picked?.data;
+    if (!rawSnapshot || typeof rawSnapshot !== 'object') {
+      toast.error(`Version v${versionSel} data not available`);
+      return;
+    }
+    const mergedSnapshot = {
+      ...(rawSnapshot as any),
+      billId: bill.billId,
+      versions,
+    };
+    const normalizedVersion = normalizeBillFromApi(mergedSnapshot, fullConfigs, commodities) as BillData;
+    setBill(recalcGrandTotal(normalizedVersion));
+  }, [bill, fullConfigs, commodities, recalcGrandTotal]);
 
   if (!canView) {
     return <ForbiddenPage moduleName="Billing" />;
@@ -3023,30 +3100,6 @@ const BillingPage = () => {
   };
 
   const tabHint = (code: string) => (isDesktop ? ` (${code})` : '');
-
-  const applySelectedVersion = useCallback((versionSel: 'latest' | number) => {
-    if (!bill) return;
-    if (versionSel === 'latest') {
-      const latestSource = latestVersionSnapshotRef.current ?? bill;
-      const normalizedLatest = normalizeBillFromApi(latestSource, fullConfigs, commodities) as BillData;
-      setBill(recalcGrandTotal(normalizedLatest));
-      return;
-    }
-    const versions = Array.isArray((bill as any).versions) ? (bill as any).versions : [];
-    const picked = versions.find((v: any) => Number(v?.version) === Number(versionSel));
-    const rawSnapshot = picked?.data;
-    if (!rawSnapshot || typeof rawSnapshot !== 'object') {
-      toast.error(`Version v${versionSel} data not available`);
-      return;
-    }
-    const mergedSnapshot = {
-      ...(rawSnapshot as any),
-      billId: bill.billId,
-      versions,
-    };
-    const normalizedVersion = normalizeBillFromApi(mergedSnapshot, fullConfigs, commodities) as BillData;
-    setBill(recalcGrandTotal(normalizedVersion));
-  }, [bill, fullConfigs, commodities, recalcGrandTotal]);
 
   return (
     <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", (searchBidDialogOpen || addBidDialogOpen) && "no-hover")}>
@@ -3779,11 +3832,6 @@ const BillingPage = () => {
                         value={bill.billingName}
                         onChange={e => {
                           setBill({ ...bill, billingName: e.target.value });
-                          setValidationErrors(prev => {
-                            const n = { ...prev };
-                            delete n.billingName;
-                            return n;
-                          });
                         }}
                         className={cn(
                           'h-9 rounded-xl text-xs',
@@ -4044,11 +4092,6 @@ const BillingPage = () => {
                         min={0}
                         onCommit={n => {
                           setBill({ ...bill, brokerageValue: n });
-                          setValidationErrors(prev => {
-                            const err = { ...prev };
-                            delete err.brokerageValue;
-                            return err;
-                          });
                         }}
                         placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
                         className={cn(
@@ -4074,11 +4117,6 @@ const BillingPage = () => {
                           min={0}
                           onCommit={n => {
                             setBill({ ...bill, globalOtherCharges: n });
-                            setValidationErrors(prev => {
-                              const err = { ...prev };
-                              delete err.globalOtherCharges;
-                              return err;
-                            });
                           }}
                           placeholder="Other Charges (₹)"
                           className={cn(
@@ -4258,12 +4296,6 @@ const BillingPage = () => {
                                       min={0}
                                       onCommit={n => {
                                         updateLineItem(gi, ii, 'quantity', Math.max(1, n));
-                                        setValidationErrors(prev => {
-                                          const err = { ...prev };
-                                          delete err[`items.${gi}.${ii}.quantity`];
-                                          delete err[`items.${gi}.${ii}.avgWeight`];
-                                          return err;
-                                        });
                                       }}
                                       className={cn(
                                         'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
@@ -4285,12 +4317,6 @@ const BillingPage = () => {
                                       min={0}
                                       onCommit={n => {
                                         updateLineItem(gi, ii, 'weight', n);
-                                        setValidationErrors(prev => {
-                                          const err = { ...prev };
-                                          delete err[`items.${gi}.${ii}.weight`];
-                                          delete err[`items.${gi}.${ii}.avgWeight`];
-                                          return err;
-                                        });
                                       }}
                                       className={cn(
                                         'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
@@ -4345,11 +4371,6 @@ const BillingPage = () => {
                                       min={0}
                                       onCommit={n => {
                                         updateLineItem(gi, ii, 'otherCharges', n);
-                                        setValidationErrors(prev => {
-                                          const err = { ...prev };
-                                          delete err[`items.${gi}.${ii}.otherCharges`];
-                                          return err;
-                                        });
                                       }}
                                       className={cn(
                                         'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
@@ -4371,11 +4392,6 @@ const BillingPage = () => {
                                       min={0}
                                       onCommit={n => {
                                         updateLineItem(gi, ii, 'brokerage', n);
-                                        setValidationErrors(prev => {
-                                          const err = { ...prev };
-                                          delete err[`items.${gi}.${ii}.brokerage`];
-                                          return err;
-                                        });
                                       }}
                                       className={cn(
                                         'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
@@ -4669,11 +4685,6 @@ const BillingPage = () => {
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
-                                  setValidationErrors(prev => {
-                                    const err = { ...prev };
-                                    delete err[`coolie-${gi}`];
-                                    return err;
-                                  });
                                 }}
                                 className={cn(billingSummaryInputClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
@@ -4714,11 +4725,6 @@ const BillingPage = () => {
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
-                                  setValidationErrors(prev => {
-                                    const err = { ...prev };
-                                    delete err[`weighman-${gi}`];
-                                    return err;
-                                  });
                                 }}
                                 className={cn(billingSummaryInputClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
                                 placeholder="Rate"
@@ -5159,11 +5165,6 @@ const BillingPage = () => {
                             commitMode="blur"
                             onCommit={n => {
                               setBill(recalcGrandTotal({ ...bill, outboundFreight: n }));
-                              setValidationErrors(prev => {
-                                const err = { ...prev };
-                                delete err.outboundFreight;
-                                return err;
-                              });
                             }}
                             className={cn(billingSummaryInputClass, validationErrors.outboundFreight && 'border-destructive ring-1 ring-destructive/30')}
                           />
@@ -5178,11 +5179,6 @@ const BillingPage = () => {
                           value={bill.outboundVehicle}
                           onChange={e => {
                             setBill({ ...bill, outboundVehicle: e.target.value });
-                            setValidationErrors(prev => {
-                              const n = { ...prev };
-                              delete n.outboundVehicle;
-                              return n;
-                            });
                           }}
                           placeholder="AP03 CK 4323"
                           className={cn("h-10 w-40 lg:h-6 lg:w-36 rounded text-left text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")}
@@ -5285,7 +5281,14 @@ const BillingPage = () => {
                       variant="outline"
                       className={cn(arrSolidMd, 'gap-1.5')}
                       onClick={() => void handleSaveDraft()}
-                      disabled={billPersisting}
+                      disabled={billPersisting || !billSaveActionEnabled}
+                      title={
+                        !canPersistSalesBill
+                          ? 'You do not have permission to save this bill.'
+                          : !billValidation.isValid
+                            ? 'Fix the highlighted validation errors before saving or updating.'
+                            : undefined
+                      }
                     >
                       {billPersisting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                       {billPersisting
@@ -5296,8 +5299,21 @@ const BillingPage = () => {
                       type="button"
                       variant="outline"
                       className={cn(arrSolidMd, 'gap-1.5')}
-                      onClick={() => void saveAndPreparePrint()}
-                      disabled={!hasSavedOnce}
+                      onClick={() => openPrintPreview()}
+                      disabled={!canPrintBill}
+                      title={
+                        !bill || selectedPrintVersion !== 'latest'
+                          ? 'Only the latest version can be printed. Select “Latest (current)”.'
+                          : billHasUnsavedEditsSinceSave
+                            ? 'Save your changes before printing.'
+                            : !billValidation.isValid
+                              ? 'Fix validation errors and save before printing.'
+                              : !hasSavedOnce || !isBackendBillId(bill.billId)
+                                ? 'Save the bill before printing.'
+                                : billPersisting
+                                  ? 'Please wait…'
+                                  : undefined
+                      }
                     >
                       <Printer className="w-4 h-4" /> Print{tabHint('Alt P')}
                     </Button>
