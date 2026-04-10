@@ -846,9 +846,7 @@ public class SettlementServiceImpl implements SettlementService {
         return dto;
     }
 
-    /**
-     * Same slab formula as SettlementPage / Quick Expenses (TS {@code computeSlabChargeTotal}).
-     */
+    /** SRS hamali / weighing: Rf × max(1, W / T), aligned with SettlementPage {@code computeSlabChargeTotal}. */
     private static double computeSlabChargeTotal(double actualWeight, double fixedRate, double threshold) {
         double w = Math.max(0d, actualWeight);
         double t = Math.max(0d, threshold);
@@ -856,11 +854,7 @@ public class SettlementServiceImpl implements SettlementService {
         if (t <= 0d) {
             return 0d;
         }
-        if (w > t) {
-            double perKg = (f * w) / t;
-            return perKg * w;
-        }
-        return f * t;
+        return f * Math.max(1d, w / t);
     }
 
     private static BigDecimal resolveLotWeightKgForCharges(

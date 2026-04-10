@@ -166,7 +166,10 @@ function collectReservedBidKeysFromSalesBills(
 function isBillEntryReservedOnOtherSalesBill(entry: BillEntry, reserved: Set<string>): boolean {
   const bid = entry.bidNumber;
   const lotId = String(entry.lotId || '').trim();
-  if (lotId && reserved.has(`${bid}::${lotId}`)) return true;
+  /** When auction/billing has a real lot id, only that key counts. Legacy lotName keys are ambiguous (many lots share "100"). */
+  if (lotId) {
+    return reserved.has(`${bid}::${lotId}`);
+  }
   return reserved.has(`legacy::${bid}::${normalizeLotNameKey(entry.lotName)}`);
 }
 
@@ -1391,7 +1394,13 @@ const BillingPage = () => {
       (auction.entries || []).forEach((entry: any) => {
         if (entry.isSelfSale) return;
 
-        const key = entry.buyerMark || entry.buyerName;
+        /** Same grouping as Sales Pad participating buyers: registered contacts (incl. global) by id; scribble by mark+name. */
+        const regId =
+          entry.buyerId != null && Number.isFinite(Number(entry.buyerId)) ? Number(entry.buyerId) : null;
+        const key =
+          regId != null
+            ? `r:${regId}`
+            : `t:${(entry.buyerMark || '').trim().toLowerCase()}|${(entry.buyerName || '').trim().toLowerCase()}`;
         if (!buyerMap.has(key)) {
           buyerMap.set(key, {
             buyerMark: entry.buyerMark,
@@ -2381,14 +2390,12 @@ const BillingPage = () => {
       (b.buyerMark || '').toLowerCase() === (bill.buyerMark || '').toLowerCase()
       && (b.buyerName || '').toLowerCase() === (bill.buyerName || '').toLowerCase();
     const candidates = buyersForBilling.filter(b => !isSameBuyer(b));
-    if (!q) return candidates.slice(0, 12);
-    return candidates
-      .filter(
-        b =>
-          (b.buyerMark || '').toLowerCase().includes(q)
-          || (b.buyerName || '').toLowerCase().includes(q),
-      )
-      .slice(0, 12);
+    if (!q) return candidates;
+    return candidates.filter(
+      b =>
+        (b.buyerMark || '').toLowerCase().includes(q)
+        || (b.buyerName || '').toLowerCase().includes(q),
+    );
   }, [bill, buyersForBilling, searchBidInput]);
 
   const searchBidVisibleEntries = useMemo(() => {
@@ -2795,14 +2802,13 @@ const BillingPage = () => {
 
   const filteredBuyerOptions = useMemo(() => {
     const q = buyerBidMarkInput.trim().toLowerCase();
-    if (!q) return buyersForBilling.slice(0, 12);
-    return buyersForBilling
-      .filter(
-        b =>
-          b.buyerMark?.toLowerCase().includes(q)
-          || b.buyerName?.toLowerCase().includes(q),
-      )
-      .slice(0, 12);
+    /** Show every unbilled buyer when empty (scrollable panel); the old slice(0,12) hid everyone past 12 with no hint to type. */
+    if (!q) return buyersForBilling;
+    return buyersForBilling.filter(
+      b =>
+        b.buyerMark?.toLowerCase().includes(q)
+        || b.buyerName?.toLowerCase().includes(q),
+    );
   }, [buyersForBilling, buyerBidMarkInput]);
 
   useEffect(() => {
@@ -3585,10 +3591,10 @@ const BillingPage = () => {
                     {filteredBuyerOptions.length === 0 ? (
                       <p className="px-3 py-2 text-xs text-muted-foreground">No buyers match your search.</p>
                     ) : (
-                      filteredBuyerOptions.map(b => (
+                      filteredBuyerOptions.map((b, idx) => (
                         <button
                           type="button"
-                          key={`${b.buyerMark}-${b.buyerName}`}
+                          key={`${b.buyerContactId ?? 'n'}::${b.buyerMark ?? ''}::${b.buyerName ?? ''}::${idx}`}
                           onClick={() => {
                             setSelectedBuyerFromDropdown(b);
                             setBuyerBidMarkInput(b.buyerMark || b.buyerName);
@@ -3772,9 +3778,9 @@ const BillingPage = () => {
                             {searchBidBuyerOptions.length === 0 ? (
                               <p className="px-3 py-2 text-xs text-muted-foreground">No buyer found.</p>
                             ) : (
-                              searchBidBuyerOptions.map(b => (
+                              searchBidBuyerOptions.map((b, idx) => (
                                 <button
-                                  key={`${b.buyerMark}-${b.buyerName}`}
+                                  key={`${b.buyerContactId ?? 'n'}::${b.buyerMark ?? ''}::${b.buyerName ?? ''}::${idx}`}
                                   type="button"
                                   onClick={() => openSearchBidDialogForBuyer(b)}
                                   className="w-full text-left px-3 py-2 border-b border-border/40 last:border-b-0 hover:bg-muted/40"

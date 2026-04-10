@@ -465,10 +465,10 @@ function totalSellerExpenses(
   return freight + exp.unloading + w + exp.cashAdvance + exp.gunnies + exp.others;
 }
 
-// ── Validation constants (from Buyer Selection Section.ini) ──
+// ── Validation constants (align with ArrivalService multi-seller: 2–12 chars) ──
 const DEDUCTION_MAX = 10_000_000;
-const VEHICLE_NUMBER_MIN = 10;
-const VEHICLE_NUMBER_MAX = 13;
+const VEHICLE_NUMBER_MIN = 2;
+const VEHICLE_NUMBER_MAX = 12;
 
 function clampMoney(value: number, min = 0, max = DEDUCTION_MAX): number {
   return Math.max(min, Math.min(max, Math.round(value * 100) / 100));
@@ -528,21 +528,13 @@ function roundMoney2(n: number): number {
   return Math.round(Math.max(0, n) * 100) / 100;
 }
 
-/**
- * Coolie / weighman (unloading) slab at lot level:
- * If actual weight is greater than threshold: perKg = (F × actual) / threshold, total = perKg × actual.
- * If actual weight is at or below threshold: total = F × threshold.
- */
+/** SRS hamali / weighing slab: charge = Rf × max(1, W / T). Round only after bag distribution (see modal / auto-pull). */
 function computeSlabChargeTotal(actualWeight: number, fixedRate: number, threshold: number): number {
   const w = Math.max(0, Number(actualWeight) || 0);
   const T = Math.max(0, Number(threshold) || 0);
   const F = Math.max(0, Number(fixedRate) || 0);
   if (T <= 0) return 0;
-  if (w > T) {
-    const perKg = (F * w) / T;
-    return perKg * w;
-  }
-  return F * T;
+  return F * Math.max(1, w / T);
 }
 
 function findArrivalSellerForSettlement(
@@ -846,6 +838,54 @@ function sumLotSlabChargesForSeller(
   return { unloading, weighing };
 }
 
+/** Per-seller slab sums + qty/weight for vehicle; shared by Quick Adjustment modal and expense auto-pull. */
+function buildSellerSlabChargeBaseForPattiSellers(
+  arrivalSellersForPatti: SellerSettlement[],
+  removedLotsBySellerId: Record<string, string[]>,
+  lotSalesOverridesBySellerId: Record<string, Record<string, LotSalesOverride>>,
+  nameToId: Map<string, number>,
+  configById: Map<number, FullCommodityConfigDto>,
+  getDivisor: (lot: SettlementLot) => number
+): Array<{
+  sellerId: string;
+  sellerName: string;
+  quantity: number;
+  unloading: number;
+  weighing: number;
+  actualWeight: number;
+}> {
+  return arrivalSellersForPatti.map(s => {
+    const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
+    const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
+    const { unloading, weighing } = sumLotSlabChargesForSeller(s, removed, lotOv, nameToId, configById, getDivisor);
+    const actualWeight = s.lots.reduce((sum, lot, i) => {
+      const sid = lotStableId(lot, i);
+      if (removed.has(sid)) return sum;
+      const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisor(lot));
+      return sum + (Number(merged.weight) || 0);
+    }, 0);
+    const qty = Math.max(
+      0,
+      Math.round(
+        s.lots.reduce((sum, lot, i) => {
+          const sid = lotStableId(lot, i);
+          if (removed.has(sid)) return sum;
+          const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisor(lot));
+          return sum + (Number(merged.qty) || 0);
+        }, 0)
+      )
+    );
+    return {
+      sellerId: s.sellerId,
+      sellerName: s.sellerName || 'Seller',
+      quantity: qty,
+      unloading,
+      weighing,
+      actualWeight,
+    };
+  });
+}
+
 function buildRateClustersFromSellerLots(
   seller: SellerSettlement,
   removedIds: Set<string>,
@@ -882,6 +922,94 @@ function buildRateClustersFromSellerLots(
 
 function defaultSellerExpenses(): SellerExpenseFormState {
   return { freight: 0, unloading: 0, weighman: 0, cashAdvance: 0, gunnies: 0, others: 0 };
+}
+
+/** Quick Adjustment: amounts from expense card; quantities/names from slab base rows. */
+function rowsFromExpenseCardAndSlabQuantities(
+  sellerComputedBase: Array<{ sellerId: string; sellerName: string; quantity: number }>,
+  sellerExpensesById: Record<string, SellerExpenseFormState>
+): VehicleExpenseRow[] {
+  return sellerComputedBase.map(s => {
+    const exp = sellerExpensesById[s.sellerId] ?? defaultSellerExpenses();
+    return {
+      id: `ve_${s.sellerId}`,
+      sellerId: s.sellerId,
+      sellerName: s.sellerName,
+      quantity: s.quantity,
+      freight: roundMoney2(exp.freight),
+      unloading: roundMoney2(exp.unloading),
+      weighing: roundMoney2(exp.weighman),
+      gunnies: roundMoney2(exp.gunnies),
+    };
+  });
+}
+
+/** Fresh slab + bag distribution only (no DB hydrate, no expense-card freight/unloading/weighing). Gunnies kept per seller from `gunniesBySellerId`. */
+function buildVehicleExpenseRowsComputedFromSlabs(
+  sellerComputedBase: Array<{
+    sellerId: string;
+    sellerName: string;
+    quantity: number;
+    unloading: number;
+    weighing: number;
+    actualWeight: number;
+  }>,
+  freightTotal: number,
+  equalShareFreight: number,
+  gunniesBySellerId: Record<string, number>
+): VehicleExpenseRow[] {
+  const nSellers = sellerComputedBase.length;
+  const totalActualWeightOnSettlement = sellerComputedBase.reduce((sum, s) => sum + s.actualWeight, 0);
+  const perKgFreight = totalActualWeightOnSettlement > 0 ? freightTotal / totalActualWeightOnSettlement : 0;
+  const unloadingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.unloading) || 0), 0);
+  const weighingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.weighing) || 0), 0);
+  const totalQtyOnSettlement = sellerComputedBase.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+  const perBagUnloading = totalQtyOnSettlement > 0 ? unloadingTotal / totalQtyOnSettlement : 0;
+  const perBagWeighing = totalQtyOnSettlement > 0 ? weighingTotal / totalQtyOnSettlement : 0;
+  const equalShareUnloading = nSellers > 0 ? unloadingTotal / nSellers : 0;
+  const equalShareWeighing = nSellers > 0 ? weighingTotal / nSellers : 0;
+
+  return sellerComputedBase.map(s => {
+    const freight = roundMoney2(
+      perKgFreight > 0 ? perKgFreight * s.actualWeight : equalShareFreight
+    );
+    const unloading = roundMoney2(
+      perBagUnloading > 0
+        ? perBagUnloading * s.quantity
+        : equalShareUnloading > 0
+          ? equalShareUnloading
+          : s.unloading
+    );
+    const weighing = roundMoney2(
+      perBagWeighing > 0
+        ? perBagWeighing * s.quantity
+        : equalShareWeighing > 0
+          ? equalShareWeighing
+          : s.weighing
+    );
+    return {
+      id: `ve_${s.sellerId}`,
+      sellerId: s.sellerId,
+      sellerName: s.sellerName,
+      quantity: s.quantity,
+      freight,
+      unloading,
+      weighing,
+      gunnies: roundMoney2(gunniesBySellerId[s.sellerId] ?? 0),
+    };
+  });
+}
+
+function vehicleExpenseOriginalsFromRows(rows: VehicleExpenseRow[]): Record<string, VehicleExpenseFieldValues> {
+  return rows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
+    acc[row.id] = {
+      freight: row.freight,
+      unloading: row.unloading,
+      weighing: row.weighing,
+      gunnies: row.gunnies,
+    };
+    return acc;
+  }, {});
 }
 
 function moneyNearEqual(a: number, b: number): boolean {
@@ -1150,6 +1278,8 @@ const SettlementPage = () => {
   const [sellerFormById, setSellerFormById] = useState<Record<string, SellerRegFormState>>({});
   const [registeredBaselineById, setRegisteredBaselineById] = useState<Record<string, SellerRegFormState>>({});
   const [sellerExpensesById, setSellerExpensesById] = useState<Record<string, SellerExpenseFormState>>({});
+  /** After a blocked save, seller cards to ring-scroll (avg / Unregistered / other validation). */
+  const [pattiSaveHighlightSellerIds, setPattiSaveHighlightSellerIds] = useState<string[]>([]);
   const [vehicleExpenseModalOpen, setVehicleExpenseModalOpen] = useState(false);
   const [vehicleExpenseLoading, setVehicleExpenseLoading] = useState(false);
   const [vehicleExpenseRows, setVehicleExpenseRows] = useState<VehicleExpenseRow[]>([]);
@@ -1636,6 +1766,19 @@ const SettlementPage = () => {
       };
 
       applyExtensionFromPattiDto(dto);
+
+      const expensePatch: Record<string, SellerExpenseFormState> = {};
+      const mergeExpensesFromPattiDto = (p: PattiDTO | null | undefined) => {
+        if (!p) return;
+        const sidKey = String(p.sellerId ?? '').trim();
+        if (!sidKey) return;
+        expensePatch[sidKey] = {
+          ...defaultSellerExpenses(),
+          ...deductionsToSellerExpenseForm(p.deductions ?? []),
+        };
+      };
+      mergeExpensesFromPattiDto(dto);
+
       const primaryNumericId = Number(dto.id ?? id);
       for (const [, dbid] of Object.entries(idMap)) {
         const nid = Number(dbid);
@@ -1643,23 +1786,22 @@ const SettlementPage = () => {
         try {
           const other = await settlementApi.getPattiById(nid);
           applyExtensionFromPattiDto(other ?? undefined);
+          mergeExpensesFromPattiDto(other ?? undefined);
         } catch {
           /* ignore per-seller extension load */
         }
       }
 
       setSelectedArrivalSellerIds(arrivalSellerIds ?? []);
-      const sid = String(dto.sellerId ?? '');
-      if (sid) {
-        const loadedExp: SellerExpenseFormState = {
-          ...defaultSellerExpenses(),
-          ...deductionsToSellerExpenseForm(dto.deductions ?? []),
-        };
-        setSellerExpensesById(prev => ({
-          ...prev,
-          [sid]: loadedExp,
-        }));
-        setSellerExpenseRestoreBaselineById(prev => ({ ...prev, [sid]: { ...loadedExp } }));
+      if (Object.keys(expensePatch).length > 0) {
+        setSellerExpensesById(prev => ({ ...prev, ...expensePatch }));
+        setSellerExpenseRestoreBaselineById(prev => {
+          const next = { ...prev };
+          for (const [k, v] of Object.entries(expensePatch)) {
+            next[k] = { ...v };
+          }
+          return next;
+        });
       }
       const dtoSellerId = String(dto.sellerId ?? '').trim();
       const fromSellers = dtoSellerId ? sellers.find(s => s.sellerId === dtoSellerId) : undefined;
@@ -1874,9 +2016,27 @@ const SettlementPage = () => {
           return `${sellerName}: rate must be greater than 0`;
         }
       }
+      for (const { lot, sid } of visibleLots) {
+        const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
+        const bounds = commodityAvgWeightBounds[lot.commodityName || ''];
+        if (bounds != null && row.weight > 0) {
+          if (bounds.min > 0 && row.avg < bounds.min) {
+            return `${sellerName}: avg weight ${row.avg.toFixed(2)} kg is below minimum ${bounds.min} kg (${row.itemLabel})`;
+          }
+          if (bounds.max > 0 && row.avg > bounds.max) {
+            return `${sellerName}: avg weight ${row.avg.toFixed(2)} kg is above maximum ${bounds.max} kg (${row.itemLabel})`;
+          }
+        }
+      }
+      if (!isSettlementSellerPrintAllowed(seller, form)) {
+        return (
+          settlementSellerPrintGateMessage(seller, form) ??
+          `${sellerName}: check Unregistered to confirm saving/printing, or link a registered contact`
+        );
+      }
       return null;
     },
-    [sellerFormById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor]
+    [sellerFormById, removedLotsBySellerId, lotSalesOverridesBySellerId, getLotDivisor, commodityAvgWeightBounds]
   );
 
   type SaveSellerOptions = {
@@ -1914,7 +2074,13 @@ const SettlementPage = () => {
         if (!payload) return false;
         const validationError = getSellerValidationError(seller);
         if (validationError) {
-          toast.error(validationError);
+          setPattiSaveHighlightSellerIds([seller.sellerId]);
+          toast.error(validationError, { duration: 8500 });
+          queueMicrotask(() => {
+            document
+              .getElementById(`settlement-seller-card-${seller.sellerId}`)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          });
           return false;
         }
         payload.inProgress = options?.inProgress === true;
@@ -1961,6 +2127,7 @@ const SettlementPage = () => {
               setSelectedPattiVersion('latest');
               if (!silent) toast.success(payload.inProgress ? `Sales Patti ${updated.pattiId} saved in progress.` : `Sales Patti ${updated.pattiId} ${actionWord}.`);
               if (showPrintAfterSave) setShowPrint(true);
+              setPattiSaveHighlightSellerIds(prev => prev.filter(x => x !== sid));
               loadSavedPattis();
               loadInProgressPattis();
               resyncBaselineAfterSaveRef.current = true;
@@ -1984,6 +2151,7 @@ const SettlementPage = () => {
               toast.success(payload.inProgress ? `Sales Patti ${created.pattiId} saved in progress for ${payload.sellerName}.` : `Sales Patti ${created.pattiId} ${actionWord} for ${payload.sellerName}.`);
             }
             if (showPrintAfterSave) setShowPrint(true);
+            setPattiSaveHighlightSellerIds(prev => prev.filter(x => x !== sid));
             loadSavedPattis();
             loadInProgressPattis();
             resyncBaselineAfterSaveRef.current = true;
@@ -2019,18 +2187,32 @@ const SettlementPage = () => {
   const savePatti = async (): Promise<boolean> => {
     if (!selectedSeller || !pattiData) return false;
     if (pattiSaveBusyRef.current) return false;
-    if (!canRunMainPattiActions) {
-      toast.error(mainPattiValidationError ?? 'Please complete required fields before saving.');
+    const scopeSellers = (
+      selectedArrivalSellerIds.length > 0
+        ? selectedArrivalSellerIds.map(id => sellers.find(s => String(s.sellerId) === String(id)))
+        : [selectedSeller]
+    ).filter((s): s is SellerSettlement => !!s);
+    const failingPreview = scopeSellers
+      .map(s => ({ s, err: getSellerValidationError(s) }))
+      .filter((x): x is { s: SellerSettlement; err: string } => x.err != null);
+    if (failingPreview.length > 0) {
+      setPattiSaveHighlightSellerIds(failingPreview.map(x => x.s.sellerId));
+      const desc = failingPreview.map(x => x.err).join('\n');
+      toast.error(
+        failingPreview.length === 1 ? failingPreview[0].err : `Fix ${failingPreview.length} sellers before saving`,
+        { description: failingPreview.length > 1 ? desc : undefined, duration: 9000 }
+      );
+      queueMicrotask(() => {
+        document
+          .getElementById(`settlement-seller-card-${failingPreview[0].s.sellerId}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
       return false;
     }
+    setPattiSaveHighlightSellerIds([]);
     pattiSaveBusyRef.current = true;
     setPattiSaveBusy(true);
     try {
-      const scopeSellers = (
-        selectedArrivalSellerIds.length > 0
-          ? selectedArrivalSellerIds.map(id => sellers.find(s => String(s.sellerId) === String(id)))
-          : [selectedSeller]
-      ).filter((s): s is SellerSettlement => !!s);
       const failures: string[] = [];
       const sellersNeedingCreate = scopeSellers.filter(s => existingPattiIdBySellerId[s.sellerId] == null);
       let sharedPattiBaseNumber: string | null = draftMainPattiNo || null;
@@ -2115,6 +2297,7 @@ const SettlementPage = () => {
         `Main patti ${allInUpdateMode ? 'updated' : 'saved'} for all ${scopeSellers.length} seller(s). Use Print when ready.`
       );
       setSettlementFormMode('saved');
+      setPattiSaveHighlightSellerIds([]);
       resyncBaselineAfterSaveRef.current = true;
       loadInProgressPattis();
       return true;
@@ -2135,9 +2318,21 @@ const SettlementPage = () => {
           ? selectedArrivalSellerIds.map(id => sellers.find(s => String(s.sellerId) === String(id)))
           : [selectedSeller]
       ).filter((s): s is SellerSettlement => !!s);
-      const validationErrors = scopeSellers.map(s => getSellerValidationError(s)).filter((e): e is string => !!e);
-      if (validationErrors.length > 0) {
-        toast.error(validationErrors.join(' | '));
+      const failingInProg = scopeSellers
+        .map(s => ({ s, err: getSellerValidationError(s) }))
+        .filter((x): x is { s: SellerSettlement; err: string } => x.err != null);
+      if (failingInProg.length > 0) {
+        setPattiSaveHighlightSellerIds(failingInProg.map(x => x.s.sellerId));
+        const desc = failingInProg.map(x => x.err).join('\n');
+        toast.error(
+          failingInProg.length === 1 ? failingInProg[0].err : `Fix ${failingInProg.length} sellers before saving in progress`,
+          { description: failingInProg.length > 1 ? desc : undefined, duration: 9000 }
+        );
+        queueMicrotask(() => {
+          document
+            .getElementById(`settlement-seller-card-${failingInProg[0].s.sellerId}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
         return false;
       }
       const failures: string[] = [];
@@ -2154,6 +2349,7 @@ const SettlementPage = () => {
         toast.error(`Failed to save in-progress patti for ${failures.join(', ')}`);
         return false;
       }
+      setPattiSaveHighlightSellerIds([]);
       toast.success('Settlement progress saved.');
       /** Per-seller save sets `resyncBaselineAfterSaveRef`; one explicit sync avoids repeated dirty/baseline churn before navigation. */
       resyncBaselineAfterSaveRef.current = false;
@@ -2754,7 +2950,7 @@ const SettlementPage = () => {
   }, [arrivalSellersForPatti, selectedSeller, pattiData]);
 
   /**
-   * Pull unloading / weighing / cash advance from backend, and align freight with weight-share logic.
+   * Pull unloading / weighing (same slab + per-bag split as Quick Adjustment), freight by weight share, cash advance from API.
    * Runs once per newly opened bill (no DB row yet). Intentionally does not depend on arrival freight display
    * updates — re-running would overwrite seller-level edits and look like “save then data reverted”.
    * Latest freight is read from `amountSummaryForExpensePullRef` when the async work finishes.
@@ -2771,57 +2967,60 @@ const SettlementPage = () => {
 
     let cancelled = false;
     void (async () => {
-      const snapBySellerId: Record<string, Awaited<ReturnType<typeof settlementApi.getSellerExpenseSnapshot>> | null> = {};
-      await Promise.all(
-        arrivalSellersForPatti.map(async s => {
-          try {
-            snapBySellerId[s.sellerId] = await settlementApi.getSellerExpenseSnapshot(s.sellerId);
-          } catch {
-            snapBySellerId[s.sellerId] = null;
-          }
-        })
-      );
+      const [snapBySellerId, configsRaw, commoditiesRaw] = await Promise.all([
+        Promise.all(
+          arrivalSellersForPatti.map(async s => {
+            try {
+              return { id: s.sellerId, snap: await settlementApi.getSellerExpenseSnapshot(s.sellerId) };
+            } catch {
+              return { id: s.sellerId, snap: null };
+            }
+          })
+        ).then(rows => {
+          const m: Record<string, Awaited<ReturnType<typeof settlementApi.getSellerExpenseSnapshot>> | null> = {};
+          for (const r of rows) m[r.id] = r.snap;
+          return m;
+        }),
+        commodityApi.getAllFullConfigs(),
+        commodityApi.list(),
+      ]);
       if (cancelled) return;
       if (quickAdjustmentAppliedRef.current) return;
 
-      const sellerActualWeightById: Record<string, number> = {};
-      const sellerQtyById: Record<string, number> = {};
-      let totalActualWeight = 0;
-      let totalQty = 0;
-      for (const s of arrivalSellersForPatti) {
-        const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
-        const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
-        const sellerQty = s.lots.reduce((sum, lot, i) => {
-          const sid = lotStableId(lot, i);
-          if (removed.has(sid)) return sum;
-          const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
-          return sum + (Number(row.qty) || 0);
-        }, 0);
-        const qty = Math.max(0, Math.round(sellerQty));
-        sellerQtyById[s.sellerId] = qty;
-        totalQty += qty;
-        const sellerWeight = s.lots.reduce((sum, lot, i) => {
-          const sid = lotStableId(lot, i);
-          if (removed.has(sid)) return sum;
-          const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
-          return sum + (Number(row.weight) || 0);
-        }, 0);
-        sellerActualWeightById[s.sellerId] = sellerWeight;
-        totalActualWeight += sellerWeight;
-      }
+      const configs = Array.isArray(configsRaw) ? configsRaw : [];
+      const commodities = Array.isArray(commoditiesRaw) ? commoditiesRaw : [];
+      const nameToId = new Map(
+        commodities.map(c => [String(c.commodity_name || '').trim().toLowerCase(), Number(c.commodity_id)])
+      );
+      const configById = new Map(configs.map(c => [c.commodityId, c]));
+      const getDivisorLocal = (lot: SettlementLot) => {
+        const n = (lot.commodityName || '').trim().toLowerCase();
+        const cid = nameToId.get(n);
+        if (cid == null) return 50;
+        const d = Number(configById.get(cid)?.config?.ratePerUnit);
+        return d > 0 ? d : 50;
+      };
+
+      const sellerSlabBase = buildSellerSlabChargeBaseForPattiSellers(
+        arrivalSellersForPatti,
+        removedLotsBySellerId,
+        lotSalesOverridesBySellerId,
+        nameToId,
+        configById,
+        getDivisorLocal
+      );
+      const unloadingTotal = sellerSlabBase.reduce((sum, r) => sum + (Number(r.unloading) || 0), 0);
+      const weighingTotal = sellerSlabBase.reduce((sum, r) => sum + (Number(r.weighing) || 0), 0);
+      const totalQty = sellerSlabBase.reduce((sum, r) => sum + (Number(r.quantity) || 0), 0);
+      const totalActualWeight = sellerSlabBase.reduce((sum, r) => sum + (Number(r.actualWeight) || 0), 0);
+      const nSellers = arrivalSellersForPatti.length;
+      const perBagUnloading = totalQty > 0 ? unloadingTotal / totalQty : 0;
+      const perBagWeighing = totalQty > 0 ? weighingTotal / totalQty : 0;
+      const equalShareUnloading = nSellers > 0 ? unloadingTotal / nSellers : 0;
+      const equalShareWeighing = nSellers > 0 ? weighingTotal / nSellers : 0;
 
       const freightTotal = Math.max(0, Number(amountSummaryForExpensePullRef.current.arrivalFreightAmount) || 0);
       const perKgFreight = totalActualWeight > 0 ? freightTotal / totalActualWeight : 0;
-      const snapshotUnloadingTotal = arrivalSellersForPatti.reduce((sum, s) => {
-        const snap = snapBySellerId[s.sellerId];
-        return sum + Number(snap?.unloading ?? 0);
-      }, 0);
-      const snapshotWeighingTotal = arrivalSellersForPatti.reduce((sum, s) => {
-        const snap = snapBySellerId[s.sellerId];
-        return sum + Number(snap?.weighing ?? 0);
-      }, 0);
-      const perBagUnloading = totalQty > 0 ? snapshotUnloadingTotal / totalQty : 0;
-      const perBagWeighing = totalQty > 0 ? snapshotWeighingTotal / totalQty : 0;
 
       if (cancelled) return;
       if (quickAdjustmentAppliedRef.current) return;
@@ -2829,25 +3028,32 @@ const SettlementPage = () => {
       setSellerExpensesById(prev => {
         const next = { ...prev };
         const baselinePatch: Record<string, SellerExpenseFormState> = {};
-        for (const s of arrivalSellersForPatti) {
-          const snap = snapBySellerId[s.sellerId];
-          const prevRow = prev[s.sellerId] ?? defaultSellerExpenses();
-          const computedFreight = perKgFreight > 0 ? roundMoney2(perKgFreight * (sellerActualWeightById[s.sellerId] ?? 0)) : prevRow.freight;
+        for (const row of sellerSlabBase) {
+          const snap = snapBySellerId[row.sellerId];
+          const prevRow = prev[row.sellerId] ?? defaultSellerExpenses();
+          const computedFreight =
+            perKgFreight > 0 ? roundMoney2(perKgFreight * (row.actualWeight ?? 0)) : prevRow.freight;
           const computedUnloading =
-            perBagUnloading > 0 ? roundMoney2(perBagUnloading * (sellerQtyById[s.sellerId] ?? 0)) : prevRow.unloading;
+            perBagUnloading > 0
+              ? roundMoney2(perBagUnloading * row.quantity)
+              : equalShareUnloading > 0
+                ? roundMoney2(equalShareUnloading)
+                : prevRow.unloading;
           const computedWeighing =
-            perBagWeighing > 0 ? roundMoney2(perBagWeighing * (sellerQtyById[s.sellerId] ?? 0)) : prevRow.weighman;
+            perBagWeighing > 0
+              ? roundMoney2(perBagWeighing * row.quantity)
+              : equalShareWeighing > 0
+                ? roundMoney2(equalShareWeighing)
+                : prevRow.weighman;
           const updated: SellerExpenseFormState = {
             ...prevRow,
             freight: computedFreight,
-            unloading: snap != null ? computedUnloading : prevRow.unloading,
-            weighman: snap != null ? computedWeighing : prevRow.weighman,
+            unloading: computedUnloading,
+            weighman: computedWeighing,
             cashAdvance: snap != null ? Number(snap.cashAdvance ?? prevRow.cashAdvance) : prevRow.cashAdvance,
           };
-          next[s.sellerId] = updated;
-          if (snap != null) {
-            baselinePatch[s.sellerId] = { ...updated };
-          }
+          next[row.sellerId] = updated;
+          baselinePatch[row.sellerId] = { ...updated };
         }
         if (Object.keys(baselinePatch).length > 0) {
           queueMicrotask(() => {
@@ -3277,17 +3483,15 @@ const SettlementPage = () => {
     [vehicleExpenseOriginalByRowId]
   );
 
-  const openVehicleExpenseModal = useCallback(async () => {
-    if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) {
-      toast.error('Open a vehicle settlement first.');
-      return;
-    }
-    setVehicleExpenseModalOpen(true);
-    setVehicleExpenseLoading(true);
-    try {
-      const selectedVehicleId = selectedSeller.vehicleId != null && Number(selectedSeller.vehicleId) > 0
-        ? Number(selectedSeller.vehicleId)
-        : null;
+  const loadQuickExpenseModalRows = useCallback(
+    async (mode: 'fromExpenseCard' | 'fromLatestSlabs'): Promise<VehicleExpenseRow[]> => {
+      if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) {
+        return [];
+      }
+      const selectedVehicleId =
+        selectedSeller.vehicleId != null && Number(selectedSeller.vehicleId) > 0
+          ? Number(selectedSeller.vehicleId)
+          : null;
       const vKey = normalizeVehicleKey(selectedSeller.vehicleNumber);
       let match: { vehicleId: number } | null = null;
       if (selectedVehicleId == null && vKey) {
@@ -3297,9 +3501,10 @@ const SettlementPage = () => {
         match = Number.isFinite(foundVehicleId) && foundVehicleId > 0 ? { vehicleId: foundVehicleId } : null;
       }
 
-      const [configs, commodities] = fullCommodityConfigs.length > 0 && commodityList.length > 0
-        ? [fullCommodityConfigs, commodityList]
-        : await Promise.all([commodityApi.getAllFullConfigs(), commodityApi.list()]);
+      const [configs, commodities] =
+        fullCommodityConfigs.length > 0 && commodityList.length > 0
+          ? [fullCommodityConfigs, commodityList]
+          : await Promise.all([commodityApi.getAllFullConfigs(), commodityApi.list()]);
       const nameToId = new Map(
         commodities.map(c => [String(c.commodity_name || '').trim().toLowerCase(), Number(c.commodity_id)])
       );
@@ -3327,235 +3532,139 @@ const SettlementPage = () => {
       const freightTotalRaw = arrival ? Number(arrival.freightTotal ?? 0) : amountSummaryDisplay.arrivalFreightAmount;
       const freightTotal = freightTotalRaw > 0 ? freightTotalRaw : fallbackFreightTotal;
       const equalShareFreight = arrivalSellersForPatti.length > 0 ? freightTotal / arrivalSellersForPatti.length : 0;
-      const sellerComputedBase = arrivalSellersForPatti.map(s => {
-        const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
-        const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
-        const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
-        const getDivisorLocal = (lot: SettlementLot) => {
-          const n = (lot.commodityName || '').trim().toLowerCase();
-          const cid = nameToId.get(n);
-          if (cid == null) return 50;
-          const d = Number(configById.get(cid)?.config?.ratePerUnit);
-          return d > 0 ? d : 50;
-        };
-        const { unloading, weighing } = sumLotSlabChargesForSeller(
-          s,
-          removed,
-          lotOv,
-          nameToId,
-          configById,
-          getDivisorLocal
-        );
-        const actualWeight = s.lots.reduce((sum, lot, i) => {
-          const sid = lotStableId(lot, i);
-          if (removed.has(sid)) return sum;
-          const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisorLocal(lot));
-          return sum + (Number(merged.weight) || 0);
-        }, 0);
-        const qty = Math.max(
-          0,
-          Math.round(
-            s.lots.reduce((sum, lot, i) => {
-              const sid = lotStableId(lot, i);
-              if (removed.has(sid)) return sum;
-              const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisorLocal(lot));
-              return sum + (Number(merged.qty) || 0);
-            }, 0)
-          )
-        );
-        return {
-          sellerId: s.sellerId,
-          sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
-          quantity: qty,
-          unloading,
-          weighing,
-          actualWeight,
-        };
-      });
-      const totalActualWeightOnSettlement = sellerComputedBase.reduce((sum, s) => sum + s.actualWeight, 0);
-      const perKgFreight = totalActualWeightOnSettlement > 0 ? freightTotal / totalActualWeightOnSettlement : 0;
-      const unloadingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.unloading) || 0), 0);
-      const weighingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.weighing) || 0), 0);
-      const totalQtyOnSettlement = sellerComputedBase.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-      const perBagUnloading = totalQtyOnSettlement > 0 ? unloadingTotal / totalQtyOnSettlement : 0;
-      const perBagWeighing = totalQtyOnSettlement > 0 ? weighingTotal / totalQtyOnSettlement : 0;
-      const equalShareUnloading =
-        arrivalSellersForPatti.length > 0 ? unloadingTotal / arrivalSellersForPatti.length : 0;
-      const equalShareWeighing =
-        arrivalSellersForPatti.length > 0 ? weighingTotal / arrivalSellersForPatti.length : 0;
-
-      const draftMoney = (draft: string | undefined, fallback: number) => {
-        if (draft === undefined) return fallback;
-        if (!/^\d*(\.\d{0,2})?$/.test(draft)) return fallback;
-        const t = draft.trim();
-        if (t === '') return fallback;
-        return clampMoney(parseFloat(t) || 0);
+      const getDivisorLocal = (lot: SettlementLot) => {
+        const n = (lot.commodityName || '').trim().toLowerCase();
+        const cid = nameToId.get(n);
+        if (cid == null) return 50;
+        const d = Number(configById.get(cid)?.config?.ratePerUnit);
+        return d > 0 ? d : 50;
       };
-
-      const rows: VehicleExpenseRow[] = sellerComputedBase.map(s => {
-        const fallbackSellerFreight = sellerExpensesById[s.sellerId]?.freight ?? 0;
-        const fallbackSellerUnloading = draftMoney(
-          unloadingDraftBySellerId[s.sellerId],
-          sellerExpensesById[s.sellerId]?.unloading ?? s.unloading
-        );
-        const fallbackSellerWeighing = draftMoney(
-          weighmanDraftBySellerId[s.sellerId],
-          sellerExpensesById[s.sellerId]?.weighman ?? s.weighing
-        );
-        const freight = roundMoney2(
-          perKgFreight > 0
-            ? perKgFreight * s.actualWeight
-            : (fallbackSellerFreight > 0 ? fallbackSellerFreight : equalShareFreight)
-        );
-        const unloading = roundMoney2(
-          perBagUnloading > 0
-            ? perBagUnloading * s.quantity
-            : (equalShareUnloading > 0 ? equalShareUnloading : fallbackSellerUnloading)
-        );
-        const weighing = roundMoney2(
-          perBagWeighing > 0
-            ? perBagWeighing * s.quantity
-            : (equalShareWeighing > 0 ? equalShareWeighing : fallbackSellerWeighing)
-        );
-
+      const slabRows = buildSellerSlabChargeBaseForPattiSellers(
+        arrivalSellersForPatti,
+        removedLotsBySellerId,
+        lotSalesOverridesBySellerId,
+        nameToId,
+        configById,
+        getDivisorLocal
+      );
+      const sellerComputedBase = slabRows.map((row, i) => {
+        const s = arrivalSellersForPatti[i];
+        const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
         return {
-          id: `ve_${s.sellerId}`,
-          sellerId: s.sellerId,
-          sellerName: s.sellerName,
-          quantity: s.quantity,
-          freight,
-          unloading,
-          weighing,
-          gunnies: 0,
+          ...row,
+          sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
         };
       });
 
-      try {
-        const hydrated = await settlementApi.hydrateQuickExpenseState(
-          rows.map(r => ({
-            sellerId: r.sellerId,
-            freight: r.freight,
-            unloading: r.unloading,
-            weighing: r.weighing,
-            gunnies: r.gunnies,
-          }))
-        );
-        const bySellerId = new Map(hydrated.map(h => [h.sellerId, h]));
-        const mergedRows = rows.map(r => {
-          const h = bySellerId.get(r.sellerId);
-          if (!h) return r;
-          return {
-            ...r,
-            freight: roundMoney2(h.freightCurrent),
-            unloading: roundMoney2(h.unloadingCurrent),
-            weighing: roundMoney2(h.weighingCurrent),
-            gunnies: roundMoney2(h.gunniesCurrent),
-          };
-        });
-        setVehicleExpenseRows(mergedRows);
-        setVehicleExpenseOriginalByRowId(
-          mergedRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
-            const h = bySellerId.get(row.sellerId);
-            acc[row.id] = {
-              freight: roundMoney2(h?.freightOriginal ?? row.freight),
-              unloading: roundMoney2(h?.unloadingOriginal ?? row.unloading),
-              weighing: roundMoney2(h?.weighingOriginal ?? row.weighing),
-              gunnies: roundMoney2(h?.gunniesOriginal ?? row.gunnies),
-            };
-            return acc;
-          }, {})
-        );
-      } catch {
+      if (mode === 'fromExpenseCard') {
+        return rowsFromExpenseCardAndSlabQuantities(sellerComputedBase, sellerExpensesById);
+      }
+      const gunniesMap: Record<string, number> = {};
+      for (const s of arrivalSellersForPatti) {
+        gunniesMap[s.sellerId] = sellerExpensesById[s.sellerId]?.gunnies ?? 0;
+      }
+      return buildVehicleExpenseRowsComputedFromSlabs(
+        sellerComputedBase,
+        freightTotal,
+        equalShareFreight,
+        gunniesMap
+      );
+    },
+    [
+      selectedSeller,
+      pattiData,
+      arrivalSellersForPatti,
+      removedLotsBySellerId,
+      lotSalesOverridesBySellerId,
+      amountSummaryDisplay.arrivalFreightAmount,
+      sellerExpensesById,
+      fullCommodityConfigs,
+      commodityList,
+    ]
+  );
+
+  const openVehicleExpenseModal = useCallback(async () => {
+    if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) {
+      toast.error('Open a vehicle settlement first.');
+      return;
+    }
+    setVehicleExpenseModalOpen(true);
+    setVehicleExpenseLoading(true);
+    try {
+      const rows = await loadQuickExpenseModalRows('fromExpenseCard');
+      if (rows.length === 0) {
+        toast.error('Failed to load quick expenses.');
+      } else {
         setVehicleExpenseRows(rows);
-        setVehicleExpenseOriginalByRowId(
-          rows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
-            acc[row.id] = {
-              freight: row.freight,
-              unloading: row.unloading,
-              weighing: row.weighing,
-              gunnies: row.gunnies,
-            };
-            return acc;
-          }, {})
-        );
+        setVehicleExpenseOriginalByRowId(vehicleExpenseOriginalsFromRows(rows));
       }
     } catch {
       toast.error('Failed to load quick expenses from arrivals.');
-      const fallbackRows = arrivalSellersForPatti.map(s => ({
-          id: `ve_${s.sellerId}`,
-          sellerId: s.sellerId,
-          sellerName: s.sellerName || 'Seller',
-          quantity: totalArrivalBagsForSeller(s),
-          freight: roundMoney2(sellerExpensesById[s.sellerId]?.freight ?? 0),
-          unloading: roundMoney2(sellerExpensesById[s.sellerId]?.unloading ?? 0),
-          weighing: roundMoney2(sellerExpensesById[s.sellerId]?.weighman ?? 0),
-          gunnies: roundMoney2(sellerExpensesById[s.sellerId]?.gunnies ?? 0),
-        }));
-      try {
-        const hydrated = await settlementApi.hydrateQuickExpenseState(
-          fallbackRows.map(r => ({
-            sellerId: r.sellerId,
-            freight: r.freight,
-            unloading: r.unloading,
-            weighing: r.weighing,
-            gunnies: r.gunnies,
-          }))
-        );
-        const bySellerId = new Map(hydrated.map(h => [h.sellerId, h]));
-        const mergedRows = fallbackRows.map(r => {
-          const h = bySellerId.get(r.sellerId);
-          if (!h) return r;
-          return {
-            ...r,
-            freight: roundMoney2(h.freightCurrent),
-            unloading: roundMoney2(h.unloadingCurrent),
-            weighing: roundMoney2(h.weighingCurrent),
-            gunnies: roundMoney2(h.gunniesCurrent),
-          };
-        });
-        setVehicleExpenseRows(mergedRows);
-        setVehicleExpenseOriginalByRowId(
-          mergedRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
-            const h = bySellerId.get(row.sellerId);
-            acc[row.id] = {
-              freight: roundMoney2(h?.freightOriginal ?? row.freight),
-              unloading: roundMoney2(h?.unloadingOriginal ?? row.unloading),
-              weighing: roundMoney2(h?.weighingOriginal ?? row.weighing),
-              gunnies: roundMoney2(h?.gunniesOriginal ?? row.gunnies),
-            };
-            return acc;
-          }, {})
-        );
-      } catch {
-        setVehicleExpenseRows(fallbackRows);
-        setVehicleExpenseOriginalByRowId(
-          fallbackRows.reduce<Record<string, VehicleExpenseFieldValues>>((acc, row) => {
-            acc[row.id] = {
-              freight: row.freight,
-              unloading: row.unloading,
-              weighing: row.weighing,
-              gunnies: row.gunnies,
-            };
-            return acc;
-          }, {})
-        );
-      }
+      const fallbackBase = arrivalSellersForPatti.map(s => ({
+        sellerId: s.sellerId,
+        sellerName: s.sellerName || 'Seller',
+        quantity: totalArrivalBagsForSeller(s),
+      }));
+      const fbRows = rowsFromExpenseCardAndSlabQuantities(fallbackBase, sellerExpensesById);
+      setVehicleExpenseRows(fbRows);
+      setVehicleExpenseOriginalByRowId(vehicleExpenseOriginalsFromRows(fbRows));
     } finally {
       setVehicleExpenseLoading(false);
     }
-  }, [
-    selectedSeller,
-    pattiData,
-    arrivalSellersForPatti,
-    removedLotsBySellerId,
-    lotSalesOverridesBySellerId,
-    amountSummaryDisplay.arrivalFreightAmount,
-    sellerExpensesById,
-    unloadingDraftBySellerId,
-    weighmanDraftBySellerId,
-    fullCommodityConfigs,
-    commodityList,
-  ]);
+  }, [selectedSeller, pattiData, arrivalSellersForPatti, sellerExpensesById, loadQuickExpenseModalRows]);
+
+  const resetQuickAdjustmentToLatestSlabs = useCallback(async () => {
+    if (!vehicleExpenseModalOpen) return;
+    setVehicleExpenseLoading(true);
+    try {
+      const rows = await loadQuickExpenseModalRows('fromLatestSlabs');
+      if (rows.length === 0) {
+        toast.error('Could not recompute from latest pricing.');
+      } else {
+        setVehicleExpenseRows(rows);
+        setVehicleExpenseOriginalByRowId(vehicleExpenseOriginalsFromRows(rows));
+        toast.success('Reset to latest slab pricing.');
+      }
+    } catch {
+      toast.error('Failed to reset to latest pricing.');
+    } finally {
+      setVehicleExpenseLoading(false);
+    }
+  }, [vehicleExpenseModalOpen, loadQuickExpenseModalRows]);
+
+  /** Keep Quick Adjustment rows in sync when the Sales report expense card changes (modal stays open). */
+  useEffect(() => {
+    if (!vehicleExpenseModalOpen) return;
+    setVehicleExpenseRows(prev => {
+      if (prev.length === 0) return prev;
+      return prev.map(row => {
+        const exp = sellerExpensesById[row.sellerId] ?? defaultSellerExpenses();
+        return {
+          ...row,
+          freight: roundMoney2(exp.freight),
+          unloading: roundMoney2(exp.unloading),
+          weighing: roundMoney2(exp.weighman),
+          gunnies: roundMoney2(exp.gunnies),
+        };
+      });
+    });
+    setVehicleExpenseOriginalByRowId(prevOrig => {
+      const ids = Object.keys(prevOrig);
+      if (ids.length === 0) return prevOrig;
+      const next = { ...prevOrig };
+      for (const id of ids) {
+        const sellerId = id.startsWith('ve_') ? id.slice(3) : id;
+        const exp = sellerExpensesById[sellerId] ?? defaultSellerExpenses();
+        next[id] = {
+          freight: roundMoney2(exp.freight),
+          unloading: roundMoney2(exp.unloading),
+          weighing: roundMoney2(exp.weighman),
+          gunnies: roundMoney2(exp.gunnies),
+        };
+      }
+      return next;
+    });
+  }, [sellerExpensesById, vehicleExpenseModalOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -4337,6 +4446,8 @@ const SettlementPage = () => {
                 const baseline = registeredBaselineById[seller.sellerId] ?? form;
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
                 const sellerValidationError = getSellerValidationError(seller);
+                const saveHighlightThisSeller = pattiSaveHighlightSellerIds.includes(seller.sellerId);
+                const printSaveAllowed = isSettlementSellerPrintAllowed(seller, form);
                 const contactSearchQuery = (form.contactSearchQuery ?? '').trim();
                 const contactSearchQueryLower = contactSearchQuery.toLowerCase();
                 const registeredContactRows = sellerContactSearchById[seller.sellerId] ?? [];
@@ -4378,6 +4489,8 @@ const SettlementPage = () => {
                       className={cn(
                         'rounded-2xl border p-3 sm:p-4',
                         SALES_REPORT_SELLER_CARD_STYLES[sellerIdx % SALES_REPORT_SELLER_CARD_STYLES.length],
+                        saveHighlightThisSeller &&
+                          'ring-2 ring-destructive/80 ring-offset-2 ring-offset-background dark:ring-offset-background',
                       )}
                     >
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/40 bg-card/80 px-3 py-2">
@@ -4438,9 +4551,13 @@ const SettlementPage = () => {
                       <div className="flex flex-wrap items-center gap-3 text-sm">
                         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seller contact</span>
                         <label
+                          id={`seller-unregistered-confirm-${seller.sellerId}`}
                           className={cn(
                             'flex items-center gap-2 font-medium',
-                            isPattiEditLocked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+                            isPattiEditLocked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
+                            saveHighlightThisSeller &&
+                              !printSaveAllowed &&
+                              'rounded-md px-1 py-0.5 ring-2 ring-destructive ring-offset-1 ring-offset-background dark:ring-offset-background'
                           )}
                         >
                           <Checkbox
@@ -4988,7 +5105,10 @@ const SettlementPage = () => {
                                         className={cn(
                                           settlementReadOnlyCellClass,
                                           avgWarn &&
-                                            'border-amber-500/45 bg-amber-500/[0.12] text-amber-800 dark:text-amber-300'
+                                            'border-amber-500/45 bg-amber-500/[0.12] text-amber-800 dark:text-amber-300',
+                                          saveHighlightThisSeller &&
+                                            avgWarn &&
+                                            'border-destructive/70 bg-destructive/[0.12] ring-2 ring-destructive/50 dark:text-destructive-foreground'
                                         )}
                                         title="Weight ÷ quantity (from Billing commodity rules)"
                                       >
@@ -5484,8 +5604,12 @@ const SettlementPage = () => {
                         variant="outline"
                         className={cn(arrSolidMd, 'gap-1.5')}
                         onClick={() => void savePattiForSeller(seller)}
-                        disabled={isPattiEditLocked || !!sellerValidationError || pattiSaveBusy}
-                        title={isPattiEditLocked ? 'Enable edit (Alt+M) to save' : undefined}
+                        disabled={isPattiEditLocked || pattiSaveBusy}
+                        title={
+                          isPattiEditLocked
+                            ? 'Enable edit (Alt+M) to save'
+                            : sellerValidationError ?? 'Validates on click'
+                        }
                       >
                         <Save className="h-3.5 w-3.5" />
                         {existingPattiIdBySellerId[seller.sellerId] != null ? 'Update Patti' : 'Save Patti'}
@@ -5557,9 +5681,9 @@ const SettlementPage = () => {
                 type="button"
                 variant="outline"
                 onClick={() => void savePatti()}
-                disabled={!canRunMainPattiActions || pattiSaveBusy || isPattiEditLocked}
+                disabled={!pattiData || pattiSaveBusy || isPattiEditLocked}
                 className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
-                title={mainPattiValidationError ?? undefined}
+                title={mainPattiValidationError ?? 'Validates on click; fix highlighted seller cards if save is rejected.'}
               >
                 <Save className="h-5 w-5" />
                 {isMainUpdateMode ? 'Update Main Patti (Alt S)' : 'Save Main Patti (Alt S)'}
@@ -5771,7 +5895,38 @@ const SettlementPage = () => {
               </div>
 
               <DialogFooter className="border-t border-border/50 bg-muted/20 px-5 py-4 sm:px-6">
-                <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+                <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(arrOutlineMd, 'gap-1.5')}
+                      disabled={vehicleExpenseLoading || vehicleExpenseRows.length === 0}
+                      onClick={() => void resetQuickAdjustmentToLatestSlabs()}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Reset
+                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+                          aria-label="What Reset does"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[300px] text-xs leading-relaxed">
+                        <p>
+                          Recomputes freight, unloading, and weighing from current commodity slabs and settlement lot weights.
+                          It does not load the old saved quick-adjustment snapshot or copy from the expense card. Gunnies stay
+                          as they are on the expense card. Use Apply to write the table to each seller’s expense card.
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                   <Button
                     type="button"
                     variant="outline"
@@ -5826,6 +5981,7 @@ const SettlementPage = () => {
                     <PlusCircle className="h-4 w-4" />
                     Apply to settlement
                   </Button>
+                  </div>
                 </div>
               </DialogFooter>
             </DialogContent>
