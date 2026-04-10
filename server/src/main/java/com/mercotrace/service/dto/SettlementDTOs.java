@@ -118,6 +118,9 @@ public final class SettlementDTOs {
         private Instant createdAt;
         private Boolean useAverageWeight;
         private Boolean inProgress;
+        /** Optional JSON blob (per-lot overrides, removed lots) — see frontend schema. */
+        @JsonProperty("extensionJson")
+        private String extensionJson;
         private List<PattiVersionDTO> versions = new ArrayList<>();
 
         public Long getId() { return id; }
@@ -156,6 +159,8 @@ public final class SettlementDTOs {
         public void setUseAverageWeight(Boolean useAverageWeight) { this.useAverageWeight = useAverageWeight; }
         public Boolean getInProgress() { return inProgress; }
         public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
+        public String getExtensionJson() { return extensionJson; }
+        public void setExtensionJson(String extensionJson) { this.extensionJson = extensionJson; }
         public List<PattiVersionDTO> getVersions() { return versions; }
         public void setVersions(List<PattiVersionDTO> versions) { this.versions = versions != null ? versions : new ArrayList<>(); }
     }
@@ -184,6 +189,8 @@ public final class SettlementDTOs {
         private BigDecimal netPayable;
         private Boolean useAverageWeight;
         private Boolean inProgress;
+        @JsonProperty("extensionJson")
+        private String extensionJson;
 
         public String getSellerId() { return sellerId; }
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
@@ -207,6 +214,8 @@ public final class SettlementDTOs {
         public void setUseAverageWeight(Boolean useAverageWeight) { this.useAverageWeight = useAverageWeight; }
         public Boolean getInProgress() { return inProgress; }
         public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
+        public String getExtensionJson() { return extensionJson; }
+        public void setExtensionJson(String extensionJson) { this.extensionJson = extensionJson; }
     }
 
     /** Seller entry for settlement list (one per seller with lots/entries summary). */

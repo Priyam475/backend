@@ -61,6 +61,11 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     @Column(name = "in_progress", nullable = false)
     private Boolean inProgress = false;
 
+    /** Optional JSON: per-lot sales report overrides (weight, rate) and removed lot ids (frontend v1 schema). */
+    @Lob
+    @Column(name = "extension_json")
+    private String extensionJson;
+
     @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("rate DESC")
     private List<PattiRateCluster> rateClusters = new ArrayList<>();
@@ -168,6 +173,14 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
 
     public void setInProgress(Boolean inProgress) {
         this.inProgress = inProgress;
+    }
+
+    public String getExtensionJson() {
+        return extensionJson;
+    }
+
+    public void setExtensionJson(String extensionJson) {
+        this.extensionJson = extensionJson;
     }
 
     public List<PattiRateCluster> getRateClusters() {

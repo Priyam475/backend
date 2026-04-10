@@ -327,6 +327,7 @@ public class SettlementServiceImpl implements SettlementService {
         entity.setNetPayable(request.getNetPayable());
         entity.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
         entity.setInProgress(Boolean.TRUE.equals(request.getInProgress()));
+        entity.setExtensionJson(blankToNull(request.getExtensionJson()));
         entity = pattiRepository.save(entity);
         mapRequestDeductionsAndClustersToEntity(request, entity);
         pattiRepository.save(entity);
@@ -380,6 +381,13 @@ public class SettlementServiceImpl implements SettlementService {
         }
         String cleaned = trimmed.toUpperCase().replaceAll("[^A-Z0-9-]", "");
         return cleaned.isBlank() ? null : cleaned;
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        return s;
     }
 
     @Override
@@ -487,6 +495,7 @@ public class SettlementServiceImpl implements SettlementService {
         patti.setNetPayable(request.getNetPayable());
         patti.setUseAverageWeight(Boolean.TRUE.equals(request.getUseAverageWeight()));
         patti.setInProgress(Boolean.TRUE.equals(request.getInProgress()));
+        patti.setExtensionJson(blankToNull(request.getExtensionJson()));
         patti.getRateClusters().clear();
         patti.getDeductions().clear();
         mapRequestDeductionsAndClustersToEntity(request, patti);
@@ -1202,6 +1211,7 @@ public class SettlementServiceImpl implements SettlementService {
         dto.setCreatedAt(e.getCreatedDate());
         dto.setUseAverageWeight(e.getUseAverageWeight());
         dto.setInProgress(Boolean.TRUE.equals(e.getInProgress()));
+        dto.setExtensionJson(e.getExtensionJson());
         for (PattiRateCluster c : e.getRateClusters()) {
             RateClusterDTO rc = new RateClusterDTO();
             rc.setRate(c.getRate());

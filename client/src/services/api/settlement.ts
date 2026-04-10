@@ -45,6 +45,8 @@ export interface PattiDTO {
   createdAt: string;
   useAverageWeight?: boolean;
   inProgress?: boolean;
+  /** Optional JSON: per-seller lot overrides and removed lot ids (see SettlementPage extension v1). */
+  extensionJson?: string;
   /** Populated on GET by id after at least one update (snapshots from previous saves). */
   versions?: PattiVersionDTO[];
 }
@@ -61,6 +63,7 @@ export interface PattiSaveRequest {
   netPayable: number;
   useAverageWeight?: boolean;
   inProgress?: boolean;
+  extensionJson?: string;
 }
 
 export interface SettlementEntryDTO {
@@ -287,7 +290,7 @@ export const settlementApi = {
 
   /** Get patti by database id. */
   async getPattiById(id: number): Promise<PattiDTO | null> {
-    const res = await apiFetch(`${BASE}/pattis/${id}`, { method: 'GET' });
+    const res = await apiFetch(`${BASE}/pattis/${id}?_=${Date.now()}`, { method: 'GET' });
     if (res.status === 404) return null;
     if (!res.ok) await parseJsonOrThrow(res, 'Failed to load patti');
     const dto = await res.json();

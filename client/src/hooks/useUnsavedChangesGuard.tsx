@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Loader2 } from "lucide-react";
 import { useBlocker, useBeforeUnload } from "react-router-dom";
 
 import {
@@ -41,6 +42,7 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
   const [localResolver, setLocalResolver] = React.useState<((value: boolean) => void) | null>(null);
   const [saving, setSaving] = React.useState(false);
   const continuingRef = React.useRef(false);
+  const continueInFlightRef = React.useRef(false);
 
   const isRouteBlocked = blocker.state === "blocked";
   const isOpen = isRouteBlocked || localResolver != null;
@@ -81,27 +83,27 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
   }, [isRouteBlocked, blocker, resolveLocal]);
 
   const handleContinue = React.useCallback(async () => {
+    if (continueInFlightRef.current) return;
+    continueInFlightRef.current = true;
     continuingRef.current = true;
-    if (onBeforeContinue) {
-      setSaving(true);
-      try {
+    const asyncSave = !!onBeforeContinue;
+    if (asyncSave) setSaving(true);
+    try {
+      if (onBeforeContinue) {
         const ok = await onBeforeContinue();
         if (!ok) {
-          setSaving(false);
-          continuingRef.current = false;
           return;
         }
-      } catch {
-        setSaving(false);
-        continuingRef.current = false;
-        return;
       }
-      setSaving(false);
+      if (isRouteBlocked) blocker.proceed();
+      else resolveLocal(true);
+    } catch {
+      /* onBeforeContinue surfaced its own error; stay on dialog */
+    } finally {
+      if (asyncSave) setSaving(false);
+      continuingRef.current = false;
+      continueInFlightRef.current = false;
     }
-    if (isRouteBlocked) blocker.proceed();
-    else resolveLocal(true);
-    // Allow close interactions again after proceed/resolve.
-    continuingRef.current = false;
   }, [isRouteBlocked, blocker, resolveLocal, onBeforeContinue]);
 
   const handleOpenChange = React.useCallback(
@@ -123,9 +125,25 @@ export default function useUnsavedChangesGuard(options: UseUnsavedChangesGuardOp
             <AlertDialogDescription>{description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleDiscard} disabled={saving}>{stayLabel}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleContinue} disabled={saving}>
-              {saving ? 'Saving…' : continueLabel}
+            <AlertDialogCancel onClick={handleDiscard} disabled={saving}>
+              {stayLabel}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              className="gap-2"
+              onClick={e => {
+                e.preventDefault();
+                void handleContinue();
+              }}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                  Saving…
+                </>
+              ) : (
+                continueLabel
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
