@@ -97,4 +97,6 @@
     <include file="config/liquibase/changelog/20260408110000_settlement_voucher_temp.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260408140000_sales_patti_in_progress.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260409123000_sales_bill_tax_input_modes.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260410110000_print_setting_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260410111000_print_settings_authorities.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

@@ -19,7 +19,7 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { commodityApi, printLogApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
+import { commodityApi, printLogApi, printSettingsApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
 import type {
@@ -615,6 +615,8 @@ const BillingPage = () => {
   const [hasSavedOnce, setHasSavedOnce] = useState(false);
   const [selectedPrintVersion, setSelectedPrintVersion] = useState<'latest' | number>('latest');
   const [showPrint, setShowPrint] = useState(false);
+  const [billingPrintSize, setBillingPrintSize] = useState<'A4' | 'A5'>('A4');
+  const [billingIncludeHeader, setBillingIncludeHeader] = useState(true);
 
   // Validation
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
@@ -645,6 +647,20 @@ const BillingPage = () => {
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [collapsedCommodityIndexes, setCollapsedCommodityIndexes] = useState<number[]>([]);
   const SUMMARY_COMMODITY_COL_WIDTH = 150;
+
+  useEffect(() => {
+    const loadPrintSetting = async () => {
+      try {
+        const list = await printSettingsApi.list();
+        const row = list.find((item) => item.module_key === 'BILLING');
+        if (row?.paper_size === 'A5') setBillingPrintSize('A5');
+        setBillingIncludeHeader(row?.include_header !== false);
+      } catch {
+        // keep defaults
+      }
+    };
+    void loadPrintSetting();
+  }, []);
 
   const handleSummaryTableScroll = useCallback(() => {
     const el = summaryTableScrollRef.current;
@@ -2938,7 +2954,10 @@ const BillingPage = () => {
                   } catch {
                     // backend optional
                   }
-                  const ok = await directPrint(generateSalesBillPrintHTML(activePrintBill), { mode: "system" });
+                  const ok = await directPrint(
+                    generateSalesBillPrintHTML(activePrintBill, { pageSize: billingPrintSize, includeHeader: billingIncludeHeader }),
+                    { mode: "system" },
+                  );
                   ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
                 }}
                 className={cn(arrSolidTall, 'flex-1 sm:flex-none gap-2')}>

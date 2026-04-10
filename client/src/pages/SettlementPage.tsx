@@ -25,6 +25,7 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import {
   printLogApi,
+  printSettingsApi,
   settlementApi,
   arrivalsApi,
   commodityApi,
@@ -917,6 +918,8 @@ const SettlementPage = () => {
   /** Per seller: `false` = expanded; missing/`true` = collapsed (default collapsed). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
   const [showPrint, setShowPrint] = useState(false);
+  const [settlementPrintSize, setSettlementPrintSize] = useState<'A4' | 'A5'>('A4');
+  const [settlementIncludeHeader, setSettlementIncludeHeader] = useState(true);
   /** Prevents overlapping save/update requests (buttons + shortcut). */
   const pattiSaveBusyRef = useRef(false);
   const [pattiSaveBusy, setPattiSaveBusy] = useState(false);
@@ -936,6 +939,19 @@ const SettlementPage = () => {
   const debouncedInvoiceName = useDebouncedValue(invoiceNameSearch, 300);
 
   const [amountSummaryNonce, setAmountSummaryNonce] = useState(0);
+  useEffect(() => {
+    const loadPrintSetting = async () => {
+      try {
+        const list = await printSettingsApi.list();
+        const row = list.find((item) => item.module_key === 'SETTLEMENT');
+        if (row?.paper_size === 'A5') setSettlementPrintSize('A5');
+        setSettlementIncludeHeader(row?.include_header !== false);
+      } catch {
+        // keep defaults
+      }
+    };
+    void loadPrintSetting();
+  }, []);
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'visible') setAmountSummaryNonce(n => n + 1);
@@ -2571,7 +2587,10 @@ const SettlementPage = () => {
     } catch {
       /* optional */
     }
-    const ok = await directPrint(generateSalesPattiPrintHTML(printPayload), { mode: 'system' });
+    const ok = await directPrint(
+      generateSalesPattiPrintHTML(printPayload, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+      { mode: 'system' },
+    );
     if (ok) toast.success('Main patti sent to printer');
     else toast.error('Printer not connected.');
   }, [
@@ -2587,6 +2606,8 @@ const SettlementPage = () => {
     isWeighingMergedIntoFreight,
     sellerFormById,
     vehicleNetPayableFromPatti,
+    settlementPrintSize,
+    settlementIncludeHeader,
   ]);
 
   const runPrintSellerSubPatti = useCallback(
@@ -2614,7 +2635,10 @@ const SettlementPage = () => {
         isWeighingMergedIntoFreight(seller.sellerId),
         form.mobile || seller.sellerPhone || ''
       );
-      const ok = await directPrint(generateSalesPattiPrintHTML(payload), { mode: 'system' });
+      const ok = await directPrint(
+        generateSalesPattiPrintHTML(payload, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+        { mode: 'system' },
+      );
       if (ok) toast.success('Seller sub-patti sent to printer');
       else toast.error('Printer not connected.');
     },
@@ -2628,6 +2652,8 @@ const SettlementPage = () => {
       getSellerValidationError,
       settlementWeighingEnabled,
       isWeighingMergedIntoFreight,
+      settlementPrintSize,
+      settlementIncludeHeader,
     ]
   );
 
@@ -2662,7 +2688,10 @@ const SettlementPage = () => {
       toast.error('No seller sub-patti data found to print.');
       return;
     }
-    const ok = await directPrint(generateSalesPattiBatchPrintHTML(payloads), { mode: 'system' });
+    const ok = await directPrint(
+      generateSalesPattiBatchPrintHTML(payloads, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+      { mode: 'system' },
+    );
     if (!ok) {
       toast.error('Print failed or cancelled.');
       return;
@@ -2680,6 +2709,8 @@ const SettlementPage = () => {
     mainPattiValidationError,
     settlementWeighingEnabled,
     isWeighingMergedIntoFreight,
+    settlementPrintSize,
+    settlementIncludeHeader,
   ]);
 
   const vehicleExpenseTotals = useMemo(() => {
@@ -3405,7 +3436,10 @@ const SettlementPage = () => {
               } catch {
                 // backend optional
               }
-              const ok = await directPrint(generateSalesPattiPrintHTML(pattiData), { mode: "system" });
+              const ok = await directPrint(
+                generateSalesPattiPrintHTML(pattiData, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+                { mode: "system" },
+              );
               if (ok) toast.success('Sales Patti sent to printer!');
               else toast.error('Printer not connected.');
             }}

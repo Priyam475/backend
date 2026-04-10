@@ -22,6 +22,18 @@ const PRINT_STYLES = `
   @media print { body { padding: 4px; } }
 `;
 
+export interface DocumentPrintOptions {
+  pageSize?: 'A4' | 'A5';
+  includeHeader?: boolean;
+}
+
+function normalizeOptions(options?: DocumentPrintOptions): Required<DocumentPrintOptions> {
+  return {
+    pageSize: options?.pageSize === 'A5' ? 'A5' : 'A4',
+    includeHeader: options?.includeHeader !== false,
+  };
+}
+
 // ── Sales Bill (BillingPage) ───────────────────────────────
 export interface BillPrintData {
   billId: string;
@@ -55,10 +67,11 @@ export interface BillPrintData {
   grandTotal: number;
 }
 
-export function generateSalesBillPrintHTML(bill: BillPrintData): string {
+export function generateSalesBillPrintHTML(bill: BillPrintData, options?: DocumentPrintOptions): string {
+  const printOptions = normalizeOptions(options);
   const dateStr = new Date(bill.billDate).toLocaleDateString();
 
-  const headerHtml = `
+  const headerHtml = printOptions.includeHeader ? `
       <div class="center section">
         <p class="bold">MERCOTRACE</p>
         <p class="muted">Sales Bill (Buyer Invoice)</p>
@@ -69,7 +82,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
         <div class="row"><span class="muted">Buyer</span><span class="bold">${escapeHtml(bill.billingName)} (${escapeHtml(bill.buyerMark)})</span></div>
         ${bill.outboundVehicle ? `<div class="row"><span class="muted">Out Vehicle</span><span class="bold">${escapeHtml(bill.outboundVehicle)}</span></div>` : ''}
       </div>
-  `;
+  ` : '';
 
   const renderGroupHtml = (group: BillPrintData["commodityGroups"][number]) => `
     <div class="section">
@@ -151,7 +164,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
     </div>
   `;
 
-  let pages: string[] = [];
+  const pages: string[] = [];
   let currentLines = 0;
   let currentGroupsHtml = '';
 
@@ -192,7 +205,7 @@ export function generateSalesBillPrintHTML(bill: BillPrintData): string {
 
   pages.push(lastPageHtml);
   const body = pages.join('');
-  return wrapPrintDocument(body);
+  return wrapPrintDocument(body, printOptions.pageSize);
 }
 
 // ── Sales Patti (SettlementPage) ─────────────────────────
@@ -214,9 +227,9 @@ export interface PattiPrintData {
   useAverageWeight?: boolean;
 }
 
-const SALES_PATTI_PRINT_STYLE = `
+function buildSalesPattiStyle(): string {
+  return `
   <style>
-    @page { size: A4 portrait; margin: 10mm; }
     .patti-a4 { font-family: Arial, sans-serif; color: #000; font-size: 14px; }
     .patti-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
     .patti-head-left p, .patti-head-right p { margin: 0; line-height: 1.2; }
@@ -229,8 +242,10 @@ const SALES_PATTI_PRINT_STYLE = `
     .footer-net { margin-top: 8px; display:flex; justify-content:flex-end; font-size: 20px; font-weight: 700; gap: 16px; }
   </style>
 `;
+}
 
-export function generateSalesPattiPrintHTML(patti: PattiPrintData): string {
+export function generateSalesPattiPrintHTML(patti: PattiPrintData, options?: DocumentPrintOptions): string {
+  const printOptions = normalizeOptions(options);
   const dateStr = new Date(patti.createdAt).toLocaleDateString('en-GB');
   const rows = (patti.detailRows && patti.detailRows.length > 0)
     ? patti.detailRows
@@ -274,7 +289,7 @@ export function generateSalesPattiPrintHTML(patti: PattiPrintData): string {
 
   const body = `
     <div class="patti-a4">
-      <div class="patti-head">
+      ${printOptions.includeHeader ? `<div class="patti-head">
         <div class="patti-head-left">
           <p style="font-weight:700;">${soldLine}</p>
           <p style="font-weight:700;">${identityLine}</p>
@@ -285,7 +300,7 @@ export function generateSalesPattiPrintHTML(patti: PattiPrintData): string {
           <p style="font-weight:700;">Patti No : ${escapeHtml(patti.pattiId || '-')}</p>
           <p style="font-weight:700;">Date : ${dateStr}</p>
         </div>
-      </div>
+      </div>` : ''}
 
       <table class="patti-table">
         <thead>
@@ -339,20 +354,21 @@ export function generateSalesPattiPrintHTML(patti: PattiPrintData): string {
       </div>
     </div>
   `;
-  return wrapPrintDocument(`${SALES_PATTI_PRINT_STYLE}${body}`);
+  return wrapPrintDocument(`${buildSalesPattiStyle()}${body}`, printOptions.pageSize);
 }
 
-export function generateSalesPattiBatchPrintHTML(pattis: PattiPrintData[]): string {
+export function generateSalesPattiBatchPrintHTML(pattis: PattiPrintData[], options?: DocumentPrintOptions): string {
   const pages = (pattis || []).map((p, idx, arr) => `
     <div${idx < arr.length - 1 ? ' style="page-break-after: always;"' : ''}>
-      ${generateSalesPattiPrintHTMLBody(p)}
+      ${generateSalesPattiPrintHTMLBody(p, options)}
     </div>
   `).join('');
-  return wrapPrintDocument(`${SALES_PATTI_PRINT_STYLE}${pages}`);
+  const printOptions = normalizeOptions(options);
+  return wrapPrintDocument(`${buildSalesPattiStyle()}${pages}`, printOptions.pageSize);
 }
 
-function generateSalesPattiPrintHTMLBody(patti: PattiPrintData): string {
-  const full = generateSalesPattiPrintHTML(patti);
+function generateSalesPattiPrintHTMLBody(patti: PattiPrintData, options?: DocumentPrintOptions): string {
+  const full = generateSalesPattiPrintHTML(patti, options);
   const bodyMatch = full.match(/<body>([\s\S]*)<\/body>/i);
   return bodyMatch ? bodyMatch[1] : '';
 }
@@ -448,7 +464,7 @@ export function generateWeighingSlipPrintHTML(slip: WeighingSlipPrintData, total
   const avgWeight = slip.bagWeights.length > 0
     ? (slip.bagWeights.reduce((s, b) => s + b.weight, 0) / slip.bagWeights.length).toFixed(2)
     : '0.00';
-  let body = `
+  const body = `
     <div class="wrap">
       <div class="center section">
         <p class="bold">MERCOTRACE</p>
@@ -498,6 +514,8 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function wrapPrintDocument(body: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${PRINT_STYLES}</style></head><body>${body}</body></html>`;
+function wrapPrintDocument(body: string, pageSize: 'A4' | 'A5' = 'A4'): string {
+  const maxWidth = pageSize === 'A5' ? '130mm' : '180mm';
+  const pageCss = `@page { size: ${pageSize} portrait; margin: 8mm; } .wrap { max-width: ${maxWidth}; }`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${pageCss}${PRINT_STYLES}</style></head><body>${body}</body></html>`;
 }
