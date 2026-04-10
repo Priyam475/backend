@@ -38,7 +38,7 @@ import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import { directPrint } from '@/utils/printTemplates';
-import { generateSalesBillPrintHTML } from '@/utils/printDocumentTemplates';
+import { generateSalesBillPrintHTML, generateNonGstSalesBillPrintHTML, type BillPrintData } from '@/utils/printDocumentTemplates';
 import {
   billGroupSubtotalWithTaxAndCharges,
   effectiveGstPercent,
@@ -380,11 +380,17 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     const resolvedSgstRate = g.sgstRate ?? g.sgst_rate ?? fromCfg?.sgstRate ?? 0;
     const resolvedCgstRate = g.cgstRate ?? g.cgst_rate ?? fromCfg?.cgstRate ?? 0;
     const resolvedIgstRate = g.igstRate ?? g.igst_rate ?? fromCfg?.igstRate ?? 0;
+    // hasAnyTaxConfigured: check commodity config first, then fall back to saved bill rates.
+    // This ensures a saved bill that has GST rates is NOT downgraded to 'NONE' simply because
+    // the commodity config is missing/not loaded yet (fixes mixed-GST multi-commodity bills).
     const hasAnyTaxConfigured =
       Number(fromCfg?.gstRate ?? 0) > 0
       || Number(fromCfg?.sgstRate ?? 0) > 0
       || Number(fromCfg?.cgstRate ?? 0) > 0
-      || Number(fromCfg?.igstRate ?? 0) > 0;
+      || Number(fromCfg?.igstRate ?? 0) > 0
+      || Number(resolvedSgstRate) > 0
+      || Number(resolvedCgstRate) > 0
+      || Number(resolvedIgstRate) > 0;
     const preferredTaxMode: 'GST' | 'IGST' | 'NONE' = hasAnyTaxConfigured
       ? (Number(resolvedIgstRate) > 0 ? 'IGST' : 'GST')
       : 'NONE';
@@ -617,6 +623,8 @@ const BillingPage = () => {
   const [showPrint, setShowPrint] = useState(false);
   const [billingPrintSize, setBillingPrintSize] = useState<'A4' | 'A5'>('A4');
   const [billingIncludeHeader, setBillingIncludeHeader] = useState(true);
+  /** Page size used when the bill has no GST on any commodity. Defaults to A5. */
+  const [nonGstPrintSize, setNonGstPrintSize] = useState<'A4' | 'A5'>('A5');
 
   type BillingMainTab = 'create' | 'progress' | 'saved';
   const [billingMainTab, setBillingMainTab] = useState<BillingMainTab>('create');
@@ -649,15 +657,69 @@ const BillingPage = () => {
     const loadPrintSetting = async () => {
       try {
         const list = await printSettingsApi.list();
-        const row = list.find((item) => item.module_key === 'BILLING');
-        if (row?.paper_size === 'A5') setBillingPrintSize('A5');
-        setBillingIncludeHeader(row?.include_header !== false);
+        const gstRow    = list.find((item) => item.module_key === 'BILLING');
+        const nonGstRow = list.find((item) => item.module_key === 'BILLING_NON_GST');
+        if (gstRow?.paper_size === 'A5') setBillingPrintSize('A5');
+        setBillingIncludeHeader(gstRow?.include_header !== false);
+        if (nonGstRow?.paper_size) setNonGstPrintSize(nonGstRow.paper_size);
       } catch {
         // keep defaults
       }
     };
     void loadPrintSetting();
   }, []);
+
+  const billPrintPayload = useMemo((): BillPrintData | null => {
+    if (!bill) return null;
+    return {
+      ...bill,
+      firm: trader
+        ? {
+            businessName: trader.business_name,
+            ownerName: trader.owner_name,
+            address: trader.address,
+            city: trader.city,
+            state: trader.state,
+            pinCode: trader.pin_code,
+            category: trader.category,
+            gstNumber: trader.gst_number,
+            rmcApmcCode: trader.rmc_apmc_code,
+            mobile: trader.mobile,
+            email: trader.email,
+          }
+        : null,
+    };
+  }, [bill, trader]);
+
+  /**
+   * True when ANY commodity group on the bill carries a GST / SGST / CGST / IGST rate.
+   * Mixed bills (some GST, some non-GST commodities) are treated as GST bills — the full
+   * GST template with print-settings header/size is used for the whole bill.
+   *
+   * Checks both the computed effective rate AND the stored taxMode so a mixed bill is
+   * never incorrectly routed to the Non-GST template even if one group has no GST.
+   */
+  const isGstBill = useMemo(() => {
+    if (!bill) return false;
+    return bill.commodityGroups.some(
+      (g) => effectiveGstPercent(g) > 0 || g.taxMode === 'GST' || g.taxMode === 'IGST',
+    );
+  }, [bill]);
+
+  const salesBillPrintHtml = useMemo(() => {
+    if (!billPrintPayload) return '';
+    if (isGstBill) {
+      // GST (or mixed) bill: respect print settings (page size + header toggle)
+      return generateSalesBillPrintHTML(billPrintPayload, {
+        pageSize: billingPrintSize,
+        includeHeader: billingIncludeHeader,
+      });
+    }
+    // Fully Non-GST: always no header; page size from BILLING_NON_GST print setting
+    return generateNonGstSalesBillPrintHTML(billPrintPayload, {
+      pageSize: nonGstPrintSize,
+    });
+  }, [billPrintPayload, billingPrintSize, billingIncludeHeader, nonGstPrintSize, isGstBill]);
 
   const handleSummaryTableScroll = useCallback(() => {
     const el = summaryTableScrollRef.current;
@@ -2851,169 +2913,11 @@ const BillingPage = () => {
         )}
 
         <div className="px-4 mt-4">
-          <div className="bg-card border border-border rounded-xl p-4 font-mono text-xs space-y-2 shadow-lg">
-            <div className="text-center border-b border-dashed border-border pb-2">
-              <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
-              <p className="text-muted-foreground">Sales Bill (Buyer Invoice)</p>
-              <p className="text-muted-foreground">{new Date(activePrintBill.billDate).toLocaleDateString()}</p>
-            </div>
-
-            <div className="border-b border-dashed border-border pb-2 space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Bill No.</span><span className="font-bold text-foreground">{activePrintBill.billNumber || 'DRAFT'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Buyer</span><span className="font-bold text-foreground">{activePrintBill.billingName} ({activePrintBill.buyerMark})</span></div>
-              {activePrintBill.outboundVehicle && <div className="flex justify-between"><span className="text-muted-foreground">Out Vehicle</span><span className="font-bold text-foreground">{activePrintBill.outboundVehicle}</span></div>}
-            </div>
-
-            {/* Per-commodity tables — REQ-BIL-004 */}
-            {activePrintBill.commodityGroups.map((group, gi) => (
-              <div key={gi} className="border-b border-dashed border-border pb-2">
-                <p className="font-bold text-foreground mb-1">
-                  {group.commodityName} {group.hsnCode && `(HSN: ${group.hsnCode})`}
-                  {(group.sgstRate ?? 0) > 0 && ` · SGST: ${formatBillingInr(group.sgstRate)}%`}
-                  {(group.cgstRate ?? 0) > 0 && ` · CGST: ${formatBillingInr(group.cgstRate)}%`}
-                  {(group.igstRate ?? 0) > 0 && ` · IGST: ${formatBillingInr(group.igstRate)}%`}
-                  {effectiveGstPercent(group) > 0 && (group.gstRate ?? 0) <= 0
-                    && ` · Tax (eff.): ${formatBillingInr(effectiveGstPercent(group))}%`}
-                </p>
-                {group.items.map((item, ii) => (
-                  <div key={ii} className="flex justify-between text-[10px] gap-2">
-                    <span className="text-foreground min-w-0">
-                      {formatBillingInr(item.quantity)}×{formatBillingInr(item.weight)}kg @₹{formatBillingInr(item.newRate)}
-                      {(item.tokenAdvance ?? 0) > 0 && (
-                        <span className="text-muted-foreground"> · Tok ₹{formatBillingInr(item.tokenAdvance ?? 0)}</span>
-                      )}
-                    </span>
-                    <span className="font-bold text-foreground shrink-0">₹{formatBillingInr(item.amount)}</span>
-                  </div>
-                ))}
-                <div className="mt-1 pt-1 border-t border-dotted border-border/50 space-y-0.5">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="text-foreground">₹{formatBillingInr(group.subtotal)}</span></div>
-                  {group.commissionPercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Commission ({formatBillingInr(group.commissionPercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.commissionAmount)}</span></div>}
-                  {group.userFeePercent > 0 && <div className="flex justify-between"><span className="text-muted-foreground">User Fee ({formatBillingInr(group.userFeePercent)}%)</span><span className="text-foreground">₹{formatBillingInr(group.userFeeAmount)}</span></div>}
-                  {effectiveGstPercent(group) > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        {`Tax on goods (${formatBillingInr(effectiveGstPercent(group))}%)`}
-                      </span>
-                      <span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, effectiveGstPercent(group)))}</span>
-                    </div>
-                  )}
-                  {(group.sgstRate ?? 0) > 0 && (
-                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">SGST ({formatBillingInr(group.sgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.sgstRate ?? 0))}</span></div>
-                  )}
-                  {(group.cgstRate ?? 0) > 0 && (
-                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">CGST ({formatBillingInr(group.cgstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.cgstRate ?? 0))}</span></div>
-                  )}
-                  {(group.igstRate ?? 0) > 0 && (
-                    <div className="flex justify-between text-[10px] opacity-90"><span className="text-muted-foreground">IGST ({formatBillingInr(group.igstRate)}%)</span><span className="text-foreground">₹{formatBillingInr(gstOnSubtotal(group.subtotal, group.igstRate ?? 0))}</span></div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {/* Additions */}
-            {(() => {
-              const totalCoolie = activePrintBill.commodityGroups.reduce((s, g) => s + (g.coolieAmount || 0), 0);
-              const totalWeighman = activePrintBill.commodityGroups.reduce((s, g) => s + (g.weighmanChargeAmount || 0), 0);
-              return (totalCoolie > 0 || totalWeighman > 0 || activePrintBill.outboundFreight > 0) && (
-                <div className="border-b border-dashed border-border pb-2">
-                  <p className="font-bold text-foreground mb-1">ADDITIONS</p>
-                  {totalCoolie > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Coolie Charge</span><span className="text-foreground">₹{formatBillingInr(totalCoolie)}</span></div>}
-                  {totalWeighman > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Weighman Charge</span><span className="text-foreground">₹{formatBillingInr(totalWeighman)}</span></div>}
-                  {activePrintBill.outboundFreight > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Outbound Freight</span><span className="text-foreground">₹{formatBillingInr(activePrintBill.outboundFreight)}</span></div>}
-                </div>
-              );
-            })()}
-
-            {/* REQ-BIL-010: Cumulative tax table (Commission, User Fee, GST) */}
-            <div className="border-b border-dashed border-border pb-2">
-              <p className="font-bold text-foreground mb-1">TAX SUMMARY</p>
-              {activePrintBill.commodityGroups.filter(g =>
-                g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
-              ).map((g, i) => (
-                <div key={i} className="text-[10px] space-y-0.5">
-                  <span className="text-muted-foreground">{g.commodityName}:</span>
-                  {g.commissionPercent > 0 && <div className="flex justify-between pl-2"><span>Commission</span><span>₹{formatBillingInr(g.commissionAmount)}</span></div>}
-                  {g.userFeePercent > 0 && <div className="flex justify-between pl-2"><span>User Fee</span><span>₹{formatBillingInr(g.userFeeAmount)}</span></div>}
-                  {effectiveGstPercent(g) > 0 && (
-                    <div className="flex justify-between pl-2">
-                      <span>{`Tax (${formatBillingInr(effectiveGstPercent(g))}%)`}</span>
-                      <span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, effectiveGstPercent(g)))}</span>
-                    </div>
-                  )}
-                  {(g.sgstRate ?? 0) > 0 && (
-                    <div className="flex justify-between pl-2 opacity-90"><span>SGST ({formatBillingInr(g.sgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.sgstRate ?? 0))}</span></div>
-                  )}
-                  {(g.cgstRate ?? 0) > 0 && (
-                    <div className="flex justify-between pl-2 opacity-90"><span>CGST ({formatBillingInr(g.cgstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.cgstRate ?? 0))}</span></div>
-                  )}
-                  {(g.igstRate ?? 0) > 0 && (
-                    <div className="flex justify-between pl-2 opacity-90"><span>IGST ({formatBillingInr(g.igstRate)}%)</span><span>₹{formatBillingInr(gstOnSubtotal(g.subtotal, g.igstRate ?? 0))}</span></div>
-                  )}
-                </div>
-              ))}
-
-              {/* Overall cumulative row (REQ-BIL-010) */}
-              {(() => {
-                const groups = activePrintBill.commodityGroups.filter(g =>
-                  g.commissionPercent > 0 || g.userFeePercent > 0 || effectiveGstPercent(g) > 0,
-                );
-                const totalCommission = groups.reduce((s, g) => s + g.commissionAmount, 0);
-                const totalUserFee = groups.reduce((s, g) => s + g.userFeeAmount, 0);
-                const totalGst = groups.reduce(
-                  (s, g) => s + (effectiveGstPercent(g) > 0 ? gstOnSubtotal(g.subtotal, effectiveGstPercent(g)) : 0),
-                  0,
-                );
-                return (
-                  <div className="mt-1 pt-1 border-t border-dotted border-border/60 text-[10px] space-y-0.5">
-                    <div className="flex justify-between pl-2">
-                      <span className="text-muted-foreground font-semibold">TOTAL</span>
-                      <span className="font-bold">₹{formatBillingInr(roundMoney2(totalCommission + totalUserFee + totalGst))}</span>
-                    </div>
-                    {totalCommission > 0 && <div className="flex justify-between pl-2"><span>Commission Total</span><span>₹{formatBillingInr(totalCommission)}</span></div>}
-                    {totalUserFee > 0 && <div className="flex justify-between pl-2"><span>User Fee Total</span><span>₹{formatBillingInr(totalUserFee)}</span></div>}
-                    {totalGst > 0 && <div className="flex justify-between pl-2"><span>GST Total</span><span>₹{formatBillingInr(totalGst)}</span></div>}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Discount & Adjustments (now per-commodity) */}
-            {(() => {
-              const totalDiscount = roundMoney2(activePrintBill.commodityGroups.reduce((s, g) => {
-                let discountAmount = g.discount || 0;
-                if (g.discountType === 'PERCENT') {
-                  const subtotalWithCharges = billGroupSubtotalWithTaxAndCharges(g);
-                  discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
-                } else {
-                  discountAmount = roundMoney2(discountAmount);
-                }
-                return roundMoney2(s + discountAmount);
-              }, 0));
-              const totalRoundOff = roundMoney2(activePrintBill.commodityGroups.reduce((s, g) => s + (g.manualRoundOff || 0), 0));
-              return (totalDiscount > 0 || totalRoundOff !== 0) && (
-                <div className="border-b border-dashed border-border pb-2">
-                  <p className="font-bold text-foreground mb-1">DISCOUNT & ADJUSTMENTS</p>
-                  {totalDiscount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="text-destructive">−₹{formatBillingInr(totalDiscount)}</span></div>}
-                  {totalRoundOff !== 0 && <div className="flex justify-between"><span className="text-muted-foreground">Round Off</span><span className="text-foreground">{totalRoundOff > 0 ? '+' : ''}₹{formatBillingInr(totalRoundOff)}</span></div>}
-                </div>
-              );
-            })()}
-
-            <div className="flex justify-between text-sm border-t border-dashed border-border pt-2">
-              <span className="font-bold text-foreground">GRAND TOTAL</span>
-              <span className="font-black text-lg text-emerald-600 dark:text-emerald-400">₹{formatBillingInr(activePrintBill.grandTotal)}</span>
-            </div>
-
-            <div className="text-center text-muted-foreground/70 text-[9px] border-t border-dashed border-border pt-2">
-              <p>NR = B + P + BRK + Other</p>
-              <p>GT = Σ(Commodity Totals) + Additions − Discount + Round Off</p>
-            </div>
-
-            <div className="text-center border-t border-dashed border-border pt-2">
-              <p className="text-muted-foreground">--- END OF BILL ---</p>
-            </div>
-          </div>
+          <iframe
+            title="GST sales bill print preview"
+            className="w-full min-h-[72vh] border border-border rounded-xl bg-white shadow-lg"
+            srcDoc={salesBillPrintHtml}
+          />
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
             <div className="flex gap-3 w-full sm:w-auto">
@@ -3031,10 +2935,15 @@ const BillingPage = () => {
                   } catch {
                     // backend optional
                   }
-                  const ok = await directPrint(
-                    generateSalesBillPrintHTML(activePrintBill, { pageSize: billingPrintSize, includeHeader: billingIncludeHeader }),
-                    { mode: "system" },
-                  );
+                  const printHtml = isGstBill
+                    ? generateSalesBillPrintHTML(billPrintPayload!, {
+                        pageSize: billingPrintSize,
+                        includeHeader: billingIncludeHeader,
+                      })
+                    : generateNonGstSalesBillPrintHTML(billPrintPayload!, {
+                        pageSize: nonGstPrintSize,
+                      });
+                  const ok = await directPrint(printHtml, { mode: "system" });
                   ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
                 }}
                 className={cn(arrSolidTall, 'flex-1 sm:flex-none gap-2')}>

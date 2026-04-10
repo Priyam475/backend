@@ -19,13 +19,18 @@ function isTraderOwnerRole(role: string | undefined): boolean {
 type RowState = {
   moduleKey: PrintModuleKey;
   label: string;
+  /** Short description shown below the label */
+  description?: string;
   paperSize: PrintPaperSize;
   includeHeader: boolean;
+  /** When true the "Layout / header" control is hidden — header is always off for this module */
+  headerLocked?: boolean;
 };
 
 const DEFAULT_ROWS: RowState[] = [
-  { moduleKey: 'SETTLEMENT', label: 'Settlement', paperSize: 'A4', includeHeader: true },
-  { moduleKey: 'BILLING', label: 'Billing', paperSize: 'A4', includeHeader: true },
+  { moduleKey: 'SETTLEMENT',      label: 'Settlement',           paperSize: 'A4', includeHeader: true },
+  { moduleKey: 'BILLING',         label: 'GST Billing',          description: 'Applied when the bill contains any GST commodity', paperSize: 'A4', includeHeader: true },
+  { moduleKey: 'BILLING_NON_GST', label: 'Without GST Billing',  description: 'Applied when the bill has no GST on any commodity', paperSize: 'A5', includeHeader: false, headerLocked: true },
 ];
 
 function rowsSnapshot(rows: RowState[]): string {
@@ -138,8 +143,14 @@ const PrintSettingsPage = () => {
               <div className="p-4 space-y-4">
                 {rows.map((row) => (
                   <div key={row.moduleKey} className="rounded-xl border border-border/50 p-4">
-                    <div className="font-semibold text-foreground mb-3">{row.label}</div>
+                    <div className="mb-3">
+                      <div className="font-semibold text-foreground">{row.label}</div>
+                      {row.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{row.description}</p>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* Paper Size — always visible */}
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Paper Size</p>
                         <Select
@@ -156,24 +167,34 @@ const PrintSettingsPage = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Layout</p>
-                        <Select
-                          value={row.includeHeader ? 'WITH_HEADER' : 'WITHOUT_HEADER'}
-                          onValueChange={(value) =>
-                            updateRow(row.moduleKey, { includeHeader: value === 'WITH_HEADER' })
-                          }
-                          disabled={!canEdit || saving}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select layout" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="WITH_HEADER">With Header</SelectItem>
-                            <SelectItem value="WITHOUT_HEADER">Without Header</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+
+                      {/* Layout / Header — hidden when headerLocked */}
+                      {!row.headerLocked ? (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">Layout</p>
+                          <Select
+                            value={row.includeHeader ? 'WITH_HEADER' : 'WITHOUT_HEADER'}
+                            onValueChange={(value) =>
+                              updateRow(row.moduleKey, { includeHeader: value === 'WITH_HEADER' })
+                            }
+                            disabled={!canEdit || saving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select layout" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="WITH_HEADER">With Header</SelectItem>
+                              <SelectItem value="WITHOUT_HEADER">Without Header</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="flex items-end pb-0.5">
+                          <p className="text-xs text-muted-foreground italic">
+                            Header: always off (Non-GST format has no letterhead)
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

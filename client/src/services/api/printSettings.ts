@@ -2,7 +2,7 @@ import { apiFetch } from './http';
 
 const BASE = '/trader/print-settings';
 
-export type PrintModuleKey = 'SETTLEMENT' | 'BILLING';
+export type PrintModuleKey = 'SETTLEMENT' | 'BILLING' | 'BILLING_NON_GST';
 export type PrintPaperSize = 'A4' | 'A5';
 
 export interface PrintSettingDTO {
