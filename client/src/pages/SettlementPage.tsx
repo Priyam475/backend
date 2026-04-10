@@ -1045,8 +1045,11 @@ const SettlementPage = () => {
   const lastExpenseAutoPullKeyRef = useRef<string>('');
   const [loadingPattis, setLoadingPattis] = useState(false);
   const [coolieMode, setCoolieMode] = useState<'FLAT' | 'RECALCULATED'>('FLAT');
-  /** Toggle 1: Use weighman — when OFF, weighing is cleared and excluded from totals; when ON, see Add to freight for merged vs line item. */
-  const [settlementWeighingEnabled, setSettlementWeighingEnabled] = useState(true);
+  /**
+   * Toggle 1 (per seller): Use weighman — when OFF, weighing excluded from totals for that seller; amounts stay in state.
+   * When ON, see Add to freight for merged vs line item. Missing key = ON (same default as Add to freight).
+   */
+  const [settlementWeighingEnabledBySellerId, setSettlementWeighingEnabledBySellerId] = useState<Record<string, boolean>>({});
   /**
    * Toggle 2 (per seller): Add to freight — when ON (default), weighing is merged into the Freight line for that seller.
    * Independent of Use weighman; only affects layout/totals when Use weighman is ON.
@@ -1170,6 +1173,11 @@ const SettlementPage = () => {
     [settlementWeighingMergeIntoFreightBySellerId]
   );
 
+  const isWeighingEnabledForSeller = useCallback(
+    (sellerId?: string) => (sellerId ? settlementWeighingEnabledBySellerId[sellerId] !== false : true),
+    [settlementWeighingEnabledBySellerId]
+  );
+
   const buildEmptyVoucherRow = useCallback((): AddVoucherRowState => ({
     localId: `v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     voucherName: '',
@@ -1227,7 +1235,7 @@ const SettlementPage = () => {
       rem: removedLotsBySellerId,
       sform: sellerFormById,
       coolie: coolieMode,
-      wOn: settlementWeighingEnabled,
+      wOn: settlementWeighingEnabledBySellerId,
       mergeF: settlementWeighingMergeIntoFreightBySellerId,
       gunnies: gunniesAmount,
     });
@@ -1238,7 +1246,7 @@ const SettlementPage = () => {
     removedLotsBySellerId,
     sellerFormById,
     coolieMode,
-    settlementWeighingEnabled,
+    settlementWeighingEnabledBySellerId,
     settlementWeighingMergeIntoFreightBySellerId,
     gunniesAmount,
   ]);
@@ -1457,6 +1465,8 @@ const SettlementPage = () => {
     setVehicleExpenseModalOpen(false);
     setDraftMainPattiNo('');
     setDraftPattiNoBySellerId({});
+    /** Default Add to freight ON (missing seller id in map => merged); clear stale false from prior sessions. */
+    setSettlementWeighingMergeIntoFreightBySellerId({});
     setSelectedSeller(seller);
     const scopeSellerIds = (overrides?.arrivalSellerIds?.length ? overrides.arrivalSellerIds : [seller.sellerId]).map(String);
     setSelectedArrivalSellerIds(scopeSellerIds);
@@ -1479,7 +1489,7 @@ const SettlementPage = () => {
     const baseDeductions = buildDeductionItemsFromSellerExpenses(
       placeholderExp,
       effectiveCoolieMode,
-      settlementWeighingEnabled,
+      isWeighingEnabledForSeller(seller.sellerId),
       isWeighingMergedIntoFreight(seller.sellerId)
     );
 
@@ -1547,7 +1557,7 @@ const SettlementPage = () => {
       useAverageWeight: false,
     };
     setPattiData(initialPattiData);
-  }, [coolieMode, gunniesAmount, getLotDivisor, settlementWeighingEnabled, isWeighingMergedIntoFreight, sellers, savedPattis]);
+  }, [coolieMode, gunniesAmount, getLotDivisor, isWeighingEnabledForSeller, isWeighingMergedIntoFreight, sellers, savedPattis]);
 
   // Open a saved patti for edit: fetch by id and pre-fill form.
   const openPattiForEdit = useCallback(
@@ -1571,6 +1581,8 @@ const SettlementPage = () => {
       setVehicleExpenseRows([]);
       setVehicleExpenseOriginalByRowId({});
       setVehicleExpenseModalOpen(false);
+      /** Default Add to freight ON; merge flags are client-only and must not inherit from a previous patti. */
+      setSettlementWeighingMergeIntoFreightBySellerId({});
       const data = mapPattiDTOToPattiData(dto);
       if (data.createdAt && new Date(data.createdAt) > new Date()) {
         toast.warning('Patti date is in the future — please verify');
@@ -1795,7 +1807,7 @@ const SettlementPage = () => {
       const deductions = buildDeductionItemsFromSellerExpenses(
         exp,
         coolieMode,
-        settlementWeighingEnabled,
+        isWeighingEnabledForSeller(seller.sellerId),
         isWeighingMergedIntoFreight(seller.sellerId)
       );
       const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
@@ -1827,7 +1839,7 @@ const SettlementPage = () => {
       sellerExpensesById,
       sellerFormById,
       coolieMode,
-      settlementWeighingEnabled,
+      isWeighingEnabledForSeller,
       isWeighingMergedIntoFreight,
     ]
   );
@@ -2518,12 +2530,6 @@ const SettlementPage = () => {
     return scope.length > 0 ? scope : [selectedSeller];
   }, [sellers, selectedSeller, pattiData, selectedArrivalSellerIds]);
 
-  /** Blocks turning Use weighman OFF until Add to freight is OFF for every seller in scope (default Add to freight is ON). */
-  const anySellerWeighingMergedIntoFreight = useMemo(
-    () => arrivalSellersForPatti.some(s => settlementWeighingMergeIntoFreightBySellerId[s.sellerId] !== false),
-    [arrivalSellersForPatti, settlementWeighingMergeIntoFreightBySellerId]
-  );
-
   const mainPattiValidationError = useMemo(() => {
     if (!pattiData) return 'Patti is not generated yet';
     if (arrivalSellersForPatti.length === 0) return 'No sellers available for this main patti';
@@ -2579,7 +2585,7 @@ const SettlementPage = () => {
         .reduce((s, r) => s + r.amount, 0);
       const expenseTotal = totalSellerExpenses(
         exp,
-        settlementWeighingEnabled,
+        isWeighingEnabledForSeller(seller.sellerId),
         isWeighingMergedIntoFreight(seller.sellerId)
       );
       return sum + (amountTot - expenseTotal);
@@ -2592,7 +2598,8 @@ const SettlementPage = () => {
     removedLotsBySellerId,
     lotSalesOverridesBySellerId,
     getLotDivisor,
-    settlementWeighingEnabled,
+    settlementWeighingEnabledBySellerId,
+    isWeighingEnabledForSeller,
     isWeighingMergedIntoFreight,
   ]);
 
@@ -2868,7 +2875,7 @@ const SettlementPage = () => {
     const deds = buildDeductionItemsFromSellerExpenses(
       exp,
       coolieMode,
-      settlementWeighingEnabled,
+      isWeighingEnabledForSeller(selectedSeller.sellerId),
       isWeighingMergedIntoFreight(selectedSeller.sellerId)
     );
     const total = deds.reduce((s, d) => s + d.amount, 0);
@@ -2883,7 +2890,8 @@ const SettlementPage = () => {
     selectedSeller?.sellerId,
     sellerExpensesById,
     coolieMode,
-    settlementWeighingEnabled,
+    settlementWeighingEnabledBySellerId,
+    isWeighingEnabledForSeller,
     isWeighingMergedIntoFreight,
   ]);
 
@@ -3013,7 +3021,7 @@ const SettlementPage = () => {
     for (const seller of scopeSellers) {
       const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
       const mergeIntoFreight = isWeighingMergedIntoFreight(seller.sellerId);
-      if (settlementWeighingEnabled) {
+      if (isWeighingEnabledForSeller(seller.sellerId)) {
         if (mergeIntoFreight) {
           deductionTotals.freight += (Number(exp.freight) || 0) + (Number(exp.weighman) || 0);
         } else {
@@ -3031,7 +3039,7 @@ const SettlementPage = () => {
     const deductions: PattiPrintData['deductions'] = [
       { key: 'freight', label: 'Freight', amount: roundMoney2(deductionTotals.freight) },
       { key: 'coolie', label: 'Unloading', amount: roundMoney2(deductionTotals.unloading) },
-      ...(settlementWeighingEnabled
+      ...(deductionTotals.weighing > 0
         ? [{ key: 'weighing', label: 'Weighing', amount: roundMoney2(deductionTotals.weighing) }]
         : []),
       { key: 'advance', label: 'Cash Advance', amount: roundMoney2(deductionTotals.advance) },
@@ -3086,7 +3094,8 @@ const SettlementPage = () => {
     lotSalesOverridesBySellerId,
     getLotDivisor,
     sellerExpensesById,
-    settlementWeighingEnabled,
+    settlementWeighingEnabledBySellerId,
+    isWeighingEnabledForSeller,
     isWeighingMergedIntoFreight,
     sellerFormById,
     vehicleNetPayableFromPatti,
@@ -3124,7 +3133,7 @@ const SettlementPage = () => {
         pattiData.createdAt,
         lotSalesOverridesBySellerId[seller.sellerId],
         getLotDivisor,
-        settlementWeighingEnabled,
+        isWeighingEnabledForSeller(seller.sellerId),
         isWeighingMergedIntoFreight(seller.sellerId),
         form.mobile || seller.sellerPhone || ''
       );
@@ -3144,7 +3153,7 @@ const SettlementPage = () => {
       lotSalesOverridesBySellerId,
       getLotDivisor,
       getSellerValidationError,
-      settlementWeighingEnabled,
+      isWeighingEnabledForSeller,
       isWeighingMergedIntoFreight,
       settlementPrintSize,
       settlementIncludeHeader,
@@ -3184,7 +3193,7 @@ const SettlementPage = () => {
         pattiData.createdAt,
         lotSalesOverridesBySellerId[s.sellerId],
         getLotDivisor,
-        settlementWeighingEnabled,
+        isWeighingEnabledForSeller(s.sellerId),
         isWeighingMergedIntoFreight(s.sellerId),
         form.mobile || s.sellerPhone || ''
       );
@@ -3214,7 +3223,7 @@ const SettlementPage = () => {
     getLotDivisor,
     canRunMainPattiActions,
     mainPattiValidationError,
-    settlementWeighingEnabled,
+    isWeighingEnabledForSeller,
     isWeighingMergedIntoFreight,
     settlementPrintSize,
     settlementIncludeHeader,
@@ -4352,7 +4361,7 @@ const SettlementPage = () => {
                 const amountTot = lotRows.reduce((s, r) => s + r.amount, 0);
                 const expenseTotal = totalSellerExpenses(
                   exp,
-                  settlementWeighingEnabled,
+                  isWeighingEnabledForSeller(seller.sellerId),
                   isWeighingMergedIntoFreight(seller.sellerId)
                 );
                 const netSeller = amountTot - expenseTotal;
@@ -5080,9 +5089,9 @@ const SettlementPage = () => {
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="bottom" className="max-w-[240px] text-xs">
-                                ON: weighing applies to totals (merged into freight or separate — see Add to freight). OFF: weighing is
-                                cleared and excluded from totals. While Add to freight is ON for any seller, turn that off for each
-                                seller first, then you can turn Use weighman off.
+                                ON: weighing applies to this seller&apos;s totals (merged into freight or separate — see Add to
+                                freight). OFF: excluded from totals; amounts are kept for this seller. While Add to freight is ON,
+                                turn it off here first, then you can turn Use weighman off.
                               </TooltipContent>
                             </Tooltip>
                           </div>
@@ -5090,32 +5099,31 @@ const SettlementPage = () => {
                             type="button"
                             id={`sw-w-${seller.sellerId}`}
                             className={settlementExpenseToggleBtnClass(
-                              settlementWeighingEnabled,
+                              isWeighingEnabledForSeller(seller.sellerId),
                               'emerald',
-                              isPattiEditLocked || (settlementWeighingEnabled && anySellerWeighingMergedIntoFreight)
+                              isPattiEditLocked ||
+                                (isWeighingEnabledForSeller(seller.sellerId) &&
+                                  isWeighingMergedIntoFreight(seller.sellerId))
                             )}
-                            disabled={isPattiEditLocked || (settlementWeighingEnabled && anySellerWeighingMergedIntoFreight)}
+                            disabled={
+                              isPattiEditLocked ||
+                              (isWeighingEnabledForSeller(seller.sellerId) &&
+                                isWeighingMergedIntoFreight(seller.sellerId))
+                            }
                             onClick={() => {
-                              setSettlementWeighingEnabled(v => {
-                                if (v) {
-                                  setSellerExpensesById(prev => {
-                                    const next = { ...prev };
-                                    for (const sid of Object.keys(next)) {
-                                      next[sid] = { ...next[sid], weighman: 0 };
-                                    }
-                                    return next;
-                                  });
-                                  setWeighmanDraftBySellerId({});
-                                }
-                                return !v;
+                              if (isPattiEditLocked) return;
+                              const sid = seller.sellerId;
+                              setSettlementWeighingEnabledBySellerId(prev => {
+                                const cur = prev[sid] !== false;
+                                return { ...prev, [sid]: !cur };
                               });
                             }}
                             aria-label="Use weighman in totals"
-                            aria-pressed={settlementWeighingEnabled}
+                            aria-pressed={isWeighingEnabledForSeller(seller.sellerId)}
                           >
                             <motion.div
                               className="absolute top-1 h-[22px] w-[22px] rounded-full bg-white shadow-md"
-                              animate={{ x: settlementWeighingEnabled ? 28 : 4 }}
+                              animate={{ x: isWeighingEnabledForSeller(seller.sellerId) ? 28 : 4 }}
                               transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                             />
                           </button>
@@ -5135,7 +5143,8 @@ const SettlementPage = () => {
                               </TooltipTrigger>
                               <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                                 Requires Use weighman ON. ON (default) merges weighing into the Freight line (single field). OFF keeps
-                                weighing on its own line. Turn this off for every seller before you can turn Use weighman off.
+                                weighing on its own line. Turn this off for this seller before you can turn Use weighman off on this
+                                card.
                               </TooltipContent>
                             </Tooltip>
                           </div>
@@ -5143,30 +5152,41 @@ const SettlementPage = () => {
                             type="button"
                             id={`sw-wm-${seller.sellerId}`}
                             className={settlementExpenseToggleBtnClass(
-                              settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId),
+                              isWeighingMergedIntoFreight(seller.sellerId),
                               'violet',
-                              isPattiEditLocked || !settlementWeighingEnabled
+                              isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)
                             )}
                             onClick={() => {
-                              if (isPattiEditLocked || !settlementWeighingEnabled) return;
-                              setSettlementWeighingMergeIntoFreightBySellerId(prev => ({
-                                ...prev,
-                                [seller.sellerId]: !isWeighingMergedIntoFreight(seller.sellerId),
-                              }));
+                              if (isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)) return;
+                              const sid = seller.sellerId;
+                              const draft = weighmanDraftBySellerId[sid];
+                              if (draft !== undefined && draft.trim() !== '') {
+                                const v = clampMoney(parseFloat(draft) || 0);
+                                quickAdjustmentAppliedRef.current = true;
+                                setSellerExpensesById(prev => {
+                                  const e0 = prev[sid] ?? defaultSellerExpenses();
+                                  return { ...prev, [sid]: { ...e0, weighman: v } };
+                                });
+                              }
+                              setWeighmanDraftBySellerId(prev => {
+                                if (prev[sid] === undefined) return prev;
+                                const next = { ...prev };
+                                delete next[sid];
+                                return next;
+                              });
+                              setSettlementWeighingMergeIntoFreightBySellerId(prev => {
+                                const cur = prev[sid] !== false;
+                                return { ...prev, [sid]: !cur };
+                              });
                             }}
-                            disabled={isPattiEditLocked || !settlementWeighingEnabled}
+                            disabled={isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)}
                             aria-label="Add weighing amount to freight"
-                            aria-pressed={
-                              settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId)
-                            }
+                            aria-pressed={isWeighingMergedIntoFreight(seller.sellerId)}
                           >
                             <motion.div
                               className="absolute top-1 h-[22px] w-[22px] rounded-full bg-white shadow-md"
                               animate={{
-                                x:
-                                  settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId)
-                                    ? 28
-                                    : 4,
+                                x: isWeighingMergedIntoFreight(seller.sellerId) ? 28 : 4,
                               }}
                               transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                             />
@@ -5180,7 +5200,8 @@ const SettlementPage = () => {
                                   label={`Freight formula ${seller.sellerId}`}
                                   lines={[
                                     'Quick Expenses default: (seller settlement weight / total settlement weight) x arrival freight.',
-                                    settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId)
+                                    isWeighingEnabledForSeller(seller.sellerId) &&
+                                      isWeighingMergedIntoFreight(seller.sellerId)
                                       ? 'Add to freight ON: this field shows freight + weighing (edits adjust base freight).'
                                       : 'Freight always applies to net payable; weighing follows Use weighman / Add to freight.',
                                     `Stored freight: ${formatMoney2Display(exp.freight)}`,
@@ -5189,7 +5210,8 @@ const SettlementPage = () => {
                               </span>
                               {(() => {
                                 const mergeIntoFreightMode =
-                                  settlementWeighingEnabled && isWeighingMergedIntoFreight(seller.sellerId);
+                                  isWeighingEnabledForSeller(seller.sellerId) &&
+                                  isWeighingMergedIntoFreight(seller.sellerId);
                                 const displayedFreight = mergeIntoFreightMode ? exp.freight + exp.weighman : exp.freight;
                                 return (
                                   <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
@@ -5273,8 +5295,8 @@ const SettlementPage = () => {
                                   lines={[
                                     'Quick Adjustment auto distribution: (seller bags / total bags) x total weighing pool.',
                                     'Total weighing pool is computed from commodity weighing slab rules.',
-                                    !settlementWeighingEnabled
-                                      ? 'Use weighman OFF: weighing cleared and excluded from totals.'
+                                    !isWeighingEnabledForSeller(seller.sellerId)
+                                      ? 'Use weighman OFF: excluded from totals (amounts kept for this seller).'
                                       : isWeighingMergedIntoFreight(seller.sellerId)
                                         ? 'Add to freight ON: weighing merged into freight line.'
                                         : 'Add to freight OFF: weighing as its own deduction.',
@@ -5288,13 +5310,13 @@ const SettlementPage = () => {
                                   inputMode="decimal"
                                   disabled={
                                     isPattiEditLocked ||
-                                    !settlementWeighingEnabled ||
+                                    !isWeighingEnabledForSeller(seller.sellerId) ||
                                     isWeighingMergedIntoFreight(seller.sellerId)
                                   }
                                   className={cn(
                                     settlementExpenseInputClass,
                                     isWeighingMergedIntoFreight(seller.sellerId) &&
-                                      settlementWeighingEnabled &&
+                                      isWeighingEnabledForSeller(seller.sellerId) &&
                                       'opacity-80'
                                   )}
                                   value={
@@ -5307,8 +5329,9 @@ const SettlementPage = () => {
                                     setWeighmanDraftBySellerId(prev => ({ ...prev, [seller.sellerId]: raw }));
                                   }}
                                   onBlur={() => {
-                                    const raw = weighmanDraftBySellerId[seller.sellerId] ?? '';
-                                    const v = clampMoney(parseFloat(raw) || 0);
+                                    const draft = weighmanDraftBySellerId[seller.sellerId];
+                                    if (draft === undefined) return;
+                                    const v = clampMoney(parseFloat(draft) || 0);
                                     quickAdjustmentAppliedRef.current = true;
                                     setSellerExpensesById(prev => {
                                       const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
