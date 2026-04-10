@@ -565,6 +565,7 @@ interface SellerRegFormState {
   registrationChosen: boolean;
   registered: boolean;
   contactId: string | null;
+  replacementSellerId: string | null;
   mark: string;
   name: string;
   mobile: string;
@@ -600,6 +601,7 @@ interface AddVoucherRowState {
   id?: number;
   localId: string;
   voucherName: string;
+  forWhoName: string;
   description: string;
   expenseAmount: string;
 }
@@ -858,6 +860,7 @@ function defaultSellerForm(seller: SellerSettlement): SellerRegFormState {
     registrationChosen: false,
     registered: false,
     contactId: linked ? String(seller.contactId) : null,
+    replacementSellerId: null,
     mark: seller.sellerMark || '',
     name: seller.sellerName || '',
     mobile: (seller.sellerPhone ?? '').trim(),
@@ -1036,6 +1039,7 @@ const SettlementPage = () => {
   const buildEmptyVoucherRow = useCallback((): AddVoucherRowState => ({
     localId: `v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     voucherName: '',
+    forWhoName: '',
     description: '',
     expenseAmount: '',
   }), []);
@@ -1054,6 +1058,7 @@ const SettlementPage = () => {
                 id: r.id,
                 localId: `v_${r.id ?? Math.random().toString(36).slice(2, 8)}`,
                 voucherName: r.voucherName ?? '',
+                forWhoName: r.forWhoName ?? '',
                 description: r.description ?? '',
                 expenseAmount: (Number(r.expenseAmount ?? 0) || 0).toFixed(2),
               }))
@@ -2347,10 +2352,21 @@ const SettlementPage = () => {
       if (cancelled) return;
 
       const sellerActualWeightById: Record<string, number> = {};
+      const sellerQtyById: Record<string, number> = {};
       let totalActualWeight = 0;
+      let totalQty = 0;
       for (const s of arrivalSellersForPatti) {
         const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
         const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
+        const sellerQty = s.lots.reduce((sum, lot, i) => {
+          const sid = lotStableId(lot, i);
+          if (removed.has(sid)) return sum;
+          const row = mergeLotDisplayRow(lot, lotOv[sid], getLotDivisor(lot));
+          return sum + (Number(row.qty) || 0);
+        }, 0);
+        const qty = Math.max(0, Math.round(sellerQty));
+        sellerQtyById[s.sellerId] = qty;
+        totalQty += qty;
         const sellerWeight = s.lots.reduce((sum, lot, i) => {
           const sid = lotStableId(lot, i);
           if (removed.has(sid)) return sum;
@@ -2363,6 +2379,16 @@ const SettlementPage = () => {
 
       const freightTotal = Math.max(0, Number(amountSummaryDisplay.arrivalFreightAmount) || 0);
       const perKgFreight = totalActualWeight > 0 ? freightTotal / totalActualWeight : 0;
+      const snapshotUnloadingTotal = arrivalSellersForPatti.reduce((sum, s) => {
+        const snap = snapBySellerId[s.sellerId];
+        return sum + Number(snap?.unloading ?? 0);
+      }, 0);
+      const snapshotWeighingTotal = arrivalSellersForPatti.reduce((sum, s) => {
+        const snap = snapBySellerId[s.sellerId];
+        return sum + Number(snap?.weighing ?? 0);
+      }, 0);
+      const perBagUnloading = totalQty > 0 ? snapshotUnloadingTotal / totalQty : 0;
+      const perBagWeighing = totalQty > 0 ? snapshotWeighingTotal / totalQty : 0;
 
       setSellerExpensesById(prev => {
         const next = { ...prev };
@@ -2370,11 +2396,15 @@ const SettlementPage = () => {
           const snap = snapBySellerId[s.sellerId];
           const prevRow = prev[s.sellerId] ?? defaultSellerExpenses();
           const computedFreight = perKgFreight > 0 ? roundMoney2(perKgFreight * (sellerActualWeightById[s.sellerId] ?? 0)) : prevRow.freight;
+          const computedUnloading =
+            perBagUnloading > 0 ? roundMoney2(perBagUnloading * (sellerQtyById[s.sellerId] ?? 0)) : prevRow.unloading;
+          const computedWeighing =
+            perBagWeighing > 0 ? roundMoney2(perBagWeighing * (sellerQtyById[s.sellerId] ?? 0)) : prevRow.weighman;
           next[s.sellerId] = {
             ...prevRow,
             freight: computedFreight,
-            unloading: snap != null ? Number(snap.unloading ?? prevRow.unloading) : prevRow.unloading,
-            weighman: snap != null ? Number(snap.weighing ?? prevRow.weighman) : prevRow.weighman,
+            unloading: snap != null ? computedUnloading : prevRow.unloading,
+            weighman: snap != null ? computedWeighing : prevRow.weighman,
             cashAdvance: snap != null ? Number(snap.cashAdvance ?? prevRow.cashAdvance) : prevRow.cashAdvance,
           };
         }
@@ -2744,15 +2774,26 @@ const SettlementPage = () => {
   );
 
   const updateVehicleExpenseQty = useCallback((id: string, raw: string) => {
-    setVehicleExpenseRows(prev =>
-      prev.map(row => {
+    setVehicleExpenseRows(prev => {
+      const nextRows = prev.map(row => {
         if (row.id !== id) return row;
         if (raw.trim() === '') return { ...row, quantity: 0 };
         const n = parseInt(raw, 10);
         if (!Number.isFinite(n)) return row;
         return { ...row, quantity: Math.max(0, n) };
-      })
-    );
+      });
+      const totalQty = nextRows.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
+      if (totalQty <= 0) return nextRows;
+
+      const totalUnloading = nextRows.reduce((sum, row) => sum + (Number(row.unloading) || 0), 0);
+      const totalWeighing = nextRows.reduce((sum, row) => sum + (Number(row.weighing) || 0), 0);
+
+      return nextRows.map(row => ({
+        ...row,
+        unloading: roundMoney2((totalUnloading * (Number(row.quantity) || 0)) / totalQty),
+        weighing: roundMoney2((totalWeighing * (Number(row.quantity) || 0)) / totalQty),
+      }));
+    });
   }, []);
 
   const isVehicleExpenseFieldEdited = useCallback(
@@ -2825,8 +2866,6 @@ const SettlementPage = () => {
       const equalShareFreight = arrivalSellersForPatti.length > 0 ? freightTotal / arrivalSellersForPatti.length : 0;
       const sellerComputedBase = arrivalSellersForPatti.map(s => {
         const arrSeller = arrival ? findArrivalSellerForSettlement(arrival, s) : undefined;
-        const qtyRaw = arrSeller ? bagsFromArrivalSeller(arrSeller) : totalArrivalBagsForSeller(s);
-        const qty = Math.max(0, Math.round(qtyRaw));
         const removed = new Set(removedLotsBySellerId[s.sellerId] ?? []);
         const lotOv = lotSalesOverridesBySellerId[s.sellerId] ?? {};
         const getDivisorLocal = (lot: SettlementLot) => {
@@ -2850,6 +2889,17 @@ const SettlementPage = () => {
           const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisorLocal(lot));
           return sum + (Number(merged.weight) || 0);
         }, 0);
+        const qty = Math.max(
+          0,
+          Math.round(
+            s.lots.reduce((sum, lot, i) => {
+              const sid = lotStableId(lot, i);
+              if (removed.has(sid)) return sum;
+              const merged = mergeLotDisplayRow(lot, lotOv[sid], getDivisorLocal(lot));
+              return sum + (Number(merged.qty) || 0);
+            }, 0)
+          )
+        );
         return {
           sellerId: s.sellerId,
           sellerName: (arrSeller?.sellerName ?? s.sellerName) || 'Seller',
@@ -2863,8 +2913,9 @@ const SettlementPage = () => {
       const perKgFreight = totalActualWeightOnSettlement > 0 ? freightTotal / totalActualWeightOnSettlement : 0;
       const unloadingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.unloading) || 0), 0);
       const weighingTotal = sellerComputedBase.reduce((sum, s) => sum + (Number(s.weighing) || 0), 0);
-      const perKgUnloading = totalActualWeightOnSettlement > 0 ? unloadingTotal / totalActualWeightOnSettlement : 0;
-      const perKgWeighing = totalActualWeightOnSettlement > 0 ? weighingTotal / totalActualWeightOnSettlement : 0;
+      const totalQtyOnSettlement = sellerComputedBase.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+      const perBagUnloading = totalQtyOnSettlement > 0 ? unloadingTotal / totalQtyOnSettlement : 0;
+      const perBagWeighing = totalQtyOnSettlement > 0 ? weighingTotal / totalQtyOnSettlement : 0;
       const equalShareUnloading =
         arrivalSellersForPatti.length > 0 ? unloadingTotal / arrivalSellersForPatti.length : 0;
       const equalShareWeighing =
@@ -2880,13 +2931,13 @@ const SettlementPage = () => {
             : (fallbackSellerFreight > 0 ? fallbackSellerFreight : equalShareFreight)
         );
         const unloading = roundMoney2(
-          perKgUnloading > 0
-            ? perKgUnloading * s.actualWeight
+          perBagUnloading > 0
+            ? perBagUnloading * s.quantity
             : (equalShareUnloading > 0 ? equalShareUnloading : fallbackSellerUnloading)
         );
         const weighing = roundMoney2(
-          perKgWeighing > 0
-            ? perKgWeighing * s.actualWeight
+          perBagWeighing > 0
+            ? perBagWeighing * s.quantity
             : (equalShareWeighing > 0 ? equalShareWeighing : fallbackSellerWeighing)
         );
 
@@ -3884,6 +3935,7 @@ const SettlementPage = () => {
                                     registrationChosen: nextChecked ? true : false,
                                     registered: false,
                                     contactId: nextChecked ? null : cur.contactId,
+                                    replacementSellerId: null,
                                     allowRegisteredEdit: false,
                                   },
                                 };
@@ -3935,10 +3987,11 @@ const SettlementPage = () => {
                                                 registrationChosen: true,
                                                 registered: true,
                                                 contactId: String(c.contact_id),
+                                                replacementSellerId: null,
                                                 mark: c.mark ?? '',
                                                 name: c.name ?? '',
                                                 mobile: c.phone ?? '',
-                                                allowRegisteredEdit: true,
+                                                allowRegisteredEdit: false,
                                                 contactSearchQuery: '',
                                               },
                                             };
@@ -3961,7 +4014,31 @@ const SettlementPage = () => {
                                   ))}
                                   {tempContactRows.slice(0, 30).map(s => (
                                     <li key={`temp-${s.sellerId}`} className="border-b border-border/30 last:border-b-0">
-                                      <div className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40"
+                                        onClick={() => {
+                                          setSellerFormById(prev => {
+                                            const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
+                                            return {
+                                              ...prev,
+                                              [seller.sellerId]: {
+                                                ...cur,
+                                                registrationChosen: true,
+                                                registered: false,
+                                                contactId: null,
+                                                replacementSellerId: String(s.sellerId),
+                                                mark: s.sellerMark ?? '',
+                                                name: s.sellerName ?? '',
+                                                mobile: s.sellerPhone ?? '',
+                                                allowRegisteredEdit: false,
+                                                contactSearchQuery: '',
+                                              },
+                                            };
+                                          });
+                                          toast.success('Temporary seller selected. You can replace now.');
+                                        }}
+                                      >
                                         <span className="min-w-0">
                                           <span className="block truncate text-sm font-semibold text-foreground">{s.sellerName || '-'}</span>
                                           <span className="block truncate text-xs text-muted-foreground">
@@ -3969,8 +4046,10 @@ const SettlementPage = () => {
                                             {s.sellerMark ? ` · ${s.sellerMark}` : ''}
                                           </span>
                                         </span>
-                                        <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Temporary</span>
-                                      </div>
+                                        <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                                          Temporary · Select
+                                        </span>
+                                      </button>
                                     </li>
                                   ))}
                                 </ul>
@@ -3982,38 +4061,42 @@ const SettlementPage = () => {
                           type="button"
                           variant="outline"
                           className={cn(arrSolidMd, 'min-w-[8rem]')}
-                          disabled={isPattiEditLocked || !!sellerRegSaving[seller.sellerId] || !form.contactId}
+                          disabled={
+                            isPattiEditLocked ||
+                            !!sellerRegSaving[seller.sellerId] ||
+                            (!form.contactId && !form.replacementSellerId)
+                          }
                           onClick={() => {
                             void (async () => {
                               if (!can('Settlement', 'Edit')) {
                                 toast.error('You do not have permission to update seller details.');
                                 return;
                               }
-                              if (!form.contactId) {
-                                toast.error('Please search and select a registered seller first.');
+                              if (!form.contactId && !form.replacementSellerId) {
+                                toast.error('Please search and select a seller first.');
                                 return;
                               }
                               setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: true }));
                               try {
                                 const baselineContactId = baseline.contactId ? String(baseline.contactId) : null;
-                                const nextContactId = String(form.contactId);
+                                const nextContactId = form.contactId ? String(form.contactId) : null;
+                                const replacementSellerId = form.replacementSellerId ? String(form.replacementSellerId) : null;
+                                let replaced: Awaited<ReturnType<typeof settlementApi.replaceSellerFromSeller>> | null = null;
                                 let reg = null as Awaited<ReturnType<typeof settlementApi.linkSellerContact>> | null;
-                                if (nextContactId && nextContactId !== baselineContactId) {
+                                if (replacementSellerId && replacementSellerId !== seller.sellerId) {
+                                  replaced = await settlementApi.replaceSellerFromSeller(seller.sellerId, replacementSellerId);
+                                } else if (nextContactId && nextContactId !== baselineContactId) {
                                   reg = await settlementApi.linkSellerContact(seller.sellerId, nextContactId);
                                 }
-                                await contactApi.update(nextContactId, {
-                                  name: form.name.trim(),
-                                  phone: form.mobile.trim(),
-                                  mark: form.mark.trim(),
-                                });
                                 const nextForm: SellerRegFormState = {
                                   ...form,
                                   registrationChosen: true,
-                                  registered: true,
-                                  contactId: reg?.contactId ?? nextContactId,
-                                  name: reg?.sellerName ?? form.name.trim(),
-                                  mark: reg?.sellerMark ?? form.mark.trim(),
-                                  mobile: reg?.sellerPhone ?? form.mobile.trim(),
+                                  registered: Boolean((replaced?.contactId ?? reg?.contactId ?? nextContactId) != null),
+                                  contactId: replaced?.contactId ?? reg?.contactId ?? nextContactId,
+                                  replacementSellerId: null,
+                                  name: replaced?.sellerName ?? reg?.sellerName ?? form.name.trim(),
+                                  mark: replaced?.sellerMark ?? reg?.sellerMark ?? form.mark.trim(),
+                                  mobile: replaced?.sellerPhone ?? reg?.sellerPhone ?? form.mobile.trim(),
                                   contactSearchQuery: '',
                                   allowRegisteredEdit: false,
                                 };
@@ -4032,9 +4115,9 @@ const SettlementPage = () => {
                                       : x
                                   )
                                 );
-                                toast.success('Seller updated successfully');
+                                toast.success('Seller replaced successfully');
                               } catch {
-                                toast.error('Failed to update seller');
+                                toast.error('Failed to replace seller');
                               } finally {
                                 setSellerRegSaving(prev => ({ ...prev, [seller.sellerId]: false }));
                               }
@@ -4189,14 +4272,15 @@ const SettlementPage = () => {
                                   }
 
                                   const contactsRegistry = await contactApi.list({ scope: 'registry' });
-                                  const markExists = contactsRegistry.some(
+                                  const traderRegistry = contactsRegistry.filter(c => String(c.trader_id ?? '').trim().length > 0);
+                                  const markExists = traderRegistry.some(
                                     c => (c.mark ?? '').trim().toLowerCase() === normalizedMark.toLowerCase()
                                   );
                                   if (markExists) {
                                     toast.error('This mark is already in use by another contact');
                                     return;
                                   }
-                                  const mobileExists = contactsRegistry.some(
+                                  const mobileExists = traderRegistry.some(
                                     c => (c.phone ?? '').trim() === normalizedMobile
                                   );
                                   if (mobileExists) {
@@ -4208,7 +4292,6 @@ const SettlementPage = () => {
                                     name: normalizedName,
                                     phone: normalizedMobile,
                                     mark: normalizedMark,
-                                    trader_id: '',
                                   });
                                   const reg = await settlementApi.linkSellerContact(seller.sellerId, created.contact_id);
                                   const nextForm: SellerRegFormState = {
@@ -4583,7 +4666,7 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label={`Unloading formula ${seller.sellerId}`}
                                   lines={[
-                                    'Quick Adjustment auto distribution: (seller settlement weight / total settlement weight) x total unloading pool.',
+                                    'Quick Adjustment auto distribution: (seller bags / total bags) x total unloading pool.',
                                     'Total unloading pool is computed from lot-level commodity slab rules.',
                                     `Current value: ${formatMoney2Display(exp.unloading)}`,
                                   ]}
@@ -4625,7 +4708,7 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label={`Weighing formula ${seller.sellerId}`}
                                   lines={[
-                                    'Quick Adjustment auto distribution: (seller settlement weight / total settlement weight) x total weighing pool.',
+                                    'Quick Adjustment auto distribution: (seller bags / total bags) x total weighing pool.',
                                     'Total weighing pool is computed from commodity weighing slab rules.',
                                     settlementWeighingEnabled
                                       ? 'Use weighman ON: shown as separate weighing deduction.'
@@ -4973,8 +5056,8 @@ const SettlementPage = () => {
                               </TooltipTrigger>
                               <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[320px] text-xs leading-relaxed">
                                 <div className="space-y-0.5 text-left normal-case tracking-normal">
-                                  <p>Unloading = (seller settlement weight / total settlement weight) x total unloading pool.</p>
-                                  <p>If total settlement weight is 0, fallback to equal share or existing seller unloading.</p>
+                                  <p>Unloading = (seller bags / total bags) x total unloading pool.</p>
+                                  <p>If total bags is 0, fallback to equal share or existing seller unloading.</p>
                                 </div>
                               </TooltipContent>
                             </Tooltip>
@@ -4995,8 +5078,8 @@ const SettlementPage = () => {
                               </TooltipTrigger>
                               <TooltipContent side="top" sideOffset={8} className="z-[99999] max-w-[320px] text-xs leading-relaxed">
                                 <div className="space-y-0.5 text-left normal-case tracking-normal">
-                                  <p>Weighing = (seller settlement weight / total settlement weight) x total weighing pool.</p>
-                                  <p>If total settlement weight is 0, fallback to equal share or existing seller weighing.</p>
+                                  <p>Weighing = (seller bags / total bags) x total weighing pool.</p>
+                                  <p>If total bags is 0, fallback to equal share or existing seller weighing.</p>
                                 </div>
                               </TooltipContent>
                             </Tooltip>
@@ -5111,6 +5194,68 @@ const SettlementPage = () => {
                         }
                         return next;
                       });
+                      setLotSalesOverridesBySellerId(prev => {
+                        const next = { ...prev };
+                        for (const seller of arrivalSellersForPatti) {
+                          const row = vehicleExpenseRows.find(r => r.sellerId === seller.sellerId);
+                          if (!row) continue;
+                          const targetQty = Math.max(0, Math.round(Number(row.quantity) || 0));
+                          const removed = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
+                          const sellerOverrides = { ...(next[seller.sellerId] ?? {}) };
+
+                          const activeLots = seller.lots
+                            .map((lot, lotIndex) => {
+                              const sid = lotStableId(lot, lotIndex);
+                              if (removed.has(sid)) return null;
+                              const merged = mergeLotDisplayRow(lot, sellerOverrides[sid], getLotDivisor(lot));
+                              const baseQty = Math.max(0, Number(merged.qty) || 0);
+                              return { sid, baseQty };
+                            })
+                            .filter((x): x is { sid: string; baseQty: number } => x != null);
+
+                          if (activeLots.length === 0) continue;
+
+                          const baseTotalQty = activeLots.reduce((sum, x) => sum + x.baseQty, 0);
+                          let allocatedBySid: Record<string, number> = {};
+
+                          if (baseTotalQty <= 0) {
+                            const equalBase = Math.floor(targetQty / activeLots.length);
+                            let rem = targetQty - equalBase * activeLots.length;
+                            allocatedBySid = activeLots.reduce<Record<string, number>>((acc, x) => {
+                              const add = rem > 0 ? 1 : 0;
+                              if (rem > 0) rem -= 1;
+                              acc[x.sid] = equalBase + add;
+                              return acc;
+                            }, {});
+                          } else {
+                            const provisional = activeLots.map(x => {
+                              const exact = (targetQty * x.baseQty) / baseTotalQty;
+                              const floor = Math.floor(exact);
+                              return { sid: x.sid, floor, frac: exact - floor };
+                            });
+                            let allocated = provisional.reduce((sum, x) => sum + x.floor, 0);
+                            let rem = targetQty - allocated;
+                            provisional.sort((a, b) => b.frac - a.frac);
+                            for (let i = 0; i < provisional.length && rem > 0; i += 1) {
+                              provisional[i].floor += 1;
+                              rem -= 1;
+                            }
+                            allocatedBySid = provisional.reduce<Record<string, number>>((acc, x) => {
+                              acc[x.sid] = x.floor;
+                              return acc;
+                            }, {});
+                          }
+
+                          for (const lot of activeLots) {
+                            const lotOverride = { ...(sellerOverrides[lot.sid] ?? {}) };
+                            lotOverride.qty = Math.max(0, Math.round(allocatedBySid[lot.sid] ?? 0));
+                            sellerOverrides[lot.sid] = lotOverride;
+                          }
+
+                          next[seller.sellerId] = sellerOverrides;
+                        }
+                        return next;
+                      });
                       setVehicleExpenseModalOpen(false);
                       toast.success('Expenses applied to per-seller Sales report.');
                     }}
@@ -5147,7 +5292,7 @@ const SettlementPage = () => {
                 ) : (
                   <div className="space-y-2">
                     {addVoucherRows.map((row, idx) => (
-                      <div key={row.localId} className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                      <div key={row.localId} className="grid grid-cols-1 gap-2 md:grid-cols-4">
                         <Input
                           value={row.voucherName}
                           onChange={e =>
@@ -5156,6 +5301,17 @@ const SettlementPage = () => {
                             )
                           }
                           placeholder="Voucher name"
+                          className="h-9 rounded-lg text-sm"
+                          autoComplete="off"
+                        />
+                        <Input
+                          value={row.forWhoName}
+                          onChange={e =>
+                            setAddVoucherRows(prev =>
+                              prev.map(r => (r.localId === row.localId ? { ...r, forWhoName: e.target.value } : r))
+                            )
+                          }
+                          placeholder="For who / Name"
                           className="h-9 rounded-lg text-sm"
                           autoComplete="off"
                         />
@@ -5237,10 +5393,11 @@ const SettlementPage = () => {
                         .map(r => ({
                           id: r.id,
                           voucherName: r.voucherName.trim(),
+                          forWhoName: r.forWhoName.trim(),
                           description: r.description.trim(),
                           expenseAmount: clampMoney(parseFloat(r.expenseAmount || '0') || 0),
                         }))
-                        .filter(r => r.voucherName !== '' || r.description !== '' || r.expenseAmount > 0);
+                        .filter(r => r.voucherName !== '' || r.forWhoName !== '' || r.description !== '' || r.expenseAmount > 0);
                       const invalid = rows.some(r => r.voucherName === '' || r.expenseAmount <= 0);
                       if (invalid) {
                         toast.message('Each voucher row needs name and amount > 0.');
@@ -5265,6 +5422,7 @@ const SettlementPage = () => {
                                 id: r.id,
                                 localId: `v_${r.id ?? Math.random().toString(36).slice(2, 8)}`,
                                 voucherName: r.voucherName ?? '',
+                                forWhoName: r.forWhoName ?? '',
                                 description: r.description ?? '',
                                 expenseAmount: (Number(r.expenseAmount ?? 0) || 0).toFixed(2),
                               }))

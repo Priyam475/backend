@@ -87,6 +87,11 @@ public interface SettlementService {
     SellerRegistrationDTO linkSellerContact(String sellerVehicleId, LinkSellerContactRequest request);
 
     /**
+     * Replace seller identity on one settlement row using another settlement seller row.
+     */
+    SellerReplacementDTO replaceSeller(String sellerVehicleId, ReplaceSellerRequest request);
+
+    /**
      * Create a temporary voucher entry for Settlement seller and return persisted row.
      */
     SettlementVoucherTempDTO createSettlementVoucherTemp(String sellerId, SettlementVoucherTempCreateRequest request);

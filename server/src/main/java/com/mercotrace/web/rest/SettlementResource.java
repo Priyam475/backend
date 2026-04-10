@@ -161,6 +161,25 @@ public class SettlementResource {
     }
 
     /**
+     * {@code PUT  /api/settlements/sellers/:sellerId/replace} :
+     * replace this settlement seller identity from another settlement seller row.
+     */
+    @PutMapping("/sellers/{sellerId}/replace")
+    @PreAuthorize("hasAuthority(\"" + AuthoritiesConstants.SETTLEMENTS_EDIT + "\")")
+    public ResponseEntity<SellerReplacementDTO> replaceSeller(
+        @PathVariable String sellerId,
+        @Valid @RequestBody ReplaceSellerRequest request
+    ) {
+        LOG.debug("REST request to replace Settlement seller {} using {}", sellerId, request.getReplacementSellerId());
+        try {
+            SellerReplacementDTO dto = settlementService.replaceSeller(sellerId, request);
+            return ResponseEntity.ok(dto);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestAlertException(e.getMessage(), ENTITY_NAME, "replacesellerfailed");
+        }
+    }
+
+    /**
      * {@code POST /api/settlements/sellers/:sellerId/vouchers/temp} :
      * create a temporary settlement voucher row to be migrated later.
      */

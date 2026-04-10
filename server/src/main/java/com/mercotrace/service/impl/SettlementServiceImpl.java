@@ -995,6 +995,67 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional
+    public SellerReplacementDTO replaceSeller(String sellerVehicleId, ReplaceSellerRequest request) {
+        Long traderId = traderContextService.getCurrentTraderId();
+        if (traderId == null) {
+            throw new IllegalArgumentException("Trader context required");
+        }
+        if (sellerVehicleId == null || sellerVehicleId.isBlank() || request == null || request.getReplacementSellerId() == null) {
+            throw new IllegalArgumentException("sellerId and replacementSellerId are required");
+        }
+        long targetId;
+        long replacementId;
+        try {
+            targetId = Long.parseLong(sellerVehicleId.trim());
+            replacementId = Long.parseLong(request.getReplacementSellerId().trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid seller id");
+        }
+        SellerInVehicle target = sellerInVehicleRepository
+            .findById(targetId)
+            .orElseThrow(() -> new IllegalArgumentException("Seller not found"));
+        SellerInVehicle replacement = sellerInVehicleRepository
+            .findById(replacementId)
+            .orElseThrow(() -> new IllegalArgumentException("Replacement seller not found"));
+
+        List<Lot> traderLots = lotRepository.findAllByTraderId(traderId, Pageable.unpaged()).getContent();
+        boolean ownsTarget = traderLots.stream().anyMatch(l -> targetId == l.getSellerVehicleId());
+        boolean ownsReplacement = traderLots.stream().anyMatch(l -> replacementId == l.getSellerVehicleId());
+        if (!ownsTarget || !ownsReplacement) {
+            throw new IllegalArgumentException("Seller not in scope for this trader");
+        }
+
+        target.setContactId(replacement.getContactId());
+        if (replacement.getContactId() != null) {
+            target.setSellerName(null);
+            target.setSellerPhone(null);
+            target.setSellerMark(null);
+        } else {
+            target.setSellerName(replacement.getSellerName());
+            target.setSellerPhone(replacement.getSellerPhone());
+            target.setSellerMark(replacement.getSellerMark());
+        }
+        sellerInVehicleRepository.save(target);
+
+        SellerReplacementDTO out = new SellerReplacementDTO();
+        out.setSellerId(String.valueOf(targetId));
+        if (target.getContactId() != null) {
+            Contact c = contactRepository.findById(target.getContactId()).orElse(null);
+            out.setContactId(String.valueOf(target.getContactId()));
+            out.setSellerName(c != null && c.getName() != null ? c.getName() : "");
+            out.setSellerMark(c != null && c.getMark() != null ? c.getMark() : "");
+            out.setSellerPhone(c != null && c.getPhone() != null ? c.getPhone() : "");
+        } else {
+            out.setContactId(null);
+            out.setSellerName(target.getSellerName() != null ? target.getSellerName() : "");
+            out.setSellerMark(target.getSellerMark() != null ? target.getSellerMark() : "");
+            out.setSellerPhone(target.getSellerPhone() != null ? target.getSellerPhone() : "");
+        }
+        return out;
+    }
+
+    @Override
+    @Transactional
     public SettlementVoucherTempDTO createSettlementVoucherTemp(String sellerId, SettlementVoucherTempCreateRequest request) {
         if (sellerId == null || sellerId.isBlank()) {
             throw new IllegalArgumentException("sellerId is required");
@@ -1025,6 +1086,7 @@ public class SettlementServiceImpl implements SettlementService {
         entity.setTraderId(traderId);
         entity.setSellerId(sellerId.trim());
         entity.setVoucherName(normalizedName);
+        entity.setForWhoName(request.getForWhoName() != null ? request.getForWhoName().trim() : null);
         entity.setDescription(request.getDescription() != null ? request.getDescription().trim() : null);
         entity.setExpenseAmount(amount);
         SettlementVoucherTemp saved = settlementVoucherTempRepository.save(entity);
@@ -1079,6 +1141,7 @@ public class SettlementServiceImpl implements SettlementService {
             entity.setTraderId(scope.traderId());
             entity.setSellerId(scope.sellerId());
             entity.setVoucherName(name);
+            entity.setForWhoName(row.getForWhoName() != null ? row.getForWhoName().trim() : null);
             entity.setDescription(row.getDescription() != null ? row.getDescription().trim() : null);
             entity.setExpenseAmount(amount);
             savedRows.add(toSettlementVoucherTempDTO(settlementVoucherTempRepository.save(entity)));
@@ -1095,6 +1158,7 @@ public class SettlementServiceImpl implements SettlementService {
         dto.setId(saved.getId());
         dto.setSellerId(saved.getSellerId());
         dto.setVoucherName(saved.getVoucherName());
+        dto.setForWhoName(saved.getForWhoName());
         dto.setDescription(saved.getDescription());
         dto.setExpenseAmount(saved.getExpenseAmount());
         dto.setCreatedAt(saved.getCreatedDate());

@@ -29,6 +29,9 @@ public class SettlementVoucherTemp extends AbstractAuditingEntity<Long> implemen
     @Column(name = "voucher_name", nullable = false, length = 200)
     private String voucherName;
 
+    @Column(name = "for_who_name", length = 200)
+    private String forWhoName;
+
     @Column(name = "description", length = 1000)
     private String description;
 
@@ -66,6 +69,14 @@ public class SettlementVoucherTemp extends AbstractAuditingEntity<Long> implemen
 
     public void setVoucherName(String voucherName) {
         this.voucherName = voucherName;
+    }
+
+    public String getForWhoName() {
+        return forWhoName;
+    }
+
+    public void setForWhoName(String forWhoName) {
+        this.forWhoName = forWhoName;
     }
 
     public String getDescription() {

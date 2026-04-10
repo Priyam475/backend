@@ -118,6 +118,14 @@ export interface SellerRegistrationDTO {
   sellerPhone: string;
 }
 
+export interface SellerReplacementDTO {
+  sellerId: string;
+  contactId?: string | null;
+  sellerName: string;
+  sellerMark: string;
+  sellerPhone: string;
+}
+
 export interface SellerChargesDTO {
   freight: number;
   advance: number;
@@ -167,6 +175,7 @@ export interface QuickExpenseStateRowDTO {
 
 export interface SettlementVoucherTempCreateRequestDTO {
   voucherName: string;
+  forWhoName?: string;
   description?: string;
   expenseAmount: number;
 }
@@ -175,6 +184,7 @@ export interface SettlementVoucherTempDTO {
   id: number;
   sellerId: string;
   voucherName: string;
+  forWhoName?: string;
   description?: string;
   expenseAmount: number;
   createdAt?: string;
@@ -183,6 +193,7 @@ export interface SettlementVoucherTempDTO {
 export interface SettlementVoucherTempUpsertRowDTO {
   id?: number;
   voucherName: string;
+  forWhoName?: string;
   description?: string;
   expenseAmount: number;
 }
@@ -411,6 +422,23 @@ export const settlementApi = {
     };
   },
 
+  /** Replace current settlement seller identity from another settlement seller row. */
+  async replaceSellerFromSeller(sourceSellerId: string, replacementSellerId: string): Promise<SellerReplacementDTO> {
+    const res = await apiFetch(`${BASE}/sellers/${encodeURIComponent(sourceSellerId)}/replace`, {
+      method: 'PUT',
+      body: JSON.stringify({ replacementSellerId }),
+    });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to replace seller');
+    const data = await res.json();
+    return {
+      sellerId: String(data.sellerId ?? sourceSellerId),
+      contactId: data.contactId != null ? String(data.contactId) : null,
+      sellerName: String(data.sellerName ?? ''),
+      sellerMark: String(data.sellerMark ?? ''),
+      sellerPhone: String(data.sellerPhone ?? ''),
+    };
+  },
+
   async createTemporaryVoucher(
     sellerId: string,
     body: SettlementVoucherTempCreateRequestDTO
@@ -425,6 +453,7 @@ export const settlementApi = {
       id: Number(data.id ?? 0),
       sellerId: String(data.sellerId ?? sellerId),
       voucherName: String(data.voucherName ?? ''),
+      forWhoName: data.forWhoName != null ? String(data.forWhoName) : undefined,
       description: data.description != null ? String(data.description) : undefined,
       expenseAmount: Number(data.expenseAmount ?? 0),
       createdAt: data.createdAt != null ? String(data.createdAt) : undefined,
@@ -441,6 +470,7 @@ export const settlementApi = {
         id: Number(r.id ?? 0),
         sellerId: String(r.sellerId ?? sellerId),
         voucherName: String(r.voucherName ?? ''),
+        forWhoName: r.forWhoName != null ? String(r.forWhoName) : undefined,
         description: r.description != null ? String(r.description) : undefined,
         expenseAmount: Number(r.expenseAmount ?? 0),
         createdAt: r.createdAt != null ? String(r.createdAt) : undefined,
@@ -465,6 +495,7 @@ export const settlementApi = {
         id: Number(r.id ?? 0),
         sellerId: String(r.sellerId ?? sellerId),
         voucherName: String(r.voucherName ?? ''),
+        forWhoName: r.forWhoName != null ? String(r.forWhoName) : undefined,
         description: r.description != null ? String(r.description) : undefined,
         expenseAmount: Number(r.expenseAmount ?? 0),
         createdAt: r.createdAt != null ? String(r.createdAt) : undefined,

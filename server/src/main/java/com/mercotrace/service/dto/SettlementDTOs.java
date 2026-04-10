@@ -369,6 +369,75 @@ public final class SettlementDTOs {
         public void setContactId(Long contactId) { this.contactId = contactId; }
     }
 
+    /** Request to replace one settlement seller using another settlement seller identity. */
+    public static class ReplaceSellerRequest implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        @NotBlank
+        private String replacementSellerId;
+
+        public String getReplacementSellerId() {
+            return replacementSellerId;
+        }
+
+        public void setReplacementSellerId(String replacementSellerId) {
+            this.replacementSellerId = replacementSellerId;
+        }
+    }
+
+    /** Result after replacing seller identity for a settlement seller row. */
+    public static class SellerReplacementDTO implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private String sellerId;
+        private String contactId;
+        private String sellerName;
+        private String sellerMark;
+        private String sellerPhone;
+
+        public String getSellerId() {
+            return sellerId;
+        }
+
+        public void setSellerId(String sellerId) {
+            this.sellerId = sellerId;
+        }
+
+        public String getContactId() {
+            return contactId;
+        }
+
+        public void setContactId(String contactId) {
+            this.contactId = contactId;
+        }
+
+        public String getSellerName() {
+            return sellerName;
+        }
+
+        public void setSellerName(String sellerName) {
+            this.sellerName = sellerName;
+        }
+
+        public String getSellerMark() {
+            return sellerMark;
+        }
+
+        public void setSellerMark(String sellerMark) {
+            this.sellerMark = sellerMark;
+        }
+
+        public String getSellerPhone() {
+            return sellerPhone;
+        }
+
+        public void setSellerPhone(String sellerPhone) {
+            this.sellerPhone = sellerPhone;
+        }
+    }
+
     /**
      * Aggregated seller charges for Settlement (e.g. freight, advance).
      * Values are computed server-side so the frontend does not rely on local state.
@@ -691,6 +760,8 @@ public final class SettlementDTOs {
         @NotBlank
         private String voucherName;
 
+        private String forWhoName;
+
         private String description;
 
         @NotNull
@@ -702,6 +773,14 @@ public final class SettlementDTOs {
 
         public void setVoucherName(String voucherName) {
             this.voucherName = voucherName;
+        }
+
+        public String getForWhoName() {
+            return forWhoName;
+        }
+
+        public void setForWhoName(String forWhoName) {
+            this.forWhoName = forWhoName;
         }
 
         public String getDescription() {
@@ -727,6 +806,7 @@ public final class SettlementDTOs {
         private Long id;
         private String sellerId;
         private String voucherName;
+        private String forWhoName;
         private String description;
         private BigDecimal expenseAmount;
         private Instant createdAt;
@@ -753,6 +833,14 @@ public final class SettlementDTOs {
 
         public void setVoucherName(String voucherName) {
             this.voucherName = voucherName;
+        }
+
+        public String getForWhoName() {
+            return forWhoName;
+        }
+
+        public void setForWhoName(String forWhoName) {
+            this.forWhoName = forWhoName;
         }
 
         public String getDescription() {
@@ -786,6 +874,7 @@ public final class SettlementDTOs {
         private Long id;
         @NotBlank
         private String voucherName;
+        private String forWhoName;
         private String description;
         @NotNull
         private BigDecimal expenseAmount;
@@ -804,6 +893,14 @@ public final class SettlementDTOs {
 
         public void setVoucherName(String voucherName) {
             this.voucherName = voucherName;
+        }
+
+        public String getForWhoName() {
+            return forWhoName;
+        }
+
+        public void setForWhoName(String forWhoName) {
+            this.forWhoName = forWhoName;
         }
 
         public String getDescription() {
