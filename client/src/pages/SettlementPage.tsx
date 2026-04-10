@@ -925,6 +925,8 @@ const SettlementPage = () => {
   const [settlementIncludeHeader, setSettlementIncludeHeader] = useState(true);
   /** Prevents overlapping save/update requests (buttons + shortcut). */
   const pattiSaveBusyRef = useRef(false);
+  /** True after quick-adjustment apply; prevents background bootstrap from overriding manual values. */
+  const quickAdjustmentAppliedRef = useRef(false);
   const [pattiSaveBusy, setPattiSaveBusy] = useState(false);
 
   /** Arrival freight + billing aggregates (invoiced freight & payable); optional invoice name filter. */
@@ -2337,6 +2339,7 @@ const SettlementPage = () => {
   useEffect(() => {
     if (!pattiData || arrivalSellersForPatti.length === 0) return;
     if (Object.keys(existingPattiIdBySellerId).length > 0) return;
+    if (quickAdjustmentAppliedRef.current) return;
     let cancelled = false;
     void (async () => {
       const snapBySellerId: Record<string, Awaited<ReturnType<typeof settlementApi.getSellerExpenseSnapshot>> | null> = {};
@@ -2418,11 +2421,12 @@ const SettlementPage = () => {
     pattiData?.createdAt,
     arrivalSalesReportSellerIdsKey,
     existingPattiIdBySellerId,
-    removedLotsBySellerId,
-    lotSalesOverridesBySellerId,
-    getLotDivisor,
     amountSummaryDisplay.arrivalFreightAmount,
   ]);
+
+  useEffect(() => {
+    quickAdjustmentAppliedRef.current = false;
+  }, [pattiData?.createdAt, arrivalSalesReportSellerIdsKey]);
 
   /** Main patti deduction lines mirror primary seller expenses + weighing toggles. */
   useEffect(() => {
@@ -4688,6 +4692,7 @@ const SettlementPage = () => {
                                 onBlur={() => {
                                   const raw = unloadingDraftBySellerId[seller.sellerId] ?? '';
                                   const v = clampMoney(parseFloat(raw) || 0);
+                                  quickAdjustmentAppliedRef.current = true;
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
                                     return { ...prev, [seller.sellerId]: { ...e0, unloading: v } };
@@ -4743,6 +4748,7 @@ const SettlementPage = () => {
                                 onBlur={() => {
                                   const raw = weighmanDraftBySellerId[seller.sellerId] ?? '';
                                   const v = clampMoney(parseFloat(raw) || 0);
+                                  quickAdjustmentAppliedRef.current = true;
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
                                     return { ...prev, [seller.sellerId]: { ...e0, weighman: v } };
@@ -4996,8 +5002,8 @@ const SettlementPage = () => {
                 <DialogHeader className="space-y-1.5 text-center sm:text-center">
                   <DialogTitle className="text-lg font-bold tracking-tight sm:text-xl">Add Quick Adjustment</DialogTitle>
                   <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
-                    Sellers and quantities come from Arrivals. Freight is allocated by settlement actual-weight share. Unloading / weighing use commodity
-                    slab rules at lot level (editable). Press Alt X to open.
+                    Quantities come from current settlement item rows (editable). Freight uses settlement actual-weight share. Unloading / weighing use
+                    bag-share distribution from lot-level commodity pools (editable). Press Alt X to open.
                   </DialogDescription>
                 </DialogHeader>
               </div>
@@ -5256,6 +5262,7 @@ const SettlementPage = () => {
                         }
                         return next;
                       });
+                      quickAdjustmentAppliedRef.current = true;
                       setVehicleExpenseModalOpen(false);
                       toast.success('Expenses applied to per-seller Sales report.');
                     }}
