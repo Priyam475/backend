@@ -581,6 +581,62 @@ function formatRupeeInr(value: number): string {
   return `₹ ${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Parsed `grossAmount` from a stored original snapshot body (session JSON or API `originalData`). */
+function grossAmountFromOriginalPayloadRecord(raw: Record<string, unknown> | null | undefined): number | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const g = raw.grossAmount;
+  if (typeof g === 'number' && Number.isFinite(g)) return g;
+  const n = Number(g);
+  return Number.isFinite(n) ? n : null;
+}
+
+function stringifyOriginalDataForHydration(od: unknown): string | null {
+  if (!od || typeof od !== 'object' || Array.isArray(od)) return null;
+  try {
+    return JSON.stringify(od);
+  } catch {
+    return null;
+  }
+}
+
+/** Copy API `originalData` into session ref so multi-seller footers can sum every seller's first snapshot. */
+function hydrateSessionOriginalSnapshotFromDto(bucket: Record<string, string>, p: PattiDTO | null | undefined): void {
+  if (!p?.sellerId) return;
+  const sid = String(p.sellerId).trim();
+  if (!sid) return;
+  const s = stringifyOriginalDataForHydration(p.originalData);
+  if (s) bucket[sid] = s;
+}
+
+function clearSessionOriginalSnapshotsForSellerIds(bucket: Record<string, string>, ids: Iterable<string>): void {
+  for (const raw of ids) {
+    const sid = String(raw ?? '').trim();
+    if (sid) delete bucket[sid];
+  }
+}
+
+function readOriginalGrossForSellerId(
+  sellerId: string,
+  sessionJsonBySellerId: Record<string, string>,
+  pattiDetail: PattiDTO | null,
+): number | null {
+  const sid = String(sellerId ?? '').trim();
+  if (!sid) return null;
+  const json = sessionJsonBySellerId[sid];
+  if (json) {
+    try {
+      const g = grossAmountFromOriginalPayloadRecord(JSON.parse(json) as Record<string, unknown>);
+      if (g != null) return g;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (pattiDetail && String(pattiDetail.sellerId ?? '').trim() === sid) {
+    return grossAmountFromOriginalPayloadRecord(pattiDetail.originalData as Record<string, unknown>);
+  }
+  return null;
+}
+
 /** Same visual language as Billing commodity read-only cells (computed fields). */
 const settlementReadOnlyCellClass =
   'h-9 lg:h-8 min-h-[2.25rem] px-2 lg:px-1.5 border border-dashed border-border/70 rounded-md bg-muted/50 text-muted-foreground inline-flex items-center justify-center w-full text-xs lg:text-[11px] cursor-not-allowed shadow-inner select-text tabular-nums';
@@ -1325,6 +1381,8 @@ const SettlementPage = () => {
   const [settlementFormMode, setSettlementFormMode] = useState<'idle' | 'new' | 'in-progress' | 'saved'>('idle');
   /** Bumps when dirty baseline ref is synced so `isSettlementDirty` recomputes (refs alone do not render). */
   const [settlementDirtyNonce, setSettlementDirtyNonce] = useState(0);
+  /** Bumps after multi-seller patti load hydrates per-seller `originalData` into session ref (refs alone do not render). */
+  const [pattiOriginalHydrationNonce, setPattiOriginalHydrationNonce] = useState(0);
 
   // Patti state
   const [pattiData, setPattiData] = useState<PattiData | null>(null);
@@ -2004,6 +2062,22 @@ const SettlementPage = () => {
       }
       setExistingPattiIdBySellerId(idMap);
 
+      const scopeForOriginalHydration = new Set<string>();
+      if (editSid) scopeForOriginalHydration.add(editSid);
+      for (const rawSid of arrivalSellerIds ?? []) {
+        const k = String(rawSid ?? '').trim();
+        if (k) scopeForOriginalHydration.add(k);
+      }
+      for (const k of Object.keys(idMap)) {
+        const ks = String(k ?? '').trim();
+        if (ks) scopeForOriginalHydration.add(ks);
+      }
+      clearSessionOriginalSnapshotsForSellerIds(
+        sessionOriginalSnapshotJsonBySellerIdRef.current,
+        scopeForOriginalHydration,
+      );
+      hydrateSessionOriginalSnapshotFromDto(sessionOriginalSnapshotJsonBySellerIdRef.current, dto);
+
       const applyExtensionFromPattiDto = (p: PattiDTO | null | undefined) => {
         if (!p) return;
         const sidKey = String(p.sellerId ?? '').trim();
@@ -2089,6 +2163,7 @@ const SettlementPage = () => {
         if (!Number.isFinite(nid) || nid <= 0 || nid === primaryNumericId) continue;
         try {
           const other = await settlementApi.getPattiById(nid);
+          hydrateSessionOriginalSnapshotFromDto(sessionOriginalSnapshotJsonBySellerIdRef.current, other ?? undefined);
           applyExtensionFromPattiDto(other ?? undefined);
           mergeExpensesFromPattiDto(other ?? undefined);
         } catch {
@@ -2123,6 +2198,7 @@ const SettlementPage = () => {
           lots: [],
         }
       );
+      setPattiOriginalHydrationNonce(n => n + 1);
     } catch {
       toast.error('Failed to load patti');
     }
@@ -2596,6 +2672,7 @@ const SettlementPage = () => {
             if (updated) {
               applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
               setPattiDetailDto(updated);
+              hydrateSessionOriginalSnapshotFromDto(sessionOriginalSnapshotJsonBySellerIdRef.current, updated);
               if (!silent) toast.success(payload.inProgress ? `Sales Patti ${updated.pattiId} saved in progress.` : `Sales Patti ${updated.pattiId} ${actionWord}.`);
               if (showPrintAfterSave) setShowPrint(true);
               setPattiSaveHighlightSellerIds(prev => prev.filter(x => x !== sid));
@@ -2619,6 +2696,7 @@ const SettlementPage = () => {
             applySavedToPrimaryUi(payload, created.pattiId, at);
             setPattiDetailDto(created);
             delete sessionOriginalSnapshotJsonBySellerIdRef.current[sid];
+            hydrateSessionOriginalSnapshotFromDto(sessionOriginalSnapshotJsonBySellerIdRef.current, created);
             if (!silent && selectedSeller?.sellerId === sid) {
               toast.success(payload.inProgress ? `Sales Patti ${created.pattiId} saved in progress.` : `Sales Patti ${created.pattiId} ${actionWord}.`);
             } else if (!silent) {
@@ -3357,38 +3435,33 @@ const SettlementPage = () => {
     ) {
       return null;
     }
-    const raw = resolveOriginalPayload();
-    if (!raw || typeof raw !== 'object') return null;
-    const baseDto: PattiDTO = pattiDetailDto
-      ? { ...pattiDetailDto }
-      : ({
-          pattiId: pattiData.pattiId,
-          sellerId: selectedSeller.sellerId,
-          sellerName: pattiData.sellerName || selectedSeller.sellerName,
-          vehicleNumber: selectedSeller.vehicleNumber,
-          fromLocation: selectedSeller.fromLocation,
-          sellerSerialNo: selectedSeller.sellerSerialNo,
-          rateClusters: pattiData.rateClusters,
-          grossAmount: pattiData.grossAmount,
-          deductions: pattiData.deductions,
-          totalDeductions: pattiData.totalDeductions,
-          netPayable: pattiData.netPayable,
-          createdAt: pattiData.createdAt,
-          useAverageWeight: pattiData.useAverageWeight,
-        } as PattiDTO);
-    const merged = {
-      ...baseDto,
-      ...raw,
-      pattiId: baseDto.pattiId,
-      sellerId: baseDto.sellerId,
-    } as PattiDTO;
-    const origPd = mapPattiDTOToPattiData(merged);
-    const billOriginalAmt = origPd.grossAmount;
+    const sellersInScope = arrivalSellersForPatti;
+    if (sellersInScope.length === 0) return null;
+    const sessionMap = sessionOriginalSnapshotJsonBySellerIdRef.current;
+    const hasAnyOriginal = sellersInScope.some(
+      s => readOriginalGrossForSellerId(s.sellerId, sessionMap, pattiDetailDto) != null,
+    );
+    if (!hasAnyOriginal) return null;
+
+    let billOriginalAmt: number | null = 0;
+    let allSellersHaveOriginalGross = true;
+    for (const s of sellersInScope) {
+      const g = readOriginalGrossForSellerId(s.sellerId, sessionMap, pattiDetailDto);
+      if (g == null) {
+        allSellersHaveOriginalGross = false;
+        break;
+      }
+      billOriginalAmt += g;
+    }
+    if (!allSellersHaveOriginalGross) {
+      billOriginalAmt = null;
+    }
+
     const arrivalWeightKg = vehicleFormDetails?.arrivalWeightKg ?? null;
     const fromSalesAuction = auctionAmountBaseline;
     const pattiNetWtKg = vehicleFormDetails?.pattiNetWeightKg ?? null;
     const rateDiff =
-      Number.isFinite(billOriginalAmt) && Number.isFinite(fromSalesAuction)
+      billOriginalAmt != null && Number.isFinite(billOriginalAmt) && Number.isFinite(fromSalesAuction)
         ? billOriginalAmt - fromSalesAuction
         : null;
     const weightDiff =
@@ -3406,10 +3479,11 @@ const SettlementPage = () => {
     settlementFormMode,
     pattiData,
     selectedSeller,
-    resolveOriginalPayload,
     pattiDetailDto,
     vehicleFormDetails,
     auctionAmountBaseline,
+    arrivalSellersForPatti,
+    pattiOriginalHydrationNonce,
   ]);
 
   useEffect(() => {
@@ -6737,12 +6811,12 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label="Bill Original Amt"
                                   lines={[
-                                    'Gross settlement total from the first snapshot we stored for this saved patti.',
+                                    'Sum of each seller’s gross from their first snapshot on this arrival (all sellers must have a stored original).',
                                   ]}
                                 />
                               </div>
                               <p className="text-sm font-bold tabular-nums text-foreground">
-                                {formatRupeeInr(billOriginalAmt)}
+                                {billOriginalAmt != null ? formatRupeeInr(billOriginalAmt) : '—'}
                               </p>
                             </div>
                             <div className="space-y-0.5">
@@ -6797,12 +6871,17 @@ const SettlementPage = () => {
                                 <InlineCalcTip
                                   label="Rate Difference"
                                   lines={[
-                                    'Bill Original Amt − From Sales Auction.',
+                                    'Bill Original Amt − From Sales Auction (only when Bill Original is the full multi-seller sum).',
                                     'Green when positive, red when negative.',
                                   ]}
                                 />
                               </div>
-                              <p className={cn('text-sm font-bold tabular-nums', signedMoneyClass(rateDiff))}>
+                              <p
+                                className={cn(
+                                  'text-sm font-bold tabular-nums',
+                                  rateDiff != null ? signedMoneyClass(rateDiff) : 'text-muted-foreground',
+                                )}
+                              >
                                 {rateDiffText}
                               </p>
                             </div>

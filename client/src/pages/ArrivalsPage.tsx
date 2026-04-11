@@ -900,6 +900,8 @@ const ArrivalsPage = () => {
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [editingVehicleId, setEditingVehicleId] = useState<number | string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+  const submitArrivalInFlightRef = useRef(false);
+  const [isSubmittingArrival, setIsSubmittingArrival] = useState(false);
   const editBaselineSnapshotRef = useRef<string | null>(null);
   type PendingDelete =
     | { kind: 'arrival'; vehicleId: number | string; label: string }
@@ -944,6 +946,8 @@ const ArrivalsPage = () => {
     editingLotIdx?: number;
   };
   const [addLotForm, setAddLotForm] = useState<AddLotFormState | null>(null);
+  const addLotLotNameInputRef = useRef<HTMLInputElement | null>(null);
+  const [addLotLotNameFocusNonce, setAddLotLotNameFocusNonce] = useState(0);
   const prevSellerExpandedRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -1902,6 +1906,7 @@ const ArrivalsPage = () => {
         variant: "",
         errors: {},
       });
+      setAddLotLotNameFocusNonce(n => n + 1);
       return;
     }
 
@@ -1936,6 +1941,7 @@ const ArrivalsPage = () => {
       variant: "",
       errors: {},
     });
+    setAddLotLotNameFocusNonce(n => n + 1);
   };
 
   const editFormLot = (si: number, li: number) => {
@@ -1992,6 +1998,18 @@ const ArrivalsPage = () => {
     window.setTimeout(tryBringActiveIntoView, 2500);
     window.setTimeout(tryBringActiveIntoView, 3500);
   }, [sellers, sellerExpanded, scrollSellerLotsToLatest]);
+
+  // After Save Lot / Update, move focus back to Lot Name for the next entry (autoFocus only runs on mount).
+  useLayoutEffect(() => {
+    if (addLotLotNameFocusNonce === 0) return;
+    const input = addLotLotNameInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: false });
+    const panel = newArrivalPanelScrollRef.current;
+    if (panel?.contains(input)) {
+      requestAnimationFrame(() => input.scrollIntoView({ block: 'center', behavior: 'auto' }));
+    }
+  }, [addLotLotNameFocusNonce]);
 
   // Scroll + focus the seller card input created by the “Add Seller” button.
   useLayoutEffect(() => {
@@ -2125,49 +2143,57 @@ const ArrivalsPage = () => {
   };
 
   const handleSubmitArrival = async () => {
-    // Submit should never block users with validations.
-    // If required fields for completion aren't present, save as draft (partial) instead.
-    const base = buildPartialPayload();
-    const normalizedForSubmit = sanitizeSubmitPayload(base);
-    const shouldComplete = isCompleteArrivalForSubmit({
-      vehicle_number: normalizedForSubmit.vehicle_number,
-      is_multi_seller: normalizedForSubmit.is_multi_seller,
-      sellers: normalizedForSubmit.sellers,
-    });
+    if (submitArrivalInFlightRef.current) return;
+    submitArrivalInFlightRef.current = true;
+    setIsSubmittingArrival(true);
+    try {
+      // Submit should never block users with validations.
+      // If required fields for completion aren't present, save as draft (partial) instead.
+      const base = buildPartialPayload();
+      const normalizedForSubmit = sanitizeSubmitPayload(base);
+      const shouldComplete = isCompleteArrivalForSubmit({
+        vehicle_number: normalizedForSubmit.vehicle_number,
+        is_multi_seller: normalizedForSubmit.is_multi_seller,
+        sellers: normalizedForSubmit.sellers,
+      });
 
-    if (editingVehicleId != null) {
-      if (!shouldComplete) {
-        await handlePartialSave();
+      if (editingVehicleId != null) {
+        if (!shouldComplete) {
+          await handlePartialSave();
+          return;
+        }
+        await handleUpdateArrival(); // completed update path
         return;
       }
-      await handleUpdateArrival(); // completed update path
-      return;
-    }
 
-    if (!can('Arrivals', 'Create')) {
-      toast.error('You do not have permission to create arrivals.');
-      return;
-    }
-
-    try {
-      const created = await arrivalsApi.create({
-        ...(shouldComplete ? normalizedForSubmit : base),
-        partially_completed: !shouldComplete,
-      });
-      await loadArrivalsFromApi();
-      await loadContactsFromApi();
-      resetForm();
-      setShowAdd(false);
-      setDesktopTab('summary');
-      if (shouldComplete) {
-        toast.success(`✅ Vehicle ${created.vehicleNumber} registered with ${created.sellerCount} seller(s) and ${created.lotCount} lot(s)`);
-      } else {
-        toast.success('Draft saved');
+      if (!can('Arrivals', 'Create')) {
+        toast.error('You do not have permission to create arrivals.');
+        return;
       }
-    } catch (err) {
-      console.error('Submit arrival error:', err);
-      const message = err instanceof Error ? err.message : 'Failed to submit arrival. Please try again.';
-      toast.error(message);
+
+      try {
+        const created = await arrivalsApi.create({
+          ...(shouldComplete ? normalizedForSubmit : base),
+          partially_completed: !shouldComplete,
+        });
+        await loadArrivalsFromApi();
+        await loadContactsFromApi();
+        resetForm();
+        setShowAdd(false);
+        setDesktopTab('summary');
+        if (shouldComplete) {
+          toast.success(`✅ Vehicle ${created.vehicleNumber} registered with ${created.sellerCount} seller(s) and ${created.lotCount} lot(s)`);
+        } else {
+          toast.success('Draft saved');
+        }
+      } catch (err) {
+        console.error('Submit arrival error:', err);
+        const message = err instanceof Error ? err.message : 'Failed to submit arrival. Please try again.';
+        toast.error(message);
+      }
+    } finally {
+      submitArrivalInFlightRef.current = false;
+      setIsSubmittingArrival(false);
     }
   };
 
@@ -3209,6 +3235,7 @@ const ArrivalsPage = () => {
                                   {/* Lot Name */}
                                   <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
+                                      ref={addLotLotNameInputRef}
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
@@ -3405,7 +3432,10 @@ const ArrivalsPage = () => {
                       </Button>
                       <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
                       <Button
+                        type="button"
                         onClick={handleSubmitArrival}
+                        disabled={isSubmittingArrival}
+                        aria-busy={isSubmittingArrival}
                         className={cn(
                           "flex-1 h-11 sm:h-12 rounded-xl font-bold text-xs sm:text-sm disabled:opacity-60 flex items-center justify-center",
                           ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
@@ -4106,6 +4136,7 @@ const ArrivalsPage = () => {
                                   {/* Lot Name */}
                                   <div className="w-[8.5rem] sm:w-[9rem] md:w-[8.5rem] lg:w-[12rem] xl:w-[14rem] flex-none">
                                     <Input
+                                      ref={addLotLotNameInputRef}
                                       placeholder="Lot Name"
                                       value={addLotForm.lotName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
@@ -4309,7 +4340,10 @@ const ArrivalsPage = () => {
                         </Button>
                         <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
                         <Button
+                          type="button"
                           onClick={handleSubmitArrival}
+                          disabled={isSubmittingArrival}
+                          aria-busy={isSubmittingArrival}
                           className={cn(
                             "flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base disabled:opacity-60 flex items-center justify-center",
                             ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
