@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 public class PrintSettingServiceImpl implements PrintSettingService {
 
-    private static final Set<String> ALLOWED_MODULE_KEYS = Set.of("SETTLEMENT", "BILLING");
+    private static final Set<String> ALLOWED_MODULE_KEYS = Set.of("SETTLEMENT", "BILLING", "BILLING_NON_GST");
 
     private final PrintSettingRepository printSettingRepository;
 

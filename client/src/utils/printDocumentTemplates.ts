@@ -930,6 +930,8 @@ export function generateNonGstSalesBillPrintHTML(
 // ── Sales Patti (SettlementPage) ─────────────────────────
 export interface PattiPrintData {
   pattiId: string;
+  /** Shown on "Patti No" line; when set, overrides pattiId for print only. */
+  pattiNoDisplay?: string;
   sellerName: string;
   sellerMobile?: string;
   sellerAddress?: string;
@@ -944,11 +946,90 @@ export interface PattiPrintData {
   netPayable: number;
   createdAt: string;
   useAverageWeight?: boolean;
+  /** Trader/firm letterhead — shown when includeHeader is true. */
+  firm?: BillPrintFirmInfo | null;
 }
 
 function buildSalesPattiStyle(): string {
   return `
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, 'Segoe UI', sans-serif; font-size: 9.5px; color: #111; }
+
+    /* ── Letterhead header box ── */
+    .ph-box { border: 1px solid #333; margin-bottom: 6px; }
+
+    /* Row 1: 3-col strip */
+    .ph-row1 {
+      display: grid;
+      grid-template-columns: 1fr 1.6fr 1fr;
+      border-bottom: 1px solid #333;
+      min-height: 30px;
+    }
+    .ph-left {
+      padding: 4px 6px;
+      font-size: 8px;
+      line-height: 1.6;
+      border-right: 1px solid #333;
+    }
+    .ph-center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 3px 5px;
+      font-size: 8px;
+      font-weight: 700;
+      border-right: 1px solid #333;
+    }
+    .ph-right {
+      padding: 4px 6px;
+      font-size: 8px;
+      line-height: 1.6;
+      text-align: right;
+    }
+
+    /* Row 2: Firm name band */
+    .ph-firm {
+      text-align: center;
+      padding: 4px 8px 3px;
+      border-bottom: 1px solid #333;
+    }
+    .ph-firm-name {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      line-height: 1.3;
+    }
+    .ph-firm-sub {
+      font-size: 8px;
+      color: #333;
+      margin-top: 1px;
+    }
+
+    /* Row 3: SALES PATTI title */
+    .ph-title {
+      text-align: center;
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      padding: 2px 0;
+      border-bottom: 1px solid #333;
+    }
+
+    /* Row 4: Sold line + Patti No 2-col */
+    .ph-sold {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 4px 7px;
+      font-size: 8.5px;
+      line-height: 1.6;
+    }
+    .ph-sold-left p { margin: 0; }
+    .ph-sold-right { text-align: right; font-size: 8.5px; line-height: 1.6; white-space: nowrap; }
+    .ph-sold-right p { margin: 0; }
+
     .patti-a4 { font-family: Arial, sans-serif; color: #000; font-size: 14px; }
     .patti-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
     .patti-head-left p, .patti-head-right p { margin: 0; line-height: 1.2; }
@@ -1006,20 +1087,60 @@ export function generateSalesPattiPrintHTML(patti: PattiPrintData, options?: Doc
   const addressLine = escapeHtml((patti.sellerAddress || '').trim() || '-');
   const vehicleLine = escapeHtml((patti.vehicleNumber || '').trim() || '-');
 
+  const f = patti.firm;
+
+  // Letterhead strip (3-col + firm band + title) — only when includeHeader is true
+  const letterheadHtml = (printOptions.includeHeader && f)
+    ? (() => {
+        const apmc     = escapeHtml((f.rmcApmcCode || '').trim());
+        const firmName = escapeHtml((f.businessName || '').trim());
+        const about    = escapeHtml((f.category || '').trim());
+        const addr     = escapeHtml([f.address, f.city, f.state, f.pinCode].filter(Boolean).join(', ') || '');
+        const owner    = escapeHtml((f.ownerName || '').trim());
+        const phone    = escapeHtml((f.mobile || '').trim());
+        const email    = escapeHtml((f.email || '').trim());
+        return `
+          <div class="ph-row1">
+            <div class="ph-left">
+              ${apmc ? `<div><strong>APMC Code</strong>&nbsp;:&nbsp;${apmc}</div>` : ''}
+            </div>
+            <div class="ph-center">${about}</div>
+            <div class="ph-right">
+              ${owner ? `<div>${owner}</div>` : ''}
+              ${phone ? `<div>${phone}</div>` : ''}
+              ${email ? `<div>${email}</div>` : ''}
+            </div>
+          </div>
+          ${firmName ? `
+          <div class="ph-firm">
+            <div class="ph-firm-name">${firmName}</div>
+            ${about ? `<div class="ph-firm-sub">${about}</div>` : ''}
+            ${addr ? `<div class="ph-firm-sub">${addr}</div>` : ''}
+          </div>` : ''}
+          <div class="ph-title">SALES PATTI</div>`;
+      })()
+    : '';
+
+  // Sold line + Patti No/Date — always shown
+  const soldSectionHtml = `
+    <div class="ph-sold">
+      <div class="ph-sold-left">
+        <p><strong>${soldLine}</strong></p>
+        <p><strong>${identityLine}</strong></p>
+        <p><strong>${addressLine}</strong></p>
+        <p><strong>Vehicle No : ${vehicleLine}</strong></p>
+      </div>
+      <div class="ph-sold-right">
+        <p><strong>Patti No : ${escapeHtml((patti.pattiNoDisplay ?? patti.pattiId) || '-')}</strong></p>
+        <p><strong>Date : ${dateStr}</strong></p>
+      </div>
+    </div>`;
+
+  const firmHeaderHtml = `<div class="ph-box">${letterheadHtml}${soldSectionHtml}</div>`;
+
   const body = `
     <div class="patti-a4">
-      ${printOptions.includeHeader ? `<div class="patti-head">
-        <div class="patti-head-left">
-          <p style="font-weight:700;">${soldLine}</p>
-          <p style="font-weight:700;">${identityLine}</p>
-          <p style="font-weight:700;">${addressLine}</p>
-          <p style="font-weight:700;">Vehicle No : ${vehicleLine}</p>
-        </div>
-        <div class="patti-head-right">
-          <p style="font-weight:700;">Patti No : ${escapeHtml(patti.pattiId || '-')}</p>
-          <p style="font-weight:700;">Date : ${dateStr}</p>
-        </div>
-      </div>` : ''}
+      ${firmHeaderHtml}
 
       <table class="patti-table">
         <thead>
