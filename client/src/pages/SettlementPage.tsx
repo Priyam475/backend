@@ -377,6 +377,14 @@ function tallyFromPattiDtoClusters(dto: PattiDTO): { lots: number; bids: number;
   return { lots, bids: clusters.length, weighed };
 }
 
+function sumPattiClusterQty(pd: PattiData): number {
+  return pd.rateClusters.reduce((s, c) => s + (Number(c.totalQuantity) || 0), 0);
+}
+
+function sumPattiClusterWeight(pd: PattiData): number {
+  return pd.rateClusters.reduce((s, c) => s + (Number(c.totalWeight) || 0), 0);
+}
+
 /** INR display: always two decimals (en-IN), signed-safe (unlike `roundMoney2` which floors negatives). */
 function formatMoney2Display(n: number): string {
   if (!Number.isFinite(n)) {
@@ -1342,7 +1350,18 @@ const SettlementPage = () => {
     settlementWeighingMergeIntoFreightBySellerId: Record<string, boolean>;
     gunniesAmount: number;
     sellerExpenseRestoreBaselineById: Record<string, SellerExpenseFormState>;
+    /** Captured when entering original view: workspace before snapshot swap (for compare footer). */
+    modifiedFooterMetrics: {
+      grossAmount: number;
+      netPayable: number;
+      totalClusterWeight: number;
+      totalClusterQty: number;
+      payableInvoiced: number;
+      salesPadNetWeightKg: number | null;
+    };
   } | null>(null);
+  /** Expand/collapse for original-snapshot compare footer (Alt+O view). */
+  const [originalCompareFooterExpanded, setOriginalCompareFooterExpanded] = useState(true);
   const settlementDirtyBaselineRef = useRef<string | null>(null);
   /** Latest workspace JSON for deferred dirty baseline sync after save (must match `settlementWorkspaceSnapshot`). */
   const settlementWorkspaceSnapshotRef = useRef<string>('');
@@ -1352,6 +1371,8 @@ const SettlementPage = () => {
     freightInvoiced: 0,
     payableInvoiced: 0,
   });
+  /** Latest vehicle summary for Alt+O stash (declared before `vehicleFormDetails` exists). */
+  const vehicleFormDetailsForOriginalFooterRef = useRef<{ salesPadNetWeightKg: number | null } | null>(null);
   /** Prevents repeated auto-pull overwrites for the same open patti (invoice filter / amount API must not wipe user edits). */
   const lastExpenseAutoPullKeyRef = useRef<string>('');
   const [loadingPattis, setLoadingPattis] = useState(false);
@@ -2188,6 +2209,14 @@ const SettlementPage = () => {
       return;
     }
     const sid = String(pattiDetailDto?.sellerId ?? selectedSeller.sellerId ?? '').trim();
+    const modifiedFooterMetrics = {
+      grossAmount: pattiData.grossAmount,
+      netPayable: pattiData.netPayable,
+      totalClusterWeight: sumPattiClusterWeight(pattiData),
+      totalClusterQty: sumPattiClusterQty(pattiData),
+      payableInvoiced: amountSummaryForExpensePullRef.current.payableInvoiced,
+      salesPadNetWeightKg: vehicleFormDetailsForOriginalFooterRef.current?.salesPadNetWeightKg ?? null,
+    };
     originalReferenceStashRef.current = {
       pattiData: JSON.parse(JSON.stringify(pattiData)) as PattiData,
       sellerExpensesById: JSON.parse(JSON.stringify(sellerExpensesById)) as Record<string, SellerExpenseFormState>,
@@ -2200,6 +2229,7 @@ const SettlementPage = () => {
       settlementWeighingMergeIntoFreightBySellerId: { ...settlementWeighingMergeIntoFreightBySellerId },
       gunniesAmount,
       sellerExpenseRestoreBaselineById: JSON.parse(JSON.stringify(sellerExpenseRestoreBaselineById)),
+      modifiedFooterMetrics,
     };
     const baseDto: PattiDTO = pattiDetailDto
       ? { ...pattiDetailDto }
@@ -3206,6 +3236,8 @@ const SettlementPage = () => {
     getLotDivisor,
   ]);
 
+  vehicleFormDetailsForOriginalFooterRef.current = vehicleFormDetails;
+
   /** All sellers on the same vehicle as the current settlement (arrival scope). */
   const arrivalSellersForPatti = useMemo(() => {
     if (!selectedSeller || !pattiData) return [];
@@ -3331,6 +3363,30 @@ const SettlementPage = () => {
     };
   }, [arrivalSellersForPatti, sellerExpensesById, amountSummaryFromApi, vehicleNetPayableFromPatti, arrivalFreightBaseline]);
   amountSummaryForExpensePullRef.current = amountSummaryDisplay;
+
+  /** Saved patti + Alt+O original snapshot: metrics for fixed compare footer (draft captured in stash at Alt+O). */
+  const originalSavedPattiCompareFooter = useMemo(() => {
+    if (!isOriginalReferenceMode || settlementFormMode !== 'saved' || !pattiData) return null;
+    const stash = originalReferenceStashRef.current;
+    if (!stash?.modifiedFooterMetrics) return null;
+    const mod = stash.modifiedFooterMetrics;
+    const origGross = pattiData.grossAmount;
+    const origQty = sumPattiClusterQty(pattiData);
+    const origWt = sumPattiClusterWeight(pattiData);
+    const origAvgBag = origQty > 0 ? origGross / origQty : 0;
+    const modAvgBag = mod.totalClusterQty > 0 ? mod.grossAmount / mod.totalClusterQty : 0;
+    const grossDelta = mod.grossAmount - origGross;
+    const weightDelta = mod.totalClusterWeight - origWt;
+    return {
+      mod,
+      origGross,
+      origWt,
+      origAvgBag,
+      modAvgBag,
+      grossDelta,
+      weightDelta,
+    };
+  }, [isOriginalReferenceMode, settlementFormMode, pattiData, amountSummaryDisplay.payableInvoiced]);
 
   useEffect(() => {
     if (!selectedSeller || !pattiData) {
@@ -4700,8 +4756,15 @@ const SettlementPage = () => {
             ? 'Saved patti'
             : '';
 
+    const cmpFooter = originalSavedPattiCompareFooter;
+
     return (
-      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <div
+        className={cn(
+          'min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6',
+          cmpFooter && 'pb-44 lg:pb-32',
+        )}
+      >
         <UnsavedChangesDialog />
         {/* Header */}
         {!isDesktop ? (
@@ -6577,6 +6640,172 @@ const SettlementPage = () => {
               </Button>
             </div>
           </motion.div>
+
+          {cmpFooter && (
+            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[90] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] print:hidden">
+              <div
+                className={cn(
+                  'pointer-events-auto w-full max-w-5xl overflow-hidden rounded-t-2xl border border-border/60 bg-card/95 shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md dark:bg-card/90',
+                  !originalCompareFooterExpanded && 'rounded-t-xl',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-2">
+                  <p className="min-w-0 text-xs font-bold text-foreground sm:text-sm">
+                    Original snapshot vs your edits
+                    <span className="ml-1.5 hidden font-normal text-muted-foreground sm:inline">
+                      (Alt+O view — Alt+M to return)
+                    </span>
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1 px-2 text-xs font-semibold"
+                    onClick={() => setOriginalCompareFooterExpanded(e => !e)}
+                    aria-expanded={originalCompareFooterExpanded}
+                  >
+                    {originalCompareFooterExpanded ? (
+                      <>
+                        Collapse <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                      </>
+                    ) : (
+                      <>
+                        Expand <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                      </>
+                    )}
+                  </Button>
+                </div>
+                {originalCompareFooterExpanded && (
+                  <div className="grid max-h-[min(40vh,22rem)] grid-cols-1 gap-3 overflow-y-auto px-3 py-3 sm:grid-cols-3 sm:gap-4 sm:px-4 sm:py-3">
+                    {(() => {
+                      const { mod, origGross, origWt, origAvgBag, modAvgBag, grossDelta, weightDelta } = cmpFooter;
+                      const profitLossClass =
+                        grossDelta < -0.005
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : grossDelta > 0.005
+                            ? 'text-red-600 dark:text-red-400'
+                            : 'text-muted-foreground';
+                      const grossDeltaLabel =
+                        grossDelta < -0.005
+                          ? 'Profit vs snapshot (draft pays less)'
+                          : grossDelta > 0.005
+                            ? 'Loss vs snapshot (draft pays more)'
+                            : 'No gross change vs snapshot';
+                      const weightDeltaText =
+                        Math.abs(weightDelta) < 0.05
+                          ? 'No change'
+                          : `${weightDelta > 0 ? '+' : ''}${weightDelta.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
+                      return (
+                        <>
+                          <div className="flex flex-col gap-3 sm:gap-3.5">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Bill basic amount
+                                <InlineCalcTip
+                                  label="Bill basic amount"
+                                  lines={[
+                                    '₹ Gross auction/settlement total from this original snapshot (sum of rate-cluster amounts).',
+                                    `Snapshot: ${formatRupeeInr(origGross)}`,
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">{formatRupeeInr(origGross)}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Patti basic amount
+                                <InlineCalcTip
+                                  label="Patti basic amount"
+                                  lines={[
+                                    'Invoice-side payable total from the Expenses & Invoice card (Sales Pad / billing), captured when you pressed Alt+O.',
+                                    'Use it next to bill gross to compare settlement vs invoice.',
+                                    `At Alt+O: ${formatRupeeInr(mod.payableInvoiced)} · Now: ${formatRupeeInr(amountSummaryDisplay.payableInvoiced)}`,
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">
+                                {formatRupeeInr(amountSummaryDisplay.payableInvoiced)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-3 sm:gap-3.5">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Rate difference
+                                <InlineCalcTip
+                                  label="Rate difference"
+                                  lines={[
+                                    'Average ₹ per bag: your draft (before Alt+O) vs this original snapshot.',
+                                    `Draft: ${formatMoney2Display(modAvgBag)}/bag · Snapshot: ${formatMoney2Display(origAvgBag)}/bag`,
+                                    'Green / red uses total gross change: draft gross minus snapshot gross (same idea as profit / loss on the bill).',
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">
+                                <span className="text-muted-foreground">Draft </span>
+                                {formatMoney2Display(modAvgBag)}/bag
+                                <span className="text-muted-foreground"> → Snap </span>
+                                {formatMoney2Display(origAvgBag)}/bag
+                              </p>
+                              <p className={cn('text-xs font-semibold tabular-nums', profitLossClass)}>
+                                Δ gross {grossDelta >= 0 ? '+' : '−'}
+                                {formatRupeeInr(Math.abs(grossDelta))} — {grossDeltaLabel}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Arrival weight
+                                <InlineCalcTip
+                                  label="Arrival weight"
+                                  lines={[
+                                    'Vehicle net billable kg from the arrival weighing record (shared for sellers on this vehicle).',
+                                    'Usually unchanged between draft and snapshot.',
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">
+                                {formatOptionalKg(vehicleFormDetails?.arrivalWeightKg ?? null)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-3 sm:gap-3.5">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Patti weight
+                                <InlineCalcTip
+                                  label="Patti weight"
+                                  lines={[
+                                    'Sales Pad net weight (sum of billed kg on settlement lots) — same as “Sales Pad Net Wt” on Vehicle Details.',
+                                    `Captured at Alt+O: ${formatOptionalKg(mod.salesPadNetWeightKg)}`,
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">
+                                {formatOptionalKg(vehicleFormDetails?.salesPadNetWeightKg ?? null)}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Weight difference
+                                <InlineCalcTip
+                                  label="Weight difference"
+                                  lines={[
+                                    'Settlement net weight in your draft (rate-cluster weights) minus this original snapshot total.',
+                                    `Draft total: ${mod.totalClusterWeight.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg · Snapshot: ${origWt.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`,
+                                  ]}
+                                />
+                              </div>
+                              <p className="text-sm font-bold tabular-nums text-foreground">{weightDeltaText}</p>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <Dialog
             open={vehicleExpenseModalOpen}
