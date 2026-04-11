@@ -1350,17 +1350,8 @@ const SettlementPage = () => {
     settlementWeighingMergeIntoFreightBySellerId: Record<string, boolean>;
     gunniesAmount: number;
     sellerExpenseRestoreBaselineById: Record<string, SellerExpenseFormState>;
-    /** Captured when entering original view: workspace before snapshot swap (for compare footer). */
-    modifiedFooterMetrics: {
-      grossAmount: number;
-      netPayable: number;
-      totalClusterWeight: number;
-      totalClusterQty: number;
-      payableInvoiced: number;
-      salesPadNetWeightKg: number | null;
-    };
   } | null>(null);
-  /** Expand/collapse for original-snapshot compare footer (Alt+O view). */
+  /** Expand/collapse for saved-patti workspace vs original compare footer (after Alt+M unlock). */
   const [originalCompareFooterExpanded, setOriginalCompareFooterExpanded] = useState(true);
   const settlementDirtyBaselineRef = useRef<string | null>(null);
   /** Latest workspace JSON for deferred dirty baseline sync after save (must match `settlementWorkspaceSnapshot`). */
@@ -1371,8 +1362,6 @@ const SettlementPage = () => {
     freightInvoiced: 0,
     payableInvoiced: 0,
   });
-  /** Latest vehicle summary for Alt+O stash (declared before `vehicleFormDetails` exists). */
-  const vehicleFormDetailsForOriginalFooterRef = useRef<{ salesPadNetWeightKg: number | null } | null>(null);
   /** Prevents repeated auto-pull overwrites for the same open patti (invoice filter / amount API must not wipe user edits). */
   const lastExpenseAutoPullKeyRef = useRef<string>('');
   const [loadingPattis, setLoadingPattis] = useState(false);
@@ -2199,24 +2188,12 @@ const SettlementPage = () => {
 
   const enterOriginalReferenceMode = useCallback(() => {
     if (!pattiData || !selectedSeller) return;
-    if (isPattiEditLocked) {
-      toast.message('Enable edit (Alt+M) first to view original.');
-      return;
-    }
     const raw = resolveOriginalPayload();
     if (!raw || typeof raw !== 'object') {
       toast.message('No original snapshot for this patti.');
       return;
     }
     const sid = String(pattiDetailDto?.sellerId ?? selectedSeller.sellerId ?? '').trim();
-    const modifiedFooterMetrics = {
-      grossAmount: pattiData.grossAmount,
-      netPayable: pattiData.netPayable,
-      totalClusterWeight: sumPattiClusterWeight(pattiData),
-      totalClusterQty: sumPattiClusterQty(pattiData),
-      payableInvoiced: amountSummaryForExpensePullRef.current.payableInvoiced,
-      salesPadNetWeightKg: vehicleFormDetailsForOriginalFooterRef.current?.salesPadNetWeightKg ?? null,
-    };
     originalReferenceStashRef.current = {
       pattiData: JSON.parse(JSON.stringify(pattiData)) as PattiData,
       sellerExpensesById: JSON.parse(JSON.stringify(sellerExpensesById)) as Record<string, SellerExpenseFormState>,
@@ -2229,7 +2206,6 @@ const SettlementPage = () => {
       settlementWeighingMergeIntoFreightBySellerId: { ...settlementWeighingMergeIntoFreightBySellerId },
       gunniesAmount,
       sellerExpenseRestoreBaselineById: JSON.parse(JSON.stringify(sellerExpenseRestoreBaselineById)),
-      modifiedFooterMetrics,
     };
     const baseDto: PattiDTO = pattiDetailDto
       ? { ...pattiDetailDto }
@@ -2299,7 +2275,6 @@ const SettlementPage = () => {
     settlementWeighingMergeIntoFreightBySellerId,
     gunniesAmount,
     sellerExpenseRestoreBaselineById,
-    isPattiEditLocked,
     extraBidLotsBySellerId,
   ]);
 
@@ -2341,14 +2316,21 @@ const SettlementPage = () => {
 
   const enableSettlementEdit = useCallback(() => {
     if (isOriginalReferenceMode) {
+      const wasLocked = !isLatestEditUnlocked;
       exitOriginalReferenceMode();
+      if (wasLocked) {
+        settlementDirtyBaselineRef.current = null;
+        setSettlementDirtyNonce(n => n + 1);
+        setIsLatestEditUnlocked(true);
+        toast.success('Editing enabled.');
+      }
       return;
     }
     settlementDirtyBaselineRef.current = null;
     setSettlementDirtyNonce(n => n + 1);
     setIsLatestEditUnlocked(true);
     toast.success('Editing enabled.');
-  }, [isOriginalReferenceMode, exitOriginalReferenceMode]);
+  }, [isOriginalReferenceMode, isLatestEditUnlocked, exitOriginalReferenceMode]);
 
   const computePattiSavePayloadForSeller = useCallback(
     (
@@ -2965,13 +2947,13 @@ const SettlementPage = () => {
       if (!e.altKey || (e.key !== 'o' && e.key !== 'O')) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (!selectedSeller || !pattiData || showPrint || isOriginalReferenceMode || isPattiEditLocked) return;
+      if (!selectedSeller || !pattiData || showPrint || isOriginalReferenceMode) return;
       e.preventDefault();
       enterOriginalReferenceMode();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [enterOriginalReferenceMode, isOriginalReferenceMode, isPattiEditLocked, pattiData, selectedSeller, showPrint]);
+  }, [enterOriginalReferenceMode, isOriginalReferenceMode, pattiData, selectedSeller, showPrint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3236,8 +3218,6 @@ const SettlementPage = () => {
     getLotDivisor,
   ]);
 
-  vehicleFormDetailsForOriginalFooterRef.current = vehicleFormDetails;
-
   /** All sellers on the same vehicle as the current settlement (arrival scope). */
   const arrivalSellersForPatti = useMemo(() => {
     if (!selectedSeller || !pattiData) return [];
@@ -3364,29 +3344,73 @@ const SettlementPage = () => {
   }, [arrivalSellersForPatti, sellerExpensesById, amountSummaryFromApi, vehicleNetPayableFromPatti, arrivalFreightBaseline]);
   amountSummaryForExpensePullRef.current = amountSummaryDisplay;
 
-  /** Saved patti + Alt+O original snapshot: metrics for fixed compare footer (draft captured in stash at Alt+O). */
-  const originalSavedPattiCompareFooter = useMemo(() => {
-    if (!isOriginalReferenceMode || settlementFormMode !== 'saved' || !pattiData) return null;
-    const stash = originalReferenceStashRef.current;
-    if (!stash?.modifiedFooterMetrics) return null;
-    const mod = stash.modifiedFooterMetrics;
-    const origGross = pattiData.grossAmount;
-    const origQty = sumPattiClusterQty(pattiData);
-    const origWt = sumPattiClusterWeight(pattiData);
-    const origAvgBag = origQty > 0 ? origGross / origQty : 0;
-    const modAvgBag = mod.totalClusterQty > 0 ? mod.grossAmount / mod.totalClusterQty : 0;
-    const grossDelta = mod.grossAmount - origGross;
-    const weightDelta = mod.totalClusterWeight - origWt;
+  /**
+   * Saved patti, after Enable edit (Alt+M): sticky summary including while viewing original snapshot (Alt+O).
+   * Uses same figures as Vehicle details and Expenses & Invoice where noted.
+   */
+  const savedPattiCompareStickyFooter = useMemo(() => {
+    if (
+      !isLatestEditUnlocked ||
+      settlementFormMode !== 'saved' ||
+      !pattiData ||
+      !selectedSeller
+    ) {
+      return null;
+    }
+    const raw = resolveOriginalPayload();
+    if (!raw || typeof raw !== 'object') return null;
+    const baseDto: PattiDTO = pattiDetailDto
+      ? { ...pattiDetailDto }
+      : ({
+          pattiId: pattiData.pattiId,
+          sellerId: selectedSeller.sellerId,
+          sellerName: pattiData.sellerName || selectedSeller.sellerName,
+          vehicleNumber: selectedSeller.vehicleNumber,
+          fromLocation: selectedSeller.fromLocation,
+          sellerSerialNo: selectedSeller.sellerSerialNo,
+          rateClusters: pattiData.rateClusters,
+          grossAmount: pattiData.grossAmount,
+          deductions: pattiData.deductions,
+          totalDeductions: pattiData.totalDeductions,
+          netPayable: pattiData.netPayable,
+          createdAt: pattiData.createdAt,
+          useAverageWeight: pattiData.useAverageWeight,
+        } as PattiDTO);
+    const merged = {
+      ...baseDto,
+      ...raw,
+      pattiId: baseDto.pattiId,
+      sellerId: baseDto.sellerId,
+    } as PattiDTO;
+    const origPd = mapPattiDTOToPattiData(merged);
+    const billOriginalAmt = origPd.grossAmount;
+    const arrivalWeightKg = vehicleFormDetails?.arrivalWeightKg ?? null;
+    const fromSalesAuction = auctionAmountBaseline;
+    const pattiNetWtKg = vehicleFormDetails?.pattiNetWeightKg ?? null;
+    const rateDiff =
+      Number.isFinite(billOriginalAmt) && Number.isFinite(fromSalesAuction)
+        ? billOriginalAmt - fromSalesAuction
+        : null;
+    const weightDiff =
+      arrivalWeightKg != null && pattiNetWtKg != null ? arrivalWeightKg - pattiNetWtKg : null;
     return {
-      mod,
-      origGross,
-      origWt,
-      origAvgBag,
-      modAvgBag,
-      grossDelta,
-      weightDelta,
+      billOriginalAmt,
+      arrivalWeightKg,
+      fromSalesAuction,
+      pattiNetWtKg,
+      rateDiff,
+      weightDiff,
     };
-  }, [isOriginalReferenceMode, settlementFormMode, pattiData, amountSummaryDisplay.payableInvoiced]);
+  }, [
+    isLatestEditUnlocked,
+    settlementFormMode,
+    pattiData,
+    selectedSeller,
+    resolveOriginalPayload,
+    pattiDetailDto,
+    vehicleFormDetails,
+    auctionAmountBaseline,
+  ]);
 
   useEffect(() => {
     if (!selectedSeller || !pattiData) {
@@ -4756,7 +4780,7 @@ const SettlementPage = () => {
             ? 'Saved patti'
             : '';
 
-    const cmpFooter = originalSavedPattiCompareFooter;
+    const cmpFooter = savedPattiCompareStickyFooter;
 
     return (
       <div
@@ -6579,7 +6603,7 @@ const SettlementPage = () => {
                   Enable Edit (Alt+M)
                 </Button>
               )}
-              {resolveOriginalPayload() != null && !isOriginalReferenceMode && !isPattiEditLocked && (
+              {resolveOriginalPayload() != null && !isOriginalReferenceMode && (
                 <Button
                   type="button"
                   variant="outline"
@@ -6642,7 +6666,12 @@ const SettlementPage = () => {
           </motion.div>
 
           {cmpFooter && (
-            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[90] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] print:hidden">
+            <div
+              className={cn(
+                'pointer-events-none fixed bottom-0 right-0 z-[90] flex justify-center px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] print:hidden',
+                isDesktop ? 'left-[260px]' : 'left-0',
+              )}
+            >
               <div
                 className={cn(
                   'pointer-events-auto w-full max-w-5xl overflow-hidden rounded-t-2xl border border-border/60 bg-card/95 shadow-[0_-8px_30px_-12px_rgba(0,0,0,0.25)] backdrop-blur-md dark:bg-card/90',
@@ -6651,9 +6680,9 @@ const SettlementPage = () => {
               >
                 <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/40 px-3 py-2">
                   <p className="min-w-0 text-xs font-bold text-foreground sm:text-sm">
-                    Original snapshot vs your edits
+                    Bill vs auction &amp; weights
                     <span className="ml-1.5 hidden font-normal text-muted-foreground sm:inline">
-                      (Alt+O view — Alt+M to return)
+                      (after Alt+M; stays on screen during Alt+O)
                     </span>
                   </p>
                   <Button
@@ -6676,126 +6705,121 @@ const SettlementPage = () => {
                   </Button>
                 </div>
                 {originalCompareFooterExpanded && (
-                  <div className="grid max-h-[min(40vh,22rem)] grid-cols-1 gap-3 overflow-y-auto px-3 py-3 sm:grid-cols-3 sm:gap-4 sm:px-4 sm:py-3">
+                  <div className="grid max-h-[min(32vh,18rem)] grid-cols-1 gap-2.5 overflow-y-auto px-3 py-2.5 sm:grid-cols-3 sm:gap-3 sm:px-4 sm:py-3">
                     {(() => {
-                      const { mod, origGross, origWt, origAvgBag, modAvgBag, grossDelta, weightDelta } = cmpFooter;
-                      const profitLossClass =
-                        grossDelta < -0.005
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : grossDelta > 0.005
-                            ? 'text-red-600 dark:text-red-400'
-                            : 'text-muted-foreground';
-                      const grossDeltaLabel =
-                        grossDelta < -0.005
-                          ? 'Profit vs snapshot (draft pays less)'
-                          : grossDelta > 0.005
-                            ? 'Loss vs snapshot (draft pays more)'
-                            : 'No gross change vs snapshot';
-                      const weightDeltaText =
-                        Math.abs(weightDelta) < 0.05
-                          ? 'No change'
-                          : `${weightDelta > 0 ? '+' : ''}${weightDelta.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
+                      const { billOriginalAmt, arrivalWeightKg, fromSalesAuction, pattiNetWtKg, rateDiff, weightDiff } =
+                        cmpFooter;
+                      const signedMoneyClass = (d: number | null, eps = 0.005) =>
+                        d == null || !Number.isFinite(d)
+                          ? 'text-muted-foreground'
+                          : d > eps
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : d < -eps
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-muted-foreground';
+                      const signedKgClass = (d: number | null, eps = 0.05) => signedMoneyClass(d, eps);
+                      const rateDiffText =
+                        rateDiff == null || !Number.isFinite(rateDiff)
+                          ? '—'
+                          : `${rateDiff >= 0 ? '+' : '−'}${formatRupeeInr(Math.abs(rateDiff))}`;
+                      const weightDiffText =
+                        weightDiff == null || !Number.isFinite(weightDiff)
+                          ? '—'
+                          : Math.abs(weightDiff) < 0.05
+                            ? '0 kg'
+                            : `${weightDiff > 0 ? '+' : '−'}${Math.abs(weightDiff).toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
                       return (
                         <>
-                          <div className="flex flex-col gap-3 sm:gap-3.5">
-                            <div className="space-y-1">
+                          <div className="flex flex-col gap-2.5 sm:gap-3">
+                            <div className="space-y-0.5">
                               <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Bill basic amount
+                                Bill Original Amt
                                 <InlineCalcTip
-                                  label="Bill basic amount"
+                                  label="Bill Original Amt"
                                   lines={[
-                                    '₹ Gross auction/settlement total from this original snapshot (sum of rate-cluster amounts).',
-                                    `Snapshot: ${formatRupeeInr(origGross)}`,
-                                  ]}
-                                />
-                              </div>
-                              <p className="text-sm font-bold tabular-nums text-foreground">{formatRupeeInr(origGross)}</p>
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Patti basic amount
-                                <InlineCalcTip
-                                  label="Patti basic amount"
-                                  lines={[
-                                    'Invoice-side payable total from the Expenses & Invoice card (Sales Pad / billing), captured when you pressed Alt+O.',
-                                    'Use it next to bill gross to compare settlement vs invoice.',
-                                    `At Alt+O: ${formatRupeeInr(mod.payableInvoiced)} · Now: ${formatRupeeInr(amountSummaryDisplay.payableInvoiced)}`,
+                                    'Gross settlement total from the first snapshot we stored for this saved patti.',
                                   ]}
                                 />
                               </div>
                               <p className="text-sm font-bold tabular-nums text-foreground">
-                                {formatRupeeInr(amountSummaryDisplay.payableInvoiced)}
+                                {formatRupeeInr(billOriginalAmt)}
                               </p>
                             </div>
-                          </div>
-                          <div className="flex flex-col gap-3 sm:gap-3.5">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Rate difference
-                                <InlineCalcTip
-                                  label="Rate difference"
-                                  lines={[
-                                    'Average ₹ per bag: your draft (before Alt+O) vs this original snapshot.',
-                                    `Draft: ${formatMoney2Display(modAvgBag)}/bag · Snapshot: ${formatMoney2Display(origAvgBag)}/bag`,
-                                    'Green / red uses total gross change: draft gross minus snapshot gross (same idea as profit / loss on the bill).',
-                                  ]}
-                                />
-                              </div>
-                              <p className="text-sm font-bold tabular-nums text-foreground">
-                                <span className="text-muted-foreground">Draft </span>
-                                {formatMoney2Display(modAvgBag)}/bag
-                                <span className="text-muted-foreground"> → Snap </span>
-                                {formatMoney2Display(origAvgBag)}/bag
-                              </p>
-                              <p className={cn('text-xs font-semibold tabular-nums', profitLossClass)}>
-                                Δ gross {grossDelta >= 0 ? '+' : '−'}
-                                {formatRupeeInr(Math.abs(grossDelta))} — {grossDeltaLabel}
-                              </p>
-                            </div>
-                            <div className="space-y-1">
+                            <div className="space-y-0.5">
                               <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Arrival weight
                                 <InlineCalcTip
                                   label="Arrival weight"
                                   lines={[
-                                    'Vehicle net billable kg from the arrival weighing record (shared for sellers on this vehicle).',
-                                    'Usually unchanged between draft and snapshot.',
+                                    'Net billable kg from the arrival record — same value as Arrival Weight on Vehicle details.',
                                   ]}
                                 />
                               </div>
                               <p className="text-sm font-bold tabular-nums text-foreground">
-                                {formatOptionalKg(vehicleFormDetails?.arrivalWeightKg ?? null)}
+                                {formatOptionalKg(arrivalWeightKg)}
                               </p>
                             </div>
                           </div>
-                          <div className="flex flex-col gap-3 sm:gap-3.5">
-                            <div className="space-y-1">
+                          <div className="flex flex-col gap-2.5 sm:gap-3">
+                            <div className="space-y-0.5">
                               <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Patti weight
+                                From Sales Auction
                                 <InlineCalcTip
-                                  label="Patti weight"
+                                  label="From Sales Auction"
                                   lines={[
-                                    'Sales Pad net weight (sum of billed kg on settlement lots) — same as “Sales Pad Net Wt” on Vehicle Details.',
-                                    `Captured at Alt+O: ${formatOptionalKg(mod.salesPadNetWeightKg)}`,
+                                    'Same total as “From Sales Auction” on the Expenses & Invoice card (sales lots on this arrival).',
                                   ]}
                                 />
                               </div>
                               <p className="text-sm font-bold tabular-nums text-foreground">
-                                {formatOptionalKg(vehicleFormDetails?.salesPadNetWeightKg ?? null)}
+                                {formatRupeeInr(fromSalesAuction)}
                               </p>
                             </div>
-                            <div className="space-y-1">
+                            <div className="space-y-0.5">
                               <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                Weight difference
+                                Patti Net Wt
                                 <InlineCalcTip
-                                  label="Weight difference"
+                                  label="Patti Net Wt"
                                   lines={[
-                                    'Settlement net weight in your draft (rate-cluster weights) minus this original snapshot total.',
-                                    `Draft total: ${mod.totalClusterWeight.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg · Snapshot: ${origWt.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`,
+                                    'Same as Patti Net Wt on Vehicle details (rate-cluster weights for this scope).',
                                   ]}
                                 />
                               </div>
-                              <p className="text-sm font-bold tabular-nums text-foreground">{weightDeltaText}</p>
+                              <p className="text-sm font-bold tabular-nums text-foreground">
+                                {formatOptionalKg(pattiNetWtKg)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2.5 sm:gap-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Rate Difference
+                                <InlineCalcTip
+                                  label="Rate Difference"
+                                  lines={[
+                                    'Bill Original Amt − From Sales Auction.',
+                                    'Green when positive, red when negative.',
+                                  ]}
+                                />
+                              </div>
+                              <p className={cn('text-sm font-bold tabular-nums', signedMoneyClass(rateDiff))}>
+                                {rateDiffText}
+                              </p>
+                            </div>
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Weight Difference
+                                <InlineCalcTip
+                                  label="Weight Difference"
+                                  lines={[
+                                    'Arrival weight − Patti Net Wt.',
+                                    'Green when positive, red when negative.',
+                                  ]}
+                                />
+                              </div>
+                              <p className={cn('text-sm font-bold tabular-nums', signedKgClass(weightDiff))}>
+                                {weightDiffText}
+                              </p>
                             </div>
                           </div>
                         </>
