@@ -154,7 +154,6 @@ public class CacheConfiguration {
             createCache(cm, com.mercotrace.domain.Patti.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.PattiRateCluster.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.PattiDeduction.class.getName(), jcacheConfiguration);
-            createCache(cm, com.mercotrace.domain.PattiVersion.class.getName(), jcacheConfiguration);
             // Sales Bill (Billing)
             createCache(cm, com.mercotrace.domain.SalesBill.class.getName(), jcacheConfiguration);
             createCache(cm, com.mercotrace.domain.SalesBillCommodityGroup.class.getName(), jcacheConfiguration);

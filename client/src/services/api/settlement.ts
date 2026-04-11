@@ -18,14 +18,6 @@ export interface DeductionItemDTO {
   autoPulled: boolean;
 }
 
-/** Saved snapshot for audit (same idea as Billing bill versions). */
-export interface PattiVersionDTO {
-  version: number;
-  savedAt?: string;
-  /** Prior patti body JSON (rate clusters, deductions, amounts, etc.) */
-  data?: Record<string, unknown>;
-}
-
 export interface PattiDTO {
   id?: number;
   pattiId: string;
@@ -47,8 +39,8 @@ export interface PattiDTO {
   inProgress?: boolean;
   /** Optional JSON: per-seller lot overrides and removed lot ids (see SettlementPage extension v1). */
   extensionJson?: string;
-  /** Populated on GET by id after at least one update (snapshots from previous saves). */
-  versions?: PattiVersionDTO[];
+  /** Parsed first-open snapshot (from original_snapshot_json). */
+  originalData?: Record<string, unknown>;
 }
 
 export interface PattiSaveRequest {
@@ -64,6 +56,8 @@ export interface PattiSaveRequest {
   useAverageWeight?: boolean;
   inProgress?: boolean;
   extensionJson?: string;
+  /** Set on first create/update when server has no original snapshot yet (JSON string of patti body). */
+  originalSnapshotJson?: string;
 }
 
 export interface SettlementEntryDTO {

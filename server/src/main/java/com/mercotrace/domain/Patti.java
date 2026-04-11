@@ -62,9 +62,12 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     private Boolean inProgress = false;
 
     /** Optional JSON: per-lot sales report overrides (weight, rate) and removed lot ids (frontend v1 schema). */
-    @Lob
-    @Column(name = "extension_json")
+    @Column(name = "extension_json", columnDefinition = "TEXT")
     private String extensionJson;
+
+    /** Immutable snapshot JSON (first-open baseline) for Alt+O reference; set once. */
+    @Column(name = "original_snapshot_json", columnDefinition = "TEXT")
+    private String originalSnapshotJson;
 
     @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("rate DESC")
@@ -73,10 +76,6 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
     @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC, id ASC")
     private List<PattiDeduction> deductions = new ArrayList<>();
-
-    @OneToMany(mappedBy = "patti", cascade = CascadeType.ALL, orphanRemoval = true)
-    @OrderBy("versionNumber ASC")
-    private List<PattiVersion> versions = new ArrayList<>();
 
     @Override
     public Long getId() {
@@ -199,11 +198,11 @@ public class Patti extends AbstractAuditingEntity<Long> implements Serializable 
         this.deductions = deductions;
     }
 
-    public List<PattiVersion> getVersions() {
-        return versions;
+    public String getOriginalSnapshotJson() {
+        return originalSnapshotJson;
     }
 
-    public void setVersions(List<PattiVersion> versions) {
-        this.versions = versions;
+    public void setOriginalSnapshotJson(String originalSnapshotJson) {
+        this.originalSnapshotJson = originalSnapshotJson;
     }
 }

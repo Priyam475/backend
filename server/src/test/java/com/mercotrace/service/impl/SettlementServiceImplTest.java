@@ -225,7 +225,7 @@ class SettlementServiceImplTest {
         Patti other = new Patti();
         other.setId(99L);
         other.setTraderId(999L);
-        when(pattiRepository.findByIdWithVersions(99L)).thenReturn(Optional.of(other));
+        when(pattiRepository.findById(99L)).thenReturn(Optional.of(other));
 
         assertThat(service.getPattiById(99L)).isEmpty();
     }

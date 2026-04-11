@@ -26,14 +26,15 @@ import com.mercotrace.service.ContactService;
 import com.mercotrace.service.SettlementService;
 import com.mercotrace.service.TraderContextService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.mercotrace.service.dto.AuctionResultDTO;
 import com.mercotrace.service.dto.AuctionResultEntryDTO;
 import com.mercotrace.service.dto.SettlementDTOs;
 import com.mercotrace.service.dto.SettlementDTOs.*;
 import java.math.BigDecimal;
 import java.math.MathContext;
-import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -330,6 +331,7 @@ public class SettlementServiceImpl implements SettlementService {
         entity.setExtensionJson(blankToNull(request.getExtensionJson()));
         entity = pattiRepository.save(entity);
         mapRequestDeductionsAndClustersToEntity(request, entity);
+        applyOriginalSnapshotIfEmpty(entity, request.getOriginalSnapshotJson());
         pattiRepository.save(entity);
         return toPattiDTO(pattiRepository.findById(entity.getId()).orElseThrow());
     }
@@ -388,6 +390,31 @@ public class SettlementServiceImpl implements SettlementService {
             return null;
         }
         return s;
+    }
+
+    /** Persist original snapshot once when the column is still empty. */
+    private void applyOriginalSnapshotIfEmpty(Patti patti, String fromRequest) {
+        if (patti.getOriginalSnapshotJson() != null && !patti.getOriginalSnapshotJson().isBlank()) {
+            return;
+        }
+        if (fromRequest == null || fromRequest.isBlank()) {
+            return;
+        }
+        patti.setOriginalSnapshotJson(sanitizeOriginalSnapshotJsonForStorage(fromRequest.trim()));
+    }
+
+    /** Drop legacy keys (e.g. versions[]) so JDBC maps TEXT as a single string field reliably. */
+    private String sanitizeOriginalSnapshotJsonForStorage(String raw) {
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            if (node instanceof ObjectNode obj) {
+                obj.remove("versions");
+                return objectMapper.writeValueAsString(obj);
+            }
+        } catch (JsonProcessingException e) {
+            LOG.warn("Could not sanitize original snapshot JSON, storing as-is: {}", e.getMessage());
+        }
+        return raw;
     }
 
     @Override
@@ -452,7 +479,7 @@ public class SettlementServiceImpl implements SettlementService {
     public Optional<PattiDTO> getPattiById(Long id) {
         Long traderId = traderContextService.getCurrentTraderId();
         return pattiRepository
-            .findByIdWithVersions(id)
+            .findById(id)
             .filter(p -> traderId.equals(p.getTraderId()))
             .map(this::toPattiDTO);
     }
@@ -471,24 +498,12 @@ public class SettlementServiceImpl implements SettlementService {
     @Transactional(readOnly = false)
     public Optional<PattiDTO> updatePatti(Long id, PattiSaveRequest request) {
         Long traderId = traderContextService.getCurrentTraderId();
-        Optional<Patti> opt = pattiRepository.findByIdWithVersions(id).filter(p -> traderId.equals(p.getTraderId()));
+        Optional<Patti> opt = pattiRepository.findById(id).filter(p -> traderId.equals(p.getTraderId()));
         if (opt.isEmpty()) {
             return Optional.empty();
         }
         Patti patti = opt.get();
-        try {
-            PattiDTO snapBody = toPattiDTO(patti);
-            snapBody.setVersions(new ArrayList<>());
-            String snapshotJson = objectMapper.writeValueAsString(snapBody);
-            PattiVersion version = new PattiVersion();
-            version.setPatti(patti);
-            version.setVersionNumber(patti.getVersions().size() + 1);
-            version.setSavedAt(Instant.now());
-            version.setSnapshotJson(snapshotJson);
-            patti.getVersions().add(version);
-        } catch (JsonProcessingException e) {
-            LOG.warn("Could not serialize patti snapshot for version: {}", e.getMessage());
-        }
+        applyOriginalSnapshotIfEmpty(patti, request.getOriginalSnapshotJson());
         patti.setSellerName(request.getSellerName());
         patti.setGrossAmount(request.getGrossAmount());
         patti.setTotalDeductions(request.getTotalDeductions());
@@ -500,7 +515,7 @@ public class SettlementServiceImpl implements SettlementService {
         patti.getDeductions().clear();
         mapRequestDeductionsAndClustersToEntity(request, patti);
         pattiRepository.save(patti);
-        return pattiRepository.findByIdWithVersions(id).map(this::toPattiDTO);
+        return pattiRepository.findById(id).map(this::toPattiDTO);
     }
 
     @Override
@@ -1223,19 +1238,12 @@ public class SettlementServiceImpl implements SettlementService {
             dd.setAutoPulled(d.getAutoPulled());
             dto.getDeductions().add(dd);
         }
-        if (e.getVersions() != null) {
-            for (PattiVersion pv : e.getVersions()) {
-                SettlementDTOs.PattiVersionDTO vd = new SettlementDTOs.PattiVersionDTO();
-                vd.setVersion(pv.getVersionNumber());
-                vd.setSavedAt(pv.getSavedAt() != null ? pv.getSavedAt().toString() : null);
-                if (pv.getSnapshotJson() != null && !pv.getSnapshotJson().isBlank()) {
-                    try {
-                        vd.setData(objectMapper.readValue(pv.getSnapshotJson(), java.util.Map.class));
-                    } catch (JsonProcessingException ex) {
-                        LOG.warn("Could not parse patti version snapshot: {}", ex.getMessage());
-                    }
-                }
-                dto.getVersions().add(vd);
+        String origJson = e.getOriginalSnapshotJson();
+        if (origJson != null && !origJson.isBlank()) {
+            try {
+                dto.setOriginalData(objectMapper.readValue(origJson, java.util.Map.class));
+            } catch (JsonProcessingException ex) {
+                LOG.warn("Could not parse patti original snapshot: {}", ex.getMessage());
             }
         }
         return dto;

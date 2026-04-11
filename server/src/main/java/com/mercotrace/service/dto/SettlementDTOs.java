@@ -60,40 +60,6 @@ public final class SettlementDTOs {
         public void setAutoPulled(Boolean autoPulled) { this.autoPulled = autoPulled; }
     }
 
-    /** Version snapshot for Sales Patti (audit). Aligned with Billing BillVersionDTO. */
-    public static class PattiVersionDTO implements Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        private Integer version;
-        private String savedAt;
-        private Object data;
-
-        public Integer getVersion() {
-            return version;
-        }
-
-        public void setVersion(Integer version) {
-            this.version = version;
-        }
-
-        public String getSavedAt() {
-            return savedAt;
-        }
-
-        public void setSavedAt(String savedAt) {
-            this.savedAt = savedAt;
-        }
-
-        public Object getData() {
-            return data;
-        }
-
-        public void setData(Object data) {
-            this.data = data;
-        }
-    }
-
     /** Sales Patti response (matches frontend PattiData). */
     public static class PattiDTO implements Serializable {
 
@@ -121,7 +87,8 @@ public final class SettlementDTOs {
         /** Optional JSON blob (per-lot overrides, removed lots) — see frontend schema. */
         @JsonProperty("extensionJson")
         private String extensionJson;
-        private List<PattiVersionDTO> versions = new ArrayList<>();
+        /** Parsed from original_snapshot_json (immutable first-open snapshot). */
+        private Object originalData;
 
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
@@ -161,8 +128,8 @@ public final class SettlementDTOs {
         public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
         public String getExtensionJson() { return extensionJson; }
         public void setExtensionJson(String extensionJson) { this.extensionJson = extensionJson; }
-        public List<PattiVersionDTO> getVersions() { return versions; }
-        public void setVersions(List<PattiVersionDTO> versions) { this.versions = versions != null ? versions : new ArrayList<>(); }
+        public Object getOriginalData() { return originalData; }
+        public void setOriginalData(Object originalData) { this.originalData = originalData; }
     }
 
     /** Request to create or update a patti (frontend sends full PattiData-like payload). */
@@ -191,6 +158,9 @@ public final class SettlementDTOs {
         private Boolean inProgress;
         @JsonProperty("extensionJson")
         private String extensionJson;
+        /** When DB original_snapshot_json is null, set once from this JSON string (create or first update). */
+        @JsonProperty("originalSnapshotJson")
+        private String originalSnapshotJson;
 
         public String getSellerId() { return sellerId; }
         public void setSellerId(String sellerId) { this.sellerId = sellerId; }
@@ -216,6 +186,8 @@ public final class SettlementDTOs {
         public void setInProgress(Boolean inProgress) { this.inProgress = inProgress; }
         public String getExtensionJson() { return extensionJson; }
         public void setExtensionJson(String extensionJson) { this.extensionJson = extensionJson; }
+        public String getOriginalSnapshotJson() { return originalSnapshotJson; }
+        public void setOriginalSnapshotJson(String originalSnapshotJson) { this.originalSnapshotJson = originalSnapshotJson; }
     }
 
     /** Seller entry for settlement list (one per seller with lots/entries summary). */

@@ -1169,11 +1169,25 @@ const SettlementPage = () => {
   /** DB row id per settlement seller — supports multi-seller saves without overwriting another seller's patti. */
   const [existingPattiIdBySellerId, setExistingPattiIdBySellerId] = useState<Record<string, number>>({});
   const [savedPattis, setSavedPattis] = useState<PattiDTO[]>([]);
-  /** Full DTO from API (includes version history after updates). */
+  /** Full DTO from API. */
   const [pattiDetailDto, setPattiDetailDto] = useState<PattiDTO | null>(null);
-  const [selectedPattiVersion, setSelectedPattiVersion] = useState<'latest' | number>('latest');
   const [isLatestEditUnlocked, setIsLatestEditUnlocked] = useState(true);
-  const latestPattiDataSnapshotRef = useRef<PattiData | null>(null);
+  /** Alt+O: show immutable original snapshot (read-only). */
+  const [isOriginalReferenceMode, setIsOriginalReferenceMode] = useState(false);
+  /** Per seller: JSON string of first-open patti body for create / one-time server original. */
+  const sessionOriginalSnapshotJsonBySellerIdRef = useRef<Record<string, string>>({});
+  const originalReferenceStashRef = useRef<{
+    pattiData: PattiData;
+    sellerExpensesById: Record<string, SellerExpenseFormState>;
+    lotSalesOverridesBySellerId: Record<string, Record<string, LotSalesOverride>>;
+    removedLotsBySellerId: Record<string, string[]>;
+    sellerFormById: Record<string, SellerRegFormState>;
+    coolieMode: 'FLAT' | 'RECALCULATED';
+    settlementWeighingEnabledBySellerId: Record<string, boolean>;
+    settlementWeighingMergeIntoFreightBySellerId: Record<string, boolean>;
+    gunniesAmount: number;
+    sellerExpenseRestoreBaselineById: Record<string, SellerExpenseFormState>;
+  } | null>(null);
   const settlementDirtyBaselineRef = useRef<string | null>(null);
   /** Latest workspace JSON for deferred dirty baseline sync after save (must match `settlementWorkspaceSnapshot`). */
   const settlementWorkspaceSnapshotRef = useRef<string>('');
@@ -1610,8 +1624,7 @@ const SettlementPage = () => {
   // Overrides: pass when toggling to avoid stale closure (React state updates are async).
   const generatePatti = useCallback(async (seller: SellerSettlement, overrides?: { coolieMode?: 'FLAT' | 'RECALCULATED'; gunniesAmount?: number; arrivalSellerIds?: string[] }) => {
     setPattiDetailDto(null);
-    setSelectedPattiVersion('latest');
-    latestPattiDataSnapshotRef.current = null;
+    setIsOriginalReferenceMode(false);
     settlementDirtyBaselineRef.current = null;
     lastExpenseAutoPullKeyRef.current = '';
     setExistingPattiIdBySellerId({});
@@ -1702,6 +1715,39 @@ const SettlementPage = () => {
     setDraftMainPattiNo(baseNo);
     setDraftPattiNoBySellerId(draftBySeller);
 
+    for (const s of scopedSellersOrdered) {
+      const sid = String(s.sellerId);
+      if (sessionOriginalSnapshotJsonBySellerIdRef.current[sid]) continue;
+      const pid = draftBySeller[sid] ?? '';
+      const rc = buildRateClustersFromSellerLots(s, new Set(), undefined, getLotDivisor);
+      const ga = rc.reduce((sum, c) => sum + c.amount, 0);
+      const exp: SellerExpenseFormState = {
+        ...defaultSellerExpenses(),
+        gunnies: overrides?.gunniesAmount ?? gunniesAmount,
+      };
+      const ded = buildDeductionItemsFromSellerExpenses(
+        exp,
+        effectiveCoolieMode,
+        isWeighingEnabledForSeller(sid),
+        isWeighingMergedIntoFreight(sid)
+      );
+      const td = ded.reduce((x, d) => x + d.amount, 0);
+      const ext = buildPattiExtensionJsonForSeller(sid, {}, {});
+      const body: Record<string, unknown> = {
+        pattiId: pid,
+        sellerId: sid,
+        sellerName: s.sellerName,
+        rateClusters: rc,
+        grossAmount: ga,
+        deductions: ded,
+        totalDeductions: td,
+        netPayable: ga - td,
+        useAverageWeight: false,
+      };
+      if (ext !== undefined) body.extensionJson = ext;
+      sessionOriginalSnapshotJsonBySellerIdRef.current[sid] = JSON.stringify(body);
+    }
+
     const initialPattiData: PattiData = {
       pattiId: draftBySeller[String(seller.sellerId)] ?? '',
       sellerName: seller.sellerName,
@@ -1746,9 +1792,8 @@ const SettlementPage = () => {
       }
       setPattiData(data);
       setPattiDetailDto(dto);
-      setSelectedPattiVersion('latest');
+      setIsOriginalReferenceMode(false);
       setIsLatestEditUnlocked(false);
-      latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(data)) as PattiData;
       const idMap: Record<string, number> = {};
       const editSid = String(dto.sellerId ?? '').trim();
       if (editSid && (dto.id ?? id) != null) {
@@ -1868,33 +1913,96 @@ const SettlementPage = () => {
     toast.success('In-progress patti restored.');
   }, [openPattiForEdit]);
 
-  /** Billing-style: view historical snapshot or return to latest working copy. */
-  const applyPattiVersionSelection = useCallback((sel: 'latest' | number) => {
-    setSelectedPattiVersion(sel);
-    if (sel === 'latest') {
-      const snap = latestPattiDataSnapshotRef.current;
-      if (snap) {
-        settlementDirtyBaselineRef.current = null;
-        setPattiData(JSON.parse(JSON.stringify(snap)) as PattiData);
+  const isPattiEditLocked = !!selectedSeller && !!pattiData && !isLatestEditUnlocked;
+  const isSettlementFormReadOnly = isPattiEditLocked || isOriginalReferenceMode;
+
+  const exitOriginalReferenceMode = useCallback(() => {
+    const st = originalReferenceStashRef.current;
+    if (!st) {
+      setIsOriginalReferenceMode(false);
+      return;
+    }
+    originalReferenceStashRef.current = null;
+    settlementDirtyBaselineRef.current = null;
+    setPattiData(st.pattiData);
+    setSellerExpensesById(st.sellerExpensesById);
+    setLotSalesOverridesBySellerId(st.lotSalesOverridesBySellerId);
+    setRemovedLotsBySellerId(st.removedLotsBySellerId);
+    setSellerFormById(st.sellerFormById);
+    setCoolieMode(st.coolieMode);
+    setSettlementWeighingEnabledBySellerId(st.settlementWeighingEnabledBySellerId);
+    setSettlementWeighingMergeIntoFreightBySellerId(st.settlementWeighingMergeIntoFreightBySellerId);
+    setGunniesAmount(st.gunniesAmount);
+    setSellerExpenseRestoreBaselineById(st.sellerExpenseRestoreBaselineById);
+    setIsOriginalReferenceMode(false);
+  }, []);
+
+  const resolveOriginalPayload = useCallback((): Record<string, unknown> | null => {
+    const od = pattiDetailDto?.originalData;
+    if (od && typeof od === 'object' && !Array.isArray(od)) {
+      return od as Record<string, unknown>;
+    }
+    const sid = String(selectedSeller?.sellerId ?? '').trim();
+    if (sid && sessionOriginalSnapshotJsonBySellerIdRef.current[sid]) {
+      try {
+        return JSON.parse(sessionOriginalSnapshotJsonBySellerIdRef.current[sid]) as Record<string, unknown>;
+      } catch {
+        return null;
       }
+    }
+    return null;
+  }, [pattiDetailDto, selectedSeller?.sellerId]);
+
+  const enterOriginalReferenceMode = useCallback(() => {
+    if (!pattiData || !selectedSeller) return;
+    if (isPattiEditLocked) {
+      toast.message('Enable edit (Alt+M) first to view original.');
       return;
     }
-    setIsLatestEditUnlocked(false);
-    if (!pattiDetailDto?.versions?.length) {
-      toast.error(`Version v${sel} not available`);
-      return;
-    }
-    const row = pattiDetailDto.versions.find(v => Number(v.version) === Number(sel));
-    const raw = row?.data as Partial<PattiDTO> | undefined;
+    const raw = resolveOriginalPayload();
     if (!raw || typeof raw !== 'object') {
-      toast.error(`Version v${sel} data not available`);
+      toast.message('No original snapshot for this patti.');
       return;
     }
-    const merged = { ...pattiDetailDto, ...raw, pattiId: pattiDetailDto.pattiId, sellerId: pattiDetailDto.sellerId } as PattiDTO;
+    const sid = String(pattiDetailDto?.sellerId ?? selectedSeller.sellerId ?? '').trim();
+    originalReferenceStashRef.current = {
+      pattiData: JSON.parse(JSON.stringify(pattiData)) as PattiData,
+      sellerExpensesById: JSON.parse(JSON.stringify(sellerExpensesById)) as Record<string, SellerExpenseFormState>,
+      lotSalesOverridesBySellerId: JSON.parse(JSON.stringify(lotSalesOverridesBySellerId)),
+      removedLotsBySellerId: JSON.parse(JSON.stringify(removedLotsBySellerId)),
+      sellerFormById: JSON.parse(JSON.stringify(sellerFormById)),
+      coolieMode,
+      settlementWeighingEnabledBySellerId: { ...settlementWeighingEnabledBySellerId },
+      settlementWeighingMergeIntoFreightBySellerId: { ...settlementWeighingMergeIntoFreightBySellerId },
+      gunniesAmount,
+      sellerExpenseRestoreBaselineById: JSON.parse(JSON.stringify(sellerExpenseRestoreBaselineById)),
+    };
+    const baseDto: PattiDTO = pattiDetailDto
+      ? { ...pattiDetailDto }
+      : ({
+          pattiId: pattiData.pattiId,
+          sellerId: selectedSeller.sellerId,
+          sellerName: pattiData.sellerName || selectedSeller.sellerName,
+          vehicleNumber: selectedSeller.vehicleNumber,
+          fromLocation: selectedSeller.fromLocation,
+          sellerSerialNo: selectedSeller.sellerSerialNo,
+          rateClusters: pattiData.rateClusters,
+          grossAmount: pattiData.grossAmount,
+          deductions: pattiData.deductions,
+          totalDeductions: pattiData.totalDeductions,
+          netPayable: pattiData.netPayable,
+          createdAt: pattiData.createdAt,
+          useAverageWeight: pattiData.useAverageWeight,
+        } as PattiDTO);
+    const merged = {
+      ...baseDto,
+      ...raw,
+      pattiId: baseDto.pattiId,
+      sellerId: baseDto.sellerId,
+    } as PattiDTO;
     const next = mapPattiDTOToPattiData(merged);
     settlementDirtyBaselineRef.current = null;
     setPattiData(next);
-    const sid = String(pattiDetailDto.sellerId ?? '').trim();
     if (sid) {
       const loadedExp: SellerExpenseFormState = {
         ...defaultSellerExpenses(),
@@ -1906,12 +2014,35 @@ const SettlementPage = () => {
       }));
       setSellerExpenseRestoreBaselineById(prev => ({ ...prev, [sid]: { ...loadedExp } }));
     }
-  }, [pattiDetailDto]);
-
-  useEffect(() => {
-    if (!pattiData || selectedPattiVersion !== 'latest') return;
-    latestPattiDataSnapshotRef.current = JSON.parse(JSON.stringify(pattiData)) as PattiData;
-  }, [pattiData, selectedPattiVersion]);
+    setRemovedLotsBySellerId({});
+    setLotSalesOverridesBySellerId({});
+    const parsed = parsePattiExtensionJson(merged.extensionJson);
+    if (parsed && sid) {
+      if (parsed.removedLotIds.length > 0) {
+        setRemovedLotsBySellerId({ [sid]: [...parsed.removedLotIds] });
+      }
+      if (Object.keys(parsed.lotOverrides).length > 0) {
+        setLotSalesOverridesBySellerId({ [sid]: { ...parsed.lotOverrides } });
+      }
+    }
+    setIsOriginalReferenceMode(true);
+    toast.message('Original snapshot (read-only). Press Alt+M to return.');
+  }, [
+    pattiData,
+    selectedSeller,
+    pattiDetailDto,
+    resolveOriginalPayload,
+    sellerExpensesById,
+    lotSalesOverridesBySellerId,
+    removedLotsBySellerId,
+    sellerFormById,
+    coolieMode,
+    settlementWeighingEnabledBySellerId,
+    settlementWeighingMergeIntoFreightBySellerId,
+    gunniesAmount,
+    sellerExpenseRestoreBaselineById,
+    isPattiEditLocked,
+  ]);
 
   useEffect(() => {
     if (!selectedSeller || !pattiData) {
@@ -1928,7 +2059,7 @@ const SettlementPage = () => {
   useEffect(() => {
     if (!resyncBaselineAfterSaveRef.current) return;
     if (pattiSaveBusy) return;
-    if (!selectedSeller || !pattiData || !isLatestEditUnlocked || showPrint) return;
+    if (!selectedSeller || !pattiData || !isLatestEditUnlocked || showPrint || isOriginalReferenceMode) return;
     const run = () => {
       if (!resyncBaselineAfterSaveRef.current) return;
       resyncBaselineAfterSaveRef.current = false;
@@ -1947,18 +2078,18 @@ const SettlementPage = () => {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [pattiSaveBusy, selectedSeller, pattiData, isLatestEditUnlocked, showPrint, settlementWorkspaceSnapshot]);
+  }, [pattiSaveBusy, selectedSeller, pattiData, isLatestEditUnlocked, showPrint, settlementWorkspaceSnapshot, isOriginalReferenceMode]);
 
-  const editLatestPattiVersion = useCallback(() => {
-    if (selectedPattiVersion !== 'latest') {
-      applyPattiVersionSelection('latest');
+  const enableSettlementEdit = useCallback(() => {
+    if (isOriginalReferenceMode) {
+      exitOriginalReferenceMode();
+      return;
     }
     settlementDirtyBaselineRef.current = null;
     setSettlementDirtyNonce(n => n + 1);
     setIsLatestEditUnlocked(true);
-    toast.success('Latest version unlocked for editing.');
-  }, [applyPattiVersionSelection, selectedPattiVersion]);
-  const isPattiEditLocked = !!selectedSeller && !!pattiData && !isLatestEditUnlocked;
+    toast.success('Editing enabled.');
+  }, [isOriginalReferenceMode, exitOriginalReferenceMode]);
 
   const computePattiSavePayloadForSeller = useCallback(
     (
@@ -2081,8 +2212,11 @@ const SettlementPage = () => {
   const savePattiForSeller = useCallback(
     async (seller: SellerSettlement, options?: SaveSellerOptions): Promise<boolean> => {
       if (!pattiData) return false;
-      if (!options?.inProgress && isPattiEditLocked) {
-        if (!options?.silent) toast.message('Enable edit (Alt+M) to save.');
+      if (!options?.inProgress && isSettlementFormReadOnly) {
+        if (!options?.silent) {
+          if (isOriginalReferenceMode) toast.message('Press Alt+M to leave original view before saving.');
+          else toast.message('Enable edit (Alt+M) to save.');
+        }
         return false;
       }
       const skipBusy = options?.skipBusyGuard === true;
@@ -2113,6 +2247,17 @@ const SettlementPage = () => {
         payload.inProgress = options?.inProgress === true;
         const sid = seller.sellerId;
         const existingDbId = existingPattiIdBySellerId[sid];
+        const sessionOrig = sessionOriginalSnapshotJsonBySellerIdRef.current[sid];
+        if (existingDbId == null && sessionOrig) {
+          payload.originalSnapshotJson = sessionOrig;
+        } else if (
+          existingDbId != null &&
+          sessionOrig &&
+          pattiDetailDto?.originalData == null &&
+          pattiDetailDto?.id === existingDbId
+        ) {
+          payload.originalSnapshotJson = sessionOrig;
+        }
         const inProgressDbId = (() => {
           if (!payload.inProgress) return undefined;
           for (const d of inProgressPattiDrafts) {
@@ -2151,13 +2296,15 @@ const SettlementPage = () => {
             if (updated) {
               applySavedToPrimaryUi(payload, updated.pattiId ?? '', updated.createdAt ?? '');
               setPattiDetailDto(updated);
-              setSelectedPattiVersion('latest');
               if (!silent) toast.success(payload.inProgress ? `Sales Patti ${updated.pattiId} saved in progress.` : `Sales Patti ${updated.pattiId} ${actionWord}.`);
               if (showPrintAfterSave) setShowPrint(true);
               setPattiSaveHighlightSellerIds(prev => prev.filter(x => x !== sid));
               loadSavedPattis();
               loadInProgressPattis();
               resyncBaselineAfterSaveRef.current = true;
+              setArrivalSummaryTab(payload.inProgress ? 'in-progress-patti' : 'saved-patti');
+              if (!payload.inProgress) setSettlementFormMode('saved');
+              else setSettlementFormMode('in-progress');
               return true;
             }
             if (!silent) toast.error('Failed to update patti');
@@ -2171,7 +2318,7 @@ const SettlementPage = () => {
             const at = created.createdAt ?? new Date().toISOString();
             applySavedToPrimaryUi(payload, created.pattiId, at);
             setPattiDetailDto(created);
-            setSelectedPattiVersion('latest');
+            delete sessionOriginalSnapshotJsonBySellerIdRef.current[sid];
             if (!silent && selectedSeller?.sellerId === sid) {
               toast.success(payload.inProgress ? `Sales Patti ${created.pattiId} saved in progress.` : `Sales Patti ${created.pattiId} ${actionWord}.`);
             } else if (!silent) {
@@ -2182,6 +2329,9 @@ const SettlementPage = () => {
             loadSavedPattis();
             loadInProgressPattis();
             resyncBaselineAfterSaveRef.current = true;
+            setArrivalSummaryTab(payload.inProgress ? 'in-progress-patti' : 'saved-patti');
+            if (!payload.inProgress) setSettlementFormMode('saved');
+            else setSettlementFormMode('in-progress');
             return true;
           }
           if (!silent) toast.error('Failed to save patti');
@@ -2206,8 +2356,13 @@ const SettlementPage = () => {
       selectedSeller?.sellerId,
       loadSavedPattis,
       loadInProgressPattis,
-      isPattiEditLocked,
+      isSettlementFormReadOnly,
+      isOriginalReferenceMode,
+      pattiDetailDto?.originalData,
+      pattiDetailDto?.id,
       getSellerValidationError,
+      setArrivalSummaryTab,
+      setSettlementFormMode,
     ]
   );
 
@@ -2405,9 +2560,8 @@ const SettlementPage = () => {
     setSelectedArrivalSellerIds([]);
     setPattiData(null);
     setPattiDetailDto(null);
-    setSelectedPattiVersion('latest');
+    setIsOriginalReferenceMode(false);
     setIsLatestEditUnlocked(true);
-    latestPattiDataSnapshotRef.current = null;
     settlementDirtyBaselineRef.current = null;
     lastExpenseAutoPullKeyRef.current = '';
     resyncBaselineAfterSaveRef.current = false;
@@ -2420,6 +2574,7 @@ const SettlementPage = () => {
 
   const isSettlementDirty = useMemo(() => {
     if (!selectedSeller || !pattiData || showPrint) return false;
+    if (isOriginalReferenceMode) return false;
     if (!isLatestEditUnlocked) return false;
     if (!settlementDirtyBaselineRef.current) return false;
     return settlementWorkspaceSnapshot !== settlementDirtyBaselineRef.current;
@@ -2428,6 +2583,7 @@ const SettlementPage = () => {
     pattiData,
     showPrint,
     isLatestEditUnlocked,
+    isOriginalReferenceMode,
     settlementWorkspaceSnapshot,
     settlementDirtyNonce,
   ]);
@@ -2457,7 +2613,7 @@ const SettlementPage = () => {
   });
 
   saveMainPattiShortcutRef.current = () => {
-    if (selectedSeller && !isPattiEditLocked) void savePatti();
+    if (selectedSeller && !isSettlementFormReadOnly) void savePatti();
   };
 
   useEffect(() => {
@@ -2478,13 +2634,26 @@ const SettlementPage = () => {
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (!selectedSeller || !pattiData || showPrint) return;
-      if (selectedPattiVersion === 'latest' && !isPattiEditLocked) return;
+      if (!isOriginalReferenceMode && !isPattiEditLocked) return;
       e.preventDefault();
-      editLatestPattiVersion();
+      enableSettlementEdit();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editLatestPattiVersion, isPattiEditLocked, pattiData, selectedPattiVersion, selectedSeller, showPrint]);
+  }, [enableSettlementEdit, isOriginalReferenceMode, isPattiEditLocked, pattiData, selectedSeller, showPrint]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'o' && e.key !== 'O')) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (!selectedSeller || !pattiData || showPrint || isOriginalReferenceMode || isPattiEditLocked) return;
+      e.preventDefault();
+      enterOriginalReferenceMode();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enterOriginalReferenceMode, isOriginalReferenceMode, isPattiEditLocked, pattiData, selectedSeller, showPrint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3209,7 +3378,7 @@ const SettlementPage = () => {
 
   const runPrintMainPatti = useCallback(async () => {
     if (!pattiData) return;
-    if (isPattiEditLocked) {
+    if (isSettlementFormReadOnly) {
       toast.message('Enable edit (Alt+M) to print.');
       return;
     }
@@ -3330,7 +3499,7 @@ const SettlementPage = () => {
     else toast.error('Printer not connected.');
   }, [
     pattiData,
-    isPattiEditLocked,
+    isSettlementFormReadOnly,
     canRunMainPattiActions,
     mainPattiValidationError,
     arrivalSellersForPatti,
@@ -3353,7 +3522,7 @@ const SettlementPage = () => {
   const runPrintSellerSubPatti = useCallback(
     async (seller: SellerSettlement) => {
       if (!pattiData) return;
-      if (isPattiEditLocked) {
+      if (isSettlementFormReadOnly) {
         toast.message('Enable edit (Alt+M) to print.');
         return;
       }
@@ -3397,7 +3566,7 @@ const SettlementPage = () => {
     },
     [
       pattiData,
-      isPattiEditLocked,
+      isSettlementFormReadOnly,
       sellerFormById,
       sellerExpensesById,
       removedLotsBySellerId,
@@ -3415,7 +3584,7 @@ const SettlementPage = () => {
 
   const runPrintAllSubPatti = useCallback(async () => {
     if (!pattiData) return;
-    if (isPattiEditLocked) {
+    if (isSettlementFormReadOnly) {
       toast.message('Enable edit (Alt+M) to print.');
       return;
     }
@@ -3471,7 +3640,7 @@ const SettlementPage = () => {
     toast.success('All sub-pattis sent to printer');
   }, [
     pattiData,
-    isPattiEditLocked,
+    isSettlementFormReadOnly,
     arrivalSellersForPatti,
     sellerFormById,
     sellerExpensesById,
@@ -4028,38 +4197,9 @@ const SettlementPage = () => {
         </div>
         )}
 
-        {pattiDetailDto && (
-          <div className="px-4 mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <Select
-              value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
-              onValueChange={val => {
-                if (val === 'latest') {
-                  applyPattiVersionSelection('latest');
-                  return;
-                }
-                const num = Number(val);
-                if (Number.isFinite(num)) applyPattiVersionSelection(num);
-              }}
-            >
-              <SelectTrigger className="h-9 min-w-0 max-w-full justify-center text-center sm:min-w-[14rem]">
-                <SelectValue placeholder="Latest (current)" />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value="latest">Latest (current)</SelectItem>
-                {(pattiDetailDto.versions ?? []).map(v => (
-                  <SelectItem key={v.version} value={String(v.version)}>
-                    v{v.version}
-                    {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {(!pattiDetailDto.versions || pattiDetailDto.versions.length === 0) && (
-              <span className="text-muted-foreground">No previous versions yet.</span>
-            )}
-            {selectedPattiVersion !== 'latest' && (
-              <span className="hidden text-[10px] font-semibold text-primary sm:inline">Snapshot (read-only view)</span>
-            )}
+        {isOriginalReferenceMode && (
+          <div className="px-4 mt-3 text-center text-[11px] font-semibold text-primary sm:text-xs">
+            Viewing original snapshot (read-only) — Alt+M to return
           </div>
         )}
 
@@ -4459,7 +4599,7 @@ const SettlementPage = () => {
                   onChange={e => setInvoiceNameSearch(e.target.value)}
                   className="h-10 rounded-xl border-border/60 bg-background/80"
                   autoComplete="off"
-                  disabled={isPattiEditLocked}
+                  disabled={isSettlementFormReadOnly}
                 />
               </div>
               <Button
@@ -4467,7 +4607,7 @@ const SettlementPage = () => {
                 variant="outline"
                 className={cn(arrSolidMd, 'w-full shrink-0 gap-1.5 sm:w-auto sm:min-w-[12rem]')}
                 onClick={() => void openVehicleExpenseModal()}
-                disabled={isPattiEditLocked}
+                disabled={isSettlementFormReadOnly}
               >
                 <PlusCircle className="h-4 w-4" />
                 Add Quick Adjustment (Alt X)
@@ -4622,7 +4762,7 @@ const SettlementPage = () => {
                           id={`seller-unregistered-confirm-${seller.sellerId}`}
                           className={cn(
                             'flex items-center gap-2 font-medium',
-                            isPattiEditLocked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
+                            isSettlementFormReadOnly ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
                             saveHighlightThisSeller &&
                               !printSaveAllowed &&
                               'rounded-md px-1 py-0.5 ring-2 ring-destructive ring-offset-1 ring-offset-background dark:ring-offset-background'
@@ -4631,7 +4771,7 @@ const SettlementPage = () => {
                           <Checkbox
                             className="h-4 w-4 rounded-none"
                             checked={form.unregisteredPrintConfirmed}
-                            disabled={isPattiEditLocked}
+                            disabled={isSettlementFormReadOnly}
                             onCheckedChange={v => {
                               setSellerFormById(prev => {
                                 const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
@@ -4676,7 +4816,7 @@ const SettlementPage = () => {
                             }}
                             placeholder="Search seller by mark, name, or mobile..."
                             className="h-8 pr-8 text-xs sm:text-sm"
-                            disabled={isPattiEditLocked}
+                            disabled={isSettlementFormReadOnly}
                           />
                           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
                             {sellerContactSearchLoading[seller.sellerId] ? (
@@ -4783,7 +4923,7 @@ const SettlementPage = () => {
                           variant="outline"
                           className={cn(arrSolidMd, 'min-w-[8rem]')}
                           disabled={
-                            isPattiEditLocked ||
+                            isSettlementFormReadOnly ||
                             !!sellerRegSaving[seller.sellerId] ||
                             (!form.contactId && !form.replacementSellerId)
                           }
@@ -4878,7 +5018,7 @@ const SettlementPage = () => {
                               'h-9 w-full min-w-0 rounded-lg text-sm',
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
-                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isSettlementFormReadOnly || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                         <div className="min-w-0">
@@ -4900,7 +5040,7 @@ const SettlementPage = () => {
                               'h-9 min-w-0 w-full rounded-lg text-sm',
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
-                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isSettlementFormReadOnly || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                         <div className="min-w-0">
@@ -4936,7 +5076,7 @@ const SettlementPage = () => {
                               form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
                             )}
                             inputMode="tel"
-                            disabled={isPattiEditLocked || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
+                            disabled={isSettlementFormReadOnly || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
                         </div>
                       </div>
@@ -4946,7 +5086,7 @@ const SettlementPage = () => {
                           <Checkbox
                             className="h-4 w-4 rounded-none"
                             checked={form.addAndChangeSeller}
-                            disabled={isPattiEditLocked}
+                            disabled={isSettlementFormReadOnly}
                             onCheckedChange={v =>
                               setSellerFormById(prev => {
                                 const cur = prev[seller.sellerId] ?? defaultSellerForm(seller);
@@ -4962,7 +5102,7 @@ const SettlementPage = () => {
                             variant="outline"
                             className={cn(arrSolidMd, 'min-w-[8rem]')}
                             disabled={
-                              isPattiEditLocked ||
+                              isSettlementFormReadOnly ||
                               !!sellerRegSaving[seller.sellerId] ||
                               !form.registrationChosen ||
                               !form.mobile.trim() ||
@@ -5072,7 +5212,7 @@ const SettlementPage = () => {
                             type="button"
                             variant="outline"
                             className={cn(arrOutlineMd, 'min-w-[7rem]')}
-                            disabled={isPattiEditLocked}
+                            disabled={isSettlementFormReadOnly}
                             onClick={() => {
                               setSellerFormById(prev => ({
                                 ...prev,
@@ -5165,7 +5305,7 @@ const SettlementPage = () => {
                                         value={Number.isFinite(row.weight) ? row.weight : 0}
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'weight', e.target.value)}
                                         aria-label="Weight kg"
-                                        disabled={isPattiEditLocked}
+                                        disabled={isSettlementFormReadOnly}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -5199,7 +5339,7 @@ const SettlementPage = () => {
                                         onChange={e => setLotSalesField(seller.sellerId, sid, 'ratePerBag', e.target.value)}
                                         aria-label="Rate per bag"
                                         title="Seller settlement rate per bag; amount uses commodity divisor from settings"
-                                        disabled={isPattiEditLocked}
+                                        disabled={isSettlementFormReadOnly}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -5220,7 +5360,7 @@ const SettlementPage = () => {
                                         size="icon"
                                         className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                         aria-label="Remove row"
-                                        disabled={isPattiEditLocked}
+                                        disabled={isSettlementFormReadOnly}
                                         onClick={() =>
                                           setDeleteLotConfirm({
                                             sellerId: seller.sellerId,
@@ -5289,17 +5429,17 @@ const SettlementPage = () => {
                             className={settlementExpenseToggleBtnClass(
                               isWeighingEnabledForSeller(seller.sellerId),
                               'emerald',
-                              isPattiEditLocked ||
+                              isSettlementFormReadOnly ||
                                 (isWeighingEnabledForSeller(seller.sellerId) &&
                                   isWeighingMergedIntoFreight(seller.sellerId))
                             )}
                             disabled={
-                              isPattiEditLocked ||
+                              isSettlementFormReadOnly ||
                               (isWeighingEnabledForSeller(seller.sellerId) &&
                                 isWeighingMergedIntoFreight(seller.sellerId))
                             }
                             onClick={() => {
-                              if (isPattiEditLocked) return;
+                              if (isSettlementFormReadOnly) return;
                               const sid = seller.sellerId;
                               setSettlementWeighingEnabledBySellerId(prev => {
                                 const cur = prev[sid] !== false;
@@ -5342,10 +5482,10 @@ const SettlementPage = () => {
                             className={settlementExpenseToggleBtnClass(
                               isWeighingMergedIntoFreight(seller.sellerId),
                               'violet',
-                              isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)
+                              isSettlementFormReadOnly || !isWeighingEnabledForSeller(seller.sellerId)
                             )}
                             onClick={() => {
-                              if (isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)) return;
+                              if (isSettlementFormReadOnly || !isWeighingEnabledForSeller(seller.sellerId)) return;
                               const sid = seller.sellerId;
                               const draft = weighmanDraftBySellerId[sid];
                               if (draft !== undefined && draft.trim() !== '') {
@@ -5367,7 +5507,7 @@ const SettlementPage = () => {
                                 return { ...prev, [sid]: !cur };
                               });
                             }}
-                            disabled={isPattiEditLocked || !isWeighingEnabledForSeller(seller.sellerId)}
+                            disabled={isSettlementFormReadOnly || !isWeighingEnabledForSeller(seller.sellerId)}
                             aria-label="Add weighing amount to freight"
                             aria-pressed={isWeighingMergedIntoFreight(seller.sellerId)}
                           >
@@ -5423,7 +5563,7 @@ const SettlementPage = () => {
                                         });
                                       }}
                                       aria-label="Freight amount"
-                                      disabled={isPattiEditLocked}
+                                      disabled={isSettlementFormReadOnly}
                                     />
                                   </div>
                                 );
@@ -5471,7 +5611,7 @@ const SettlementPage = () => {
                                     });
                                   }}
                                   aria-label="Unloading amount"
-                                  disabled={isPattiEditLocked}
+                                  disabled={isSettlementFormReadOnly}
                                 />
                               </div>
                             </div>
@@ -5497,7 +5637,7 @@ const SettlementPage = () => {
                                   type="text"
                                   inputMode="decimal"
                                   disabled={
-                                    isPattiEditLocked ||
+                                    isSettlementFormReadOnly ||
                                     !isWeighingEnabledForSeller(seller.sellerId) ||
                                     isWeighingMergedIntoFreight(seller.sellerId)
                                   }
@@ -5552,7 +5692,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Cash advance"
-                                disabled={isPattiEditLocked}
+                                disabled={isSettlementFormReadOnly}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -5571,7 +5711,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Gunnies"
-                                disabled={isPattiEditLocked}
+                                disabled={isSettlementFormReadOnly}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -5590,7 +5730,7 @@ const SettlementPage = () => {
                                   });
                                 }}
                                 aria-label="Other expenses"
-                                disabled={isPattiEditLocked}
+                                disabled={isSettlementFormReadOnly}
                               />
                             </div>
                           </div>
@@ -5640,12 +5780,12 @@ const SettlementPage = () => {
                         className={cn(arrOutlineMd, 'gap-1.5')}
                         onClick={() => void runPrintSellerSubPatti(seller)}
                         disabled={
-                          isPattiEditLocked ||
+                          isSettlementFormReadOnly ||
                           !!sellerValidationError ||
                           !isSettlementSellerPrintAllowed(seller, form)
                         }
                         title={
-                          isPattiEditLocked
+                          isSettlementFormReadOnly
                             ? 'Enable edit (Alt+M) to print'
                             : sellerValidationError ??
                               settlementSellerPrintGateMessage(seller, form) ??
@@ -5659,8 +5799,8 @@ const SettlementPage = () => {
                         type="button"
                         variant="outline"
                         className={cn(arrOutlineMd, 'gap-1.5')}
-                        disabled={isPattiEditLocked}
-                        title={isPattiEditLocked ? 'Enable edit (Alt+M) to add vouchers' : undefined}
+                        disabled={isSettlementFormReadOnly}
+                        title={isSettlementFormReadOnly ? 'Enable edit (Alt+M) to add vouchers' : undefined}
                         onClick={() => {
                           setAddVoucherSellerId(seller.sellerId);
                         }}
@@ -5672,9 +5812,9 @@ const SettlementPage = () => {
                         variant="outline"
                         className={cn(arrSolidMd, 'gap-1.5')}
                         onClick={() => void savePattiForSeller(seller)}
-                        disabled={isPattiEditLocked || pattiSaveBusy}
+                        disabled={isSettlementFormReadOnly || pattiSaveBusy}
                         title={
-                          isPattiEditLocked
+                          isSettlementFormReadOnly
                             ? 'Enable edit (Alt+M) to save'
                             : sellerValidationError ?? 'Validates on click'
                         }
@@ -5697,59 +5837,36 @@ const SettlementPage = () => {
             className="glass-card rounded-2xl border border-border/50 p-4 sm:p-5"
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
-              {pattiDetailDto && (
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={selectedPattiVersion === 'latest' ? 'latest' : String(selectedPattiVersion)}
-                    onValueChange={val => {
-                      if (val === 'latest') {
-                        applyPattiVersionSelection('latest');
-                        return;
-                      }
-                      const num = Number(val);
-                      if (Number.isFinite(num)) applyPattiVersionSelection(num);
-                    }}
-                  >
-                    <SelectTrigger className={cn(arrOutlineTall, 'min-w-[12rem] justify-center text-center')}>
-                      <SelectValue placeholder="Latest (current)" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      <SelectItem value="latest">Latest (current)</SelectItem>
-                      {(pattiDetailDto.versions ?? []).map(v => (
-                        <SelectItem key={v.version} value={String(v.version)}>
-                          v{v.version}
-                          {v.savedAt ? ` — ${new Date(v.savedAt).toLocaleString()}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedPattiVersion !== 'latest' && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={cn(arrSolidTall, 'gap-2 sm:min-w-[10rem]')}
-                      onClick={editLatestPattiVersion}
-                    >
-                      Edit Latest (Alt M)
-                    </Button>
-                  )}
-                  {selectedPattiVersion === 'latest' && isPattiEditLocked && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={cn(arrSolidTall, 'gap-2 sm:min-w-[10rem]')}
-                      onClick={editLatestPattiVersion}
-                    >
-                      Enable Edit (Alt M)
-                    </Button>
-                  )}
-                </div>
+              {isOriginalReferenceMode && (
+                <span className="w-full text-center text-xs font-semibold text-primary sm:w-auto sm:text-sm">
+                  Viewing original (read-only) — Alt+M to return to modified
+                </span>
+              )}
+              {isPattiEditLocked && !isOriginalReferenceMode && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(arrSolidTall, 'gap-2 sm:min-w-[10rem]')}
+                  onClick={enableSettlementEdit}
+                >
+                  Enable Edit (Alt+M)
+                </Button>
+              )}
+              {resolveOriginalPayload() != null && !isOriginalReferenceMode && !isPattiEditLocked && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
+                  onClick={enterOriginalReferenceMode}
+                >
+                  View original (Alt+O)
+                </Button>
               )}
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void savePatti()}
-                disabled={!pattiData || pattiSaveBusy || isPattiEditLocked}
+                disabled={!pattiData || pattiSaveBusy || isSettlementFormReadOnly}
                 className={cn(arrSolidTall, 'gap-2 sm:min-w-[11rem]')}
                 title={mainPattiValidationError ?? 'Validates on click; fix highlighted seller cards if save is rejected.'}
               >
@@ -5761,13 +5878,13 @@ const SettlementPage = () => {
                 variant="outline"
                 className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
                 disabled={
-                  isPattiEditLocked ||
+                  isSettlementFormReadOnly ||
                   !canRunMainPattiActions ||
                   settlementPrintPermissionError != null
                 }
                 onClick={() => void runPrintMainPatti()}
                 title={
-                  isPattiEditLocked
+                  isSettlementFormReadOnly
                     ? 'Enable edit (Alt+M) to print'
                     : settlementPrintPermissionError ?? mainPattiValidationError ?? undefined
                 }
@@ -5780,13 +5897,13 @@ const SettlementPage = () => {
                 variant="outline"
                 className={cn(arrOutlineTall, 'gap-2 sm:min-w-[10rem]')}
                 disabled={
-                  isPattiEditLocked ||
+                  isSettlementFormReadOnly ||
                   !canRunMainPattiActions ||
                   settlementPrintPermissionError != null
                 }
                 onClick={() => void runPrintAllSubPatti()}
                 title={
-                  isPattiEditLocked
+                  isSettlementFormReadOnly
                     ? 'Enable edit (Alt+M) to print'
                     : settlementPrintPermissionError ?? mainPattiValidationError ?? undefined
                 }
