@@ -1567,19 +1567,29 @@ const BillingPage = () => {
   useEffect(() => {
     if (!bill) return;
     let mutated = false;
-    const nextGroups = bill.commodityGroups.map(group => {
+    const nextGroups: CommodityGroup[] = bill.commodityGroups.map(group => {
       const taxCfg = commodityTaxConfigByName.get(group.commodityName);
       const hasTax = taxCfg?.hasTax ?? false;
       if (!hasTax) {
         if ((group.gstRate ?? 0) !== 0 || (group.sgstRate ?? 0) !== 0 || (group.cgstRate ?? 0) !== 0 || (group.igstRate ?? 0) !== 0 || group.taxMode !== 'NONE') {
           mutated = true;
-          return { ...group, taxMode: 'NONE', gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: 0 };
+          return { 
+            ...group, 
+            taxMode: 'NONE' as const, 
+            gstRate: 0, 
+            sgstRate: 0, 
+            cgstRate: 0, 
+            igstRate: 0 
+          };
         }
         return group;
       }
       if (group.taxMode === 'NONE') {
         mutated = true;
-        return { ...group, taxMode: taxCfg?.defaultMode === 'IGST' ? 'IGST' : 'GST' };
+        return { 
+          ...group, 
+          taxMode: (taxCfg?.defaultMode === 'IGST' ? 'IGST' : 'GST') as 'IGST' | 'GST' 
+        };
       }
       return group;
     });
