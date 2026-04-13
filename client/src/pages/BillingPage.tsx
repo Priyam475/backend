@@ -502,8 +502,9 @@ type ValidationErrors = Record<string, string>;
 function validateBill(
   b: BillData,
   commodityAvgWeightBounds: Record<string, { min: number; max: number }>,
-): { isValid: boolean; errors: ValidationErrors } {
+): { isValid: boolean; errors: ValidationErrors; warnings: ValidationErrors } {
   const errors: ValidationErrors = {};
+  const warnings: ValidationErrors = {};
 
   const trimmedName = (b.billingName ?? '').trim();
   if (!trimmedName) {
@@ -583,7 +584,7 @@ function validateBill(
       const avgBelowMin = bounds != null && bounds.min > 0 && avgWeight < bounds.min;
       const avgAboveMax = bounds != null && bounds.max > 0 && avgWeight > bounds.max;
       if (avgBelowMin || avgAboveMax) {
-        errors[`items.${gi}.${ii}.avgWeight`] = avgBelowMin
+        warnings[`items.${gi}.${ii}.avgWeight`] = avgBelowMin
           ? `Avg Wt must be >= ${bounds!.min} kg`
           : `Avg Wt must be <= ${bounds!.max} kg`;
       }
@@ -603,7 +604,7 @@ function validateBill(
     });
   });
 
-  return { isValid: Object.keys(errors).length === 0, errors };
+  return { isValid: Object.keys(errors).length === 0, errors, warnings };
 }
 
 const BillingPage = () => {
@@ -788,10 +789,11 @@ const BillingPage = () => {
     () =>
       bill
         ? validateBill(bill, commodityAvgWeightBounds)
-        : { isValid: true as const, errors: {} as ValidationErrors },
+        : { isValid: true as const, errors: {} as ValidationErrors, warnings: {} as ValidationErrors },
     [bill, commodityAvgWeightBounds],
   );
   const validationErrors = billValidation.errors;
+  const validationWarnings = billValidation.warnings;
   const canPersistSalesBill = useMemo(() => {
     if (!bill) return false;
     const canCreate = can('Billing', 'Create');
@@ -4282,9 +4284,9 @@ const BillingPage = () => {
                                         &gt;max {bounds!.max}kg
                                       </p>
                                     )}
-                                    {validationErrors[`items.${gi}.${ii}.avgWeight`] && (
-                                      <p className="mt-0.5 text-[8px] text-destructive text-center">
-                                        {validationErrors[`items.${gi}.${ii}.avgWeight`]}
+                                    {validationWarnings[`items.${gi}.${ii}.avgWeight`] && (
+                                      <p className="mt-0.5 text-[8px] text-amber-700 dark:text-amber-400 text-center">
+                                        {validationWarnings[`items.${gi}.${ii}.avgWeight`]}
                                       </p>
                                     )}
                                   </div>
@@ -4709,11 +4711,11 @@ const BillingPage = () => {
                               >
                                 <div className="flex items-center gap-1.5">
                                   <RadioGroupItem value="GST" id={`gst-mode-${gi}`} />
-                                  <label htmlFor={`gst-mode-${gi}`} className="text-[10px] font-semibold">GST</label>
+                                  <label htmlFor={`gst-mode-${gi}`} className="text-[10px] font-semibold">GST(Local)</label>
                                 </div>
                                 <div className="flex items-center gap-1.5">
                                   <RadioGroupItem value="IGST" id={`igst-mode-${gi}`} />
-                                  <label htmlFor={`igst-mode-${gi}`} className="text-[10px] font-semibold">IGST</label>
+                                  <label htmlFor={`igst-mode-${gi}`} className="text-[10px] font-semibold">IGST(Inter State)</label>
                                 </div>
                               </RadioGroup>
                             )}
