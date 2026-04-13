@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle,
+  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle, Check, X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -362,6 +363,114 @@ function mapPattiDTOToPattiData(dto: PattiDTO): PattiData {
     netPayable,
     createdAt,
     useAverageWeight: dto.useAverageWeight ?? false,
+  };
+}
+
+/**
+ * Alt+O original view: body fields (clusters, extensionJson, amounts) come only from immutable snapshot `raw`.
+ * Do not fall back to current `pattiDetailDto` for those keys — missing keys mean empty/default, not “live” split/edit state.
+ */
+function pattiDtoFromOriginalSnapshotPayload(baseDto: PattiDTO, raw: Record<string, unknown>): PattiDTO {
+  const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(raw, key);
+
+  const rateClusters: PattiDTO['rateClusters'] =
+    has('rateClusters') && Array.isArray(raw.rateClusters)
+      ? (raw.rateClusters as PattiDTO['rateClusters'])
+      : [];
+
+  const deductions: PattiDTO['deductions'] =
+    has('deductions') && Array.isArray(raw.deductions)
+      ? (raw.deductions as PattiDTO['deductions'])
+      : [];
+
+  const toNum = (key: string, defaultValue: number): number => {
+    if (!has(key)) return defaultValue;
+    const v = raw[key];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : defaultValue;
+  };
+
+  const totalDeductionsFromLines = deductions.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const grossAmount = toNum('grossAmount', 0);
+  const totalDeductions = has('totalDeductions') ? toNum('totalDeductions', totalDeductionsFromLines) : totalDeductionsFromLines;
+  const netPayable = has('netPayable') ? toNum('netPayable', grossAmount - totalDeductions) : grossAmount - totalDeductions;
+
+  let extensionJson: string | undefined;
+  if (has('extensionJson')) {
+    const ej = raw.extensionJson;
+    if (ej == null || ej === '') extensionJson = undefined;
+    else extensionJson = typeof ej === 'string' ? ej : String(ej);
+  } else {
+    extensionJson = undefined;
+  }
+
+  const useAverageWeight = has('useAverageWeight') ? Boolean(raw.useAverageWeight) : false;
+
+  const sellerName =
+    has('sellerName') && raw.sellerName != null ? String(raw.sellerName) : baseDto.sellerName;
+  const vehicleNumber = has('vehicleNumber')
+    ? raw.vehicleNumber == null
+      ? undefined
+      : String(raw.vehicleNumber)
+    : baseDto.vehicleNumber;
+  const fromLocation = has('fromLocation')
+    ? raw.fromLocation == null
+      ? undefined
+      : String(raw.fromLocation)
+    : baseDto.fromLocation;
+
+  const createdAt = has('createdAt')
+    ? raw.createdAt == null
+      ? baseDto.createdAt
+      : typeof raw.createdAt === 'string'
+        ? raw.createdAt
+        : String(raw.createdAt)
+    : baseDto.createdAt;
+
+  const pattiBaseNumber = has('pattiBaseNumber')
+    ? raw.pattiBaseNumber == null
+      ? undefined
+      : String(raw.pattiBaseNumber)
+    : baseDto.pattiBaseNumber;
+
+  let sellerSequenceNumber = baseDto.sellerSequenceNumber;
+  if (has('sellerSequenceNumber')) {
+    const v = raw.sellerSequenceNumber;
+    if (typeof v === 'number' && Number.isFinite(v)) sellerSequenceNumber = v;
+    else {
+      const n = Number(v);
+      if (Number.isFinite(n)) sellerSequenceNumber = n;
+    }
+  }
+
+  const sellerSerialNo = has('sellerSerialNo')
+    ? (raw.sellerSerialNo as PattiDTO['sellerSerialNo'])
+    : baseDto.sellerSerialNo;
+
+  const date = has('date') ? (raw.date == null ? baseDto.date : String(raw.date)) : baseDto.date;
+
+  return {
+    id: baseDto.id,
+    pattiId: baseDto.pattiId,
+    pattiBaseNumber,
+    sellerSequenceNumber,
+    sellerId: baseDto.sellerId,
+    sellerName,
+    vehicleNumber,
+    fromLocation,
+    sellerSerialNo,
+    date,
+    rateClusters,
+    grossAmount,
+    deductions,
+    totalDeductions,
+    netPayable,
+    createdAt,
+    useAverageWeight,
+    inProgress: has('inProgress') ? Boolean(raw.inProgress) : baseDto.inProgress,
+    extensionJson,
+    originalData: baseDto.originalData,
   };
 }
 
@@ -848,6 +957,8 @@ type PattiExtensionJsonV1 = {
   removedLotIds?: string[];
   lotOverrides?: Record<string, { weight?: number; ratePerBag?: number; qty?: number }>;
   extraBidLots?: ExtraBidLot[];
+  /** Display order: `a:${lotStableId}` then `e:${extraId}`; omit when default (API lots then extras). */
+  salesRowOrder?: string[];
   /** Persisted Sales report “Unregistered” print confirmation for this sub-patti. */
   unregisteredPrintConfirmed?: boolean;
 };
@@ -857,7 +968,9 @@ function buildPattiExtensionJsonForSeller(
   removedLotsBySellerId: Record<string, string[]>,
   lotSalesOverridesBySellerId: Record<string, Record<string, LotSalesOverride>>,
   extraBidLotsBySellerId: Record<string, ExtraBidLot[]>,
-  unregisteredPrintConfirmed: boolean
+  unregisteredPrintConfirmed: boolean,
+  salesRowOrderBySellerId?: Record<string, SalesRowOrderKey[]>,
+  sellerForOrder?: SellerSettlement
 ): string | undefined {
   const removed = removedLotsBySellerId[sellerId] ?? [];
   const ov = lotSalesOverridesBySellerId[sellerId] ?? {};
@@ -871,11 +984,21 @@ function buildPattiExtensionJsonForSeller(
     if (Object.keys(entry).length > 0) slimOverrides[lotSid] = entry;
   }
   const extraBidLots = extraBidLotsBySellerId[sellerId] ?? [];
+  const storedOrder = salesRowOrderBySellerId?.[sellerId];
+  let persistOrder: SalesRowOrderKey[] | undefined;
+  if (storedOrder?.length && sellerForOrder) {
+    const removedSet = new Set(removed);
+    const def = buildDefaultSalesRowOrder(sellerForOrder, removedSet, extraBidLots);
+    if (JSON.stringify(storedOrder) !== JSON.stringify(def)) {
+      persistOrder = storedOrder;
+    }
+  }
   if (
     removed.length === 0 &&
     Object.keys(slimOverrides).length === 0 &&
     extraBidLots.length === 0 &&
-    !unregisteredPrintConfirmed
+    !unregisteredPrintConfirmed &&
+    !persistOrder?.length
   ) {
     return undefined;
   }
@@ -883,6 +1006,7 @@ function buildPattiExtensionJsonForSeller(
   if (removed.length > 0) payload.removedLotIds = [...removed];
   if (Object.keys(slimOverrides).length > 0) payload.lotOverrides = slimOverrides;
   if (extraBidLots.length > 0) payload.extraBidLots = extraBidLots.map(e => ({ ...e }));
+  if (persistOrder?.length) payload.salesRowOrder = [...persistOrder];
   if (unregisteredPrintConfirmed) payload.unregisteredPrintConfirmed = true;
   return JSON.stringify(payload);
 }
@@ -893,6 +1017,7 @@ function parsePattiExtensionJson(
   removedLotIds: string[];
   lotOverrides: Record<string, LotSalesOverride>;
   extraBidLots: ExtraBidLot[];
+  salesRowOrder: SalesRowOrderKey[];
   unregisteredPrintConfirmed: boolean;
 } | null {
   if (extensionJson == null || !String(extensionJson).trim()) return null;
@@ -913,7 +1038,16 @@ function parsePattiExtensionJson(
     }
     const extraBidLots = parseExtraBidLotsArray(parsed.extraBidLots);
     const unregisteredPrintConfirmed = parsed.unregisteredPrintConfirmed === true;
-    return { removedLotIds, lotOverrides, extraBidLots, unregisteredPrintConfirmed };
+    const rawOrder = Array.isArray(parsed.salesRowOrder)
+      ? parsed.salesRowOrder.map(String).filter(Boolean)
+      : [];
+    return {
+      removedLotIds,
+      lotOverrides,
+      extraBidLots,
+      salesRowOrder: rawOrder as SalesRowOrderKey[],
+      unregisteredPrintConfirmed,
+    };
   } catch {
     return null;
   }
@@ -944,6 +1078,113 @@ function mergeLotDisplayRow(lot: SettlementLot, o: LotSalesOverride | undefined,
 function lotStableId(lot: SettlementLot, index: number): string {
   if (lot.lotId && String(lot.lotId).trim()) return String(lot.lotId).trim();
   return `__idx_${index}_${encodeURIComponent(lot.lotName || '')}_${encodeURIComponent(lot.commodityName || '')}`;
+}
+
+type SalesRowOrderKey = string;
+
+function salesRowKeyApi(sid: string): SalesRowOrderKey {
+  return `a:${sid}`;
+}
+
+function salesRowKeyExtra(id: string): SalesRowOrderKey {
+  return `e:${id}`;
+}
+
+function parseSalesRowOrderKey(k: string): { type: 'api'; sid: string } | { type: 'extra'; id: string } | null {
+  if (k.startsWith('a:')) return { type: 'api', sid: k.slice(2) };
+  if (k.startsWith('e:')) return { type: 'extra', id: k.slice(2) };
+  return null;
+}
+
+function newExtraBidLotId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `eb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildDefaultSalesRowOrder(
+  seller: SellerSettlement,
+  removedSet: Set<string>,
+  extraLots: ExtraBidLot[]
+): SalesRowOrderKey[] {
+  const keys: SalesRowOrderKey[] = [];
+  for (let i = 0; i < (seller.lots ?? []).length; i++) {
+    const lot = seller.lots![i];
+    const sid = lotStableId(lot, i);
+    if (removedSet.has(sid)) continue;
+    keys.push(salesRowKeyApi(sid));
+  }
+  for (const e of extraLots) keys.push(salesRowKeyExtra(e.id));
+  return keys;
+}
+
+function sanitizeSalesRowOrder(
+  order: SalesRowOrderKey[] | undefined,
+  seller: SellerSettlement,
+  removedSet: Set<string>,
+  extraLots: ExtraBidLot[]
+): SalesRowOrderKey[] {
+  const fallback = buildDefaultSalesRowOrder(seller, removedSet, extraLots);
+  const validApi = new Set(
+    (seller.lots ?? [])
+      .map((lot, i) => lotStableId(lot, i))
+      .filter(sid => !removedSet.has(sid))
+  );
+  const validExtra = new Set(extraLots.map(e => e.id));
+  if (!order?.length) return fallback;
+  const seen = new Set<SalesRowOrderKey>();
+  const out: SalesRowOrderKey[] = [];
+  for (const k of order) {
+    const p = parseSalesRowOrderKey(k);
+    if (!p) continue;
+    if (p.type === 'api' && validApi.has(p.sid) && !seen.has(k)) {
+      seen.add(k);
+      out.push(k);
+    }
+    if (p.type === 'extra' && validExtra.has(p.id) && !seen.has(k)) {
+      seen.add(k);
+      out.push(k);
+    }
+  }
+  for (const k of fallback) {
+    if (!seen.has(k)) out.push(k);
+  }
+  return out;
+}
+
+/** Cancel payload for inline split transaction (revert to single row). */
+type SplitCancelRestore =
+  | {
+      kind: 'api_plus_extra';
+      apiSid: string;
+      prevApiOverride: LotSalesOverride;
+      newExtraId: string;
+    }
+  | {
+      kind: 'extra_pair';
+      firstExtraId: string;
+      newExtraId: string;
+      originalExtra: ExtraBidLot;
+    };
+
+/** Active split edit: two rows, fixed totals until Save or Cancel. */
+type SplitGroupSnapshot = {
+  splitGroupId: string;
+  sellerId: string;
+  rowKeyA: SalesRowOrderKey;
+  rowKeyB: SalesRowOrderKey;
+  totalQty: number;
+  totalWeight: number;
+  isEditing: boolean;
+  cancelRestore: SplitCancelRestore;
+};
+
+function splitGroupHasRowKey(g: SplitGroupSnapshot, k: SalesRowOrderKey): boolean {
+  return g.rowKeyA === k || g.rowKeyB === k;
+}
+
+function getSalesRowKeyForTableRow(isExtraBid: boolean, sid: string): SalesRowOrderKey {
+  return isExtraBid ? salesRowKeyExtra(sid) : salesRowKeyApi(sid);
 }
 
 function addSlabChargesForLotWeight(
@@ -1402,6 +1643,7 @@ const SettlementPage = () => {
     lotSalesOverridesBySellerId: Record<string, Record<string, LotSalesOverride>>;
     removedLotsBySellerId: Record<string, string[]>;
     extraBidLotsBySellerId: Record<string, ExtraBidLot[]>;
+    salesReportRowOrderBySellerId: Record<string, SalesRowOrderKey[]>;
     sellerFormById: Record<string, SellerRegFormState>;
     coolieMode: 'FLAT' | 'RECALCULATED';
     settlementWeighingEnabledBySellerId: Record<string, boolean>;
@@ -1439,8 +1681,6 @@ const SettlementPage = () => {
   const [gunniesAmount, setGunniesAmount] = useState(0);
   /** Per seller: `false` = expanded; missing/`true` = collapsed (default collapsed). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
-  /** Saved patti: which seller’s Add bid (split quantity) dialog is open. */
-  const [addBidDialogSellerId, setAddBidDialogSellerId] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
   const [settlementPrintSize, setSettlementPrintSize] = useState<'A4' | 'A5'>('A4');
   const [settlementIncludeHeader, setSettlementIncludeHeader] = useState(true);
@@ -1623,12 +1863,20 @@ const SettlementPage = () => {
   const [lotSalesOverridesBySellerId, setLotSalesOverridesBySellerId] = useState<
     Record<string, Record<string, LotSalesOverride>>
   >({});
-  /** Saved patti only: extra lot rows from “Add bid”, persisted in `extensionJson`. */
+  /** Saved patti only: extra lot rows (inline split / legacy add-bid), persisted in `extensionJson`. */
   const [extraBidLotsBySellerId, setExtraBidLotsBySellerId] = useState<Record<string, ExtraBidLot[]>>({});
-  /** Draft fields for per-seller “Add bid” card (Saved Patti). */
-  const [newBidDraftBySellerId, setNewBidDraftBySellerId] = useState<
-    Record<string, { lotName: string; qty: string; weight: string; rate: string }>
+  /** Per seller: sales table row order (`a:${sid}` / `e:${id}`); default derived when missing. */
+  const [salesReportRowOrderBySellerId, setSalesReportRowOrderBySellerId] = useState<
+    Record<string, SalesRowOrderKey[]>
   >({});
+  /** Inline split transactions: keyed by splitGroupId (not persisted). */
+  const [splitGroupsById, setSplitGroupsById] = useState<Record<string, SplitGroupSnapshot>>({});
+  /** At most one active split edit per seller (row pair). */
+  const [activeSplitGroupIdBySellerId, setActiveSplitGroupIdBySellerId] = useState<Record<string, string | null>>({});
+  const splitGroupsByIdRef = useRef(splitGroupsById);
+  splitGroupsByIdRef.current = splitGroupsById;
+  const activeSplitGroupIdBySellerIdRef = useRef(activeSplitGroupIdBySellerId);
+  activeSplitGroupIdBySellerIdRef.current = activeSplitGroupIdBySellerId;
 
   /** Full workspace fingerprint for leave / unsaved prompts (not only `pattiData`). */
   const settlementWorkspaceSnapshot = useMemo(() => {
@@ -1639,7 +1887,8 @@ const SettlementPage = () => {
       exp: sellerExpensesById,
       rem: removedLotsBySellerId,
       extraBid: extraBidLotsBySellerId,
-      newBidDraft: newBidDraftBySellerId,
+      rowOrder: salesReportRowOrderBySellerId,
+      splitTxn: { splitGroupsById, activeSplitGroupIdBySellerId },
       sform: sellerFormById,
       coolie: coolieMode,
       wOn: settlementWeighingEnabledBySellerId,
@@ -1652,7 +1901,9 @@ const SettlementPage = () => {
     sellerExpensesById,
     removedLotsBySellerId,
     extraBidLotsBySellerId,
-    newBidDraftBySellerId,
+    salesReportRowOrderBySellerId,
+    splitGroupsById,
+    activeSplitGroupIdBySellerId,
     sellerFormById,
     coolieMode,
     settlementWeighingEnabledBySellerId,
@@ -1869,7 +2120,9 @@ const SettlementPage = () => {
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
     setExtraBidLotsBySellerId({});
-    setNewBidDraftBySellerId({});
+    setSalesReportRowOrderBySellerId({});
+    setSplitGroupsById({});
+    setActiveSplitGroupIdBySellerId({});
     setVehicleExpenseRows([]);
     setVehicleExpenseOriginalByRowId({});
     setVehicleExpenseModalOpen(false);
@@ -2022,7 +2275,9 @@ const SettlementPage = () => {
       setRemovedLotsBySellerId({});
       setLotSalesOverridesBySellerId({});
       setExtraBidLotsBySellerId({});
-      setNewBidDraftBySellerId({});
+      setSalesReportRowOrderBySellerId({});
+      setSplitGroupsById({});
+      setActiveSplitGroupIdBySellerId({});
       setVehicleExpenseRows([]);
       setVehicleExpenseOriginalByRowId({});
       setVehicleExpenseModalOpen(false);
@@ -2102,6 +2357,12 @@ const SettlementPage = () => {
           };
           setSellerFormById(patchClearUnreg);
           setRegisteredBaselineById(patchClearUnreg);
+          setSalesReportRowOrderBySellerId(prev => {
+            if (!(sidKey in prev)) return prev;
+            const next = { ...prev };
+            delete next[sidKey];
+            return next;
+          });
           return;
         }
         if (parsed.removedLotIds.length > 0) {
@@ -2118,6 +2379,11 @@ const SettlementPage = () => {
             ...prev,
             [sidKey]: [...parsed.extraBidLots],
           }));
+        }
+        {
+          const removedSetForOrder = new Set(parsed.removedLotIds);
+          const ord = sanitizeSalesRowOrder(parsed.salesRowOrder, sellerModel, removedSetForOrder, parsed.extraBidLots);
+          setSalesReportRowOrderBySellerId(prev => ({ ...prev, [sidKey]: ord }));
         }
         const unreg = parsed.unregisteredPrintConfirmed === true;
         const patchSellerReg = (prev: Record<string, SellerRegFormState>) => {
@@ -2237,6 +2503,7 @@ const SettlementPage = () => {
     setLotSalesOverridesBySellerId(st.lotSalesOverridesBySellerId);
     setRemovedLotsBySellerId(st.removedLotsBySellerId);
     setExtraBidLotsBySellerId(st.extraBidLotsBySellerId);
+    setSalesReportRowOrderBySellerId(st.salesReportRowOrderBySellerId);
     setSellerFormById(st.sellerFormById);
     setCoolieMode(st.coolieMode);
     setSettlementWeighingEnabledBySellerId(st.settlementWeighingEnabledBySellerId);
@@ -2276,6 +2543,10 @@ const SettlementPage = () => {
       lotSalesOverridesBySellerId: JSON.parse(JSON.stringify(lotSalesOverridesBySellerId)),
       removedLotsBySellerId: JSON.parse(JSON.stringify(removedLotsBySellerId)),
       extraBidLotsBySellerId: JSON.parse(JSON.stringify(extraBidLotsBySellerId)) as Record<string, ExtraBidLot[]>,
+      salesReportRowOrderBySellerId: JSON.parse(JSON.stringify(salesReportRowOrderBySellerId)) as Record<
+        string,
+        SalesRowOrderKey[]
+      >,
       sellerFormById: JSON.parse(JSON.stringify(sellerFormById)),
       coolieMode,
       settlementWeighingEnabledBySellerId: { ...settlementWeighingEnabledBySellerId },
@@ -2300,12 +2571,7 @@ const SettlementPage = () => {
           createdAt: pattiData.createdAt,
           useAverageWeight: pattiData.useAverageWeight,
         } as PattiDTO);
-    const merged = {
-      ...baseDto,
-      ...raw,
-      pattiId: baseDto.pattiId,
-      sellerId: baseDto.sellerId,
-    } as PattiDTO;
+    const merged = pattiDtoFromOriginalSnapshotPayload(baseDto, raw);
     const next = mapPattiDTOToPattiData(merged);
     settlementDirtyBaselineRef.current = null;
     setPattiData(next);
@@ -2323,6 +2589,9 @@ const SettlementPage = () => {
     setRemovedLotsBySellerId({});
     setLotSalesOverridesBySellerId({});
     setExtraBidLotsBySellerId({});
+    setSalesReportRowOrderBySellerId({});
+    setSplitGroupsById({});
+    setActiveSplitGroupIdBySellerId({});
     const parsed = parsePattiExtensionJson(merged.extensionJson);
     if (parsed && sid) {
       if (parsed.removedLotIds.length > 0) {
@@ -2333,6 +2602,11 @@ const SettlementPage = () => {
       }
       if (parsed.extraBidLots.length > 0) {
         setExtraBidLotsBySellerId({ [sid]: [...parsed.extraBidLots] });
+      }
+      if (selectedSeller?.sellerId === sid) {
+        const rs = new Set(parsed.removedLotIds);
+        const ord = sanitizeSalesRowOrder(parsed.salesRowOrder, selectedSeller, rs, parsed.extraBidLots);
+        setSalesReportRowOrderBySellerId({ [sid]: ord });
       }
     }
     setIsOriginalReferenceMode(true);
@@ -2352,6 +2626,7 @@ const SettlementPage = () => {
     gunniesAmount,
     sellerExpenseRestoreBaselineById,
     extraBidLotsBySellerId,
+    salesReportRowOrderBySellerId,
   ]);
 
   useEffect(() => {
@@ -2441,7 +2716,9 @@ const SettlementPage = () => {
         removedLotsBySellerId,
         lotSalesOverridesBySellerId,
         extraBidLotsBySellerId,
-        form.unregisteredPrintConfirmed === true
+        form.unregisteredPrintConfirmed === true,
+        salesReportRowOrderBySellerId,
+        seller
       );
       return {
         sellerId: seller.sellerId,
@@ -2462,6 +2739,7 @@ const SettlementPage = () => {
       removedLotsBySellerId,
       lotSalesOverridesBySellerId,
       extraBidLotsBySellerId,
+      salesReportRowOrderBySellerId,
       getLotDivisor,
       sellerExpensesById,
       sellerFormById,
@@ -3860,6 +4138,355 @@ const SettlementPage = () => {
     []
   );
 
+  const updateExtraBidLotName = useCallback((sellerId: string, extraId: string, lotName: string) => {
+    setExtraBidLotsBySellerId(prev => {
+      const list = [...(prev[sellerId] ?? [])];
+      const idx = list.findIndex(e => e.id === extraId);
+      if (idx < 0) return prev;
+      list[idx] = { ...list[idx], lotName: lotName.trim() };
+      return { ...prev, [sellerId]: list };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isSettlementFormReadOnly) return;
+    setSplitGroupsById({});
+    setActiveSplitGroupIdBySellerId({});
+  }, [isSettlementFormReadOnly]);
+
+  /** Qty/weight sync only inside active split group; totals stay constant. */
+  const applySplitGroupQtyWeightSync = useCallback(
+    (
+      seller: SellerSettlement,
+      snap: SplitGroupSnapshot,
+      editedKey: SalesRowOrderKey,
+      field: 'qty' | 'weight',
+      raw: string
+    ) => {
+      if (raw.trim() === '') return;
+      const n = parseFloat(raw);
+      if (!Number.isFinite(n)) return;
+      if (activeSplitGroupIdBySellerIdRef.current[seller.sellerId] !== snap.splitGroupId) return;
+      const partnerKey = editedKey === snap.rowKeyA ? snap.rowKeyB : snap.rowKeyA;
+      const sid = seller.sellerId;
+      const pEdit = parseSalesRowOrderKey(editedKey);
+      const pPartner = parseSalesRowOrderKey(partnerKey);
+      if (!pEdit || !pPartner) return;
+
+      if (field === 'qty') {
+        const qE = Math.max(0, Math.min(Math.round(n), snap.totalQty));
+        const qP = snap.totalQty - qE;
+        /** Keep total weight fixed; split by bag share so avg kg/bag matches across both rows. */
+        let wE = 0;
+        let wP = 0;
+        if (snap.totalQty > 0 && snap.totalWeight > 0) {
+          wE = (qE / snap.totalQty) * snap.totalWeight;
+          wP = snap.totalWeight - wE;
+        } else if (snap.totalWeight > 0) {
+          wP = snap.totalWeight;
+        }
+        const applyQtyWeight = (key: SalesRowOrderKey, q: number, w: number) => {
+          const p = parseSalesRowOrderKey(key);
+          if (!p) return;
+          if (p.type === 'api') {
+            setLotSalesOverridesBySellerId(prevOv => {
+              const curSeller = { ...(prevOv[sid] ?? {}) };
+              const lo = { ...(curSeller[p.sid] ?? {}) };
+              lo.qty = q;
+              lo.weight = w;
+              curSeller[p.sid] = lo;
+              return { ...prevOv, [sid]: curSeller };
+            });
+          } else {
+            setExtraBidLotsBySellerId(prevEx => {
+              const list = [...(prevEx[sid] ?? [])];
+              const i = list.findIndex(e => e.id === p.id);
+              if (i < 0) return prevEx;
+              list[i] = { ...list[i], qty: q, weight: w };
+              return { ...prevEx, [sid]: list };
+            });
+          }
+        };
+        flushSync(() => {
+          applyQtyWeight(editedKey, qE, wE);
+        });
+        applyQtyWeight(partnerKey, qP, wP);
+        return;
+      }
+
+      const wE = Math.max(0, Math.min(n, snap.totalWeight));
+      const wP = snap.totalWeight - wE;
+      if (pEdit.type === 'api') {
+        flushSync(() => {
+          setLotSalesOverridesBySellerId(prevOv => {
+            const curSeller = { ...(prevOv[sid] ?? {}) };
+            const lo = { ...(curSeller[pEdit.sid] ?? {}) };
+            lo.weight = wE;
+            curSeller[pEdit.sid] = lo;
+            return { ...prevOv, [sid]: curSeller };
+          });
+        });
+      } else {
+        flushSync(() => {
+          setExtraBidLotsBySellerId(prevEx => {
+            const list = [...(prevEx[sid] ?? [])];
+            const i = list.findIndex(e => e.id === pEdit.id);
+            if (i < 0) return prevEx;
+            list[i] = { ...list[i], weight: wE };
+            return { ...prevEx, [sid]: list };
+          });
+        });
+      }
+      if (pPartner.type === 'api') {
+        setLotSalesOverridesBySellerId(prevOv => {
+          const curSeller = { ...(prevOv[sid] ?? {}) };
+          const lo = { ...(curSeller[pPartner.sid] ?? {}) };
+          lo.weight = wP;
+          curSeller[pPartner.sid] = lo;
+          return { ...prevOv, [sid]: curSeller };
+        });
+      } else {
+        setExtraBidLotsBySellerId(prevEx => {
+          const list = [...(prevEx[sid] ?? [])];
+          const i = list.findIndex(e => e.id === pPartner.id);
+          if (i < 0) return prevEx;
+          list[i] = { ...list[i], weight: wP };
+          return { ...prevEx, [sid]: list };
+        });
+      }
+    },
+    []
+  );
+
+  const commitSplitGroup = useCallback((splitGroupId: string) => {
+    const snap = splitGroupsByIdRef.current[splitGroupId];
+    if (!snap) return;
+    const sid = snap.sellerId;
+    setSplitGroupsById(prev => {
+      if (!prev[splitGroupId]) return prev;
+      const next = { ...prev };
+      delete next[splitGroupId];
+      return next;
+    });
+    setActiveSplitGroupIdBySellerId(prev =>
+      prev[sid] === splitGroupId ? { ...prev, [sid]: null } : prev
+    );
+  }, []);
+
+  const cancelSplitGroup = useCallback((splitGroupId: string) => {
+    const snap = splitGroupsByIdRef.current[splitGroupId];
+    if (!snap) return;
+    const sid = snap.sellerId;
+    const cr = snap.cancelRestore;
+
+    if (cr.kind === 'api_plus_extra') {
+      const { apiSid, prevApiOverride, newExtraId } = cr;
+      const kRm = salesRowKeyExtra(newExtraId);
+      setExtraBidLotsBySellerId(prevEx => ({
+        ...prevEx,
+        [sid]: (prevEx[sid] ?? []).filter(e => e.id !== newExtraId),
+      }));
+      setLotSalesOverridesBySellerId(prevOv => {
+        const curSeller = { ...(prevOv[sid] ?? {}) };
+        const has = hasLotSalesOverride(prevApiOverride);
+        if (!has) {
+          delete curSeller[apiSid];
+        } else {
+          curSeller[apiSid] = { ...prevApiOverride };
+        }
+        if (Object.keys(curSeller).length === 0) {
+          const next = { ...prevOv };
+          delete next[sid];
+          return next;
+        }
+        return { ...prevOv, [sid]: curSeller };
+      });
+      setSalesReportRowOrderBySellerId(prevOr => {
+        const ord = prevOr[sid];
+        if (!ord?.length) return prevOr;
+        return { ...prevOr, [sid]: ord.filter(k => k !== kRm) };
+      });
+    } else {
+      const { firstExtraId, newExtraId, originalExtra } = cr;
+      setExtraBidLotsBySellerId(prevEx => {
+        const list = [...(prevEx[sid] ?? [])];
+        const i1 = list.findIndex(e => e.id === firstExtraId);
+        const i2 = list.findIndex(e => e.id === newExtraId);
+        if (i1 < 0 || i2 < 0) return prevEx;
+        const lo = Math.min(i1, i2);
+        const hi = Math.max(i1, i2);
+        list.splice(lo, hi - lo + 1, { ...originalExtra });
+        return { ...prevEx, [sid]: list };
+      });
+      setSalesReportRowOrderBySellerId(prevOr => {
+        const ord = [...(prevOr[sid] ?? [])];
+        const kNew = salesRowKeyExtra(newExtraId);
+        return { ...prevOr, [sid]: ord.filter(k => k !== kNew) };
+      });
+    }
+
+    setSplitGroupsById(prev => {
+      if (!prev[splitGroupId]) return prev;
+      const next = { ...prev };
+      delete next[splitGroupId];
+      return next;
+    });
+    setActiveSplitGroupIdBySellerId(prev =>
+      prev[sid] === splitGroupId ? { ...prev, [sid]: null } : prev
+    );
+  }, []);
+
+  const splitInlineSalesTableRow = useCallback(
+    (
+      seller: SellerSettlement,
+      tr: SettlementSalesTableRow,
+      merged: ReturnType<typeof mergeLotDisplayRow>,
+      lotOvForSeller: Record<string, LotSalesOverride>
+    ) => {
+      if (settlementFormMode !== 'saved' || isSettlementFormReadOnly) return;
+      const sid = seller.sellerId;
+      if (activeSplitGroupIdBySellerIdRef.current[sid]) {
+        toast.message('Save or cancel the current split edit first.');
+        return;
+      }
+      const q = merged.qty;
+      const w = merged.weight;
+      const r = merged.ratePerBag;
+      if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(w) || w <= 0) {
+        toast.message('Need positive quantity and weight to split.');
+        return;
+      }
+      const rowKeyA = getSalesRowKeyForTableRow(tr.isExtraBid, tr.sid);
+      const splitGroupId = newExtraBidLotId();
+      const newId = newExtraBidLotId();
+      const removedSet = new Set(removedLotsBySellerId[sid] ?? []);
+
+      const q1 = Math.floor(q / 2);
+      const q2 = q - q1;
+      const w1 = w / 2;
+      const w2 = w - w1;
+      if (q1 <= 0 || q2 <= 0) {
+        toast.message('Need at least 2 bags to split.');
+        return;
+      }
+      if (w1 <= 0 || w2 <= 0) {
+        toast.message('Need positive weight on both split rows.');
+        return;
+      }
+
+      const rowKeyB = salesRowKeyExtra(newId);
+
+      if (!tr.isExtraBid) {
+        const prevApiOverride: LotSalesOverride = { ...(lotOvForSeller[tr.sid] ?? {}) };
+        const lot = tr.lot;
+        const commodity = (lot.commodityName || '').trim();
+        const lotName = (merged.itemLabel || lot.lotName || '—').trim();
+        const nextExtra: ExtraBidLot = {
+          id: newId,
+          lotName: lotName || '—',
+          commodityName: commodity,
+          qty: q2,
+          weight: w2,
+          ratePerBag: r,
+        };
+        const prevExtras = extraBidLotsBySellerId[sid] ?? [];
+        const nextExtras = [...prevExtras, nextExtra];
+        flushSync(() => {
+          setLotSalesOverridesBySellerId(prevOv => {
+            const curSeller = { ...(prevOv[sid] ?? {}) };
+            const lo = { ...(curSeller[tr.sid] ?? {}) };
+            lo.qty = q1;
+            lo.weight = w1;
+            lo.ratePerBag = r;
+            curSeller[tr.sid] = lo;
+            return { ...prevOv, [sid]: curSeller };
+          });
+        });
+        setExtraBidLotsBySellerId(prev => ({ ...prev, [sid]: nextExtras }));
+        setSalesReportRowOrderBySellerId(prevOr => {
+          const base = sanitizeSalesRowOrder(prevOr[sid], seller, removedSet, nextExtras);
+          const kApi = salesRowKeyApi(tr.sid);
+          const kNew = salesRowKeyExtra(newId);
+          const ix = base.indexOf(kApi);
+          const ins = ix >= 0 ? ix + 1 : base.length;
+          const nextOrder = [...base.slice(0, ins), kNew, ...base.slice(ins)];
+          return { ...prevOr, [sid]: nextOrder };
+        });
+        setSplitGroupsById(prev => ({
+          ...prev,
+          [splitGroupId]: {
+            splitGroupId,
+            sellerId: sid,
+            rowKeyA,
+            rowKeyB,
+            totalQty: q,
+            totalWeight: w,
+            isEditing: true,
+            cancelRestore: {
+              kind: 'api_plus_extra',
+              apiSid: tr.sid,
+              prevApiOverride,
+              newExtraId: newId,
+            },
+          },
+        }));
+        setActiveSplitGroupIdBySellerId(prev => ({ ...prev, [sid]: splitGroupId }));
+        return;
+      }
+
+      const curList = [...(extraBidLotsBySellerId[sid] ?? [])];
+      const idx = curList.findIndex(e => e.id === tr.sid);
+      if (idx < 0) return;
+      const cur = curList[idx];
+      const originalExtra: ExtraBidLot = { ...cur };
+      const nextA: ExtraBidLot = { ...cur, qty: q1, weight: w1 };
+      const nextB: ExtraBidLot = {
+        id: newId,
+        lotName: cur.lotName,
+        commodityName: cur.commodityName,
+        qty: q2,
+        weight: w2,
+        ratePerBag: cur.ratePerBag,
+      };
+      curList.splice(idx, 1, nextA, nextB);
+      setExtraBidLotsBySellerId(prev => ({ ...prev, [sid]: curList }));
+      setSalesReportRowOrderBySellerId(prevOr => {
+        const base = sanitizeSalesRowOrder(prevOr[sid], seller, removedSet, curList);
+        const kOld = salesRowKeyExtra(tr.sid);
+        const kNew = salesRowKeyExtra(newId);
+        const ix = base.indexOf(kOld);
+        const ins = ix >= 0 ? ix + 1 : base.length;
+        const nextOrder = [...base.slice(0, ins), kNew, ...base.slice(ins)];
+        return { ...prevOr, [sid]: nextOrder };
+      });
+      setSplitGroupsById(prev => ({
+        ...prev,
+        [splitGroupId]: {
+          splitGroupId,
+          sellerId: sid,
+          rowKeyA,
+          rowKeyB,
+          totalQty: q,
+          totalWeight: w,
+          isEditing: true,
+          cancelRestore: {
+            kind: 'extra_pair',
+            firstExtraId: tr.sid,
+            newExtraId: newId,
+            originalExtra,
+          },
+        },
+      }));
+      setActiveSplitGroupIdBySellerId(prev => ({ ...prev, [sid]: splitGroupId }));
+    },
+    [
+      settlementFormMode,
+      isSettlementFormReadOnly,
+      removedLotsBySellerId,
+      extraBidLotsBySellerId,
+    ]
+  );
+
   const runPrintMainPatti = useCallback(async () => {
     if (!pattiData) return;
     if (isSettlementFormReadOnly) {
@@ -5173,6 +5800,8 @@ const SettlementPage = () => {
                 const exp = sellerExpensesById[seller.sellerId] ?? defaultSellerExpenses();
                 const sellerValidationError = getSellerValidationError(seller);
                 const saveHighlightThisSeller = pattiSaveHighlightSellerIds.includes(seller.sellerId);
+                /** Sticky save-highlight IDs clear visually once seller validates (live re-check). */
+                const showSaveValidationChrome = saveHighlightThisSeller && sellerValidationError != null;
                 const printSaveAllowed = isSettlementSellerPrintAllowed(seller, form);
                 const contactSearchQuery = (form.contactSearchQuery ?? '').trim();
                 const contactSearchQueryLower = contactSearchQuery.toLowerCase();
@@ -5187,19 +5816,39 @@ const SettlementPage = () => {
                 const showContactSearchDropdown = contactSearchQuery.length > 0;
                 const removedSet = new Set(removedLotsBySellerId[seller.sellerId] ?? []);
                 const lotOv = lotSalesOverridesBySellerId[seller.sellerId] ?? {};
+                const agSplitId = activeSplitGroupIdBySellerId[seller.sellerId] ?? null;
+                const splitSnapForSeller = agSplitId ? splitGroupsById[agSplitId] : null;
                 const extraLotsRaw = extraBidLotsBySellerId[seller.sellerId] ?? [];
                 const visibleApiLots = (seller.lots ?? [])
                   .map((lot, i) => ({ lot, i, sid: lotStableId(lot, i) }))
                   .filter(x => !removedSet.has(x.sid));
-                const tableRows: SettlementSalesTableRow[] = [
-                  ...visibleApiLots.map(({ lot, sid }) => ({ lot, sid, isExtraBid: false as const })),
-                  ...extraLotsRaw.map(e => ({
-                    lot: settlementLotFromExtraBid(e),
-                    sid: e.id,
-                    isExtraBid: true as const,
-                    extraBid: e,
-                  })),
-                ];
+                const apiLotBySid = new Map(visibleApiLots.map(({ lot, sid }) => [sid, { lot, sid }] as const));
+                const extraById = new Map(extraLotsRaw.map(e => [e.id, e] as const));
+                const rowOrderKeys = sanitizeSalesRowOrder(
+                  salesReportRowOrderBySellerId[seller.sellerId],
+                  seller,
+                  removedSet,
+                  extraLotsRaw
+                );
+                const tableRows: SettlementSalesTableRow[] = [];
+                for (const k of rowOrderKeys) {
+                  const p = parseSalesRowOrderKey(k);
+                  if (!p) continue;
+                  if (p.type === 'api') {
+                    const hit = apiLotBySid.get(p.sid);
+                    if (!hit) continue;
+                    tableRows.push({ lot: hit.lot, sid: hit.sid, isExtraBid: false as const });
+                  } else {
+                    const e = extraById.get(p.id);
+                    if (!e) continue;
+                    tableRows.push({
+                      lot: settlementLotFromExtraBid(e),
+                      sid: e.id,
+                      isExtraBid: true as const,
+                      extraBid: e,
+                    });
+                  }
+                }
                 const lotRows = tableRows.map(r =>
                   mergeLotDisplayRow(r.lot, r.isExtraBid ? undefined : lotOv[r.sid], getLotDivisor(r.lot))
                 );
@@ -5208,17 +5857,21 @@ const SettlementPage = () => {
                 const amountTot = lotRows.reduce((s, r) => s + r.amount, 0);
                 const allowedQtyBags = Math.round(totalArrivalBagsForSeller(seller));
                 const qtyOutOfBalance = allowedQtyBags > 0 && qtyTot !== allowedQtyBags;
-                const newBidDraft =
-                  newBidDraftBySellerId[seller.sellerId] ?? {
-                    lotName: '',
-                    qty: '',
-                    weight: '',
-                    rate: '',
-                  };
-                const defaultNewBidCommodity =
-                  visibleApiLots[0]?.lot.commodityName?.trim() ||
-                  (seller.lots?.[0]?.commodityName ?? '').trim() ||
-                  '';
+                const invalidLotFieldBySid: Record<string, { qty?: true; weight?: true; rate?: true }> = {};
+                for (const tr of tableRows) {
+                  const r = mergeLotDisplayRow(
+                    tr.lot,
+                    tr.isExtraBid ? undefined : lotOv[tr.sid],
+                    getLotDivisor(tr.lot)
+                  );
+                  const inv: { qty?: true; weight?: true; rate?: true } = {};
+                  if (!Number.isFinite(r.qty) || r.qty <= 0) inv.qty = true;
+                  if (!Number.isFinite(r.weight) || r.weight <= 0) inv.weight = true;
+                  if (!Number.isFinite(r.ratePerBag) || r.ratePerBag <= 0) inv.rate = true;
+                  if (Object.keys(inv).length > 0) invalidLotFieldBySid[tr.sid] = inv;
+                }
+                const sellerNameMissing = !(form.name || seller.sellerName || '').trim();
+                const highlightSellerName = showSaveValidationChrome && sellerNameMissing;
                 const expenseTotal = totalSellerExpenses(
                   exp,
                   isWeighingEnabledForSeller(seller.sellerId),
@@ -5238,7 +5891,7 @@ const SettlementPage = () => {
                       className={cn(
                         'rounded-2xl border p-3 sm:p-4',
                         SALES_REPORT_SELLER_CARD_STYLES[sellerIdx % SALES_REPORT_SELLER_CARD_STYLES.length],
-                        saveHighlightThisSeller &&
+                        showSaveValidationChrome &&
                           'ring-2 ring-destructive/80 ring-offset-2 ring-offset-background dark:ring-offset-background',
                       )}
                     >
@@ -5254,18 +5907,6 @@ const SettlementPage = () => {
                         <span className="rounded-lg border border-border/50 bg-background/70 px-2 py-1 text-[11px] font-semibold text-foreground">
                           Patti No: {sellerSalesPattiNumberBySellerId[seller.sellerId] || '-'}
                         </span>
-                        {settlementFormMode === 'saved' && (
-                          <Button
-                            type="button"
-                            className={cn(arrSolidSm, 'gap-1')}
-                            disabled={isSettlementFormReadOnly}
-                            title="Add bid (split quantity)"
-                            onClick={() => setAddBidDialogSellerId(seller.sellerId)}
-                          >
-                            <PlusCircle className="h-3.5 w-3.5" />
-                            Add bid
-                          </Button>
-                        )}
                         <Button
                           type="button"
                           className={cn(arrSolidSm, 'gap-1')}
@@ -5316,7 +5957,7 @@ const SettlementPage = () => {
                           className={cn(
                             'flex items-center gap-2 font-medium',
                             isSettlementFormReadOnly ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
-                            saveHighlightThisSeller &&
+                            showSaveValidationChrome &&
                               !printSaveAllowed &&
                               'rounded-md px-1 py-0.5 ring-2 ring-destructive ring-offset-1 ring-offset-background dark:ring-offset-background'
                           )}
@@ -5591,7 +6232,9 @@ const SettlementPage = () => {
                             }
                             className={cn(
                               'h-9 min-w-0 w-full rounded-lg text-sm',
-                              form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground'
+                              form.registered && !form.allowRegisteredEdit && 'cursor-not-allowed border-dashed bg-muted/45 text-muted-foreground',
+                              highlightSellerName &&
+                                'ring-2 ring-destructive/70 ring-offset-2 ring-offset-background dark:ring-offset-background'
                             )}
                             disabled={isSettlementFormReadOnly || !form.registrationChosen || (form.registered && !form.allowRegisteredEdit)}
                           />
@@ -5784,6 +6427,36 @@ const SettlementPage = () => {
                       </div>
                     </div>
 
+                    {splitSnapForSeller?.isEditing ? (
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/35 bg-primary/[0.07] px-3 py-2 dark:bg-primary/10">
+                        <p className="min-w-0 text-xs font-medium text-foreground">
+                          Split edit: qty/weight totals stay fixed across the two rows. Rates are independent per row.
+                          Save to finish or Cancel to restore the single row.
+                        </p>
+                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className={cn(arrSolidSm, 'h-8 gap-1 px-2.5')}
+                            onClick={() => commitSplitGroup(splitSnapForSeller.splitGroupId)}
+                          >
+                            <Check className="h-3.5 w-3.5" aria-hidden />
+                            Save
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1 px-2.5"
+                            onClick={() => cancelSplitGroup(splitSnapForSeller.splitGroupId)}
+                          >
+                            <X className="h-3.5 w-3.5" aria-hidden />
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
                       <div className="min-h-0 min-w-0 flex-1 overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm lg:max-w-[calc(100%-18.25rem)]">
                         <table className="w-full min-w-[700px] border-separate border-spacing-0 text-[11px] leading-tight sm:text-sm">
@@ -5818,13 +6491,31 @@ const SettlementPage = () => {
                           <tbody>
                             {tableRows.length === 0 ? (
                               <tr>
-                                <td colSpan={8} className="px-2 py-8 text-center text-muted-foreground">
+                                <td
+                                  colSpan={8}
+                                  className={cn(
+                                    'px-2 py-8 text-center text-muted-foreground',
+                                    showSaveValidationChrome &&
+                                      'rounded-lg ring-2 ring-destructive/50 ring-inset'
+                                  )}
+                                >
                                   No lots for this seller
                                 </td>
                               </tr>
                             ) : (
                               tableRows.map((tr, displayIdx) => {
                                 const { lot, sid, isExtraBid } = tr;
+                                const rowKey = getSalesRowKeyForTableRow(isExtraBid, sid);
+                                const splitSnap = splitSnapForSeller;
+                                const rowInActiveSplitGroup = !!(
+                                  splitSnap &&
+                                  splitSnap.isEditing &&
+                                  (rowKey === splitSnap.rowKeyA || rowKey === splitSnap.rowKeyB)
+                                );
+                                const splitEditLocksOthers = !!(splitSnap && splitSnap.isEditing);
+                                const fieldLocked =
+                                  isSettlementFormReadOnly ||
+                                  (splitEditLocksOthers && !rowInActiveSplitGroup);
                                 const div = getLotDivisor(lot);
                                 const row = mergeLotDisplayRow(
                                   lot,
@@ -5840,42 +6531,79 @@ const SettlementPage = () => {
                                     settlementFormMode === 'in-progress' ||
                                     settlementFormMode === 'saved') &&
                                   !isSettlementFormReadOnly;
+                                const qtyCellEditable =
+                                  qtyEditableInSalesReport &&
+                                  (!splitEditLocksOthers || rowInActiveSplitGroup);
                                 return (
                                   <tr
                                     key={sid}
+                                    data-split-group={splitSnap?.splitGroupId ?? ''}
                                     className="border-b border-border/40 bg-card/90 text-center transition-colors hover:bg-muted/25"
                                   >
                                     <td className="px-2 py-2 align-middle tabular-nums text-foreground lg:px-3">
                                       {displayIdx + 1}
                                     </td>
                                     <td className="px-2 py-2 align-middle text-left font-semibold text-foreground lg:px-3">
-                                      {row.itemLabel}
-                                      {isExtraBid ? (
-                                        <span className="ml-1 text-[9px] font-normal text-muted-foreground">
-                                          (add bid)
-                                        </span>
-                                      ) : null}
+                                      {isExtraBid &&
+                                      settlementFormMode === 'saved' &&
+                                      !isSettlementFormReadOnly ? (
+                                        <Input
+                                          className="h-8 min-w-0 max-w-[14rem] text-xs font-semibold"
+                                          value={tr.extraBid.lotName}
+                                          disabled={fieldLocked}
+                                          onChange={e =>
+                                            updateExtraBidLotName(seller.sellerId, sid, e.target.value)
+                                          }
+                                          aria-label="Lot item name"
+                                        />
+                                      ) : (
+                                        <>
+                                          {row.itemLabel}
+                                          {isExtraBid ? (
+                                            <span className="ml-1 text-[9px] font-normal text-muted-foreground">
+                                              (split)
+                                            </span>
+                                          ) : null}
+                                        </>
+                                      )}
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
-                                      {qtyEditableInSalesReport ? (
+                                      {qtyCellEditable ? (
                                         <Input
                                           type="number"
                                           min={0}
                                           step={1}
-                                          className="mx-auto h-9 w-[4.5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                          className={cn(
+                                            'mx-auto h-9 w-[4.5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+                                            showSaveValidationChrome &&
+                                              invalidLotFieldBySid[sid]?.qty &&
+                                              'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
+                                          )}
                                           value={Number.isFinite(row.qty) ? row.qty : 0}
-                                          onChange={e =>
-                                            isExtraBid
-                                              ? updateExtraBidLotField(
-                                                  seller.sellerId,
-                                                  sid,
-                                                  'qty',
-                                                  e.target.value
-                                                )
-                                              : setLotSalesField(seller.sellerId, sid, 'qty', e.target.value)
-                                          }
+                                          onChange={e => {
+                                            if (splitSnap && rowInActiveSplitGroup) {
+                                              applySplitGroupQtyWeightSync(
+                                                seller,
+                                                splitSnap,
+                                                rowKey,
+                                                'qty',
+                                                e.target.value
+                                              );
+                                              return;
+                                            }
+                                            if (isExtraBid) {
+                                              updateExtraBidLotField(
+                                                seller.sellerId,
+                                                sid,
+                                                'qty',
+                                                e.target.value
+                                              );
+                                            } else {
+                                              setLotSalesField(seller.sellerId, sid, 'qty', e.target.value);
+                                            }
+                                          }}
                                           aria-label="Quantity bags"
-                                          disabled={isSettlementFormReadOnly}
+                                          disabled={fieldLocked}
                                         />
                                       ) : (
                                         <div
@@ -5894,20 +6622,37 @@ const SettlementPage = () => {
                                         type="number"
                                         min={0}
                                         step={0.1}
-                                        className="mx-auto h-9 w-[5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        className={cn(
+                                          'mx-auto h-9 w-[5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+                                          showSaveValidationChrome &&
+                                            invalidLotFieldBySid[sid]?.weight &&
+                                            'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
+                                        )}
                                         value={Number.isFinite(row.weight) ? row.weight : 0}
-                                        onChange={e =>
-                                          isExtraBid
-                                            ? updateExtraBidLotField(
-                                                seller.sellerId,
-                                                sid,
-                                                'weight',
-                                                e.target.value
-                                              )
-                                            : setLotSalesField(seller.sellerId, sid, 'weight', e.target.value)
-                                        }
+                                        onChange={e => {
+                                          if (splitSnap && rowInActiveSplitGroup) {
+                                            applySplitGroupQtyWeightSync(
+                                              seller,
+                                              splitSnap,
+                                              rowKey,
+                                              'weight',
+                                              e.target.value
+                                            );
+                                            return;
+                                          }
+                                          if (isExtraBid) {
+                                            updateExtraBidLotField(
+                                              seller.sellerId,
+                                              sid,
+                                              'weight',
+                                              e.target.value
+                                            );
+                                          } else {
+                                            setLotSalesField(seller.sellerId, sid, 'weight', e.target.value);
+                                          }
+                                        }}
                                         aria-label="Weight kg"
-                                        disabled={isSettlementFormReadOnly}
+                                        disabled={fieldLocked}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -5916,7 +6661,7 @@ const SettlementPage = () => {
                                           settlementReadOnlyCellClass,
                                           avgWarn &&
                                             'border-amber-500/45 bg-amber-500/[0.12] text-amber-800 dark:text-amber-300',
-                                          saveHighlightThisSeller &&
+                                          showSaveValidationChrome &&
                                             avgWarn &&
                                             'border-destructive/70 bg-destructive/[0.12] ring-2 ring-destructive/50 dark:text-destructive-foreground'
                                         )}
@@ -5936,21 +6681,33 @@ const SettlementPage = () => {
                                         type="number"
                                         min={0}
                                         step={0.01}
-                                        className="mx-auto h-9 w-[5.25rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                        className={cn(
+                                          'mx-auto h-9 w-[5.25rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
+                                          showSaveValidationChrome &&
+                                            invalidLotFieldBySid[sid]?.rate &&
+                                            'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
+                                        )}
                                         value={Number.isFinite(row.ratePerBag) ? row.ratePerBag : 0}
-                                        onChange={e =>
-                                          isExtraBid
-                                            ? updateExtraBidLotField(
-                                                seller.sellerId,
-                                                sid,
-                                                'ratePerBag',
-                                                e.target.value
-                                              )
-                                            : setLotSalesField(seller.sellerId, sid, 'ratePerBag', e.target.value)
-                                        }
+                                        onChange={e => {
+                                          if (isExtraBid) {
+                                            updateExtraBidLotField(
+                                              seller.sellerId,
+                                              sid,
+                                              'ratePerBag',
+                                              e.target.value
+                                            );
+                                          } else {
+                                            setLotSalesField(
+                                              seller.sellerId,
+                                              sid,
+                                              'ratePerBag',
+                                              e.target.value
+                                            );
+                                          }
+                                        }}
                                         aria-label="Rate per bag"
                                         title="Seller settlement rate per bag; amount uses commodity divisor from settings"
-                                        disabled={isSettlementFormReadOnly}
+                                        disabled={fieldLocked}
                                       />
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
@@ -5965,24 +6722,44 @@ const SettlementPage = () => {
                                       </div>
                                     </td>
                                     <td className="px-1 py-1.5 align-middle text-center lg:px-2">
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                        aria-label="Remove row"
-                                        disabled={isSettlementFormReadOnly}
-                                        onClick={() =>
-                                          setDeleteLotConfirm({
-                                            sellerId: seller.sellerId,
-                                            lotId: sid,
-                                            itemLabel: row.itemLabel,
-                                            isExtraBid,
-                                          })
-                                        }
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
+                                      <div className="inline-flex items-center justify-center gap-0.5">
+                                        {settlementFormMode === 'saved' && !isSettlementFormReadOnly && (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-9 w-9 text-primary hover:bg-primary/10"
+                                            aria-label="Split row 1:1"
+                                            title="Split this row in half (enable edit with Alt+M)"
+                                            disabled={
+                                              splitEditLocksOthers ||
+                                              row.qty <= 0 ||
+                                              row.weight <= 0
+                                            }
+                                            onClick={() => splitInlineSalesTableRow(seller, tr, row, lotOv)}
+                                          >
+                                            <Edit3 className="h-4 w-4" />
+                                          </Button>
+                                        )}
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                          aria-label="Remove row"
+                                          disabled={isSettlementFormReadOnly || fieldLocked}
+                                          onClick={() =>
+                                            setDeleteLotConfirm({
+                                              sellerId: seller.sellerId,
+                                              lotId: sid,
+                                              itemLabel: row.itemLabel,
+                                              isExtraBid,
+                                            })
+                                          }
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -5995,7 +6772,14 @@ const SettlementPage = () => {
                                 <td colSpan={2} className="px-2 py-2.5 text-center lg:px-3">
                                   Total
                                 </td>
-                                <td className="px-2 py-2.5 text-center tabular-nums lg:px-3">
+                                <td
+                                  className={cn(
+                                    'px-2 py-2.5 text-center tabular-nums lg:px-3',
+                                    showSaveValidationChrome &&
+                                      qtyOutOfBalance &&
+                                      'rounded-md ring-2 ring-destructive/55 ring-offset-2 ring-offset-background dark:ring-offset-background'
+                                  )}
+                                >
                                   <span className="inline-flex items-center justify-center gap-1">
                                     {qtyTot}
                                     {qtyOutOfBalance && (
@@ -6454,201 +7238,6 @@ const SettlementPage = () => {
                     </div>
                     </div>
 
-                    {settlementFormMode === 'saved' && (
-                      <Dialog
-                        open={addBidDialogSellerId === seller.sellerId}
-                        onOpenChange={open => {
-                          if (!open) {
-                            setAddBidDialogSellerId(id => (id === seller.sellerId ? null : id));
-                          }
-                        }}
-                      >
-                        <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto rounded-2xl border border-border/60 bg-background p-0 sm:max-w-xl sm:p-0">
-                          <div className="border-b border-border/50 bg-muted/30 px-4 py-3 sm:px-5">
-                            <DialogHeader className="space-y-1 text-left">
-                              <DialogTitle className="text-base font-bold tracking-tight">
-                                Add bid (split quantity)
-                              </DialogTitle>
-                              <DialogDescription className="text-[11px] text-muted-foreground">
-                                {seller.sellerName}
-                                {seller.sellerMark ? ` – ${seller.sellerMark}` : ''}. Adds an extra lot row; balance total
-                                quantity with other rows to match arrival bags.
-                              </DialogDescription>
-                            </DialogHeader>
-                          </div>
-                          <div className="space-y-3 px-4 py-3 sm:px-5">
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                              <div className="min-w-0 sm:col-span-2">
-                                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Enter Lot Name<span className="text-destructive">*</span>
-                                </label>
-                                <Input
-                                  className="h-9 text-sm"
-                                  value={newBidDraft.lotName}
-                                  onChange={e =>
-                                    setNewBidDraftBySellerId(prev => ({
-                                      ...prev,
-                                      [seller.sellerId]: {
-                                        ...newBidDraft,
-                                        lotName: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  disabled={isSettlementFormReadOnly}
-                                  placeholder="Lot name"
-                                />
-                              </div>
-                              <div className="min-w-0">
-                                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Enter Quantity<span className="text-destructive">*</span>
-                                </label>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={1}
-                                  className="h-9 text-sm tabular-nums"
-                                  value={newBidDraft.qty}
-                                  onChange={e =>
-                                    setNewBidDraftBySellerId(prev => ({
-                                      ...prev,
-                                      [seller.sellerId]: {
-                                        ...newBidDraft,
-                                        qty: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  disabled={isSettlementFormReadOnly}
-                                  placeholder="Bags"
-                                />
-                              </div>
-                              <div className="min-w-0">
-                                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Enter Weight<span className="text-destructive">*</span>
-                                </label>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={0.1}
-                                  className="h-9 text-sm tabular-nums"
-                                  value={newBidDraft.weight}
-                                  onChange={e =>
-                                    setNewBidDraftBySellerId(prev => ({
-                                      ...prev,
-                                      [seller.sellerId]: {
-                                        ...newBidDraft,
-                                        weight: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  disabled={isSettlementFormReadOnly}
-                                  placeholder="kg"
-                                />
-                              </div>
-                              <div className="min-w-0 sm:col-span-2">
-                                <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Enter Rate<span className="text-destructive">*</span>
-                                </label>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={0.01}
-                                  className="h-9 text-sm tabular-nums"
-                                  value={newBidDraft.rate}
-                                  onChange={e =>
-                                    setNewBidDraftBySellerId(prev => ({
-                                      ...prev,
-                                      [seller.sellerId]: {
-                                        ...newBidDraft,
-                                        rate: e.target.value,
-                                      },
-                                    }))
-                                  }
-                                  disabled={isSettlementFormReadOnly}
-                                  placeholder="₹/bag"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          <DialogFooter className="border-t border-border/50 bg-muted/20 px-4 py-3 sm:px-5">
-                            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className={arrOutlineMd}
-                                onClick={() => setAddBidDialogSellerId(id => (id === seller.sellerId ? null : id))}
-                              >
-                                Close
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className={cn(arrOutlineMd, 'min-w-[6rem]')}
-                                disabled={isSettlementFormReadOnly}
-                                onClick={() =>
-                                  setNewBidDraftBySellerId(prev => ({
-                                    ...prev,
-                                    [seller.sellerId]: { lotName: '', qty: '', weight: '', rate: '' },
-                                  }))
-                                }
-                              >
-                                Clear
-                              </Button>
-                              <Button
-                                type="button"
-                                className={cn(arrSolidMd, 'min-w-[7rem]')}
-                                disabled={isSettlementFormReadOnly}
-                                onClick={() => {
-                                  const name = newBidDraft.lotName.trim();
-                                  const q = Math.max(0, Math.round(parseFloat(newBidDraft.qty) || 0));
-                                  const w = parseFloat(newBidDraft.weight);
-                                  const r = parseFloat(newBidDraft.rate);
-                                  if (!name) {
-                                    toast.error('Lot name is required');
-                                    return;
-                                  }
-                                  if (!Number.isFinite(q) || q <= 0) {
-                                    toast.error('Enter a valid quantity');
-                                    return;
-                                  }
-                                  if (!Number.isFinite(w) || w <= 0) {
-                                    toast.error('Enter a valid weight');
-                                    return;
-                                  }
-                                  if (!Number.isFinite(r) || r <= 0) {
-                                    toast.error('Enter a valid rate');
-                                    return;
-                                  }
-                                  const id =
-                                    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-                                      ? crypto.randomUUID()
-                                      : `eb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-                                  const row: ExtraBidLot = {
-                                    id,
-                                    lotName: name,
-                                    commodityName: defaultNewBidCommodity,
-                                    qty: q,
-                                    weight: w,
-                                    ratePerBag: r,
-                                  };
-                                  setExtraBidLotsBySellerId(prev => ({
-                                    ...prev,
-                                    [seller.sellerId]: [...(prev[seller.sellerId] ?? []), row],
-                                  }));
-                                  setNewBidDraftBySellerId(prev => ({
-                                    ...prev,
-                                    [seller.sellerId]: { lotName: '', qty: '', weight: '', rate: '' },
-                                  }));
-                                  setAddBidDialogSellerId(cur => (cur === seller.sellerId ? null : cur));
-                                  toast.success('Bid row added — adjust other row quantities so total matches arrival bags.');
-                                }}
-                              >
-                                Save Bid
-                              </Button>
-                            </div>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    )}
                   </div>
                 );
               })}
@@ -7376,6 +7965,7 @@ const SettlementPage = () => {
                   onClick={() => {
                     if (!deleteLotConfirm) return;
                     const { sellerId, lotId, isExtraBid } = deleteLotConfirm;
+                    const keyRm = isExtraBid ? salesRowKeyExtra(lotId) : salesRowKeyApi(lotId);
                     if (isExtraBid) {
                       setExtraBidLotsBySellerId(prev => ({
                         ...prev,
@@ -7386,6 +7976,18 @@ const SettlementPage = () => {
                         ...prev,
                         [sellerId]: [...(prev[sellerId] ?? []), lotId],
                       }));
+                    }
+                    setSalesReportRowOrderBySellerId(prev => {
+                      const ord = prev[sellerId];
+                      if (!ord?.length) return prev;
+                      return { ...prev, [sellerId]: ord.filter(k => k !== keyRm) };
+                    });
+                    const act = activeSplitGroupIdBySellerIdRef.current[sellerId];
+                    if (act) {
+                      const g = splitGroupsByIdRef.current[act];
+                      if (g && g.sellerId === sellerId && splitGroupHasRowKey(g, keyRm)) {
+                        commitSplitGroup(act);
+                      }
                     }
                     setDeleteLotConfirm(null);
                   }}
