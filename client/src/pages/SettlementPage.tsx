@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { SettlementNumericInput } from '@/components/settlement/SettlementNumericInput';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
@@ -504,12 +505,42 @@ function formatMoney2Display(n: number): string {
 }
 
 /** Restore per-seller expense form from saved patti deduction lines. */
-function deductionsToSellerExpenseForm(deds: DeductionItem[]): SellerExpenseFormState {
+function deductionsToSellerExpenseForm(
+  deds: DeductionItem[],
+  opts?: { inferredWeighmanFromSlabs?: number }
+): SellerExpenseFormState {
   const byKey = Object.fromEntries(deds.map(d => [d.key, d.amount])) as Record<string, number>;
+  const freightDed = deds.find(d => d.key === 'freight');
+  const hasWeighingLine = deds.some(d => d.key === 'weighing' || d.key === 'weighman');
+
+  let freight = Number(byKey.freight ?? 0);
+  let weighman = Number(byKey.weighing ?? byKey.weighman ?? 0);
+
+  /**
+   * Legacy saves (Add to freight ON): single `freight` row held freight+weighing with no `weighing` key.
+   * Split using slab-derived weighing when freight label indicates merged line.
+   */
+  if (
+    !hasWeighingLine &&
+    freight > 0 &&
+    weighman === 0 &&
+    opts?.inferredWeighmanFromSlabs != null &&
+    Number.isFinite(opts.inferredWeighmanFromSlabs)
+  ) {
+    const inf = clampMoney(opts.inferredWeighmanFromSlabs);
+    const lab = String(freightDed?.label ?? '').toLowerCase();
+    const looksMergedFreight = lab.includes('incl');
+    if (looksMergedFreight && inf > 0) {
+      const w = Math.min(inf, freight);
+      weighman = w;
+      freight = clampMoney(freight - w);
+    }
+  }
+
   return {
-    freight: Number(byKey.freight ?? 0),
+    freight: clampMoney(freight),
     unloading: Number(byKey.coolie ?? byKey.unloading ?? 0),
-    weighman: Number(byKey.weighing ?? byKey.weighman ?? 0),
+    weighman: clampMoney(weighman),
     cashAdvance: Number(byKey.advance ?? 0),
     gunnies: Number(byKey.gunnies ?? 0),
     others: Number(byKey.others ?? 0),
@@ -529,15 +560,8 @@ function buildDeductionItemsFromSellerExpenses(
       : 'Unloading (Coolie) — commodity slab (weight mode reference)';
 
   const merged = weighingEnabled && mergeWeighingIntoFreight;
-  let freightAmt = exp.freight;
-  let weighingAmt = 0;
-  if (weighingEnabled) {
-    if (merged) {
-      freightAmt = exp.freight + exp.weighman;
-    } else {
-      weighingAmt = exp.weighman;
-    }
-  }
+  /** Always persist base freight + weighing on separate rows so reopening saved pattis restores `weighman` (Quick Adjustment + expense card). UI merge only affects display, not stored shape. */
+  const freightAmt = exp.freight;
 
   const items: DeductionItem[] = [
     {
@@ -549,11 +573,11 @@ function buildDeductionItemsFromSellerExpenses(
     },
     { key: 'coolie', label: coolieLabel, amount: exp.unloading, editable: true, autoPulled: true },
   ];
-  if (weighingEnabled && !merged) {
+  if (weighingEnabled) {
     items.push({
       key: 'weighing',
       label: 'Weighing Charges',
-      amount: weighingAmt,
+      amount: exp.weighman,
       editable: true,
       autoPulled: true,
     });
@@ -1248,6 +1272,53 @@ function sumLotSlabChargesForSeller(
   return { unloading, weighing };
 }
 
+/**
+ * Recompute commodity weighing slab total for a patti row (extensionJson + seller lots).
+ * Used when hydrating legacy saves that merged weighing into `freight` with no `weighing` deduction line.
+ */
+function inferWeighmanSlabHintForPattiHydration(
+  p: PattiDTO,
+  sellers: SellerSettlement[],
+  commodityList: Commodity[],
+  fullCommodityConfigs: FullCommodityConfigDto[],
+  getLotDivisor: (lot: SettlementLot) => number
+): number | undefined {
+  const sidKey = String(p.sellerId ?? '').trim();
+  if (!sidKey) return undefined;
+  const sellerModel =
+    sellers.find(s => s.sellerId === sidKey) ??
+    ({
+      sellerId: sidKey,
+      sellerName: (p.sellerName ?? '').trim(),
+      sellerMark: '',
+      vehicleNumber: '',
+      lots: [],
+    } as SellerSettlement);
+  const parsed = parsePattiExtensionJson(p.extensionJson);
+  const removed = new Set(parsed?.removedLotIds ?? []);
+  const lotOv = parsed?.lotOverrides ?? {};
+  const extraLots = parsed?.extraBidLots ?? [];
+  if ((sellerModel.lots?.length ?? 0) === 0 && extraLots.length === 0) return undefined;
+  const nameToId = new Map<string, number>();
+  for (const c of commodityList) {
+    const name = String(c.commodity_name ?? '').trim().toLowerCase();
+    const id = Number(c.commodity_id);
+    if (name && Number.isFinite(id)) nameToId.set(name, id);
+  }
+  const configById = new Map(fullCommodityConfigs.map(c => [c.commodityId, c]));
+  const { weighing } = sumLotSlabChargesForSeller(
+    sellerModel,
+    extraLots,
+    removed,
+    lotOv,
+    nameToId,
+    configById,
+    getLotDivisor
+  );
+  const w = roundMoney2(weighing);
+  return w > 0 ? w : undefined;
+}
+
 /** Per-seller slab sums + qty/weight for vehicle; shared by Quick Adjustment modal and expense auto-pull. */
 function buildSellerSlabChargeBaseForPattiSellers(
   arrivalSellersForPatti: SellerSettlement[],
@@ -1800,7 +1871,6 @@ const SettlementPage = () => {
   const [addVoucherRows, setAddVoucherRows] = useState<AddVoucherRowState[]>([]);
   const [addVoucherLoading, setAddVoucherLoading] = useState(false);
   const [addVoucherSaving, setAddVoucherSaving] = useState(false);
-  const [unloadingDraftBySellerId, setUnloadingDraftBySellerId] = useState<Record<string, string>>({});
   const [weighmanDraftBySellerId, setWeighmanDraftBySellerId] = useState<Record<string, string>>({});
   /** Last auto-pulled / applied expense snapshot per seller (redo target on the Expense card). */
   const [sellerExpenseRestoreBaselineById, setSellerExpenseRestoreBaselineById] = useState<
@@ -2416,9 +2486,18 @@ const SettlementPage = () => {
         if (!p) return;
         const sidKey = String(p.sellerId ?? '').trim();
         if (!sidKey) return;
+        const slabHint = inferWeighmanSlabHintForPattiHydration(
+          p,
+          sellers,
+          commodityList,
+          fullCommodityConfigs,
+          getLotDivisor
+        );
         expensePatch[sidKey] = {
           ...defaultSellerExpenses(),
-          ...deductionsToSellerExpenseForm(p.deductions ?? []),
+          ...deductionsToSellerExpenseForm(p.deductions ?? [], {
+            inferredWeighmanFromSlabs: slabHint,
+          }),
         };
       };
       mergeExpensesFromPattiDto(dto);
@@ -2469,7 +2548,7 @@ const SettlementPage = () => {
       toast.error('Failed to load patti');
     }
   },
-  [sellers, savedPattis]);
+  [sellers, savedPattis, commodityList, fullCommodityConfigs, getLotDivisor]);
 
   const openInProgressDraft = useCallback(async (draft: InProgressSettlementDraft) => {
     const rep = String(draft.representativeSellerId ?? '').trim();
@@ -2576,9 +2655,16 @@ const SettlementPage = () => {
     settlementDirtyBaselineRef.current = null;
     setPattiData(next);
     if (sid) {
+      const slabHint = inferWeighmanSlabHintForPattiHydration(
+        merged,
+        sellers,
+        commodityList,
+        fullCommodityConfigs,
+        getLotDivisor
+      );
       const loadedExp: SellerExpenseFormState = {
         ...defaultSellerExpenses(),
-        ...deductionsToSellerExpenseForm(next.deductions),
+        ...deductionsToSellerExpenseForm(next.deductions, { inferredWeighmanFromSlabs: slabHint }),
       };
       setSellerExpensesById(prev => ({
         ...prev,
@@ -2627,6 +2713,10 @@ const SettlementPage = () => {
     sellerExpenseRestoreBaselineById,
     extraBidLotsBySellerId,
     salesReportRowOrderBySellerId,
+    commodityList,
+    fullCommodityConfigs,
+    getLotDivisor,
+    sellers,
   ]);
 
   useEffect(() => {
@@ -4842,7 +4932,9 @@ const SettlementPage = () => {
   );
 
   const loadQuickExpenseModalRows = useCallback(
-    async (mode: 'fromExpenseCard' | 'fromLatestSlabs'): Promise<VehicleExpenseRow[]> => {
+    async (
+      mode: 'fromExpenseCard' | 'fromLatestSlabs' | 'openWithBaseline'
+    ): Promise<VehicleExpenseRow[] | { cardRows: VehicleExpenseRow[]; slabBaselineRows: VehicleExpenseRow[] }> => {
       if (!selectedSeller || !pattiData || arrivalSellersForPatti.length === 0) {
         return [];
       }
@@ -4915,12 +5007,24 @@ const SettlementPage = () => {
         };
       });
 
-      if (mode === 'fromExpenseCard') {
-        return rowsFromExpenseCardAndSlabQuantities(sellerComputedBase, sellerExpensesById);
-      }
       const gunniesMap: Record<string, number> = {};
       for (const s of arrivalSellersForPatti) {
         gunniesMap[s.sellerId] = sellerExpensesById[s.sellerId]?.gunnies ?? 0;
+      }
+
+      if (mode === 'openWithBaseline') {
+        const cardRows = rowsFromExpenseCardAndSlabQuantities(sellerComputedBase, sellerExpensesById);
+        const slabBaselineRows = buildVehicleExpenseRowsComputedFromSlabs(
+          sellerComputedBase,
+          freightTotal,
+          equalShareFreight,
+          gunniesMap
+        );
+        return { cardRows, slabBaselineRows };
+      }
+
+      if (mode === 'fromExpenseCard') {
+        return rowsFromExpenseCardAndSlabQuantities(sellerComputedBase, sellerExpensesById);
       }
       return buildVehicleExpenseRowsComputedFromSlabs(
         sellerComputedBase,
@@ -4951,12 +5055,15 @@ const SettlementPage = () => {
     setVehicleExpenseModalOpen(true);
     setVehicleExpenseLoading(true);
     try {
-      const rows = await loadQuickExpenseModalRows('fromExpenseCard');
-      if (rows.length === 0) {
+      const pack = await loadQuickExpenseModalRows('openWithBaseline');
+      if (Array.isArray(pack)) {
+        toast.error('Failed to load quick expenses.');
+      } else if (pack.cardRows.length === 0) {
         toast.error('Failed to load quick expenses.');
       } else {
-        setVehicleExpenseRows(rows);
-        setVehicleExpenseOriginalByRowId(vehicleExpenseOriginalsFromRows(rows));
+        setVehicleExpenseRows(pack.cardRows);
+        /** Redo targets slab-distributed freight / unloading / weighing (Reset logic), not a copy of saved card — so reopen after save still shows revert when card differs from slabs. */
+        setVehicleExpenseOriginalByRowId(vehicleExpenseOriginalsFromRows(pack.slabBaselineRows));
       }
     } catch {
       toast.error('Failed to load quick expenses from arrivals.');
@@ -4978,7 +5085,7 @@ const SettlementPage = () => {
     setVehicleExpenseLoading(true);
     try {
       const rows = await loadQuickExpenseModalRows('fromLatestSlabs');
-      if (rows.length === 0) {
+      if (!Array.isArray(rows) || rows.length === 0) {
         toast.error('Could not recompute from latest pricing.');
       } else {
         setVehicleExpenseRows(rows);
@@ -5044,16 +5151,17 @@ const SettlementPage = () => {
       const edited = isVehicleExpenseFieldEdited(row, field);
       return (
         <div className="mx-auto flex w-full max-w-[12rem] items-center gap-1">
-          <Input
-            type="number"
-            min={0}
-            step={0.01}
+          <SettlementNumericInput
+            value={row[field] ?? 0}
+            onCommit={n => updateVehicleExpenseCell(row.id, field, String(n))}
+            onClear={() => updateVehicleExpenseCell(row.id, field, '')}
+            commitMode="live"
+            fractionDigits={2}
+            emptyWhenZero
             className={cn(
               'h-10 min-w-0 flex-1 rounded-md border-border/70 bg-background px-2 text-center text-sm tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
               edited && 'border-amber-500/70'
             )}
-            value={row[field] === 0 ? '' : row[field]}
-            onChange={e => updateVehicleExpenseCell(row.id, field, e.target.value)}
             aria-label={ariaLabel}
           />
           {edited && (
@@ -6569,39 +6677,35 @@ const SettlementPage = () => {
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
                                       {qtyCellEditable ? (
-                                        <Input
-                                          type="number"
-                                          min={0}
-                                          step={1}
+                                        <SettlementNumericInput
+                                          value={Number.isFinite(row.qty) ? row.qty : 0}
+                                          onCommit={n => {
+                                            const s = String(Math.round(n));
+                                            if (splitSnap && rowInActiveSplitGroup) {
+                                              applySplitGroupQtyWeightSync(seller, splitSnap, rowKey, 'qty', s);
+                                            } else if (isExtraBid) {
+                                              updateExtraBidLotField(seller.sellerId, sid, 'qty', s);
+                                            } else {
+                                              setLotSalesField(seller.sellerId, sid, 'qty', s);
+                                            }
+                                          }}
+                                          onClear={
+                                            rowInActiveSplitGroup
+                                              ? undefined
+                                              : isExtraBid
+                                                ? () =>
+                                                    updateExtraBidLotField(seller.sellerId, sid, 'qty', '0')
+                                                : () => setLotSalesField(seller.sellerId, sid, 'qty', '')
+                                          }
+                                          commitMode="live"
+                                          integerOnly
+                                          fractionDigits={0}
                                           className={cn(
                                             'mx-auto h-9 w-[4.5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
                                             showSaveValidationChrome &&
                                               invalidLotFieldBySid[sid]?.qty &&
                                               'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
                                           )}
-                                          value={Number.isFinite(row.qty) ? row.qty : 0}
-                                          onChange={e => {
-                                            if (splitSnap && rowInActiveSplitGroup) {
-                                              applySplitGroupQtyWeightSync(
-                                                seller,
-                                                splitSnap,
-                                                rowKey,
-                                                'qty',
-                                                e.target.value
-                                              );
-                                              return;
-                                            }
-                                            if (isExtraBid) {
-                                              updateExtraBidLotField(
-                                                seller.sellerId,
-                                                sid,
-                                                'qty',
-                                                e.target.value
-                                              );
-                                            } else {
-                                              setLotSalesField(seller.sellerId, sid, 'qty', e.target.value);
-                                            }
-                                          }}
                                           aria-label="Quantity bags"
                                           disabled={fieldLocked}
                                         />
@@ -6618,39 +6722,34 @@ const SettlementPage = () => {
                                       )}
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
-                                      <Input
-                                        type="number"
-                                        min={0}
-                                        step={0.1}
+                                      <SettlementNumericInput
+                                        value={Number.isFinite(row.weight) ? row.weight : 0}
+                                        onCommit={n => {
+                                          const s = String(n);
+                                          if (splitSnap && rowInActiveSplitGroup) {
+                                            applySplitGroupQtyWeightSync(seller, splitSnap, rowKey, 'weight', s);
+                                          } else if (isExtraBid) {
+                                            updateExtraBidLotField(seller.sellerId, sid, 'weight', s);
+                                          } else {
+                                            setLotSalesField(seller.sellerId, sid, 'weight', s);
+                                          }
+                                        }}
+                                        onClear={
+                                          rowInActiveSplitGroup
+                                            ? undefined
+                                            : isExtraBid
+                                              ? () =>
+                                                  updateExtraBidLotField(seller.sellerId, sid, 'weight', '0')
+                                              : () => setLotSalesField(seller.sellerId, sid, 'weight', '')
+                                        }
+                                        commitMode="live"
+                                        fractionDigits={2}
                                         className={cn(
                                           'mx-auto h-9 w-[5rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
                                           showSaveValidationChrome &&
                                             invalidLotFieldBySid[sid]?.weight &&
                                             'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
                                         )}
-                                        value={Number.isFinite(row.weight) ? row.weight : 0}
-                                        onChange={e => {
-                                          if (splitSnap && rowInActiveSplitGroup) {
-                                            applySplitGroupQtyWeightSync(
-                                              seller,
-                                              splitSnap,
-                                              rowKey,
-                                              'weight',
-                                              e.target.value
-                                            );
-                                            return;
-                                          }
-                                          if (isExtraBid) {
-                                            updateExtraBidLotField(
-                                              seller.sellerId,
-                                              sid,
-                                              'weight',
-                                              e.target.value
-                                            );
-                                          } else {
-                                            setLotSalesField(seller.sellerId, sid, 'weight', e.target.value);
-                                          }
-                                        }}
                                         aria-label="Weight kg"
                                         disabled={fieldLocked}
                                       />
@@ -6677,34 +6776,30 @@ const SettlementPage = () => {
                                       )}
                                     </td>
                                     <td className="px-1 py-1.5 align-middle lg:px-2">
-                                      <Input
-                                        type="number"
-                                        min={0}
-                                        step={0.01}
+                                      <SettlementNumericInput
+                                        value={Number.isFinite(row.ratePerBag) ? row.ratePerBag : 0}
+                                        onCommit={n => {
+                                          const s = String(n);
+                                          if (isExtraBid) {
+                                            updateExtraBidLotField(seller.sellerId, sid, 'ratePerBag', s);
+                                          } else {
+                                            setLotSalesField(seller.sellerId, sid, 'ratePerBag', s);
+                                          }
+                                        }}
+                                        onClear={
+                                          isExtraBid
+                                            ? () =>
+                                                updateExtraBidLotField(seller.sellerId, sid, 'ratePerBag', '0')
+                                            : () => setLotSalesField(seller.sellerId, sid, 'ratePerBag', '')
+                                        }
+                                        commitMode="live"
+                                        fractionDigits={2}
                                         className={cn(
                                           'mx-auto h-9 w-[5.25rem] rounded-md border border-border bg-background px-1.5 text-center text-xs font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',
                                           showSaveValidationChrome &&
                                             invalidLotFieldBySid[sid]?.rate &&
                                             'ring-2 ring-destructive/60 ring-offset-1 ring-offset-background dark:ring-offset-background'
                                         )}
-                                        value={Number.isFinite(row.ratePerBag) ? row.ratePerBag : 0}
-                                        onChange={e => {
-                                          if (isExtraBid) {
-                                            updateExtraBidLotField(
-                                              seller.sellerId,
-                                              sid,
-                                              'ratePerBag',
-                                              e.target.value
-                                            );
-                                          } else {
-                                            setLotSalesField(
-                                              seller.sellerId,
-                                              sid,
-                                              'ratePerBag',
-                                              e.target.value
-                                            );
-                                          }
-                                        }}
                                         aria-label="Rate per bag"
                                         title="Seller settlement rate per bag; amount uses commodity divisor from settings"
                                         disabled={fieldLocked}
@@ -6956,25 +7051,24 @@ const SettlementPage = () => {
                                 const displayedFreight = mergeIntoFreightMode ? exp.freight + exp.weighman : exp.freight;
                                 return (
                                   <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                                    <Input
+                                    <SettlementNumericInput
                                       id={`settlement-seller-expense-${seller.sellerId}-freight`}
-                                      type="number"
-                                      min={0}
-                                      step={0.01}
-                                      inputMode="decimal"
-                                      className={settlementExpenseInputClass}
-                                      value={displayedFreight === 0 ? '' : displayedFreight}
-                                      onChange={e => {
-                                        const entered = clampMoney(parseFloat(e.target.value) || 0);
+                                      value={displayedFreight}
+                                      onCommit={entered => {
+                                        const v = clampMoney(entered);
                                         setSellerExpensesById(prev => {
                                           const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
                                           if (mergeIntoFreightMode) {
-                                            const baseFreight = clampMoney(entered - e0.weighman);
+                                            const baseFreight = clampMoney(v - e0.weighman);
                                             return { ...prev, [seller.sellerId]: { ...e0, freight: baseFreight } };
                                           }
-                                          return { ...prev, [seller.sellerId]: { ...e0, freight: entered } };
+                                          return { ...prev, [seller.sellerId]: { ...e0, freight: v } };
                                         });
                                       }}
+                                      commitMode="live"
+                                      fractionDigits={2}
+                                      emptyWhenZero
+                                      className={settlementExpenseInputClass}
                                       aria-label="Freight amount"
                                       disabled={isSettlementFormReadOnly}
                                     />
@@ -6995,34 +7089,20 @@ const SettlementPage = () => {
                                 />
                               </span>
                               <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                                <Input
-                                  type="text"
-                                  inputMode="decimal"
-                                  className={settlementExpenseInputClass}
-                                  value={
-                                    unloadingDraftBySellerId[seller.sellerId] ??
-                                    (exp.unloading === 0 ? '' : exp.unloading.toFixed(2))
-                                  }
-                                  onChange={e => {
-                                    const raw = e.target.value;
-                                    if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
-                                    setUnloadingDraftBySellerId(prev => ({ ...prev, [seller.sellerId]: raw }));
-                                  }}
-                                  onBlur={() => {
-                                    const draft = unloadingDraftBySellerId[seller.sellerId];
-                                    if (draft === undefined) return;
-                                    const v = clampMoney(parseFloat(draft) || 0);
+                                <SettlementNumericInput
+                                  value={exp.unloading}
+                                  onCommit={v => {
+                                    const x = clampMoney(v);
                                     quickAdjustmentAppliedRef.current = true;
                                     setSellerExpensesById(prev => {
                                       const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                      return { ...prev, [seller.sellerId]: { ...e0, unloading: v } };
-                                    });
-                                    setUnloadingDraftBySellerId(prev => {
-                                      const next = { ...prev };
-                                      delete next[seller.sellerId];
-                                      return next;
+                                      return { ...prev, [seller.sellerId]: { ...e0, unloading: x } };
                                     });
                                   }}
+                                  commitMode="blur"
+                                  fractionDigits={2}
+                                  emptyWhenZero
+                                  className={settlementExpenseInputClass}
                                   aria-label="Unloading amount"
                                   disabled={isSettlementFormReadOnly}
                                 />
@@ -7046,9 +7126,29 @@ const SettlementPage = () => {
                                 />
                               </span>
                               <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                                <Input
-                                  type="text"
-                                  inputMode="decimal"
+                                <SettlementNumericInput
+                                  value={exp.weighman}
+                                  onCommit={v => {
+                                    const x = clampMoney(v);
+                                    quickAdjustmentAppliedRef.current = true;
+                                    setSellerExpensesById(prev => {
+                                      const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                      return { ...prev, [seller.sellerId]: { ...e0, weighman: x } };
+                                    });
+                                  }}
+                                  onRawChange={raw => {
+                                    setWeighmanDraftBySellerId(prev => {
+                                      if (raw === null) {
+                                        const next = { ...prev };
+                                        delete next[seller.sellerId];
+                                        return next;
+                                      }
+                                      return { ...prev, [seller.sellerId]: raw };
+                                    });
+                                  }}
+                                  commitMode="blur"
+                                  fractionDigits={2}
+                                  emptyWhenZero
                                   disabled={
                                     isSettlementFormReadOnly ||
                                     !isWeighingEnabledForSeller(seller.sellerId) ||
@@ -7060,88 +7160,63 @@ const SettlementPage = () => {
                                       isWeighingEnabledForSeller(seller.sellerId) &&
                                       'opacity-80'
                                   )}
-                                  value={
-                                    weighmanDraftBySellerId[seller.sellerId] ??
-                                    (exp.weighman === 0 ? '' : exp.weighman.toFixed(2))
-                                  }
-                                  onChange={e => {
-                                    const raw = e.target.value;
-                                    if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
-                                    setWeighmanDraftBySellerId(prev => ({ ...prev, [seller.sellerId]: raw }));
-                                  }}
-                                  onBlur={() => {
-                                    const draft = weighmanDraftBySellerId[seller.sellerId];
-                                    if (draft === undefined) return;
-                                    const v = clampMoney(parseFloat(draft) || 0);
-                                    quickAdjustmentAppliedRef.current = true;
-                                    setSellerExpensesById(prev => {
-                                      const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                      return { ...prev, [seller.sellerId]: { ...e0, weighman: v } };
-                                    });
-                                    setWeighmanDraftBySellerId(prev => {
-                                      const next = { ...prev };
-                                      delete next[seller.sellerId];
-                                      return next;
-                                    });
-                                  }}
                                   aria-label="Weighing charges"
                                 />
                               </div>
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Cash Advance</span>
-                              <Input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                inputMode="decimal"
-                                className={settlementExpenseInputClass}
-                                value={exp.cashAdvance === 0 ? '' : exp.cashAdvance}
-                                onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                              <SettlementNumericInput
+                                value={exp.cashAdvance}
+                                onCommit={v => {
+                                  const x = clampMoney(v);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                    return { ...prev, [seller.sellerId]: { ...e0, cashAdvance: v } };
+                                    return { ...prev, [seller.sellerId]: { ...e0, cashAdvance: x } };
                                   });
                                 }}
+                                commitMode="live"
+                                fractionDigits={2}
+                                emptyWhenZero
+                                className={settlementExpenseInputClass}
                                 aria-label="Cash advance"
                                 disabled={isSettlementFormReadOnly}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Gunnies</span>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                className={settlementExpenseInputClass}
-                                value={exp.gunnies === 0 ? '' : exp.gunnies}
-                                onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                              <SettlementNumericInput
+                                value={exp.gunnies}
+                                onCommit={v => {
+                                  const x = clampMoney(v);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                    return { ...prev, [seller.sellerId]: { ...e0, gunnies: v } };
+                                    return { ...prev, [seller.sellerId]: { ...e0, gunnies: x } };
                                   });
                                 }}
+                                commitMode="live"
+                                fractionDigits={2}
+                                emptyWhenZero
+                                className={settlementExpenseInputClass}
                                 aria-label="Gunnies"
                                 disabled={isSettlementFormReadOnly}
                               />
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-muted-foreground">Others</span>
-                              <Input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                className={settlementExpenseInputClass}
-                                value={exp.others === 0 ? '' : exp.others}
-                                onChange={e => {
-                                  const v = clampMoney(parseFloat(e.target.value) || 0);
+                              <SettlementNumericInput
+                                value={exp.others}
+                                onCommit={v => {
+                                  const x = clampMoney(v);
                                   setSellerExpensesById(prev => {
                                     const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                    return { ...prev, [seller.sellerId]: { ...e0, others: v } };
+                                    return { ...prev, [seller.sellerId]: { ...e0, others: x } };
                                   });
                                 }}
+                                commitMode="live"
+                                fractionDigits={2}
+                                emptyWhenZero
+                                className={settlementExpenseInputClass}
                                 aria-label="Other expenses"
                                 disabled={isSettlementFormReadOnly}
                               />
@@ -7816,17 +7891,18 @@ const SettlementPage = () => {
                           autoComplete="off"
                         />
                         <div className="flex items-center gap-2">
-                          <Input
-                            type="text"
-                            inputMode="decimal"
-                            value={row.expenseAmount}
-                            onChange={e => {
-                              const raw = e.target.value;
-                              if (!/^\d*(\.\d{0,2})?$/.test(raw)) return;
+                          <SettlementNumericInput
+                            value={clampMoney(parseFloat(row.expenseAmount || '0') || 0)}
+                            onCommit={n =>
                               setAddVoucherRows(prev =>
-                                prev.map(r => (r.localId === row.localId ? { ...r, expenseAmount: raw } : r))
-                              );
-                            }}
+                                prev.map(r =>
+                                  r.localId === row.localId ? { ...r, expenseAmount: clampMoney(n).toFixed(2) } : r
+                                )
+                              )
+                            }
+                            allowEmptyZero
+                            commitMode="blur"
+                            fractionDigits={2}
                             placeholder="0.00"
                             className="h-9 rounded-lg text-sm"
                           />
