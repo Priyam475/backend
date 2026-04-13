@@ -4344,12 +4344,11 @@ const BillingPage = () => {
 
                                   <div>
                                     <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Bid Rate ₹</p>
-                                    <Input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={item.baseRate || ""}
-                                      onChange={e => {
-                                        updateLineItem(gi, ii, "baseRate", parseFloat(e.target.value) || 0);
+                                    <BillingMoneyInput
+                                      value={item.baseRate || 0}
+                                      min={0}
+                                      onCommit={n => {
+                                        updateLineItem(gi, ii, 'baseRate', n);
                                       }}
                                       className={`h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`}
                                     />
