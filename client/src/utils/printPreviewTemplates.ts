@@ -166,10 +166,10 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
       </div>`;
 
     case 'chiti_buyer':
-      return `<div style="font-family:'Segoe UI',Arial,sans-serif; width:80mm; padding:10px; font-size:10px; border:2px dashed #999">
-        <div style="text-align:center; font-weight:800; font-size:13px; color:#1a1a2e">${firm.name || '—'}</div>
+      return `<div style="font-family:'Segoe UI',Arial,sans-serif; width:80mm; padding:10px; font-size:12px; border:2px dashed #999">
+        <div style="text-align:center; font-weight:800; font-size:15px; color:#1a1a2e">${firm.name || '—'}</div>
         <div style="margin-top:6px"><strong>Buyer's Mark:</strong> ${sampleBuyer.mark}</div>
-        <table style="width:100%; border-collapse:collapse; font-size:9px; margin-top:8px">
+        <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:8px">
           <tr style="background:#f0f4ff"><th style="border:1px solid #ddd; padding:4px">Lot Name/No</th><th style="border:1px solid #ddd; padding:4px">Godown</th><th style="border:1px solid #ddd; padding:4px">Qty</th><th style="border:1px solid #ddd; padding:4px">Rate/50kg</th><th style="border:1px solid #ddd; padding:4px">Weight</th><th style="border:1px solid #ddd; padding:4px">Amount</th></tr>
           ${sampleLots.map((l: any) => `<tr>
             <td style="border:1px solid #ddd; padding:3px">${l.lot_name}<br/><small style="color:#888">${l.lot_no}</small></td>
@@ -181,8 +181,8 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
           </tr>`).join('')}
         </table>
         <div style="font-weight:bold; margin-top:8px; text-align:right">Total Bids: ${sampleLots.length}</div>
-        <div style="text-align:center; font-size:8px; margin-top:10px; color:#aaa">Delivered by MERCOTRACE</div>
-        <div style="border-top:2px dashed #ccc; margin-top:10px; text-align:center; font-size:8px; color:#bbb; padding-top:4px">--- CUT HERE ---</div>
+        <div style="text-align:center; font-size:10px; margin-top:10px; color:#aaa">Delivered by ${firm.name || '—'}</div>
+        <div style="border-top:2px dashed #ccc; margin-top:10px; text-align:center; font-size:10px; color:#bbb; padding-top:4px">--- CUT HERE ---</div>
       </div>`;
 
     case 'dispatch_coolie':
@@ -223,10 +223,10 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
       const sellerLots = sampleLots.filter((l: any) => l.seller === firstSeller);
       const totalQty = sellerLots.reduce((s: number, l: any) => s + (l.qty || 0), 0);
       const totalAmt = sellerLots.reduce((s: number, l: any) => s + ((l.rate || 800) * (l.weight || l.qty * 50) / 50), 0);
-      return `<div style="font-family:'Segoe UI',Arial,sans-serif; width:80mm; padding:10px; font-size:10px; border:2px dashed #999">
-        <div style="text-align:center; font-weight:800; font-size:13px; color:#1a1a2e">${firm.name || '—'}</div>
+      return `<div style="font-family:'Segoe UI',Arial,sans-serif; width:80mm; padding:10px; font-size:12px; border:2px dashed #999">
+        <div style="text-align:center; font-weight:800; font-size:15px; color:#1a1a2e">${firm.name || '—'}</div>
         <div style="margin-top:6px"><strong>Seller:</strong> ${firstSeller} &nbsp; <strong>Slr Sr No:</strong> 1</div>
-        <table style="width:100%; border-collapse:collapse; font-size:9px; margin-top:8px">
+        <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:8px">
           <tr style="background:#f0f4ff"><th style="border:1px solid #ddd; padding:4px">Lot Name/No</th><th style="border:1px solid #ddd; padding:4px">Qty</th><th style="border:1px solid #ddd; padding:4px">Rate/50kg</th><th style="border:1px solid #ddd; padding:4px">Weight</th></tr>
           ${sellerLots.map((l: any) => `<tr>
             <td style="border:1px solid #ddd; padding:3px">${l.lot_name}<br/><small style="color:#888">${l.lot_no}</small></td>
@@ -235,13 +235,13 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
             <td style="border:1px solid #ddd; padding:3px; text-align:right">${l.weight || l.qty * 50}</td>
           </tr>`).join('')}
         </table>
-        <div style="font-weight:bold; margin-top:8px; display:flex; justify-content:space-between; font-size:9px">
+        <div style="font-weight:bold; margin-top:8px; display:flex; justify-content:space-between; font-size:11px">
           <span>Total Lots: ${sellerLots.length}</span>
           <span>Total Qty: ${totalQty}</span>
           <span>₹${totalAmt.toLocaleString()}</span>
         </div>
-        <div style="text-align:center; font-size:8px; margin-top:10px; color:#aaa">Delivered by MERCOTRACE</div>
-        <div style="border-top:2px dashed #ccc; margin-top:10px; text-align:center; font-size:8px; color:#bbb; padding-top:4px">--- CUT HERE ---</div>
+        <div style="text-align:center; font-size:10px; margin-top:10px; color:#aaa">Delivered by ${firm.name || '—'}</div>
+        <div style="border-top:2px dashed #ccc; margin-top:10px; text-align:center; font-size:10px; color:#bbb; padding-top:4px">--- CUT HERE ---</div>
       </div>`;
     }
 

@@ -293,20 +293,20 @@ export function generateBuyerChitiThermal(
   buyerName: string,
   buyerMark: string,
   bids: BidInfo[],
-  stage: "post-auction" | "post-weighing" = "post-auction"
+  stage: "post-auction" | "post-weighing" = "post-auction",
+  traderDisplayName?: string
 ): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalBid = bids.length;
 
-  // Column widths sum to 48 (approximation for thermal alignment)
-  const wLot = 13;
-  const wLotSl = 6;
-  const wGdwn = 8;
-  const wRate = 7;
-  const wQty = 4;
-  const wMark = 8;
+  // Column widths sum to 48 (Mark column removed; widths redistributed)
+  const wLot = 16;
+  const wLotSl = 8;
+  const wGdwn = 10;
+  const wRate = 9;
+  const wQty = 5;
 
   const pad = (s: string, w: number) => padThermalRight(clampThermalText(s, w), w);
   const lineLR = (left: string, right: string) => {
@@ -321,13 +321,15 @@ export function generateBuyerChitiThermal(
     return lPart + " ".repeat(spaces) + rClamped;
   };
 
+  const firmLine = clampThermalText(String(traderDisplayName ?? "").trim() || "Trader", THERMAL_CHARS_PER_LINE);
+
   const header = [
-    "[C]Mercotrace",
+    "[C]" + firmLine,
     "[C]" + clampThermalText(buyerName, THERMAL_CHARS_PER_LINE),
     "[C]" + escposBold(`[${String(buyerMark ?? "").trim()}]`),
     "[L]--------------------------------",
     "",
-    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Rate", wRate) + pad("Qty", wQty) + pad("Mark", wMark),
+    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Rate", wRate) + pad("Qty", wQty),
   ].join("\n");
 
   const rows = bids
@@ -340,8 +342,7 @@ export function generateBuyerChitiThermal(
         pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
         pad(b.godown || "—", wGdwn) +
         pad(rateTxt, wRate) +
-        pad(String(b.quantity), wQty) +
-        pad(`[${b.buyerMark}]`, wMark);
+        pad(String(b.quantity), wQty);
 
       return "[L]" + line1;
     })
@@ -363,19 +364,19 @@ export function generateSellerChitiThermal(
   sellerName: string,
   sellerSerial: number,
   bids: BidInfo[],
-  stage: "post-auction" | "post-weighing" = "post-auction"
+  stage: "post-auction" | "post-weighing" = "post-auction",
+  traderDisplayName?: string
 ): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalLot = bids.length;
 
-  // Column widths sum to 48 (approximation for thermal alignment)
-  const wLot = 14;
-  const wLotSl = 6;
-  const wMark = 9;
-  const wQty = 4;
-  const wRate = 8;
+  // Column widths sum to 48 (Mark column removed; widths redistributed)
+  const wLot = 20;
+  const wLotSl = 7;
+  const wQty = 7;
+  const wRate = 14;
 
   const pad = (s: string, w: number) => padThermalRight(clampThermalText(s, w), w);
   const lineLR = (left: string, right: string) => {
@@ -390,14 +391,16 @@ export function generateSellerChitiThermal(
     return lPart + " ".repeat(spaces) + rClamped;
   };
 
+  const firmLine = clampThermalText(String(traderDisplayName ?? "").trim() || "Trader", THERMAL_CHARS_PER_LINE);
+
   const header = [
-    "[C]Mercotrace",
+    "[C]" + firmLine,
     "",
     "[C]" + clampThermalText(sellerName, THERMAL_CHARS_PER_LINE),
     "[C]" + clampThermalText(`S.No: ${sellerSerial}`, THERMAL_CHARS_PER_LINE),
     "[L]--------------------------------",
     "",
-    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Mark", wMark) + pad("Qty", wQty) + pad("Rate", wRate),
+    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Qty", wQty) + pad("Rate", wRate),
   ].join("\n");
 
   const rows = bids
@@ -407,7 +410,6 @@ export function generateSellerChitiThermal(
       const line =
         pad(formatLotIdentifierForBid(b), wLot) +
         pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
-        pad(`[${b.buyerMark}]`, wMark) +
         pad(String(b.quantity), wQty) +
         pad(rateTxt, wRate);
 
@@ -437,11 +439,18 @@ function escapeStickerHtml(s: string): string {
 }
 
 // ── 2. Buyer Chiti (80mm thermal) ────────────────────────
-export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+export function generateBuyerChiti(
+  buyerName: string,
+  buyerMark: string,
+  bids: BidInfo[],
+  stage: 'post-auction' | 'post-weighing' = 'post-auction',
+  traderDisplayName?: string
+): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalBid = bids.length;
+  const headerTitle = escapeStickerHtml((traderDisplayName ?? '').trim() || 'Trader');
   const rows = bids.map(b => `
     <tr>
       <td>${formatLotIdentifierForBid(b)}</td>
@@ -449,34 +458,33 @@ export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: B
       <td>${b.godown || '—'}</td>
       <td>₹${b.rate}</td>
       <td>${b.quantity}</td>
-      <td>[${b.buyerMark}]</td>
     </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><style>
     @page { size: 80mm auto; margin: 2mm; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 11px; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 13px; }
     .header { text-align: center; border-bottom: 1px dashed #333; padding-bottom: 4px; margin-bottom: 4px; }
-    .header h3 { margin: 2px 0; font-size: 14px; }
-    .header small { color: #666; font-size: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .header h3 { margin: 2px 0; font-size: 16px; }
+    .header small { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
     .buyer-info { background: #f5f5f5; border-radius: 4px; padding: 6px; margin-bottom: 6px; text-align: center; }
-    .buyer-info .mark { font-size: 22px; font-weight: 900; }
-    table { width: 100%; border-collapse: collapse; font-size: 10px; }
-    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 9px; text-transform: uppercase; }
+    .buyer-info .mark { font-size: 24px; font-weight: 900; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 11px; text-transform: uppercase; }
     td { padding: 3px 2px; border-bottom: 1px dotted #ddd; }
-    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; }
+    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; font-size: 13px; }
     .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
     .stage { display: none; }
-    .powered { text-align: center; font-size: 8px; color: #666; margin-top: 4px; }
+    .powered { text-align: center; font-size: 10px; color: #666; margin-top: 4px; }
     .cut-line { border-top: 1px dashed #999; margin-top: 6px; padding-top: 2px; }
     @media print { body { margin: 0; } }
   </style></head><body>
-    <div class="header"><h3>Mercotrace</h3></div>
+    <div class="header"><h3>${headerTitle}</h3></div>
     <div class="buyer-info">
-      <div style="font-size:11px;color:#666">${buyerName}</div>
-      <div class="mark">[${buyerMark}]</div>
+      <div style="font-size:13px;color:#666">${escapeStickerHtml(buyerName)}</div>
+      <div class="mark">[${escapeStickerHtml(buyerMark)}]</div>
     </div>
     <table>
-      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Rate</th><th>Qty</th><th>Mark</th></tr></thead>
+      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Rate</th><th>Qty</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
@@ -488,47 +496,53 @@ export function generateBuyerChiti(buyerName: string, buyerMark: string, bids: B
 }
 
 // ── 3. Seller Chiti (80mm thermal) ───────────────────────
-export function generateSellerChiti(sellerName: string, sellerSerial: number, bids: BidInfo[], stage: 'post-auction' | 'post-weighing' = 'post-auction'): string {
+export function generateSellerChiti(
+  sellerName: string,
+  sellerSerial: number,
+  bids: BidInfo[],
+  stage: 'post-auction' | 'post-weighing' = 'post-auction',
+  traderDisplayName?: string
+): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalLot = bids.length;
+  const headerTitle = escapeStickerHtml((traderDisplayName ?? '').trim() || 'Trader');
   const rows = bids.map(b => `
     <tr>
       <td>${formatLotIdentifierForBid(b)}</td>
       <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
-      <td>[${b.buyerMark}]</td>
       <td>${b.quantity}</td>
       <td>₹${b.rate}</td>
     </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><style>
     @page { size: 80mm auto; margin: 2mm; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 11px; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 4px; width: 76mm; font-size: 13px; }
     .header { text-align: center; border-bottom: 1px dashed #333; padding-bottom: 4px; margin-bottom: 4px; }
-    .header h3 { margin: 2px 0; font-size: 14px; }
-    .header small { color: #666; font-size: 8px; text-transform: uppercase; letter-spacing: 1px; }
+    .header h3 { margin: 2px 0; font-size: 16px; }
+    .header small { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
     .seller-info { background: #f5f5f5; border-radius: 4px; padding: 6px; margin-bottom: 6px; text-align: center; }
-    .seller-info .name { font-size: 13px; font-weight: 800; }
-    .seller-info .mark { font-size: 18px; font-weight: 900; letter-spacing: 2px; margin-top: 2px; }
-    .seller-info .serial { font-size: 10px; color: #666; margin-top: 2px; }
-    table { width: 100%; border-collapse: collapse; font-size: 10px; }
-    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 9px; text-transform: uppercase; }
+    .seller-info .name { font-size: 15px; font-weight: 800; }
+    .seller-info .mark { font-size: 20px; font-weight: 900; letter-spacing: 2px; margin-top: 2px; }
+    .seller-info .serial { font-size: 12px; color: #666; margin-top: 2px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #eee; padding: 3px 2px; text-align: left; font-size: 11px; text-transform: uppercase; }
     td { padding: 3px 2px; border-bottom: 1px dotted #ddd; }
-    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; }
+    .totals { border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; font-weight: 800; font-size: 13px; }
     .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
     .stage { display: none; }
-    .powered { text-align: center; font-size: 8px; color: #666; margin-top: 4px; }
+    .powered { text-align: center; font-size: 10px; color: #666; margin-top: 4px; }
     .cut-line { border-top: 1px dashed #999; margin-top: 6px; padding-top: 2px; }
     @media print { body { margin: 0; } }
   </style></head><body>
-    <div class="header"><h3>Mercotrace</h3></div>
+    <div class="header"><h3>${headerTitle}</h3></div>
     <div class="seller-info">
-      <div class="name">${sellerName}</div>
-      <div class="serial">S.No: ${sellerSerial}</div>
+      <div class="name">${escapeStickerHtml(sellerName)}</div>
+      <div class="serial">S.No: ${escapeStickerHtml(String(sellerSerial))}</div>
     </div>
     <table>
-      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Mark</th><th>Qty</th><th>Rate</th></tr></thead>
+      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Qty</th><th>Rate</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">
