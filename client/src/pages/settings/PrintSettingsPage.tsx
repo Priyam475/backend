@@ -245,7 +245,7 @@ const PrintSettingsPage = () => {
 
                 {/* User Billing — nested GST / Non-GST */}
                 <div className="rounded-xl border border-border/50 p-4 space-y-3">
-                  <div className="font-semibold text-foreground">User Billing</div>
+                  <div className="font-semibold text-foreground">Billing</div>
                   <p className="text-xs text-muted-foreground">Sales bill print formats.</p>
 
                   <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-3">
