@@ -1,5 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { format, isValid, parse } from 'date-fns';
+import {
+  clampYmdToReportCustomRange,
+  getReportCustomRangeCalendarExclusiveAfter,
+  getReportCustomRangeMaxDate,
+  getReportCustomRangeMinDate,
+} from '@/pages/reports/utils/reportCustomDateBounds';
 import { CalendarIcon } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 
@@ -37,6 +43,15 @@ type ReportCustomDateRangePickerProps = {
  * Range calendar in a popover: selection stays **draft** until **Apply**.
  * **Clear** resets the draft only; parent updates only on **Apply** with both ends set.
  */
+function clampDateToCustomRange(d: Date): Date {
+  const min = getReportCustomRangeMinDate();
+  const max = getReportCustomRangeMaxDate();
+  const t = d.getTime();
+  if (t < min.getTime()) return min;
+  if (t > max.getTime()) return max;
+  return d;
+}
+
 export function ReportCustomDateRangePicker({
   start,
   end,
@@ -50,14 +65,29 @@ export function ReportCustomDateRangePicker({
   /** Draft while popover is open — not committed until Apply. */
   const [draft, setDraft] = useState<DateRange | undefined>(undefined);
 
+  /** Refresh when popover opens so “today” / bounds stay correct if session crosses midnight. */
+  const disabledMatchers = useMemo(
+    () => [
+      { before: getReportCustomRangeMinDate() },
+      { after: getReportCustomRangeCalendarExclusiveAfter() },
+    ],
+    [open],
+  );
+
   const handleOpenChange = useCallback(
     (next: boolean) => {
       if (next) {
-        const from = parseYmd(start);
-        const to = parseYmd(end);
-        if (from && to) setDraft({ from, to });
-        else if (from) setDraft({ from, to: undefined });
-        else setDraft(undefined);
+        const cs = clampYmdToReportCustomRange(start);
+        const ce = clampYmdToReportCustomRange(end);
+        const from = parseYmd(cs);
+        const to = parseYmd(ce);
+        if (from && to) {
+          const a = clampDateToCustomRange(from);
+          const b = clampDateToCustomRange(to);
+          setDraft(a <= b ? { from: a, to: b } : { from: b, to: a });
+        } else if (from) {
+          setDraft({ from: clampDateToCustomRange(from), to: undefined });
+        } else setDraft(undefined);
       }
       setOpen(next);
     },
@@ -77,8 +107,8 @@ export function ReportCustomDateRangePicker({
 
   const handleApply = useCallback(() => {
     if (!draft?.from || !draft.to) return;
-    const a = draft.from;
-    const b = draft.to;
+    const a = clampDateToCustomRange(draft.from);
+    const b = clampDateToCustomRange(draft.to);
     const lo = a <= b ? a : b;
     const hi = a <= b ? b : a;
     onStartChange(fmt(lo));
@@ -117,8 +147,15 @@ export function ReportCustomDateRangePicker({
           defaultMonth={defaultMonth}
           selected={draft}
           onSelect={(range: DateRange | undefined) => {
-            setDraft(range);
+            if (!range) {
+              setDraft(undefined);
+              return;
+            }
+            const from = range.from ? clampDateToCustomRange(range.from) : undefined;
+            const to = range.to ? clampDateToCustomRange(range.to) : undefined;
+            setDraft({ from, to });
           }}
+          disabled={disabledMatchers}
           initialFocus
           className="p-2"
         />

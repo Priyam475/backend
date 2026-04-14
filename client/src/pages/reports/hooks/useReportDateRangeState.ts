@@ -1,4 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
+import {
+  getReportCustomRangeMaxYmd,
+  getReportCustomRangeMinYmd,
+  REPORT_CUSTOM_DATE_LOOKBACK_DAYS,
+} from '@/pages/reports/utils/reportCustomDateBounds';
 import { getWeekRangeByOffset, type ReportWeekPresetOffset } from '@/pages/reports/utils/weekRange';
 
 export type ReportDateFilterMode = 'by_week' | 'custom_date';
@@ -49,6 +54,14 @@ export function useReportDateRangeState(): ReportDateRangeStateApi {
     if (!customStart || !customEnd) return null;
     if (customStart > customEnd) {
       return 'Start date must be on or before end date.';
+    }
+    const minY = getReportCustomRangeMinYmd();
+    const maxY = getReportCustomRangeMaxYmd();
+    if (customStart < minY || customEnd < minY) {
+      return `Dates cannot be more than ${REPORT_CUSTOM_DATE_LOOKBACK_DAYS} days in the past. Earliest allowed day is ${minY}.`;
+    }
+    if (customStart > maxY || customEnd > maxY) {
+      return `Dates cannot be after today (${maxY}).`;
     }
     return null;
   }, [mode, customStart, customEnd]);
