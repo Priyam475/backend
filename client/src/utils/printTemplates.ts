@@ -554,35 +554,174 @@ export function generateSellerChiti(
 }
 
 // ── 4. Sale Pad Print (A5 Portrait) ─────────────────────
-export function generateSalePadPrint(bids: BidInfo[]): string {
-  const rows = bids.map(b => `
-    <tr>
-      <td>${b.vehicleTotalQty ?? b.quantity}</td>
-      <td>${b.sellerSerial && b.sellerSerial > 0 ? b.sellerSerial : '—'}</td>
-      <td>${escapeStickerHtml(b.sellerName || '—')}</td>
-      <td>${b.sellerVehicleQty ?? b.quantity}</td>
-      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
-      <td>${escapeStickerHtml(formatLotIdentifierForBid(b))}</td>
-    </tr>`).join('');
+/** A5 portrait content height inside @page margin (11mm × 2). */
+const SALE_PAD_CONTENT_HEIGHT_MM = 210 - 11 * 2;
+/** Reserved height: trader title + Vehicle Qty + meta + gap after Seller Qty row + dashed rule (mm). */
+const SALE_PAD_HEADER_RESERVE_MM = 28;
+/** Minimum lot-row slots (grid shares remaining height equally). */
+const SALE_PAD_MIN_LOT_ROWS = 3;
+/** One seller section per printed A5 page. */
+const SALE_PAD_SECTIONS_PER_PAGE = 1;
+const SALE_PAD_SHEET_COUNT = 2;
 
-  return `<!DOCTYPE html><html><head><style>
-    @page { size: A5 portrait; margin: 8mm; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 8mm; font-size: 11px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    thead { display: table-header-group; }
-    tfoot { display: table-footer-group; }
-    tr { page-break-inside: avoid; }
-    th { background: #333; color: #fff; padding: 4px 6px; font-size: 9px; text-transform: uppercase; text-align: center; }
-    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 10px; text-align: center; }
-    tr:nth-child(even) { background: #f9f9f9; }
-    .sale-pad-title { text-align: center; font-size: 13px; font-weight: 800; margin-top: 2px; margin-bottom: 6px; letter-spacing: 0.3px; }
-    @media print { body { margin: 0; padding: 8mm; } }
+function getSalePadLotRowCount(): number {
+  const approxRowMm = 20;
+  const available = Math.max(0, SALE_PAD_CONTENT_HEIGHT_MM - SALE_PAD_HEADER_RESERVE_MM);
+  const n = Math.floor(available / approxRowMm);
+  return Math.max(SALE_PAD_MIN_LOT_ROWS, n);
+}
+
+function buildEmptySalePadSellerSection(lotRowCount: number): string {
+  const lotRows = Array.from({ length: lotRowCount }, () => `
+    <div class="sp-lot-row">
+      <span class="sp-lot-no">Lot No</span>
+      <span class="sp-lot-name">Lot Name</span>
+    </div>`).join('');
+
+  return `
+  <section class="sp-seller-block" style="--sp-lot-rows:${lotRowCount}" aria-label="Seller lot section">
+    <div class="sp-header-group">
+      <div class="sp-line-vehicle">Vehicle Qty</div>
+      <div class="sp-line-meta">
+        <span class="sp-sl">Slr No</span>
+        <span class="sp-sn">Seller Name</span>
+        <span class="sp-sq">Seller Qty</span>
+      </div>
+    </div>
+    <div class="sp-lot-rows">${lotRows}</div>
+  </section>`;
+}
+
+/**
+ * Blank Sale Pad (A5 portrait): trader title, one seller section per page, empty lot rows.
+ * `bids` ignored — template is always empty (Print Hub + preview).
+ */
+export function generateSalePadPrint(_bids?: BidInfo[], traderDisplayName?: string): string {
+  void _bids;
+  const traderTitle = escapeStickerHtml((traderDisplayName ?? '').trim() || 'Trader');
+  const lotRowCount = getSalePadLotRowCount();
+  const sectionHtml = buildEmptySalePadSellerSection(lotRowCount);
+  const sheets: string[] = [];
+  for (let p = 0; p < SALE_PAD_SHEET_COUNT; p++) {
+    const inner = Array.from({ length: SALE_PAD_SECTIONS_PER_PAGE }, () => sectionHtml).join('');
+    sheets.push(
+      `<div class="sp-sheet"><div class="sp-page-inner"><div class="sp-trader-header">${traderTitle}</div>${inner}</div></div>`
+    );
+  }
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>Sale Pad</title><style>
+    @page { size: A5 portrait; margin: 11mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: Arial, Inter, "Segoe UI", sans-serif;
+      font-size: 11px;
+      color: #000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sp-sheet {
+      page-break-after: always;
+      break-after: page;
+      width: 100%;
+      height: calc(210mm - 22mm);
+      min-height: calc(210mm - 22mm);
+      max-height: calc(210mm - 22mm);
+      display: flex;
+      flex-direction: column;
+    }
+    .sp-sheet:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .sp-page-inner {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .sp-trader-header {
+      flex: 0 0 auto;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0 0 4mm 0;
+      margin-bottom: 3mm;
+      border-bottom: 1px solid #ccc;
+    }
+    .sp-seller-block {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      width: 100%;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .sp-header-group {
+      flex: 0 0 auto;
+    }
+    .sp-line-vehicle {
+      font-size: 11px;
+      line-height: 1.2;
+      padding: 0 0 1mm 0;
+      text-align: left;
+    }
+    .sp-line-meta {
+      display: grid;
+      grid-template-columns: 1fr 2fr 1fr;
+      column-gap: 2mm;
+      align-items: baseline;
+      font-size: 11px;
+      line-height: 1.25;
+      padding: 2mm 0 9mm 0;
+      margin-bottom: 0;
+      border-bottom: 1px dashed #333;
+    }
+    .sp-sl { text-align: left; }
+    .sp-sn { text-align: center; }
+    .sp-sq { text-align: right; }
+    .sp-lot-rows {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: repeat(var(--sp-lot-rows, 8), minmax(0, 1fr));
+      width: 100%;
+    }
+    .sp-lot-row {
+      display: grid;
+      grid-template-columns: 1fr 2fr 1fr;
+      column-gap: 2mm;
+      align-items: start;
+      padding-top: 1mm;
+      font-size: 11px;
+      line-height: 1.2;
+      min-height: 0;
+      border-bottom: 1px dashed #bbb;
+    }
+    .sp-lot-no { grid-column: 1; text-align: left; }
+    .sp-lot-name { grid-column: 2 / span 2; text-align: left; }
+    @media print {
+      body { margin: 0; }
+    }
+    @media screen {
+      body { background: #e8e8e8; padding: 8px; }
+      .sp-sheet {
+        width: 148mm;
+        margin: 0 auto 12px;
+        background: #fff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+        padding: 0;
+      }
+    }
   </style></head><body>
-    <div class="sale-pad-title">SALE PAD</div>
-    <table>
-      <thead><tr><th>Vehicle Qty</th><th>Seller SL No</th><th>Seller Name</th><th>Seller Qty</th><th>Lot SL No</th><th>Lot Name</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <!-- A5 content ${SALE_PAD_CONTENT_HEIGHT_MM}mm; ${lotRowCount} lot rows share remaining height -->
+    ${sheets.join('')}
   </body></html>`;
 }
 

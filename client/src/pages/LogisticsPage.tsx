@@ -337,7 +337,7 @@ const LogisticsPage = () => {
     }
     const html =
       type === 'SALE_PAD'
-        ? generateSalePadPrint(filteredBids)
+        ? generateSalePadPrint(undefined, chitiPrintTraderName)
         : type === 'TENDER_SLIP'
           ? generateTenderSlip(filteredBids)
           : generateDispatchControl(filteredBids);

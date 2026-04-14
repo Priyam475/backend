@@ -9,6 +9,7 @@ import {
   generateSalesPattiBatchPrintHTML,
   generateSalesPattiPrintHTML,
 } from '@/utils/printDocumentTemplates';
+import { generateSalePadPrint } from '@/utils/printTemplates';
 import {
   buildSampleBillPrintData,
   buildSamplePattiPrintPayloads,
@@ -24,6 +25,7 @@ const FULL_DOC_TEMPLATE_IDS = new Set([
   'seller_invoice',
   'main_invoice',
   'invoice_a5',
+  'sale_pad',
 ]);
 
 /** True → full HTML document (`iframe` / `directPrint`); false → fragment for `dangerouslySetInnerHTML`. */
@@ -73,6 +75,9 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
       includeHeader: true,
     });
   }
+  if (templateId === 'sale_pad') {
+    return generateSalePadPrint([], (firm.name ?? '').trim() || 'Trader');
+  }
 
   const commonHeader = `
     <div style="text-align:center; border-bottom:2px solid #222; padding-bottom:10px; margin-bottom:14px">
@@ -97,26 +102,6 @@ export function generateTemplateHTML(templateId: string, arrivalDetails: Arrival
   const tdStyle = 'border:1px solid #e0e4ec; padding:5px';
 
   switch (templateId) {
-    case 'sale_pad':
-      return `<div style="font-family:'Segoe UI',Arial,sans-serif; max-width:420px; margin:auto; padding:16px; font-size:12px">
-        ${commonHeader}
-        <div style="text-align:center; font-weight:bold; font-size:15px; margin-bottom:14px; color:#1a1a2e">SALE PAD</div>
-        <div style="font-size:11px; margin-bottom:8px; color:#555">Date: ${today}</div>
-        <table style="${tableStyle}">
-          <tr><th style="${thStyle}">Vehicle</th><th style="${thStyle}">Qty</th></tr>
-          ${sampleLots.map((l: any) => `<tr><td style="${tdStyle}">${l.vehicle}</td><td style="${tdStyle}; text-align:right">${l.qty}</td></tr>`).join('')}
-        </table>
-        <table style="${tableStyle}; margin-top:12px">
-          <tr><th style="${thStyle}">Slr No</th><th style="${thStyle}">Seller Name</th><th style="${thStyle}">Qty</th></tr>
-          ${sampleLots.map((l: any, i: number) => `<tr><td style="${tdStyle}">${i + 1}</td><td style="${tdStyle}">${l.seller}</td><td style="${tdStyle}; text-align:right">${l.qty}</td></tr>`).join('')}
-        </table>
-        <table style="${tableStyle}; margin-top:12px">
-          <tr><th style="${thStyle}">Lot No</th><th style="${thStyle}">Lot Name</th></tr>
-          ${sampleLots.map((l: any) => `<tr><td style="${tdStyle}">${l.lot_no}</td><td style="${tdStyle}">${l.lot_name}</td></tr>`).join('')}
-        </table>
-        ${footer}
-      </div>`;
-
     case 'sales_sticker': {
       const lot = sampleLots[0] || { lot_name: 'Onion', lot_no: 'ONI/001', seller: 'Seller', vehicle: 'MH-12-AB-1234', qty: 10 };
       const shortOrigin = 'Origin';
