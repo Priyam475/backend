@@ -1,14 +1,16 @@
 import { Shield } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { ReportDateRangeSelector } from '@/pages/reports/components/ReportDateRangeSelector';
 import { useReportDateRangeState } from '@/pages/reports/hooks/useReportDateRangeState';
 import { ReportDetailPageShell } from './ReportDetailPageShell';
 import { BillPrefixCombobox } from '@/pages/reports/userFees/components/BillPrefixCombobox';
 import { UserFeesBuyerTable } from '@/pages/reports/userFees/components/UserFeesBuyerTable';
 import { UserFeesDayTable } from '@/pages/reports/userFees/components/UserFeesDayTable';
+import { UserFeesReportActions } from '@/pages/reports/userFees/components/UserFeesReportActions';
 import { fetchUserFeesDayDetail, fetchUserFeesReport } from '@/pages/reports/userFees/userFeesReportService';
 import { isUserFeesReportEmpty } from '@/pages/reports/userFees/userFeesFormat';
-import { commodityApi } from '@/services/api';
+import { commodityApi, printSettingsApi } from '@/services/api';
 import type { UserFeesDayDetailDTO, UserFeesReportDTO } from '@/services/api/reports';
 import { minYmd, todayIstYmd } from '@/utils/reportIstDates';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,6 +18,7 @@ import { toast } from 'sonner';
 
 const UserFeesReportPage = () => {
   const dateRange = useReportDateRangeState();
+  const { trader, user } = useAuth();
   const [billPrefix, setBillPrefix] = useState('');
   const [prefixOptions, setPrefixOptions] = useState<string[]>([]);
   const [data, setData] = useState<UserFeesReportDTO | null>(null);
@@ -25,6 +28,7 @@ const UserFeesReportPage = () => {
   const [detail, setDetail] = useState<UserFeesDayDetailDTO | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [summaryVersion, setSummaryVersion] = useState(0);
+  const [billingIncludeHeader, setBillingIncludeHeader] = useState(true);
 
   const effectiveRange = useMemo(() => {
     const { startDate, endDate, ...rest } = dateRange.preparedPayload;
@@ -36,6 +40,38 @@ const UserFeesReportPage = () => {
       endDate: endClamped,
     };
   }, [dateRange.preparedPayload]);
+
+  const userFeesDocumentOptions = useMemo(
+    () => ({
+      includeHeader: billingIncludeHeader,
+    }),
+    [billingIncludeHeader],
+  );
+
+  useEffect(() => {
+    const loadPrintSetting = async () => {
+      try {
+        const list = await printSettingsApi.list();
+        const gstRow = list.find((item) => item.module_key === 'BILLING');
+        if (gstRow) {
+          setBillingIncludeHeader(gstRow.include_header !== false);
+        }
+      } catch {
+        /* keep defaults */
+      }
+    };
+    void loadPrintSetting();
+  }, []);
+
+  const printHeader = useMemo(() => {
+    const addressParts = [trader?.address, trader?.city, trader?.state, trader?.pin_code].filter(Boolean);
+    return {
+      traderName: trader?.business_name?.trim() || user?.name?.trim() || 'Trader',
+      apmcCode: (trader?.rmc_apmc_code ?? '').trim(),
+      address: addressParts.join(', '),
+      mobile: (trader?.mobile ?? '').trim(),
+    };
+  }, [trader, user?.name]);
 
   const latestParamsRef = useRef({
     start: effectiveRange.startDate,
@@ -179,6 +215,13 @@ const UserFeesReportPage = () => {
             </div>
           ) : data ? (
             <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:gap-4 lg:items-start">
+              <UserFeesReportActions
+                className="lg:col-span-2"
+                report={data}
+                printHeader={printHeader}
+                documentOptions={userFeesDocumentOptions}
+                disabled={loading}
+              />
               <UserFeesDayTable
                 days={data.days}
                 totals={data.totals}
