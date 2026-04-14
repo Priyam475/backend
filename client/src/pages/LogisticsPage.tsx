@@ -339,7 +339,7 @@ const LogisticsPage = () => {
       type === 'SALE_PAD'
         ? generateSalePadPrint(undefined, chitiPrintTraderName)
         : type === 'TENDER_SLIP'
-          ? generateTenderSlip(filteredBids)
+          ? generateTenderSlip(chitiPrintTraderName)
           : generateDispatchControl(filteredBids);
     const ok = await directPrint(html, { mode: "system" });
     ok ? toast.success('Sent to printer!') : toast.error('Printer not connected.');

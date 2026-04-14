@@ -726,11 +726,15 @@ export function generateSalePadPrint(_bids?: BidInfo[], traderDisplayName?: stri
 }
 
 // ── 5. Tender Slip for Buyers (A4 Landscape, Triplicate) ─
-export function generateTenderSlip(bids: BidInfo[]): string {
-  const rows = bids.map(b => `<tr><td>${lotDisplay(b)}</td><td>${b.quantity}</td><td>₹${b.rate}</td></tr>`).join('');
+const TENDER_SLIP_BLANK_ROW_COUNT = 16;
+
+/** Blank triplicate form: header + empty LOT/BAGS/RATE grid (user fills by hand). */
+export function generateTenderSlip(traderDisplayName?: string): string {
+  const firmName = escapeStickerHtml((traderDisplayName ?? '').trim() || 'Trader');
+  const blankRows = Array.from({ length: TENDER_SLIP_BLANK_ROW_COUNT }, () => '<tr class="ts-blank-row"><td></td><td></td><td></td></tr>').join('');
   const singleSlip = `<div class="slip">
     <div class="firm-header">
-      <div class="firm-name">MERCOTRACE</div>
+      <div class="firm-name">${firmName}</div>
       <div class="firm-line">Agricultural Produce Market Committee</div>
       <div class="firm-line">APMC Market Yard</div>
       <div class="info-row">
@@ -742,7 +746,7 @@ export function generateTenderSlip(bids: BidInfo[]): string {
         <span class="val">${todayStr()}</span>
       </div>
     </div>
-    <table><thead><tr><th>LOT</th><th>BAGS</th><th>RATE</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="ts-table"><thead><tr><th>LOT</th><th>BAGS</th><th>RATE</th></tr></thead><tbody>${blankRows}</tbody></table>
   </div>`;
 
   return `<!DOCTYPE html><html><head><style>
@@ -756,10 +760,15 @@ export function generateTenderSlip(bids: BidInfo[]): string {
     .info-row { display: flex; align-items: baseline; gap: 6px; font-size: 10px; margin-top: 2px; }
     .info-row .lbl { color: #666; font-size: 9px; text-transform: uppercase; font-weight: 400; flex-shrink: 0; }
     .info-row .val { font-weight: 700; font-size: 10px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    table.ts-table { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; empty-cells: show; }
     th { background: #eee; padding: 3px 6px; font-size: 10px; text-transform: uppercase; text-align: left; border: 1px solid #ccc; }
-    td { padding: 3px 6px; font-size: 11px; border: 1px solid #ddd; }
+    td { padding: 3px 6px; font-size: 11px; border: 1px solid #ddd; vertical-align: middle; }
+    tr.ts-blank-row td { height: 1.55rem; }
     @media print { body { margin: 0; padding: 6mm; } }
+    @media screen {
+      body { background: #e8e8e8; padding: 8px; }
+      .triplicate { max-width: 297mm; margin: 0 auto; }
+    }
   </style></head><body>
     <div class="triplicate">
       ${singleSlip}
