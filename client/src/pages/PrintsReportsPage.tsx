@@ -81,11 +81,11 @@ const PrintsReportsPage = () => {
   const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
-  const { trader } = useAuth();
+  const { trader, user } = useAuth();
   const firm: FirmInfo = useMemo(() => {
     const addressParts = [trader?.address, trader?.city, trader?.state, trader?.pin_code].filter(Boolean);
     return {
-      name: trader?.business_name ?? '',
+      name: trader?.business_name?.trim() || user?.name?.trim() || '',
       about: trader?.category ?? '',
       address: addressParts.join(', '),
       apmcCode: '',
@@ -94,7 +94,7 @@ const PrintsReportsPage = () => {
       gstin: '',
       bank: { name: '', acc: '', ifsc: '', branch: '' },
     };
-  }, [trader]);
+  }, [trader, user?.name]);
 
   useEffect(() => {
     contactApi.list().then(setContacts);
