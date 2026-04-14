@@ -1,8 +1,9 @@
 import { useId } from 'react';
+import { Redo2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { ReportDateRangeStateApi } from '@/pages/reports/hooks/useReportDateRangeState';
 import { REPORT_WEEK_PRESETS, coerceReportWeekOffset } from '@/pages/reports/utils/weekRange';
-import { reportsAccentPrimaryButtonClassName } from '@/pages/reports/reportUiTokens';
+import { reportsAccentIconButtonClassName, reportsAccentPrimaryButtonClassName } from '@/pages/reports/reportUiTokens';
 import { ReportDateModeRadioGroup } from './ReportDateModeRadioGroup';
 import { ReportFilterSection } from './ReportFilterSection';
 import { ReportCustomDateRangePicker } from './ReportCustomDateRangePicker';
@@ -10,9 +11,16 @@ import { ReportCustomDateRangePicker } from './ReportCustomDateRangePicker';
 type ReportDateRangeSelectorProps = {
   state: ReportDateRangeStateApi;
   idPrefix?: string;
+  onRefresh?: () => void;
+  refreshDisabled?: boolean;
 };
 
-export function ReportDateRangeSelector({ state, idPrefix }: ReportDateRangeSelectorProps) {
+export function ReportDateRangeSelector({
+  state,
+  idPrefix,
+  onRefresh,
+  refreshDisabled,
+}: ReportDateRangeSelectorProps) {
   const reactId = useId();
   const base = idPrefix ?? `rdr-${reactId}`;
 
@@ -21,7 +29,7 @@ export function ReportDateRangeSelector({ state, idPrefix }: ReportDateRangeSele
   return (
     <ReportFilterSection
       title="Date range"
-      description="Week presets or custom range. Stays client-side until API wiring."
+      description="Week presets or custom range."
       density="compact"
     >
       {/* Mobile / tablet: ≤3 content rows (radios | control | generate) + compact footer */}
@@ -78,6 +86,18 @@ export function ReportDateRangeSelector({ state, idPrefix }: ReportDateRangeSele
         >
           Generate Report
         </button>
+        {onRefresh ? (
+          <button
+            type="button"
+            disabled={refreshDisabled}
+            onClick={() => onRefresh()}
+            title="Reload report for this range"
+            aria-label="Reload report for this range"
+            className={reportsAccentIconButtonClassName(!!refreshDisabled)}
+          >
+            <Redo2 className="h-4 w-4" strokeWidth={2.25} />
+          </button>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-0.5 pt-1.5 mt-1 border-t border-border/25">
@@ -87,11 +107,6 @@ export function ReportDateRangeSelector({ state, idPrefix }: ReportDateRangeSele
         >
           {state.preparedPayload.startDate} … {state.preparedPayload.endDate}
         </p>
-        {state.generateRequestId > 0 ? (
-          <p className="text-[10px] text-muted-foreground leading-tight">
-            UI tick #{state.generateRequestId} — connect API later.
-          </p>
-        ) : null}
       </div>
     </ReportFilterSection>
   );

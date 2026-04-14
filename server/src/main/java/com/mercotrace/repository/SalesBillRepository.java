@@ -3,6 +3,7 @@ package com.mercotrace.repository;
 import com.mercotrace.domain.SalesBill;
 import java.math.BigDecimal;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -24,6 +25,15 @@ public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
         BigDecimal getGrossSale();
 
         BigDecimal getPendingBalance();
+    }
+
+    /** Fee totals from commodity groups for bills in date range (no bill row duplication). */
+    interface SalesBillFeeTotals {
+        BigDecimal getCommissionTotal();
+
+        BigDecimal getUserFeeTotal();
+
+        BigDecimal getCoolieTotal();
     }
 
     // NOTE:
@@ -67,8 +77,59 @@ public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
     );
 
     @Query(
+        "SELECT COALESCE(SUM(g.commissionAmount), 0) AS commissionTotal, " +
+        "COALESCE(SUM(g.userFeeAmount), 0) AS userFeeTotal, " +
+        "COALESCE(SUM(g.coolieAmount), 0) AS coolieTotal " +
+        "FROM SalesBillCommodityGroup g JOIN g.salesBill s " +
+        "WHERE s.traderId = :traderId AND s.billDate >= :dateFrom AND s.billDate <= :dateTo"
+    )
+    SalesBillFeeTotals sumFeeTotalsByTraderAndBillDateRange(
+        @Param("traderId") Long traderId,
+        @Param("dateFrom") java.time.Instant dateFrom,
+        @Param("dateTo") java.time.Instant dateTo
+    );
+
+    @Query(
         "SELECT COALESCE(SUM(b.outboundFreight), 0) FROM SalesBill b " +
         "WHERE b.traderId = :traderId AND b.id IN :billIds"
     )
     BigDecimal sumOutboundFreightByTraderAndBillIds(@Param("traderId") Long traderId, @Param("billIds") Collection<Long> billIds);
+
+    /** Per UTC calendar day: bill count, gross, pending. */
+    @Query(
+        value =
+            "SELECT CAST((s.bill_date AT TIME ZONE 'UTC') AS date) AS d, " +
+            "COUNT(*)::bigint, " +
+            "COALESCE(SUM(s.grand_total), 0), " +
+            "COALESCE(SUM(s.pending_balance), 0) " +
+            "FROM sales_bill s " +
+            "WHERE s.trader_id = :traderId AND s.bill_date >= :fromInstant AND s.bill_date <= :toInstant " +
+            "GROUP BY CAST((s.bill_date AT TIME ZONE 'UTC') AS date) " +
+            "ORDER BY d DESC",
+        nativeQuery = true
+    )
+    List<Object[]> aggregateBillsByUtcDay(
+        @Param("traderId") Long traderId,
+        @Param("fromInstant") java.time.Instant fromInstant,
+        @Param("toInstant") java.time.Instant toInstant
+    );
+
+    @Query(
+        value =
+            "SELECT CAST((s.bill_date AT TIME ZONE 'UTC') AS date) AS d, " +
+            "COALESCE(SUM(g.commission_amount), 0), " +
+            "COALESCE(SUM(g.user_fee_amount), 0), " +
+            "COALESCE(SUM(g.coolie_amount), 0) " +
+            "FROM sales_bill_commodity_group g " +
+            "JOIN sales_bill s ON g.sales_bill_id = s.id " +
+            "WHERE s.trader_id = :traderId AND s.bill_date >= :fromInstant AND s.bill_date <= :toInstant " +
+            "GROUP BY CAST((s.bill_date AT TIME ZONE 'UTC') AS date) " +
+            "ORDER BY d DESC",
+        nativeQuery = true
+    )
+    List<Object[]> sumFeesByUtcDay(
+        @Param("traderId") Long traderId,
+        @Param("fromInstant") java.time.Instant fromInstant,
+        @Param("toInstant") java.time.Instant toInstant
+    );
 }

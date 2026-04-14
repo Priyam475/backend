@@ -44,7 +44,9 @@ export interface CommodityProfitRowDTO {
   profit: number;
 }
 
-export interface DailySalesSummaryDTO {
+/** One calendar day (YYYY-MM-DD), newest first in `days`. */
+export interface DailySalesSummaryDayRowDTO {
+  date: string;
   totalBills: number;
   totalBags: number;
   grossSale: number;
@@ -52,10 +54,27 @@ export interface DailySalesSummaryDTO {
   userFee: number;
   coolie: number;
   netSales: number;
-  cashReceived: number;
-  bankReceived: number;
   totalCollected: number;
   outstanding: number;
+}
+
+export interface DailySalesSummaryTotalsDTO {
+  totalBills: number;
+  totalBags: number;
+  grossSale: number;
+  commission: number;
+  userFee: number;
+  coolie: number;
+  netSales: number;
+  totalCollected: number;
+  outstanding: number;
+}
+
+export interface DailySalesSummaryReportDTO {
+  periodStart?: string;
+  periodEnd?: string;
+  days: DailySalesSummaryDayRowDTO[];
+  totals: DailySalesSummaryTotalsDTO;
 }
 
 export interface PartyExposureRowDTO {
@@ -169,10 +188,14 @@ export const reportsApi = {
     }));
   },
 
-  async getDailySalesSummary(dateFrom: string, dateTo: string): Promise<DailySalesSummaryDTO> {
+  async getDailySalesSummaryReport(
+    dateFrom: string,
+    dateTo: string,
+    signal?: AbortSignal
+  ): Promise<DailySalesSummaryReportDTO> {
     const q = new URLSearchParams({ dateFrom, dateTo });
-    const res = await apiFetch(`/reports/daily-sales?${q.toString()}`, { method: 'GET' }).then(errDailySales);
-    return (await res.json()) as DailySalesSummaryDTO;
+    const res = await apiFetch(`/reports/daily-sales-summary?${q.toString()}`, { method: 'GET', signal }).then(errDailySales);
+    return (await res.json()) as DailySalesSummaryReportDTO;
   },
 
   async getPartyExposure(dateFrom: string, dateTo: string): Promise<PartyExposureRowDTO[]> {
