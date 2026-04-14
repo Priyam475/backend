@@ -1753,8 +1753,13 @@ const SettlementPage = () => {
   /** Per seller: `false` = expanded; missing/`true` = collapsed (default collapsed). */
   const [salesReportCollapsedBySellerId, setSalesReportCollapsedBySellerId] = useState<Record<string, boolean>>({});
   const [showPrint, setShowPrint] = useState(false);
-  const [settlementPrintSize, setSettlementPrintSize] = useState<'A4' | 'A5'>('A4');
+  const [settlementPaperWithHeader, setSettlementPaperWithHeader] = useState<'A4' | 'A5'>('A4');
+  const [settlementPaperWithoutHeader, setSettlementPaperWithoutHeader] = useState<'A4' | 'A5'>('A4');
   const [settlementIncludeHeader, setSettlementIncludeHeader] = useState(true);
+  const settlementEffectivePrintSize = useMemo(
+    () => (settlementIncludeHeader ? settlementPaperWithHeader : settlementPaperWithoutHeader),
+    [settlementIncludeHeader, settlementPaperWithHeader, settlementPaperWithoutHeader],
+  );
   /** Prevents overlapping save/update requests (buttons + shortcut). */
   const pattiSaveBusyRef = useRef(false);
   /** After a successful save, re-baseline dirty tracking once `pattiSaveBusy` is false and state has settled. */
@@ -1796,8 +1801,11 @@ const SettlementPage = () => {
       try {
         const list = await printSettingsApi.list();
         const row = list.find((item) => item.module_key === 'SETTLEMENT');
-        if (row?.paper_size === 'A5') setSettlementPrintSize('A5');
-        setSettlementIncludeHeader(row?.include_header !== false);
+        if (row) {
+          setSettlementPaperWithHeader(row.paper_size_with_header === 'A5' ? 'A5' : 'A4');
+          setSettlementPaperWithoutHeader(row.paper_size_without_header === 'A5' ? 'A5' : 'A4');
+          setSettlementIncludeHeader(row.include_header !== false);
+        }
       } catch {
         // keep defaults
       }
@@ -4688,7 +4696,10 @@ const SettlementPage = () => {
       /* optional */
     }
     const ok = await directPrint(
-      generateSalesPattiPrintHTML(printPayload, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+      generateSalesPattiPrintHTML(printPayload, {
+        pageSize: settlementEffectivePrintSize,
+        includeHeader: settlementIncludeHeader,
+      }),
       { mode: 'system' },
     );
     if (ok) toast.success('Main patti sent to printer');
@@ -4709,7 +4720,7 @@ const SettlementPage = () => {
     isWeighingMergedIntoFreight,
     sellerFormById,
     vehicleNetPayableFromPatti,
-    settlementPrintSize,
+    settlementEffectivePrintSize,
     settlementIncludeHeader,
     firmInfo,
     displayMainSalesPattiNo,
@@ -4756,7 +4767,10 @@ const SettlementPage = () => {
         firm: firmInfo,
       };
       const ok = await directPrint(
-        generateSalesPattiPrintHTML(payload, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+        generateSalesPattiPrintHTML(payload, {
+          pageSize: settlementEffectivePrintSize,
+          includeHeader: settlementIncludeHeader,
+        }),
         { mode: 'system' },
       );
       if (ok) toast.success('Seller sub-patti sent to printer');
@@ -4774,7 +4788,7 @@ const SettlementPage = () => {
       getSellerValidationError,
       isWeighingEnabledForSeller,
       isWeighingMergedIntoFreight,
-      settlementPrintSize,
+      settlementEffectivePrintSize,
       settlementIncludeHeader,
       firmInfo,
       sellerSalesPattiNumberBySellerId,
@@ -4830,7 +4844,10 @@ const SettlementPage = () => {
       return;
     }
     const ok = await directPrint(
-      generateSalesPattiBatchPrintHTML(payloads, { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader }),
+      generateSalesPattiBatchPrintHTML(payloads, {
+        pageSize: settlementEffectivePrintSize,
+        includeHeader: settlementIncludeHeader,
+      }),
       { mode: 'system' },
     );
     if (!ok) {
@@ -4852,7 +4869,7 @@ const SettlementPage = () => {
     mainPattiValidationError,
     isWeighingEnabledForSeller,
     isWeighingMergedIntoFreight,
-    settlementPrintSize,
+    settlementEffectivePrintSize,
     settlementIncludeHeader,
     firmInfo,
     sellerSalesPattiNumberBySellerId,
@@ -5524,7 +5541,7 @@ const SettlementPage = () => {
                       : {}),
                     pattiNoDisplay: mainPattiNumberForDisplay(displayMainSalesPattiNo, pattiData.pattiId),
                   },
-                  { pageSize: settlementPrintSize, includeHeader: settlementIncludeHeader },
+                  { pageSize: settlementEffectivePrintSize, includeHeader: settlementIncludeHeader },
                 ),
                 { mode: "system" },
               );

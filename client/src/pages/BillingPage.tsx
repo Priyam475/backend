@@ -625,8 +625,13 @@ const BillingPage = () => {
   const [hasSavedOnce, setHasSavedOnce] = useState(false);
   const [selectedPrintVersion, setSelectedPrintVersion] = useState<'latest' | number>('latest');
   const [showPrint, setShowPrint] = useState(false);
-  const [billingPrintSize, setBillingPrintSize] = useState<'A4' | 'A5'>('A4');
+  const [billingPaperWithHeader, setBillingPaperWithHeader] = useState<'A4' | 'A5'>('A4');
+  const [billingPaperWithoutHeader, setBillingPaperWithoutHeader] = useState<'A4' | 'A5'>('A4');
   const [billingIncludeHeader, setBillingIncludeHeader] = useState(true);
+  const billingEffectivePrintSize = useMemo(
+    () => (billingIncludeHeader ? billingPaperWithHeader : billingPaperWithoutHeader),
+    [billingIncludeHeader, billingPaperWithHeader, billingPaperWithoutHeader],
+  );
   /** Page size used when the bill has no GST on any commodity. Defaults to A5. */
   const [nonGstPrintSize, setNonGstPrintSize] = useState<'A4' | 'A5'>('A5');
 
@@ -661,11 +666,16 @@ const BillingPage = () => {
     const loadPrintSetting = async () => {
       try {
         const list = await printSettingsApi.list();
-        const gstRow    = list.find((item) => item.module_key === 'BILLING');
+        const gstRow = list.find((item) => item.module_key === 'BILLING');
         const nonGstRow = list.find((item) => item.module_key === 'BILLING_NON_GST');
-        if (gstRow?.paper_size === 'A5') setBillingPrintSize('A5');
-        setBillingIncludeHeader(gstRow?.include_header !== false);
-        if (nonGstRow?.paper_size) setNonGstPrintSize(nonGstRow.paper_size);
+        if (gstRow) {
+          setBillingPaperWithHeader(gstRow.paper_size_with_header === 'A5' ? 'A5' : 'A4');
+          setBillingPaperWithoutHeader(gstRow.paper_size_without_header === 'A5' ? 'A5' : 'A4');
+          setBillingIncludeHeader(gstRow.include_header !== false);
+        }
+        if (nonGstRow?.paper_size_without_header) {
+          setNonGstPrintSize(nonGstRow.paper_size_without_header);
+        }
       } catch {
         // keep defaults
       }
@@ -713,9 +723,9 @@ const BillingPage = () => {
   const salesBillPrintHtml = useMemo(() => {
     if (!billPrintPayload) return '';
     if (isGstBill) {
-      // GST (or mixed) bill: respect print settings (page size + header toggle)
+      // GST (or mixed): page size follows default layout (with vs without letterhead) from print settings
       return generateSalesBillPrintHTML(billPrintPayload, {
-        pageSize: billingPrintSize,
+        pageSize: billingEffectivePrintSize,
         includeHeader: billingIncludeHeader,
       });
     }
@@ -723,7 +733,7 @@ const BillingPage = () => {
     return generateNonGstSalesBillPrintHTML(billPrintPayload, {
       pageSize: nonGstPrintSize,
     });
-  }, [billPrintPayload, billingPrintSize, billingIncludeHeader, nonGstPrintSize, isGstBill]);
+  }, [billPrintPayload, billingEffectivePrintSize, billingIncludeHeader, nonGstPrintSize, isGstBill]);
 
   const handleSummaryTableScroll = useCallback(() => {
     const el = summaryTableScrollRef.current;
@@ -2955,7 +2965,7 @@ const BillingPage = () => {
                   }
                   const printHtml = isGstBill
                     ? generateSalesBillPrintHTML(billPrintPayload!, {
-                        pageSize: billingPrintSize,
+                        pageSize: billingEffectivePrintSize,
                         includeHeader: billingIncludeHeader,
                       })
                     : generateNonGstSalesBillPrintHTML(billPrintPayload!, {
