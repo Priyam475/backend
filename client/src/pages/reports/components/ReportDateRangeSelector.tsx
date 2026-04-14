@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Redo2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { ReportDateRangeStateApi } from '@/pages/reports/hooks/useReportDateRangeState';
@@ -11,6 +11,8 @@ import { ReportCustomDateRangePicker } from './ReportCustomDateRangePicker';
 type ReportDateRangeSelectorProps = {
   state: ReportDateRangeStateApi;
   idPrefix?: string;
+  /** Rendered after week/custom control and before Generate Report. */
+  beforeGenerateActions?: ReactNode;
   onRefresh?: () => void;
   refreshDisabled?: boolean;
 };
@@ -18,6 +20,7 @@ type ReportDateRangeSelectorProps = {
 export function ReportDateRangeSelector({
   state,
   idPrefix,
+  beforeGenerateActions,
   onRefresh,
   refreshDisabled,
 }: ReportDateRangeSelectorProps) {
@@ -77,6 +80,10 @@ export function ReportDateRangeSelector({
             </p>
           ) : null}
         </div>
+
+        {beforeGenerateActions ? (
+          <div className="min-w-0 w-full lg:w-auto lg:max-w-[220px] shrink-0">{beforeGenerateActions}</div>
+        ) : null}
 
         <button
           type="button"

@@ -77,6 +77,45 @@ export interface DailySalesSummaryReportDTO {
   totals: DailySalesSummaryTotalsDTO;
 }
 
+export interface UserFeesDayRowDTO {
+  date: string;
+  totalBags: number;
+  totalSales: number;
+  userCharges: number;
+  weighmanCharge: number;
+}
+
+export interface UserFeesTotalsDTO {
+  totalBags: number;
+  totalSales: number;
+  userCharges: number;
+  weighmanCharge: number;
+}
+
+export interface UserFeesReportDTO {
+  periodStart?: string;
+  periodEnd?: string;
+  billPrefixApplied?: string;
+  days: UserFeesDayRowDTO[];
+  totals: UserFeesTotalsDTO;
+}
+
+export interface UserFeesBillRowDTO {
+  buyerName: string;
+  billNumber: string;
+  totalBags: number;
+  totalSales: number;
+  userCharges: number;
+  weighmanCharge: number;
+}
+
+export interface UserFeesDayDetailDTO {
+  date: string;
+  billPrefixApplied?: string;
+  bills: UserFeesBillRowDTO[];
+  totals: UserFeesTotalsDTO;
+}
+
 export interface PartyExposureRowDTO {
   party: string;
   totalSale: number;
@@ -126,6 +165,8 @@ const errCommodity = handleError('Failed to load commodity profitability');
 const errDailySales = handleError('Failed to load daily sales summary');
 const errPartyExposure = handleError('Failed to load party exposure');
 const errAdminSummary = handleError('Failed to load admin reports summary');
+const errUserFees = handleError('Failed to load user fees report');
+const errUserFeesDay = handleError('Failed to load user fees day detail');
 
 export const reportsApi = {
   async getTrialBalance(dateFrom: string, dateTo: string): Promise<TrialBalanceRow[]> {
@@ -208,6 +249,35 @@ export const reportsApi = {
     const q = new URLSearchParams({ dateFrom, dateTo });
     const res = await apiFetch(`/admin/reports/daily-summary?${q.toString()}`, { method: 'GET' }).then(errAdminSummary);
     return (await res.json()) as AdminDailySummaryDTO;
+  },
+
+  async getUserFeesReport(
+    dateFrom: string,
+    dateTo: string,
+    billPrefix?: string | null,
+    signal?: AbortSignal
+  ): Promise<UserFeesReportDTO> {
+    const q = new URLSearchParams({ dateFrom, dateTo });
+    const p = billPrefix?.trim();
+    if (p) {
+      q.set('billPrefix', p);
+    }
+    const res = await apiFetch(`/reports/user-fees?${q.toString()}`, { method: 'GET', signal }).then(errUserFees);
+    return (await res.json()) as UserFeesReportDTO;
+  },
+
+  async getUserFeesDayDetail(
+    date: string,
+    billPrefix?: string | null,
+    signal?: AbortSignal
+  ): Promise<UserFeesDayDetailDTO> {
+    const q = new URLSearchParams({ date });
+    const p = billPrefix?.trim();
+    if (p) {
+      q.set('billPrefix', p);
+    }
+    const res = await apiFetch(`/reports/user-fees/day?${q.toString()}`, { method: 'GET', signal }).then(errUserFeesDay);
+    return (await res.json()) as UserFeesDayDetailDTO;
   },
 };
 

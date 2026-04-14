@@ -132,4 +132,89 @@ public interface SalesBillRepository extends JpaRepository<SalesBill, Long> {
         @Param("fromInstant") java.time.Instant fromInstant,
         @Param("toInstant") java.time.Instant toInstant
     );
+
+    /** Per UTC calendar day: sum of grand_total (filtered by optional bill number prefix). */
+    @Query(
+        value =
+            "SELECT CAST((s.bill_date AT TIME ZONE 'UTC') AS date) AS d, " +
+            "COALESCE(SUM(s.grand_total), 0) " +
+            "FROM sales_bill s " +
+            "WHERE s.trader_id = :traderId AND s.bill_date >= :fromInstant AND s.bill_date <= :toInstant " +
+            "AND (COALESCE(:billPrefix, '') = '' OR UPPER(s.bill_number) LIKE UPPER(:billPrefix) || '%') " +
+            "GROUP BY CAST((s.bill_date AT TIME ZONE 'UTC') AS date) " +
+            "ORDER BY d DESC",
+        nativeQuery = true
+    )
+    List<Object[]> sumGrandTotalByUtcDayWithOptionalPrefix(
+        @Param("traderId") Long traderId,
+        @Param("fromInstant") java.time.Instant fromInstant,
+        @Param("toInstant") java.time.Instant toInstant,
+        @Param("billPrefix") String billPrefix
+    );
+
+    /** Per UTC calendar day: user fee and weighman sums (prefix on bill). */
+    @Query(
+        value =
+            "SELECT CAST((s.bill_date AT TIME ZONE 'UTC') AS date) AS d, " +
+            "COALESCE(SUM(g.user_fee_amount), 0), " +
+            "COALESCE(SUM(g.weighman_charge_amount), 0) " +
+            "FROM sales_bill_commodity_group g " +
+            "JOIN sales_bill s ON g.sales_bill_id = s.id " +
+            "WHERE s.trader_id = :traderId AND s.bill_date >= :fromInstant AND s.bill_date <= :toInstant " +
+            "AND (COALESCE(:billPrefix, '') = '' OR UPPER(s.bill_number) LIKE UPPER(:billPrefix) || '%') " +
+            "GROUP BY CAST((s.bill_date AT TIME ZONE 'UTC') AS date) " +
+            "ORDER BY d DESC",
+        nativeQuery = true
+    )
+    List<Object[]> sumUserFeeWeighmanByUtcDayWithOptionalPrefix(
+        @Param("traderId") Long traderId,
+        @Param("fromInstant") java.time.Instant fromInstant,
+        @Param("toInstant") java.time.Instant toInstant,
+        @Param("billPrefix") String billPrefix
+    );
+
+    /** Per UTC calendar day: billed bag quantities (line item quantity sum). */
+    @Query(
+        value =
+            "SELECT CAST((s.bill_date AT TIME ZONE 'UTC') AS date) AS d, " +
+            "COALESCE(SUM(li.quantity), 0) " +
+            "FROM sales_bill_line_item li " +
+            "JOIN sales_bill_commodity_group g ON li.commodity_group_id = g.id " +
+            "JOIN sales_bill s ON g.sales_bill_id = s.id " +
+            "WHERE s.trader_id = :traderId AND s.bill_date >= :fromInstant AND s.bill_date <= :toInstant " +
+            "AND (COALESCE(:billPrefix, '') = '' OR UPPER(s.bill_number) LIKE UPPER(:billPrefix) || '%') " +
+            "GROUP BY CAST((s.bill_date AT TIME ZONE 'UTC') AS date) " +
+            "ORDER BY d DESC",
+        nativeQuery = true
+    )
+    List<Object[]> sumLineItemQuantityByUtcDayWithOptionalPrefix(
+        @Param("traderId") Long traderId,
+        @Param("fromInstant") java.time.Instant fromInstant,
+        @Param("toInstant") java.time.Instant toInstant,
+        @Param("billPrefix") String billPrefix
+    );
+
+    /**
+     * Bills for one UTC calendar day of {@code bill_date}, optional prefix. One row per bill; fees/bags via correlated subselects (no join inflation).
+     */
+    @Query(
+        value =
+            "SELECT s.buyer_name, s.bill_number, s.grand_total, " +
+            "(SELECT COALESCE(SUM(li.quantity), 0) FROM sales_bill_line_item li " +
+            "  INNER JOIN sales_bill_commodity_group cg ON li.commodity_group_id = cg.id " +
+            "  WHERE cg.sales_bill_id = s.id), " +
+            "(SELECT COALESCE(SUM(cg.user_fee_amount), 0) FROM sales_bill_commodity_group cg WHERE cg.sales_bill_id = s.id), " +
+            "(SELECT COALESCE(SUM(cg.weighman_charge_amount), 0) FROM sales_bill_commodity_group cg WHERE cg.sales_bill_id = s.id) " +
+            "FROM sales_bill s " +
+            "WHERE s.trader_id = :traderId " +
+            "AND CAST((s.bill_date AT TIME ZONE 'UTC') AS date) = CAST(:billDay AS date) " +
+            "AND (COALESCE(:billPrefix, '') = '' OR UPPER(s.bill_number) LIKE UPPER(:billPrefix) || '%') " +
+            "ORDER BY UPPER(s.bill_number)",
+        nativeQuery = true
+    )
+    List<Object[]> findUserFeesBillRowsForUtcDayWithOptionalPrefix(
+        @Param("traderId") Long traderId,
+        @Param("billDay") java.time.LocalDate billDay,
+        @Param("billPrefix") String billPrefix
+    );
 }
