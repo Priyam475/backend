@@ -71,7 +71,7 @@ export const AVAILABLE_MODULES: Record<string, string[]> = {
   'Settlement': ['View', 'Create', 'Edit'],
 
   // 13. Billing
-  'Billing': ['View', 'Create'],
+  'Billing': ['View', 'Create', 'Edit'],
 
   // 14. Chart of Accounts
   'Chart of Accounts': ['View', 'Create'],

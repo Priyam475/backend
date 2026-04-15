@@ -2620,12 +2620,17 @@ const BillingPage = () => {
     toast.success('Global charges applied to all line items');
   };
 
-  const buildSavePayload = () => {
+  /** Save path unchanged when options omitted; auto-save before buyer switch may suppress duplicate client validation toast. */
+  type PersistBillOptions = { skipClientValidationErrorToast?: boolean };
+
+  const buildSavePayload = (options?: PersistBillOptions) => {
     if (!bill) return;
     const { isValid, errors } = validateBill(bill, commodityAvgWeightBounds);
     if (!isValid) {
-      const count = Object.keys(errors).length;
-      toast.error(`Please fix ${count} validation ${count === 1 ? 'error' : 'errors'} before saving`);
+      if (!options?.skipClientValidationErrorToast) {
+        const count = Object.keys(errors).length;
+        toast.error(`Please fix ${count} validation ${count === 1 ? 'error' : 'errors'} before saving`);
+      }
       return null;
     }
     const payload = {
@@ -2678,13 +2683,13 @@ const BillingPage = () => {
     return { payload, isUpdate };
   };
 
-  const persistBill = async (): Promise<SalesBillDTO | null> => {
+  const persistBill = async (options?: PersistBillOptions): Promise<SalesBillDTO | null> => {
     if (persistBillPromiseRef.current) {
       return persistBillPromiseRef.current;
     }
     const run = (async (): Promise<SalesBillDTO | null> => {
       setBillPersisting(true);
-    const built = buildSavePayload();
+    const built = buildSavePayload(options);
     if (!built) return null;
     const { payload, isUpdate } = built;
     try {
@@ -2721,10 +2726,20 @@ const BillingPage = () => {
     const hasItems = bill.commodityGroups.some(g => (g.items?.length ?? 0) > 0);
     if (!hasItems) return true;
 
+    const baseline = billDirtyBaselineRef.current;
+    const unchanged =
+      baseline != null && serializeBillForDirty(bill) === baseline;
+    if (unchanged) {
+      return true;
+    }
+
     const currentBuyerLabel = bill.buyerMark || bill.buyerName || 'current buyer';
-    const saved = await persistBill();
+    const saved = await persistBill({ skipClientValidationErrorToast: true });
     if (!saved) {
-      toast.error('Could not auto-save current bill. Please fix highlighted fields and try again.');
+      const { isValid } = validateBill(bill, commodityAvgWeightBounds);
+      if (!isValid) {
+        toast.error('Could not auto-save current bill. Please fix highlighted fields and try again.');
+      }
       return false;
     }
 
