@@ -3648,7 +3648,7 @@ const BillingPage = () => {
                 disabled={!bill && !selectedBuyer}
                 className={cn(arrSolidLg, 'sm:self-end')}
               >
-                Change Buyer
+                Change Bill
               </Button>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
@@ -3998,8 +3998,9 @@ const BillingPage = () => {
                   }
                 >
                   {replaceSelectedContact
-                    ? `Update ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`
+                    ? `${replaceTarget === 'BROKER' ? 'Update Broker' : 'Change Buyer'}`
                     : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
+               
                 </Button>
                 <Button type="button" variant="outline" className={cn(arrSolidMd, 'shrink-0')} onClick={clearReplacementInline}>
                   Clear

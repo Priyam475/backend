@@ -44,7 +44,7 @@ export const AVAILABLE_MODULES: Record<string, string[]> = {
   'Commodity Settings': ['View', 'Create', 'Edit', 'Delete'],
 
   // 4. Arrivals
-  'Arrivals': ['View', 'Create'],
+  'Arrivals': ['View', 'Create', 'Edit', 'Delete'],
 
   // 5. Auctions / Sales
   'Auctions / Sales': ['View', 'Create', 'Edit', 'Delete', 'Approve'],
