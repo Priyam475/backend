@@ -3317,6 +3317,7 @@ const BillingPage = () => {
                 <BillingMoneyInput
                   value={Number(addBidQty) || 0}
                   min={0}
+                  integerOnly
                   onCommit={n => setAddBidQty(n > 0 ? String(roundMoney2(n)) : '')}
                   placeholder={String(addBidRemainingQty)}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
