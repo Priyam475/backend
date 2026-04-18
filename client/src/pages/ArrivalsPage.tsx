@@ -3615,7 +3615,7 @@ const ArrivalsPage = () => {
               </div>
             )}
           </div>
-          <div className="px-4 space-y-2.5">
+          <div className="px-4 space-y-2.5 md:space-y-1.5 md:px-6">
             {activeArrivalsLoading ? (
               <div className="glass-card p-8 rounded-2xl text-center">
                 <p className="text-muted-foreground">Loading arrivals…</p>
@@ -3702,13 +3702,14 @@ const ArrivalsPage = () => {
                 const showMobileArrivalActions = can('Arrivals', 'Edit') || can('Arrivals', 'Delete');
                 return (
                   <motion.div key={a.vehicleId + '-' + i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                    <div className="glass-card max-w-full overflow-x-hidden overflow-y-visible rounded-2xl">
+                    <div className="glass-card max-w-full overflow-x-hidden overflow-y-visible rounded-2xl md:rounded-xl md:shadow-sm md:max-w-4xl md:mx-auto">
                       <button
                         type="button"
                         onClick={() => loadExpandedDetail(a.vehicleId)}
-                        className="flex w-full min-w-0 touch-manipulation items-start gap-3 p-3.5 text-left"
+                        className="flex w-full min-w-0 touch-manipulation items-start gap-3 p-3.5 text-left md:items-center md:gap-2 md:p-2.5 md:pr-2"
                       >
-                        <div className="min-w-0 flex-1 space-y-2">
+                        {/* Phone: stacked card (unchanged below md) */}
+                        <div className="min-w-0 flex-1 space-y-2 md:hidden">
                           <ArrivalSummaryVehicleSellerQty
                             layout="stack"
                             vehicleNumber={a.vehicleNumber}
@@ -3750,7 +3751,7 @@ const ArrivalsPage = () => {
                             </span>
                           </div>
                         </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1 self-start pt-0.5">
+                        <div className="flex shrink-0 flex-col items-end gap-1 self-start pt-0.5 md:hidden">
                           <span className="whitespace-nowrap text-xs text-muted-foreground">
                             {new Date(a.arrivalDatetime).toLocaleDateString()}
                           </span>
@@ -3765,9 +3766,61 @@ const ArrivalsPage = () => {
                             )}
                           </span>
                         </div>
+
+                        {/* Tablet (md–lg): single dense row — hidden at lg+ where desktop table is used */}
+                        <div className="hidden w-full min-w-0 items-center gap-2 md:flex">
+                          <div className="min-w-0 flex-1 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+                            <ArrivalSummaryVehicleSellerQty
+                              layout="inline"
+                              vehicleNumber={a.vehicleNumber}
+                              primarySellerName={a.primarySellerName}
+                              totalBags={a.totalBags}
+                            />
+                          </div>
+                          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-2">
+                            <span
+                              className="inline-flex max-w-[6.5rem] shrink-0 origin-left scale-[0.92] sm:max-w-[7.5rem] sm:scale-100"
+                              title={status === 'PARTIALLY_COMPLETED' ? 'Partially completed' : undefined}
+                            >
+                              <ArrivalStatusBadge status={status} size="sm" />
+                            </span>
+                            <span className="text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">
+                              S{a.sellerCount}·L{a.lotCount}·{a.netWeight}
+                              <span className="text-muted-foreground/80">kg</span>
+                            </span>
+                            {godownLabel ? (
+                              <span
+                                className="hidden min-w-0 max-w-[6rem] truncate text-[10px] text-muted-foreground min-[800px]:inline md:max-w-[7rem]"
+                                title={godownLabel}
+                              >
+                                <MapPin className="mr-0.5 inline h-3 w-3 shrink-0 text-[#6075FF]" aria-hidden />
+                                {godownLabel}
+                              </span>
+                            ) : null}
+                            <span
+                              className="text-[10px] tabular-nums text-muted-foreground whitespace-nowrap"
+                              title="Bids / Weighed lots"
+                            >
+                              B{a.bidsCount ?? 0}/{a.weighedCount ?? 0}
+                            </span>
+                            <span className="text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">
+                              {new Date(a.arrivalDatetime).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </span>
+                            <span
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/30"
+                              aria-hidden
+                            >
+                              {isExpanded ? (
+                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </span>
+                          </div>
+                        </div>
                       </button>
                       {showMobileArrivalActions && !isExpanded && (
-                        <div className="flex w-full gap-2 border-t border-border/30 px-3 py-2.5">
+                        <div className="flex w-full gap-2 border-t border-border/30 px-3 py-2.5 md:px-2.5 md:py-2">
                           {can('Arrivals', 'Edit') && (
                             <button
                               type="button"
@@ -3884,7 +3937,7 @@ const ArrivalsPage = () => {
                   style={{ WebkitBackdropFilter: 'blur(24px)' }}
                 >
                 <div ref={newArrivalPanelScrollRef} className="w-full max-w-[480px] md:max-w-full overflow-y-auto">
-                  <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-4 sticky top-0 z-10">
+                  <div className="bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-4 px-4 sticky top-0 z-20">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <button
@@ -3924,7 +3977,7 @@ const ArrivalsPage = () => {
                       <div className="flex-1 h-px bg-border/30" />
                     </div>
 
-                    <div className="glass-card rounded-2xl p-4 relative z-20 overflow-visible">
+                    <div className="glass-card rounded-2xl p-4 relative overflow-visible">
                       <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">Arrival Type</label>
                       <div className="flex gap-2">
                         <button onClick={() => setIsMultiSeller(true)}
@@ -4298,45 +4351,12 @@ const ArrivalsPage = () => {
                                 <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">{addLotForm.editingLotId ? "Edit Lot" : "New Lot"}</p>
                                 <div className="grid min-w-0 grid-cols-2 gap-2">
                                   <div className="min-w-0 space-y-1">
-                                    <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Lot name</label>
-                                    <Input
-                                      ref={addLotLotNameInputRef}
-                                      placeholder="Lot name"
-                                      value={addLotForm.lotName}
-                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
-                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
-                                      className={cn(
-                                        "h-11 w-full min-w-0 rounded-xl text-sm focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)] focus-visible:ring-0 focus-visible:ring-offset-0",
-                                        addLotForm.errors.lotName && "border-red-500 bg-red-50 ring-2 ring-red-500/30 dark:bg-red-950/20",
-                                      )}
-                                      maxLength={50}
-                                      autoFocus
-                                    />
-                                    {addLotForm.errors.lotName && <p className="text-[9px] leading-tight text-red-500">{addLotForm.errors.lotName}</p>}
-                                  </div>
-                                  <div className="min-w-0 space-y-1">
-                                    <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Bags</label>
-                                    <Input
-                                      type="number"
-                                      placeholder="Bags"
-                                      value={addLotForm.bags}
-                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
-                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
-                                      className={cn(
-                                        "h-11 w-full min-w-0 rounded-xl text-sm focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)] focus-visible:ring-0 focus-visible:ring-offset-0",
-                                        addLotForm.errors.bags && "border-red-500 bg-red-50 ring-2 ring-red-500/30 dark:bg-red-950/20",
-                                      )}
-                                      min={1}
-                                      max={100000}
-                                    />
-                                    {addLotForm.errors.bags && <p className="text-[9px] leading-tight text-red-500">{addLotForm.errors.bags}</p>}
-                                  </div>
-                                  <div className="min-w-0 space-y-1">
                                     <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Commodity</label>
                                     <select
                                       value={addLotForm.commodityName}
                                       onChange={e => setAddLotForm(prev => prev ? { ...prev, commodityName: e.target.value, variant: '', errors: { ...prev.errors, commodity: undefined } } : null)}
                                       onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
+                                      autoFocus
                                       className={cn(
                                         "h-11 w-full min-w-0 rounded-xl border border-input bg-background px-2 text-xs focus:border-primary focus:outline-none focus:ring-0 focus:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)] sm:text-sm",
                                         addLotForm.errors.commodity && "border-red-500 ring-2 ring-red-500/30",
@@ -4361,6 +4381,39 @@ const ArrivalsPage = () => {
                                         <option key={opt.value || 'none'} value={opt.value}>{opt.label}</option>
                                       ))}
                                     </select>
+                                  </div>
+                                  <div className="min-w-0 space-y-1">
+                                    <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Lot name</label>
+                                    <Input
+                                      ref={addLotLotNameInputRef}
+                                      placeholder="Lot name"
+                                      value={addLotForm.lotName}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, lotName: e.target.value, errors: { ...prev.errors, lotName: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
+                                      className={cn(
+                                        "h-11 w-full min-w-0 rounded-xl text-sm focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)] focus-visible:ring-0 focus-visible:ring-offset-0",
+                                        addLotForm.errors.lotName && "border-red-500 bg-red-50 ring-2 ring-red-500/30 dark:bg-red-950/20",
+                                      )}
+                                      maxLength={50}
+                                    />
+                                    {addLotForm.errors.lotName && <p className="text-[9px] leading-tight text-red-500">{addLotForm.errors.lotName}</p>}
+                                  </div>
+                                  <div className="min-w-0 space-y-1">
+                                    <label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Bags</label>
+                                    <Input
+                                      type="number"
+                                      placeholder="Bags"
+                                      value={addLotForm.bags}
+                                      onChange={e => setAddLotForm(prev => prev ? { ...prev, bags: e.target.value, errors: { ...prev.errors, bags: undefined } } : null)}
+                                      onFocus={() => handleLotEntryFieldFocus(seller.seller_vehicle_id)}
+                                      className={cn(
+                                        "h-11 w-full min-w-0 rounded-xl text-sm focus-visible:border-primary focus-visible:shadow-[0_0_0_2px_hsl(var(--ring)/0.25)] focus-visible:ring-0 focus-visible:ring-offset-0",
+                                        addLotForm.errors.bags && "border-red-500 bg-red-50 ring-2 ring-red-500/30 dark:bg-red-950/20",
+                                      )}
+                                      min={1}
+                                      max={100000}
+                                    />
+                                    {addLotForm.errors.bags && <p className="text-[9px] leading-tight text-red-500">{addLotForm.errors.bags}</p>}
                                   </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 pt-0.5">
