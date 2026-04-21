@@ -265,6 +265,8 @@ export function generateSalesSticker(bid: BidInfo): string {
     .center-top { text-align: center; font-size: 16px; font-weight: 900; margin-bottom: 2px; }
     .origin-full { text-align: center; font-size: 10px; font-weight: 700; width: 100%; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 2px; }
+    .cut-line { border-top: 1px dashed #999; margin-top: 4px; padding-top: 0; }
+    .thermal-tear-space { height: 20mm; min-height: 20mm; margin: 0; padding: 0; }
     @media print { body { margin: 0; padding: 2mm; } }
   </style></head><body>
     <div class="sticker">
@@ -280,6 +282,8 @@ export function generateSalesSticker(bid: BidInfo): string {
         <div class="cell"><span class="lbl">Godown</span><span class="val">${escapeStickerHtml(bid.godown || '—')}</span></div>
       </div>
     </div>
+    <div class="cut-line"></div>
+    <div class="thermal-tear-space" aria-hidden="true"></div>
   </body></html>`;
 }
 
@@ -492,6 +496,7 @@ export function generateBuyerChiti(
     .stage { display: none; }
     .powered { text-align: center; font-size: 10px; color: #666; margin-top: 4px; }
     .cut-line { border-top: 1px dashed #999; margin-top: 6px; padding-top: 2px; }
+    .thermal-tear-space { height: 20mm; min-height: 20mm; margin: 0; padding: 0; }
     @media print { body { margin: 0; } }
   </style></head><body>
     <div class="header"><h3>${headerTitle}</h3></div>
@@ -508,6 +513,7 @@ export function generateBuyerChiti(
       <div class="row"><span>Total QTY</span><span>${totalQty}</span></div>
     </div>
     <div class="cut-line"></div>
+    <div class="thermal-tear-space" aria-hidden="true"></div>
   </body></html>`;
 }
 
@@ -550,6 +556,7 @@ export function generateSellerChiti(
     .stage { display: none; }
     .powered { text-align: center; font-size: 10px; color: #666; margin-top: 4px; }
     .cut-line { border-top: 1px dashed #999; margin-top: 6px; padding-top: 2px; }
+    .thermal-tear-space { height: 20mm; min-height: 20mm; margin: 0; padding: 0; }
     @media print { body { margin: 0; } }
   </style></head><body>
     <div class="header"><h3>${headerTitle}</h3></div>
@@ -566,6 +573,7 @@ export function generateSellerChiti(
       <div class="row"><span>Total QTY</span><span>${totalQty}</span></div>
     </div>
     <div class="cut-line"></div>
+    <div class="thermal-tear-space" aria-hidden="true"></div>
   </body></html>`;
 }
 
