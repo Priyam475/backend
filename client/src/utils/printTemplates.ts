@@ -1,4 +1,7 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import { toast } from "sonner";
+
+import { bluetoothPrintersApi } from "@/services/api/bluetoothPrinters";
 
 // ── Print Templates for Print Hub ──────────────────────────
 // REQ-LOG-002: All print formats per SRS (same format as client_origin)
@@ -136,6 +139,19 @@ export async function directPrint(
 
   // 1) Android native attempt
   if (isAndroidNative) {
+    const mac = (deviceMac ?? "").trim();
+    if (mac) {
+      try {
+        const allowed = await bluetoothPrintersApi.checkMacAccess(mac);
+        if (!allowed) {
+          toast.error("You are not allowed to use this Bluetooth printer.");
+          return false;
+        }
+      } catch {
+        toast.error("Could not verify printer permissions. Check your connection.");
+        return false;
+      }
+    }
     try {
       await Promise.race([
         mercoPrinter.printHtml({
