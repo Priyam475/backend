@@ -44,6 +44,10 @@ export interface BidInfo {
   origin?: string;
   godown?: string;
   weight?: number;
+  /** Server auction entry id (completed lot); set by Print Hub when available. */
+  auctionEntryId?: number;
+  /** Set when this lot is a self-sale re-auction unit. */
+  selfSaleUnitId?: number | null;
 }
 
 type ThermalPayload = { html: string; thermalText: string };
@@ -320,19 +324,20 @@ export function generateBuyerChitiThermal(
   buyerMark: string,
   bids: BidInfo[],
   stage: "post-auction" | "post-weighing" = "post-auction",
-  traderDisplayName?: string
+  traderDisplayName?: string,
+  printRate: boolean = true
 ): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalBid = bids.length;
 
-  // Column widths sum to 48 (Mark column removed; widths redistributed)
-  const wLot = 16;
-  const wLotSl = 8;
-  const wGdwn = 10;
+  // Column widths sum to 48 (Mark column removed; widths redistributed). When printRate is off, wRate width is split across others.
+  const wLot = printRate ? 16 : 20;
+  const wLotSl = printRate ? 8 : 8;
+  const wGdwn = printRate ? 10 : 12;
   const wRate = 9;
-  const wQty = 5;
+  const wQty = printRate ? 5 : 8;
 
   const pad = (s: string, w: number) => padThermalRight(clampThermalText(s, w), w);
   const lineLR = (left: string, right: string) => {
@@ -355,7 +360,11 @@ export function generateBuyerChitiThermal(
     "[C]" + escposBold(`[${String(buyerMark ?? "").trim()}]`),
     `[L]${THERMAL_INTERNAL_RULE}`,
     "",
-    "[L]" + pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Rate", wRate) + pad("Qty", wQty),
+    "[L]" + (
+      printRate
+        ? pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Rate", wRate) + pad("Qty", wQty)
+        : pad("Lot Name", wLot) + pad("LotSL", wLotSl) + pad("Gdwn", wGdwn) + pad("Qty", wQty)
+    ),
   ].join("\n");
 
   const rows = bids
@@ -363,12 +372,16 @@ export function generateBuyerChitiThermal(
       const lot = formatLotIdentifierForBid(b);
       const rateTxt = escapeThermalPrice(`₹${b.rate}`);
 
-      const line1 =
-        pad(lot, wLot) +
-        pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
-        pad(b.godown || "—", wGdwn) +
-        pad(rateTxt, wRate) +
-        pad(String(b.quantity), wQty);
+      const line1 = printRate
+        ? pad(lot, wLot) +
+          pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
+          pad(b.godown || "—", wGdwn) +
+          pad(rateTxt, wRate) +
+          pad(String(b.quantity), wQty)
+        : pad(lot, wLot) +
+          pad(String(b.lotNumber && b.lotNumber > 0 ? b.lotNumber : "—"), wLotSl) +
+          pad(b.godown || "—", wGdwn) +
+          pad(String(b.quantity), wQty);
 
       return "[L]" + line1;
     })
@@ -470,21 +483,36 @@ export function generateBuyerChiti(
   buyerMark: string,
   bids: BidInfo[],
   stage: 'post-auction' | 'post-weighing' = 'post-auction',
-  traderDisplayName?: string
+  traderDisplayName?: string,
+  printRate: boolean = true
 ): string {
   const _stage = stage;
   void _stage;
   const totalQty = bids.reduce((s, b) => s + b.quantity, 0);
   const totalBid = bids.length;
   const headerTitle = escapeStickerHtml((traderDisplayName ?? '').trim() || 'Trader');
-  const rows = bids.map(b => `
-    <tr>
+  const rows = bids
+    .map(b => {
+      if (printRate) {
+        return `<tr>
       <td>${formatLotIdentifierForBid(b)}</td>
       <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
       <td>${b.godown || '—'}</td>
       <td>₹${b.rate}</td>
       <td>${b.quantity}</td>
-    </tr>`).join('');
+    </tr>`;
+      }
+      return `<tr>
+      <td>${formatLotIdentifierForBid(b)}</td>
+      <td>${b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}</td>
+      <td>${b.godown || '—'}</td>
+      <td>${b.quantity}</td>
+    </tr>`;
+    })
+    .join('');
+  const tableHead = printRate
+    ? '<thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Rate</th><th>Qty</th></tr></thead>'
+    : '<thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Qty</th></tr></thead>';
 
   return `<!DOCTYPE html><html><head><style>
     @page { size: 80mm auto; margin: 2mm; }
@@ -513,7 +541,7 @@ export function generateBuyerChiti(
       <div class="mark">[${escapeStickerHtml(buyerMark)}]</div>
     </div>
     <table>
-      <thead><tr><th>Lot Name</th><th>Lot SL No</th><th>Gdwn</th><th>Rate</th><th>Qty</th></tr></thead>
+      ${tableHead}
       <tbody>${rows}</tbody>
     </table>
     <div class="totals">

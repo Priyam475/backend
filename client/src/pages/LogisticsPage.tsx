@@ -1,17 +1,42 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react';
+import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Printer, Package, User, Search, Layers
+  ArrowLeft, Printer, Package, User, Search, Layers, ChevronDown, Trash2, Inbox, Undo2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Input } from '@/components/ui/input';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { printLogApi, arrivalsApi, logisticsApi } from '@/services/api';
+import { printLogApi, arrivalsApi, logisticsApi, auctionApi } from '@/services/api';
+import type { AuctionBidUpdateRequest } from '@/services/api/auction';
+import { usePermissions } from '@/lib/permissions';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import {
   directPrint,
@@ -30,6 +55,66 @@ import type { BidInfo } from '@/utils/printTemplates';
 
 export type { BidInfo };
 
+const bidKey = (b: BidInfo) => `${b.lotId}:${b.bidNumber}`;
+
+/** List / table row key — `lotId:bidNumber` is not unique in some API payloads; prefer auction entry id. */
+const bidListKey = (b: BidInfo, indexInList: number): string => {
+  if (b.auctionEntryId != null && Number.isFinite(Number(b.auctionEntryId))) {
+    return `ae:${b.auctionEntryId}`;
+  }
+  return `${bidKey(b)}#${indexInList}`;
+};
+
+/**
+ * Reserved Print Hub "pool" (server auction entry buyer fields).
+ * Bids with this mark are unassigned; visible to all users with auction results.
+ */
+const LOGISTICS_UNASSIGNED_BUYER_MARK = '__M0_UNB__';
+const LOGISTICS_UNASSIGNED_BUYER_NAME = 'Unassigned';
+
+const isLogisticsUnassignedBid = (b: BidInfo): boolean =>
+  (b.buyerMark || '').trim() === LOGISTICS_UNASSIGNED_BUYER_MARK;
+
+/** Lines for buyer Chitti card: name+mark when distinct; mark-only for temp/duplicate. */
+const buyerChittiHeaderLines = (g: { buyerName: string; buyerMark: string }): { primary: string; secondary?: string } => {
+  const name = (g.buyerName || '').trim();
+  const mark = (g.buyerMark || '').trim();
+  if (mark === LOGISTICS_UNASSIGNED_BUYER_MARK) {
+    return { primary: 'Unassigned (pool)' };
+  }
+  if (!mark && !name) return { primary: '—' };
+  const nameIsOnlyMark = !name || name.toLowerCase() === mark.toLowerCase();
+  if (nameIsOnlyMark) return { primary: mark || name };
+  return { primary: name, secondary: mark || undefined };
+};
+
+const BUYER_CHITTI_BULK_BTN_CLASS =
+  'h-8 min-h-8 text-[10px] px-2.5 font-bold text-[#FFFFFF] border border-[rgba(255,255,255,0.25)] rounded-md transition-shadow shadow-[0_0_10px_rgba(91,140,255,0.85)] hover:shadow-[0_0_14px_rgba(123,97,255,0.9)] active:opacity-90 touch-manipulation';
+
+const buyerChittiBulkBtnStyle: CSSProperties = {
+  background: 'linear-gradient(90deg, #4B7CF3 0%, #5B8CFF 45%, #7B61FF 100%)',
+};
+
+/** Same gradient as buyer chitti actions; table header row. */
+const buyerChittiTableHeadStyle: CSSProperties = {
+  background: 'linear-gradient(90deg, #4B7CF3 0%, #5B8CFF 45%, #7B61FF 100%)',
+};
+
+const CHITTI_TABLE_HEAD_CELL =
+  'py-2 px-2 text-left text-[10px] font-bold uppercase tracking-wide text-[#FFFFFF] border-b border-[rgba(255,255,255,0.2)]';
+
+const chittiRedoBtnClass =
+  'inline-flex h-9 w-9 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-border bg-muted/50 text-foreground hover:bg-muted transition-colors touch-manipulation shrink-0 md:h-7 md:w-7 md:min-h-7 md:min-w-7';
+
+const chittiDeleteIconBtnClass =
+  'inline-flex h-9 w-9 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-destructive/10 border border-destructive/15 text-destructive hover:bg-destructive/20 active:opacity-90 transition-colors touch-manipulation shrink-0 md:h-7 md:w-7 md:min-h-7 md:min-w-7';
+
+/**
+ * Per-bid buyer Chitti completion (server `print_log.reference_id` = `lotId:bidNumber`).
+ * Same trader: shared across users / sessions (see GET /print-logs/reference-ids).
+ */
+const BUYER_CHITI_BID_REF_TYPE = 'BUYER_CHITI_BID';
+
 type FilterMode = 'LOT' | 'BUYER' | 'SELLER';
 
 const FILTER_TABS: { key: FilterMode; label: string; icon: typeof Layers; desc: string }[] = [
@@ -43,6 +128,7 @@ const LogisticsPage = () => {
   const isDesktop = useDesktopMode();
   const { trader, user } = useAuth();
   const [bids, setBids] = useState<BidInfo[]>([]);
+  const [printedBidKeys, setPrintedBidKeys] = useState<Set<string>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('BUYER');
 
@@ -51,7 +137,9 @@ const LogisticsPage = () => {
     [trader?.business_name, user?.name]
   );
 
-  const { auctionResults: auctionData } = useAuctionResults();
+  const { auctionResults: auctionData, refetch: refetchAuctions } = useAuctionResults();
+  const { can } = usePermissions();
+  const canEditAuctionBids = can('Auctions / Sales', 'Edit');
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
 
   useEffect(() => {
@@ -121,6 +209,10 @@ const LogisticsPage = () => {
 
       const allBids: BidInfo[] = [];
       auctionData.forEach((auction: any) => {
+        const selfSaleUnitId =
+          auction.selfSaleUnitId != null && Number(auction.selfSaleUnitId) > 0
+            ? Number(auction.selfSaleUnitId)
+            : null;
         (auction.entries || []).forEach((entry: any) => {
           const listMeta = lotIdMetaFromList.get(String(auction.lotId));
           let sellerName = auction.sellerName || 'Unknown';
@@ -141,6 +233,11 @@ const LogisticsPage = () => {
             godown = listMeta.godown;
           }
 
+          const auctionEntryId =
+            entry.auctionEntryId != null && Number.isFinite(Number(entry.auctionEntryId))
+              ? Number(entry.auctionEntryId)
+              : undefined;
+
           allBids.push({
             bidNumber: entry.bidNumber,
             buyerMark: entry.buyerMark,
@@ -156,6 +253,8 @@ const LogisticsPage = () => {
             commodityName,
             origin,
             godown,
+            auctionEntryId,
+            selfSaleUnitId,
           });
         });
       });
@@ -243,12 +342,274 @@ const LogisticsPage = () => {
       list.push(b);
       byBuyer.set(key, list);
     });
-    return Array.from(byBuyer.entries()).map(([mark, list]) => ({
+    const rows = Array.from(byBuyer.entries()).map(([mark, list]) => ({
       buyerMark: mark,
       buyerName: list[0]?.buyerName ?? mark,
       bids: list,
     }));
+    rows.sort((a, b) => {
+      const aU = a.buyerMark === LOGISTICS_UNASSIGNED_BUYER_MARK ? 0 : 1;
+      const bU = b.buyerMark === LOGISTICS_UNASSIGNED_BUYER_MARK ? 0 : 1;
+      if (aU !== bU) return aU - bU;
+      return (a.buyerMark || '').localeCompare(b.buyerMark || '', undefined, { sensitivity: 'base' });
+    });
+    return rows;
   }, [filteredBids]);
+
+  /** Full list (ignore hub search filter) so migrate stays usable while searching other buyers/lots. */
+  const unassignedPoolBids = useMemo(
+    () => bids.filter((b) => isLogisticsUnassignedBid(b)),
+    [bids]
+  );
+
+  const loadPrintedBidKeysFromServer = useCallback(async () => {
+    try {
+      const ids = await printLogApi.listReferenceIds(BUYER_CHITI_BID_REF_TYPE);
+      setPrintedBidKeys(
+        new Set((ids as string[]).filter((x) => typeof x === 'string' && x.length > 0))
+      );
+    } catch {
+      // keep current set; user may lack PRINT_LOGS_VIEW
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPrintedBidKeysFromServer();
+  }, [loadPrintedBidKeysFromServer, bids.length]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadPrintedBidKeysFromServer();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [loadPrintedBidKeysFromServer]);
+
+  const prevBidKeysByBuyerRef = useRef<Record<string, string[]>>({});
+  const [buyerChittiSelected, setBuyerChittiSelected] = useState<Record<string, Set<string>>>({});
+  const [buyerChittiCollapsed, setBuyerChittiCollapsed] = useState<Set<string>>(() => new Set());
+  const [buyerChittiPrintRateByMark, setBuyerChittiPrintRateByMark] = useState<Record<string, boolean>>({});
+  const chittiPrintRateLabelBase = useId();
+
+  /** Staged removals: moved to Unassigned on “Save & print chitti”, not immediately. */
+  const [pendingRemoveByMark, setPendingRemoveByMark] = useState<Record<string, Set<string>>>({});
+  /** After successful Save & print for this buyer, pool migrate is allowed (session). */
+  const [migrateUnlockedByMark, setMigrateUnlockedByMark] = useState<Record<string, boolean>>({});
+  const [stagingRemove, setStagingRemove] = useState<{ buyerMark: string; bid: BidInfo } | null>(null);
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [migrateTarget, setMigrateTarget] = useState<{ buyerName: string; buyerMark: string } | null>(null);
+  const [migrateSearch, setMigrateSearch] = useState('');
+  const [migrateSelectedKeys, setMigrateSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [migrateBusy, setMigrateBusy] = useState(false);
+
+  const reassignBidBuyer = useCallback(
+    async (b: BidInfo, buyerName: string, buyerMark: string) => {
+      if (b.auctionEntryId == null) {
+        throw new Error('This bid has no server id. Refresh the page.');
+      }
+      const body: AuctionBidUpdateRequest = {
+        billing_reassign_buyer: true,
+        buyer_name: buyerName,
+        buyer_mark: buyerMark,
+        buyer_id: null,
+      };
+      if (b.selfSaleUnitId) {
+        await auctionApi.updateSelfSaleBid(b.selfSaleUnitId, b.auctionEntryId, body);
+      } else {
+        await auctionApi.updateBid(b.lotId, b.auctionEntryId, body);
+      }
+    },
+    []
+  );
+
+  /** Search-only: no list until user types (lot id, seller, vehicle, etc.). */
+  const migrateSearchResults = useMemo(() => {
+    const q = migrateSearch.trim();
+    if (!q) return [] as BidInfo[];
+    const ql = q.toLowerCase();
+    return unassignedPoolBids.filter(
+      (b) =>
+        formatLotIdentifierForBid(b).toLowerCase().includes(ql) ||
+        b.sellerName.toLowerCase().includes(ql) ||
+        (b.vehicleNumber || '').toLowerCase().includes(ql) ||
+        (b.lotName || '').toLowerCase().includes(ql) ||
+        b.lotId.toLowerCase().includes(ql) ||
+        String(b.bidNumber).includes(q) ||
+        (b.commodityName || '').toLowerCase().includes(ql),
+    );
+  }, [unassignedPoolBids, migrateSearch]);
+
+  const confirmStageRemoveFromChitti = useCallback(() => {
+    if (!stagingRemove || !canEditAuctionBids) {
+      setStagingRemove(null);
+      return;
+    }
+    const { buyerMark, bid } = stagingRemove;
+    if (bid.auctionEntryId == null) {
+      toast.error('This bid has no server id. Refresh the page.');
+      setStagingRemove(null);
+      return;
+    }
+    if (isLogisticsUnassignedBid(bid)) {
+      setStagingRemove(null);
+      return;
+    }
+    const k = bidKey(bid);
+    setPendingRemoveByMark((p) => {
+      const cur = new Set(p[buyerMark] ?? []);
+      cur.add(k);
+      return { ...p, [buyerMark]: cur };
+    });
+    setBuyerChittiSelected((p) => {
+      const sel = new Set(p[buyerMark] ?? []);
+      sel.delete(k);
+      return { ...p, [buyerMark]: sel };
+    });
+    setStagingRemove(null);
+    toast.message('Staged for removal', {
+      description: 'Moves to Unassigned when you tap Save & print chitti.',
+    });
+  }, [stagingRemove, canEditAuctionBids]);
+
+  const migrateAllowedForMark = useCallback(
+    (buyerMark: string) => {
+      if (migrateUnlockedByMark[buyerMark]) return true;
+      const group = buyerGroups.find((x) => x.buyerMark === buyerMark);
+      return group?.bids.some((b) => printedBidKeys.has(bidKey(b))) ?? false;
+    },
+    [buyerGroups, migrateUnlockedByMark, printedBidKeys]
+  );
+
+  const runMigrateFromPool = useCallback(async () => {
+    if (!migrateTarget || migrateSelectedKeys.size === 0) return;
+    if (!migrateAllowedForMark(migrateTarget.buyerMark)) {
+      toast.error('Save & print chitti for this buyer first, then you can migrate from the pool.');
+      return;
+    }
+    if (!canEditAuctionBids) {
+      toast.error('You do not have permission to reassign bids.');
+      return;
+    }
+    setMigrateBusy(true);
+    try {
+      for (const k of migrateSelectedKeys) {
+        const b = migrateSearchResults.find((x, i) => bidListKey(x, i) === k);
+        if (b && b.auctionEntryId != null) {
+          await reassignBidBuyer(b, migrateTarget.buyerName, migrateTarget.buyerMark);
+        }
+      }
+      await refetchAuctions();
+      setMigrateOpen(false);
+      setMigrateTarget(null);
+      setMigrateSearch('');
+      setMigrateSelectedKeys(new Set());
+      toast.success('Bids assigned to this buyer.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not assign bids');
+    } finally {
+      setMigrateBusy(false);
+    }
+  }, [
+    migrateTarget,
+    migrateSelectedKeys,
+    migrateAllowedForMark,
+    canEditAuctionBids,
+    migrateSearchResults,
+    reassignBidBuyer,
+    refetchAuctions,
+  ]);
+
+  useEffect(() => {
+    setBuyerChittiSelected((prev) => {
+      const out: Record<string, Set<string>> = { ...prev };
+      for (const g of buyerGroups) {
+        const { buyerMark: mark, bids: list } = g;
+        const keys = list.map(bidKey);
+        const prevKeys = prevBidKeysByBuyerRef.current[mark];
+        prevBidKeysByBuyerRef.current[mark] = keys;
+        const prevSel = out[mark];
+        if (!prevSel) {
+          out[mark] = new Set(keys.filter((k) => !printedBidKeys.has(k)));
+          continue;
+        }
+        const next = new Set<string>();
+        for (const k of keys) {
+          if (printedBidKeys.has(k)) continue;
+          const isNew = !prevKeys || !prevKeys.includes(k);
+          if (isNew) next.add(k);
+          else if (prevSel.has(k)) next.add(k);
+        }
+        out[mark] = next;
+      }
+      return out;
+    });
+  }, [buyerGroups, printedBidKeys]);
+
+  useEffect(() => {
+    setPendingRemoveByMark((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const g of buyerGroups) {
+        const set = next[g.buyerMark];
+        if (!set || set.size === 0) continue;
+        const validKeys = new Set(g.bids.map(bidKey));
+        const filtered = new Set([...set].filter((k) => validKeys.has(k)));
+        if (filtered.size !== set.size) {
+          next[g.buyerMark] = filtered;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [buyerGroups]);
+
+  useEffect(() => {
+    setBuyerChittiPrintRateByMark((prev) => {
+      const next = { ...prev };
+      for (const g of buyerGroups) {
+        if (!(g.buyerMark in next)) next[g.buyerMark] = true;
+      }
+      return next;
+    });
+  }, [buyerGroups]);
+
+  const toggleBuyerChittiExpand = useCallback((buyerMark: string) => {
+    setBuyerChittiCollapsed((p) => {
+      const n = new Set(p);
+      if (n.has(buyerMark)) n.delete(buyerMark);
+      else n.add(buyerMark);
+      return n;
+    });
+  }, []);
+
+  const selectAllBuyerBids = useCallback((g: (typeof buyerGroups)[number]) => {
+    setBuyerChittiSelected((p) => ({
+      ...p,
+      [g.buyerMark]: new Set(
+        g.bids.filter((b) => !printedBidKeys.has(bidKey(b))).map(bidKey)
+      ),
+    }));
+  }, [printedBidKeys]);
+
+  const deselectAllBuyerBids = useCallback((g: (typeof buyerGroups)[number]) => {
+    setBuyerChittiSelected((p) => ({
+      ...p,
+      [g.buyerMark]: new Set(),
+    }));
+  }, []);
+
+  const setBidSelected = useCallback(
+    (buyerMark: string, k: string, on: boolean) => {
+      if (printedBidKeys.has(k)) return;
+      setBuyerChittiSelected((p) => {
+        const cur = new Set(p[buyerMark] ?? []);
+        if (on) cur.add(k);
+        else cur.delete(k);
+        return { ...p, [buyerMark]: cur };
+      });
+    },
+    [printedBidKeys]
+  );
 
   const sellerGroups = useMemo(() => {
     const bySeller = new Map<string, { name: string; serial: number; bids: BidInfo[] }>();
@@ -282,25 +643,112 @@ const LogisticsPage = () => {
     ok ? toast.success('Sticker sent to printer!') : toast.error('Printer not connected. Please check printer connection.');
   };
 
-  const handlePrintBuyerChiti = async (g: { buyerMark: string; buyerName: string; bids: BidInfo[] }) => {
-    toast.info('🖨 Printing Buyer Chiti…');
-    try {
-      await printLogApi.create({
-        reference_type: 'BUYER_CHITI',
-        reference_id: g.buyerMark,
-        print_type: 'BUYER_CHITI',
-      });
-    } catch {
-      // optional
+  const handleSavePrintBuyerChitti = async (g: { buyerMark: string; buyerName: string; bids: BidInfo[] }) => {
+    const mark = g.buyerMark;
+    const selectedSet = buyerChittiSelected[mark] ?? new Set<string>();
+    const pending = pendingRemoveByMark[mark] ?? new Set<string>();
+    const toPrint = g.bids.filter((b) => {
+      const k = bidKey(b);
+      return selectedSet.has(k) && !pending.has(k) && !printedBidKeys.has(k);
+    });
+    if (toPrint.length === 0 && pending.size === 0) {
+      toast.error('Nothing to save: select lots to print and/or stage removals.');
+      return;
     }
-    const ok = await directPrint(
-      {
-        html: generateBuyerChiti(g.buyerName, g.buyerMark, g.bids, 'post-auction', chitiPrintTraderName),
-        thermalText: generateBuyerChitiThermal(g.buyerName, g.buyerMark, g.bids, 'post-auction', chitiPrintTraderName),
-      },
-      { mode: "auto" }
-    );
-    ok ? toast.success('Buyer Chiti sent to printer!') : toast.error('Printer not connected.');
+    if (!canEditAuctionBids && pending.size > 0) {
+      toast.error('You do not have permission to move bids to the Unassigned pool.');
+      return;
+    }
+    if (pending.size > 0) {
+      for (const k of pending) {
+        const b = g.bids.find((x) => bidKey(x) === k);
+        if (!b || b.auctionEntryId == null) {
+          toast.error('Staged bid missing server id. Refresh and try again.');
+          return;
+        }
+      }
+    }
+    const printRate = buyerChittiPrintRateByMark[mark] !== false;
+    if (toPrint.length > 0) {
+      toast.info('🖨 Printing Buyer Chiti…');
+      const ok = await directPrint(
+        {
+          html: generateBuyerChiti(
+            g.buyerName,
+            g.buyerMark,
+            toPrint,
+            'post-auction',
+            chitiPrintTraderName,
+            printRate
+          ),
+          thermalText: generateBuyerChitiThermal(
+            g.buyerName,
+            g.buyerMark,
+            toPrint,
+            'post-auction',
+            chitiPrintTraderName,
+            printRate
+          ),
+        },
+        { mode: 'auto' }
+      );
+      if (!ok) {
+        toast.error('Printer not connected. Staged removals were not applied.');
+        return;
+      }
+      const printedAt = new Date().toISOString();
+      try {
+        await printLogApi.create({
+          reference_type: 'BUYER_CHITI',
+          reference_id: g.buyerMark,
+          print_type: 'BUYER_CHITI',
+          printed_at: printedAt,
+        });
+      } catch {
+        // optional
+      }
+      try {
+        await Promise.all(
+          toPrint.map((b) =>
+            printLogApi.create({
+              reference_type: BUYER_CHITI_BID_REF_TYPE,
+              reference_id: bidKey(b),
+              print_type: 'BUYER_CHITI',
+              printed_at: printedAt,
+            })
+          )
+        );
+      } catch {
+        toast.warning('Chitti printed; some server log entries may be missing. List will refresh.');
+      }
+    }
+    if (pending.size > 0 && canEditAuctionBids) {
+      try {
+        for (const k of pending) {
+          const b = g.bids.find((x) => bidKey(x) === k);
+          if (b && b.auctionEntryId != null) {
+            await reassignBidBuyer(b, LOGISTICS_UNASSIGNED_BUYER_NAME, LOGISTICS_UNASSIGNED_BUYER_MARK);
+          }
+        }
+        await refetchAuctions();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Print succeeded but pool move failed. Check auctions.');
+        await loadPrintedBidKeysFromServer();
+        return;
+      }
+    } else if (toPrint.length > 0) {
+      await refetchAuctions().catch(() => {});
+    }
+    setPendingRemoveByMark((p) => ({ ...p, [mark]: new Set() }));
+    setMigrateUnlockedByMark((p) => ({ ...p, [mark]: true }));
+    await loadPrintedBidKeysFromServer();
+    if (toPrint.length > 0 && pending.size > 0) {
+      toast.success('Chitti printed and staged bids moved to Unassigned.');
+    } else if (toPrint.length > 0) {
+      toast.success('Buyer Chitti saved and sent to printer.');
+    } else {
+      toast.success('Staged bids moved to Unassigned (nothing new to print).');
+    }
   };
 
   const handlePrintSellerChiti = async (g: { name: string; serial: number; bids: BidInfo[] }) => {
@@ -500,18 +948,53 @@ const LogisticsPage = () => {
         ) : filterMode === 'BUYER' ? (
           buyerGroups.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">No matching buyers</p>
-          ) : buyerGroups.map((g, i) => (
+          ) : buyerGroups.map((g, i) => {
+            const selectedSet = buyerChittiSelected[g.buyerMark] ?? new Set<string>();
+            const unprintedBids = g.bids.filter((b) => !printedBidKeys.has(bidKey(b)));
+            const selectedUnprinted = unprintedBids.filter((b) => selectedSet.has(bidKey(b)));
+            const pendingSet = pendingRemoveByMark[g.buyerMark] ?? new Set<string>();
+            const draftPreviewBids = g.bids.filter((b) => {
+              const k = bidKey(b);
+              return selectedSet.has(k) && !pendingSet.has(k) && !printedBidKeys.has(k);
+            });
+            const unprintedKeys = unprintedBids.map(bidKey);
+            const allUnprintedSelected =
+              unprintedKeys.length > 0 && unprintedKeys.every((k) => selectedSet.has(k));
+            const noUnprintedSelected = unprintedKeys.every((k) => !selectedSet.has(k));
+            const headerSelectChecked: boolean | 'indeterminate' = allUnprintedSelected
+              ? true
+              : noUnprintedSelected
+                ? false
+                : 'indeterminate';
+            const printRateOn = buyerChittiPrintRateByMark[g.buyerMark] !== false;
+            const isExpanded = !buyerChittiCollapsed.has(g.buyerMark);
+            const { primary: titlePrimary, secondary: titleMark } = buyerChittiHeaderLines(g);
+            const printRateId = `${chittiPrintRateLabelBase}-pr-${i}`;
+            const isUnassignedGroup = g.buyerMark === LOGISTICS_UNASSIGNED_BUYER_MARK;
+            const chittiListId = `buyer-chitti-list-${g.buyerMark || 'x'}`;
+            return (
             <motion.div key={g.buyerMark}
               initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.02 }}
               className="glass-card rounded-2xl p-3 overflow-hidden">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-md flex-shrink-0">
-                  <span className="text-white font-black text-xs">[{g.buyerMark}]</span>
-                </div>
+              <div className="flex items-center gap-2 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => toggleBuyerChittiExpand(g.buyerMark)}
+                  aria-expanded={isExpanded}
+                  aria-controls={chittiListId}
+                  className="p-2 -m-0.5 rounded-lg hover:bg-foreground/5 flex-shrink-0 touch-manipulation"
+                >
+                  <ChevronDown
+                    className={cn('w-5 h-5 text-muted-foreground transition-transform', isExpanded && 'rotate-180')}
+                  />
+                </button>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-foreground truncate">{g.buyerName}</p>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-sm font-bold text-foreground truncate leading-snug">{titlePrimary}</p>
+                  {titleMark != null && titleMark !== '' && (
+                    <p className="text-xs text-muted-foreground font-semibold truncate leading-snug mt-0.5">[{titleMark}]</p>
+                  )}
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5 flex-wrap">
                     <span>{g.bids.length} lots</span>
                     <span>•</span>
                     <span>{g.bids.reduce((s, b) => s + b.quantity, 0)} bags</span>
@@ -519,11 +1002,387 @@ const LogisticsPage = () => {
                     <span>₹{g.bids.reduce((s, b) => s + b.quantity * b.rate, 0).toLocaleString('en-IN')}</span>
                   </div>
                 </div>
-                <button onClick={() => handlePrintBuyerChiti(g)}
-                  className="px-3 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-violet-500 text-white text-[10px] font-bold shadow-sm flex-shrink-0">🖨 Chiti</button>
               </div>
+              {isExpanded && (
+                <div
+                  id={chittiListId}
+                  className="mt-3 pt-3 border-t border-border/40 space-y-3"
+                >
+                  {isUnassignedGroup ? null : (
+                    <>
+                      <div className="w-full">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Label htmlFor={printRateId} className="text-sm font-semibold text-foreground shrink-0">
+                              Print rate
+                            </Label>
+                            <Switch
+                              id={printRateId}
+                              checked={buyerChittiPrintRateByMark[g.buyerMark] !== false}
+                              onCheckedChange={(on) => setBuyerChittiPrintRateByMark((p) => ({ ...p, [g.buyerMark]: on }))}
+                              className="shrink-0"
+                              aria-describedby={`${printRateId}-desc`}
+                            />
+                          </div>
+                          {canEditAuctionBids && (
+                            <button
+                              type="button"
+                              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 max-w-full sm:max-w-[min(100%,14rem)] justify-center inline-flex items-center gap-1')}
+                              style={buyerChittiBulkBtnStyle}
+                              disabled={unassignedPoolBids.length === 0}
+                              title={
+                                unassignedPoolBids.length === 0
+                                  ? 'No bids in the Unassigned pool'
+                                  : 'Search unassigned bids to add here'
+                              }
+                              onClick={() => {
+                                setMigrateTarget({ buyerName: g.buyerName, buyerMark: g.buyerMark });
+                                setMigrateSearch('');
+                                setMigrateSelectedKeys(new Set());
+                                setMigrateOpen(true);
+                              }}
+                            >
+                              <Inbox className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                              <span className="truncate">Search &amp; migrate bid</span>
+                            </button>
+                          )}
+                        </div>
+                        <p id={`${printRateId}-desc`} className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
+                          When on, the rate column is included on this buyer&apos;s Chiti print. Assigning from the pool is allowed after Save &amp; print chitti once for this buyer, or if this buyer already has printed lots on file.
+                        </p>
+                      </div>
+                      <p className="text-[10px] font-semibold text-muted-foreground">
+                        {selectedUnprinted.length}/{unprintedBids.length} selected for print · {draftPreviewBids.length} on chitti preview
+                        {pendingSet.size > 0 ? ` · ${pendingSet.size} staged removal` : ''}
+                      </p>
+
+                      <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-3 md:items-start">
+                        {/* Current (server) — left on md+ */}
+                        <section className="min-w-0 rounded-xl border border-border/60 bg-background/40 p-2 md:order-1">
+                          <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground px-1 pb-2">
+                            Current lots
+                          </h3>
+                          {/* md+: table */}
+                          <div className="hidden md:block overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
+                            <table className="w-full text-left text-[11px] border-collapse">
+                              <thead>
+                                <tr style={buyerChittiTableHeadStyle}>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pl-2 pr-0 w-10 rounded-tl-xl align-middle')}>
+                                    {unprintedKeys.length > 0 ? (
+                                      <Checkbox
+                                        checked={headerSelectChecked}
+                                        onCheckedChange={(c) => {
+                                          if (c === true) selectAllBuyerBids(g);
+                                          else deselectAllBuyerBids(g);
+                                        }}
+                                        className="h-[18px] w-[18px] rounded-none border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-primary"
+                                        aria-label="Select or deselect all lots not yet printed"
+                                      />
+                                    ) : null}
+                                  </th>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot name</th>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot SL</th>
+                                  {printRateOn && (
+                                    <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Rate</th>
+                                  )}
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL)}>Qty</th>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'text-right rounded-tr-xl w-14 min-w-[3.25rem] whitespace-nowrap')}>
+                                    Act.
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {g.bids.map((b, rowIdx) => {
+                                  const k = bidKey(b);
+                                  const on = selectedSet.has(k);
+                                  const isPrinted = printedBidKeys.has(k);
+                                  const pendingRow = pendingSet.has(k);
+                                  return (
+                                    <tr
+                                      key={bidListKey(b, rowIdx)}
+                                      className={cn(
+                                        'border-b border-border/30 align-middle',
+                                        isPrinted && 'text-muted-foreground/80',
+                                        pendingRow && 'bg-amber-500/10',
+                                      )}
+                                    >
+                                      <td className="py-1.5 pl-1">
+                                        <Checkbox
+                                          checked={isPrinted || on}
+                                          onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
+                                          disabled={isPrinted}
+                                          className="h-[18px] w-[18px] rounded-none border-foreground/30"
+                                          aria-label={
+                                            isPrinted
+                                              ? `Lot ${formatLotIdentifierForBid(b)} — printed`
+                                              : `Select lot ${formatLotIdentifierForBid(b)}`
+                                          }
+                                        />
+                                      </td>
+                                      <td className="py-1.5 pr-2 max-w-[8rem] lg:max-w-[10rem]">
+                                        <span className="font-semibold text-foreground break-words line-clamp-2">
+                                          {formatLotIdentifierForBid(b)}
+                                        </span>
+                                        {isPrinted && (
+                                          <span className="ml-1 text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">done</span>
+                                        )}
+                                      </td>
+                                      <td className="py-1.5 pr-2 whitespace-nowrap tabular-nums">
+                                        {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}
+                                      </td>
+                                      {printRateOn && (
+                                        <td className="py-1.5 pr-2 whitespace-nowrap tabular-nums">₹{b.rate}</td>
+                                      )}
+                                      <td className="py-1.5 pr-2 tabular-nums">{b.quantity}</td>
+                                      <td className="py-1.5 pr-1 text-right whitespace-nowrap align-middle">
+                                        {canEditAuctionBids && !isPrinted && b.auctionEntryId != null && (
+                                          pendingRow ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setPendingRemoveByMark((p) => {
+                                                  const n = new Set(p[g.buyerMark] ?? []);
+                                                  n.delete(k);
+                                                  return { ...p, [g.buyerMark]: n };
+                                                });
+                                                setBidSelected(g.buyerMark, k, true);
+                                              }}
+                                              className={chittiRedoBtnClass}
+                                              aria-label="Undo staged removal"
+                                            >
+                                              <Undo2 className="h-3.5 w-3.5 shrink-0" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => setStagingRemove({ buyerMark: g.buyerMark, bid: b })}
+                                              className={chittiDeleteIconBtnClass}
+                                              aria-label={`Stage removal — ${formatLotIdentifierForBid(b)}`}
+                                              title="Remove from chitti (saved with Save & print)"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                            </button>
+                                          )
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {/* &lt;md: cards */}
+                          <ul className="md:hidden space-y-2" role="list">
+                            {unprintedKeys.length > 0 && (
+                              <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5">
+                                <Checkbox
+                                  checked={headerSelectChecked}
+                                  onCheckedChange={(c) => {
+                                    if (c === true) selectAllBuyerBids(g);
+                                    else deselectAllBuyerBids(g);
+                                  }}
+                                  className="h-[18px] w-[18px] shrink-0 rounded-none"
+                                  aria-label="Select or deselect all unprinted lots"
+                                />
+                                <span className="text-[11px] font-semibold text-muted-foreground">All unprinted lots</span>
+                              </li>
+                            )}
+                            {g.bids.map((b, rowIdx) => {
+                              const k = bidKey(b);
+                              const on = selectedSet.has(k);
+                              const isPrinted = printedBidKeys.has(k);
+                              const pendingRow = pendingSet.has(k);
+                              return (
+                                <li
+                                  key={bidListKey(b, rowIdx)}
+                                  className={cn(
+                                    'rounded-xl border border-border/60 p-2.5',
+                                    isPrinted && 'opacity-75',
+                                    pendingRow && 'border-amber-500/50 bg-amber-500/10',
+                                  )}
+                                >
+                                  <div className="flex items-start gap-2">
+                                    <Checkbox
+                                      checked={isPrinted || on}
+                                      onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
+                                      disabled={isPrinted}
+                                      className="mt-0.5 h-[18px] w-[18px] shrink-0 rounded-none"
+                                      aria-label={`Select ${formatLotIdentifierForBid(b)}`}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-bold text-foreground break-words leading-snug">
+                                        {formatLotIdentifierForBid(b)}
+                                      </p>
+                                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                                        SL {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'} · {b.godown || '—'}
+                                        {printRateOn ? ` · ₹${b.rate}` : ''} · Qty {b.quantity}
+                                      </p>
+                                      {isPrinted && (
+                                        <p className="text-[9px] font-bold uppercase text-emerald-600 mt-1">Print done</p>
+                                      )}
+                                    </div>
+                                    {canEditAuctionBids && !isPrinted && b.auctionEntryId != null && (
+                                      pendingRow ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setPendingRemoveByMark((p) => {
+                                              const n = new Set(p[g.buyerMark] ?? []);
+                                              n.delete(k);
+                                              return { ...p, [g.buyerMark]: n };
+                                            });
+                                            setBidSelected(g.buyerMark, k, true);
+                                          }}
+                                          className={cn(chittiRedoBtnClass, 'w-auto min-w-[44px] px-2')}
+                                          aria-label="Redo"
+                                        >
+                                          <Undo2 className="h-4 w-4" />
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => setStagingRemove({ buyerMark: g.buyerMark, bid: b })}
+                                          className={chittiDeleteIconBtnClass}
+                                          aria-label="Delete from chitti"
+                                        >
+                                          <Trash2 className="h-4 w-4" strokeWidth={2.2} />
+                                        </button>
+                                      )
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
+
+                        {/* Chitti preview — right on md+ */}
+                        <section className="min-w-0 rounded-xl border border-primary/25 bg-primary/5 p-2 md:order-2">
+                          <h3 className="text-[11px] font-bold uppercase tracking-wide text-primary px-1 pb-2">
+                            Chitti preview (print)
+                          </h3>
+                          <div className="hidden md:block overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
+                            <table className="w-full text-left text-[11px] border-collapse">
+                              <thead>
+                                <tr style={buyerChittiTableHeadStyle}>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pl-2 rounded-tl-xl whitespace-nowrap')}>
+                                    Lot name
+                                  </th>
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot SL</th>
+                                  {printRateOn && (
+                                    <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Rate</th>
+                                  )}
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pr-2 rounded-tr-xl')}>Qty</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {draftPreviewBids.length === 0 ? (
+                                  <tr>
+                                    <td
+                                      colSpan={printRateOn ? 4 : 3}
+                                      className="py-4 text-center text-muted-foreground text-[11px]"
+                                    >
+                                      No rows selected for print. Use checkboxes on the left.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  draftPreviewBids.map((b, rowIdx) => (
+                                    <tr key={bidListKey(b, rowIdx)} className="border-b border-border/30">
+                                      <td className="py-1.5 pl-1 pr-2 max-w-[8rem] lg:max-w-[10rem]">
+                                        <span className="font-semibold break-words line-clamp-2">{formatLotIdentifierForBid(b)}</span>
+                                      </td>
+                                      <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">
+                                        {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}
+                                      </td>
+                                      {printRateOn && (
+                                        <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">₹{b.rate}</td>
+                                      )}
+                                      <td className="py-1.5 pr-1 tabular-nums">{b.quantity}</td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                          <ul className="md:hidden space-y-2" role="list">
+                            {draftPreviewBids.length === 0 ? (
+                              <li className="text-center text-[11px] text-muted-foreground py-3">Nothing on chitti yet.</li>
+                            ) : (
+                              draftPreviewBids.map((b, rowIdx) => (
+                                <li
+                                  key={bidListKey(b, rowIdx)}
+                                  className="rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 text-[11px]"
+                                >
+                                  <p className="font-bold text-foreground break-words">{formatLotIdentifierForBid(b)}</p>
+                                  <p className="text-muted-foreground mt-0.5">
+                                    SL {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'} · {b.godown || '—'}
+                                    {printRateOn ? ` · ₹${b.rate}` : ''} · Qty {b.quantity}
+                                  </p>
+                                </li>
+                              ))
+                            )}
+                          </ul>
+                        </section>
+                      </div>
+
+                      <div className="flex flex-row flex-wrap items-stretch justify-end gap-2 sm:gap-3 pt-1 w-full">
+                        <button
+                          type="button"
+                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[12rem] justify-center')}
+                          style={buyerChittiBulkBtnStyle}
+                          disabled={
+                            (draftPreviewBids.length === 0 && pendingSet.size === 0) ||
+                            (draftPreviewBids.length === 0 && pendingSet.size > 0 && !canEditAuctionBids)
+                          }
+                          onClick={() => void handleSavePrintBuyerChitti(g)}
+                        >
+                          Save &amp; print chitti
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[11rem] justify-center')}
+                          style={buyerChittiBulkBtnStyle}
+                          disabled={pendingSet.size === 0}
+                          onClick={() => {
+                            const pend = pendingRemoveByMark[g.buyerMark] ?? new Set<string>();
+                            setPendingRemoveByMark((p) => ({ ...p, [g.buyerMark]: new Set() }));
+                            setBuyerChittiSelected((p) => {
+                              const cur = new Set(p[g.buyerMark] ?? []);
+                              pend.forEach((key) => cur.add(key));
+                              return { ...p, [g.buyerMark]: cur };
+                            });
+                          }}
+                        >
+                          Cancel staged removals
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {isUnassignedGroup && (
+                  <ul className="space-y-1.5" role="list">
+                    {g.bids.map((b, rowIdx) => {
+                      const k = bidKey(b);
+                      return (
+                        <li key={bidListKey(b, rowIdx)} className="min-w-0">
+                          <div className="rounded-lg py-2 px-2 -mx-1 hover:bg-foreground/5 text-left">
+                            <div className="text-xs font-bold break-words text-foreground">
+                              {formatLotIdentifierForBid(b)}
+                            </div>
+                            <p className="text-[10px] mt-0.5 break-words text-muted-foreground">
+                              #{b.bidNumber} · S{b.sellerSerial} {b.sellerName} · {b.quantity} @ ₹{b.rate}
+                              {b.origin || b.vehicleNumber ? ` · ${b.origin || b.vehicleNumber}` : ''}
+                            </p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  )}
+                </div>
+              )}
             </motion.div>
-          ))
+            );
+          })
         ) : (
           sellerGroups.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">No matching sellers</p>
@@ -553,6 +1412,177 @@ const LogisticsPage = () => {
           ))
         )}
       </div>
+
+      <AlertDialog
+        open={stagingRemove != null}
+        onOpenChange={(open) => {
+          if (!open) setStagingRemove(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this lot from the chitti draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {stagingRemove
+                ? `It stays on this buyer until you tap “Save & print chitti”. Then it moves to the Unassigned pool for everyone. Lot: ${formatLotIdentifierForBid(
+                    stagingRemove.bid,
+                  )}.`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'border-0 sm:mt-0')}
+              style={buyerChittiBulkBtnStyle}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'border-0 text-[#FFFFFF] hover:text-[#FFFFFF]')}
+              style={buyerChittiBulkBtnStyle}
+              onClick={() => confirmStageRemoveFromChitti()}
+            >
+              Stage removal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={migrateOpen}
+        onOpenChange={(open) => {
+          setMigrateOpen(open);
+          if (!open) {
+            setMigrateTarget(null);
+            setMigrateSearch('');
+            setMigrateSelectedKeys(new Set());
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[min(90dvh,640px)] flex flex-col gap-0 p-0 sm:max-w-xl">
+          <DialogHeader className="p-6 pb-2 text-left">
+            <DialogTitle>Search &amp; migrate bid</DialogTitle>
+            <DialogDescription>
+              {migrateTarget
+                ? `Add unassigned bids to ${migrateTarget.buyerName} (${migrateTarget.buyerMark}). Type to search — no full list.`
+                : 'Choose a buyer on the card first.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 flex flex-col gap-2 min-h-0 flex-1">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                aria-label="Search by lot id, seller, or vehicle"
+                placeholder="e.g. 320/320/110-110, seller name, vehicle#…"
+                value={migrateSearch}
+                onChange={(e) => setMigrateSearch(e.target.value)}
+                className="h-9 pl-8 text-sm"
+                autoFocus
+              />
+            </div>
+            {!migrateSearch.trim() ? (
+              <p className="text-sm text-muted-foreground py-4 text-center leading-relaxed">
+                Type part of a <span className="font-medium text-foreground">lot identifier</span>,{' '}
+                <span className="font-medium text-foreground">seller</span>, or <span className="font-medium text-foreground">vehicle</span> to
+                see matching unassigned rows — then select.
+              </p>
+            ) : migrateSearchResults.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No unassigned bids match this search.</p>
+            ) : (
+              <ul className="min-h-0 max-h-[min(42vh,320px)] overflow-y-auto space-y-1.5 pr-0.5 py-1" role="list">
+                {migrateSearchResults.map((b, rowIdx) => {
+                  const sk = bidListKey(b, rowIdx);
+                  const selected = migrateSelectedKeys.has(sk);
+                  const migDomId = `mig-${sk.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                  return (
+                    <li key={sk}>
+                      <div className="flex items-start gap-2 rounded-lg border border-border/60 p-2 hover:bg-foreground/5">
+                        <Checkbox
+                          id={migDomId}
+                          checked={selected}
+                          onCheckedChange={(c) => {
+                            const on = c === true;
+                            setMigrateSelectedKeys((prev) => {
+                              const n = new Set(prev);
+                              if (on) n.add(sk);
+                              else n.delete(sk);
+                              return n;
+                            });
+                          }}
+                          className="mt-0.5 h-[18px] w-[18px] rounded-none"
+                          aria-label={`Select ${formatLotIdentifierForBid(b)}`}
+                        />
+                        <label htmlFor={migDomId} className="min-w-0 flex-1 text-left text-sm cursor-pointer">
+                          <span className="font-semibold text-foreground break-words block">
+                            {formatLotIdentifierForBid(b)}
+                          </span>
+                          <span className="block text-[10px] text-muted-foreground mt-0.5 break-words">
+                            #{b.bidNumber} · {b.sellerName} · {b.quantity} @ ₹{b.rate} · {b.vehicleNumber}
+                          </span>
+                        </label>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {migrateSearch.trim() && migrateSearchResults.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  className={BUYER_CHITTI_BULK_BTN_CLASS}
+                  style={buyerChittiBulkBtnStyle}
+                  onClick={() =>
+                    setMigrateSelectedKeys(new Set(migrateSearchResults.map((x, i) => bidListKey(x, i))))
+                  }
+                >
+                  Select all shown
+                </button>
+                <button
+                  type="button"
+                  className={BUYER_CHITTI_BULK_BTN_CLASS}
+                  style={buyerChittiBulkBtnStyle}
+                  onClick={() => setMigrateSelectedKeys(new Set())}
+                >
+                  Deselect all
+                </button>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="p-6 pt-2 border-t sm:justify-end gap-2">
+            <button
+              type="button"
+              className={BUYER_CHITTI_BULK_BTN_CLASS}
+              style={buyerChittiBulkBtnStyle}
+              onClick={() => {
+                setMigrateOpen(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-w-[10rem]')}
+              style={buyerChittiBulkBtnStyle}
+              disabled={
+                migrateSelectedKeys.size === 0 ||
+                migrateBusy ||
+                !migrateTarget ||
+                !migrateAllowedForMark(migrateTarget.buyerMark)
+              }
+              title={
+                migrateTarget && !migrateAllowedForMark(migrateTarget.buyerMark)
+                  ? 'Save & print chitti for this buyer once to enable assigning from the pool.'
+                  : undefined
+              }
+              onClick={() => void runMigrateFromPool()}
+            >
+              {migrateBusy ? 'Assigning…' : `Assign ${migrateSelectedKeys.size} bid(s)`}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {!isDesktop && <BottomNav />}
     </div>
   );
