@@ -903,6 +903,7 @@ public class ArrivalService {
 
         java.util.Map<Long, String> contactNameById = contacts.stream()
             .collect(Collectors.toMap(Contact::getId, c -> c.getName() != null ? c.getName() : ""));
+        java.util.Map<Long, Contact> contactById = contacts.stream().collect(Collectors.toMap(Contact::getId, c -> c, (a, b) -> a));
 
         List<ArrivalDetailDTO> content = vehicles.stream().map(v -> {
             ArrivalDetailDTO dto = new ArrivalDetailDTO();
@@ -920,6 +921,14 @@ public class ArrivalService {
                 sellerDetail.setSellerName(siv.getContactId() != null
                     ? contactNameById.getOrDefault(siv.getContactId(), "")
                     : (siv.getSellerName() != null ? siv.getSellerName() : ""));
+                Contact sellerContact = siv.getContactId() != null ? contactById.get(siv.getContactId()) : null;
+                String resolvedMark = null;
+                if (sellerContact != null && sellerContact.getMark() != null && !sellerContact.getMark().isBlank()) {
+                    resolvedMark = sellerContact.getMark().trim();
+                } else if (siv.getSellerMark() != null && !siv.getSellerMark().isBlank()) {
+                    resolvedMark = siv.getSellerMark().trim();
+                }
+                sellerDetail.setSellerMark(resolvedMark);
                 List<Lot> sellerLots = lots.stream().filter(l -> l.getSellerVehicleId().equals(siv.getId())).toList();
                 List<ArrivalLotDetailDTO> lotDetails = sellerLots.stream().map(lot -> {
                     ArrivalLotDetailDTO ld = new ArrivalLotDetailDTO();

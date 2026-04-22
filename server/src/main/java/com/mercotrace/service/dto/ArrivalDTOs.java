@@ -543,6 +543,8 @@ public final class ArrivalDTOs {
     public static class ArrivalSellerDetailDTO implements Serializable {
 
         private String sellerName;
+        /** Seller mark (contact mark or free-text seller mark on vehicle). */
+        private String sellerMark;
         private Long contactId;
         private String origin;
         private List<ArrivalLotDetailDTO> lots;
@@ -553,6 +555,14 @@ public final class ArrivalDTOs {
 
         public void setSellerName(String sellerName) {
             this.sellerName = sellerName;
+        }
+
+        public String getSellerMark() {
+            return sellerMark;
+        }
+
+        public void setSellerMark(String sellerMark) {
+            this.sellerMark = sellerMark;
         }
 
         public Long getContactId() {

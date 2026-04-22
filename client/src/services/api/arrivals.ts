@@ -82,6 +82,7 @@ export interface ArrivalLotDetail {
 /** Seller in arrival detail. */
 export interface ArrivalSellerDetail {
   sellerName: string;
+  sellerMark?: string;
   contactId?: number;
   origin?: string;
   lots: ArrivalLotDetail[];

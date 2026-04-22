@@ -39,6 +39,7 @@ import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import { directPrint } from '@/utils/printTemplates';
 import { generateSalesBillPrintHTML, generateNonGstSalesBillPrintHTML, type BillPrintData } from '@/utils/printDocumentTemplates';
+import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
 import {
   billGroupSubtotalWithTaxAndCharges,
   effectiveGstPercent,
@@ -122,6 +123,8 @@ interface BillEntry {
   vehicleTotalQty?: number;
   /** Total bags for this seller on the vehicle (all lots of that seller). */
   sellerVehicleQty?: number;
+  vehicleMark?: string;
+  sellerMark?: string;
   presetApplied: number;
   isSelfSale: boolean;
   /** Token advance collected at auction stage for this bid (₹). */
@@ -236,6 +239,8 @@ interface BillLineItem {
   vehicleTotalQty?: number;
   /** Total bags for this seller on the vehicle (all lots of that seller). */
   sellerVehicleQty?: number;
+  vehicleMark?: string;
+  sellerMark?: string;
   sellerName: string;
   quantity: number;
   weight: number;
@@ -346,14 +351,22 @@ function roundBillMoneyValues(b: BillData): BillData {
   };
 }
 
-/** Lot identifier for billing rows: Vehicle QTY / Seller QTY / Lot Name - Lot QTY. */
+/** Lot identifier for billing rows (same pattern as Sales Pad / Logistics). */
 function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): string {
-  const lotQty = (entry as any).lotTotalQty ?? (entry as any).quantity ?? 0;
-  const lotName = (entry as any).lotName || String(lotQty || '');
-  // Use auction-lot identifier strictly at lot level (not buyer/vehicle split totals).
-  const vTotal = lotQty;
-  const sTotal = lotQty;
-  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+  const lotQty = Number((entry as any).lotTotalQty ?? (entry as any).quantity ?? 0) || 0;
+  const lotName = String((entry as any).lotName || lotQty || '');
+  const vTotal = Number((entry as any).vehicleTotalQty ?? lotQty) || lotQty;
+  const sTotal = Number((entry as any).sellerVehicleQty ?? lotQty) || lotQty;
+  const vm = String((entry as any).vehicleMark ?? '').trim();
+  const sm = String((entry as any).sellerMark ?? '').trim();
+  return formatAuctionLotIdentifier({
+    vehicleMark: vm,
+    vehicleTotalQty: vTotal,
+    sellerMark: sm,
+    sellerTotalQty: sTotal,
+    lotName,
+    lotQty,
+  });
 }
 
 /** Normalize bill from API: add presetApplied (derived) and gstRate to items/groups. */
@@ -976,7 +989,14 @@ const BillingPage = () => {
     const lotName = lot.lot_name || String(lotQty);
     const vTotal = Number(lot.vehicle_total_qty ?? lotQty) || lotQty;
     const sTotal = Number(lot.seller_total_qty ?? lotQty) || lotQty;
-    return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+    return formatAuctionLotIdentifier({
+      vehicleMark: lot.vehicle_mark,
+      vehicleTotalQty: vTotal,
+      sellerMark: lot.seller_mark,
+      sellerTotalQty: sTotal,
+      lotName,
+      lotQty,
+    });
   }, []);
 
   const filteredAddBidLots = useMemo(() => {
@@ -1405,6 +1425,8 @@ const BillingPage = () => {
       let sellerName = auction.sellerName || 'Unknown';
       let lotName = auction.lotName || '';
       const commodityName = auction.commodityName || '';
+      let vehicleMark = String(auction.vehicleMark ?? '').trim();
+      let sellerMark = String(auction.sellerMark ?? '').trim();
 
       arrivalDetails.forEach((arr) => {
         (arr.sellers || []).forEach((seller) => {
@@ -1412,6 +1434,8 @@ const BillingPage = () => {
             if (String(lot.id) === String(auction.lotId)) {
               sellerName = seller.sellerName;
               lotName = lot.lotName || lotName;
+              if (!vehicleMark) vehicleMark = String(arr.vehicleMarkAlias ?? '').trim();
+              if (!sellerMark) sellerMark = String(seller.sellerMark ?? '').trim();
             }
           });
         });
@@ -1419,6 +1443,8 @@ const BillingPage = () => {
 
       const vKey = auction.vehicleNumber || '';
       const sKey = `${vKey}||${sellerName || ''}`;
+      const apiVTot = Number(auction.vehicleTotalQty);
+      const apiSTot = Number(auction.sellerTotalQty);
 
       (auction.entries || []).forEach((entry: any) => {
         if (entry.isSelfSale) return;
@@ -1458,8 +1484,12 @@ const BillingPage = () => {
           rate: entry.rate,
           quantity: entry.quantity,
           weight,
-          vehicleTotalQty: vehicleTotals.get(vKey) ?? entry.quantity,
-          sellerVehicleQty: vehicleSellerTotals.get(sKey) ?? entry.quantity,
+          vehicleTotalQty:
+            Number.isFinite(apiVTot) && apiVTot > 0 ? apiVTot : (vehicleTotals.get(vKey) ?? entry.quantity),
+          sellerVehicleQty:
+            Number.isFinite(apiSTot) && apiSTot > 0 ? apiSTot : (vehicleSellerTotals.get(sKey) ?? entry.quantity),
+          vehicleMark: vehicleMark || undefined,
+          sellerMark: sellerMark || undefined,
           presetApplied: entry.presetApplied || 0,
           isSelfSale: Boolean(entry.isSelfSale),
           tokenAdvance,
@@ -1802,6 +1832,8 @@ const BillingPage = () => {
         sellerOtherCharges: roundMoney2(sellerOtherCharges),
         vehicleTotalQty: (entry as any).vehicleTotalQty,
         sellerVehicleQty: (entry as any).sellerVehicleQty,
+        vehicleMark: (entry as any).vehicleMark,
+        sellerMark: (entry as any).sellerMark,
         newRate,
         amount,
         tokenAdvance: roundMoney2(Number(entry.tokenAdvance) || 0),
@@ -2166,6 +2198,8 @@ const BillingPage = () => {
         weight: 0,
         vehicleTotalQty: addBidSelectedLot.vehicle_total_qty ?? matchedAuction.quantity ?? 0,
         sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? matchedAuction.quantity ?? 0,
+        vehicleMark: String(addBidSelectedLot.vehicle_mark ?? '').trim() || undefined,
+        sellerMark: String(addBidSelectedLot.seller_mark ?? '').trim() || undefined,
         presetApplied: Number(matchedAuction.preset_margin) || 0,
         isSelfSale: !!matchedAuction.is_self_sale,
         tokenAdvance: Number(matchedAuction.token_advance) || 0,
@@ -2677,6 +2711,8 @@ const BillingPage = () => {
             lotTotalQty: _ltq,
             vehicleTotalQty: _vtq,
             sellerVehicleQty: _svq,
+            vehicleMark: _vm,
+            sellerMark: _sm,
             ...restIt
           } = it;
           return restIt;

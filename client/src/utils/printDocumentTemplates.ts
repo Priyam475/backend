@@ -2,6 +2,7 @@
 // Same format as client_origin; used with directPrint() + printLogApi.
 
 import { effectiveGstPercent, formatBillingInr, gstOnSubtotal, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
+import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
 
 const PRINT_STYLES = `
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; font-size: 12px; color: #111; }
@@ -95,6 +96,10 @@ export interface BillPrintData {
       lotName?: string;
       /** Total bags for the whole lot (used to build the lot identifier). */
       lotTotalQty?: number;
+      vehicleTotalQty?: number;
+      sellerVehicleQty?: number;
+      vehicleMark?: string;
+      sellerMark?: string;
       bidNumber?: number;
       sellerName?: string;
     }[];
@@ -146,16 +151,23 @@ function commodityNetTotal(group: BillPrintData['commodityGroups'][number]): num
 }
 
 /**
- * Lot identifier — mirrors BillingPage `formatLotIdentifierForBillEntry`:
- * "{lotTotalQty}/{lotTotalQty}/{lotName}-{lotTotalQty}"
- * Falls back gracefully when fields are absent.
+ * Lot identifier — mirrors BillingPage `formatLotIdentifierForBillEntry`.
  */
 function formatLotIdentifierForPrint(
   item: BillPrintData['commodityGroups'][number]['items'][number],
 ): string {
-  const lotQty  = Number(item.lotTotalQty ?? item.quantity ?? 0);
+  const lotQty = Number(item.lotTotalQty ?? item.quantity ?? 0) || 0;
   const lotName = String(item.lotName || String(lotQty || ''));
-  return `${lotQty}/${lotQty}/${lotName}-${lotQty}`;
+  const vTotal = Number(item.vehicleTotalQty ?? lotQty) || lotQty;
+  const sTotal = Number(item.sellerVehicleQty ?? lotQty) || lotQty;
+  return formatAuctionLotIdentifier({
+    vehicleMark: item.vehicleMark,
+    vehicleTotalQty: vTotal,
+    sellerMark: item.sellerMark,
+    sellerTotalQty: sTotal,
+    lotName,
+    lotQty,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

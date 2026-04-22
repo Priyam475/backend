@@ -33,6 +33,15 @@ import type { Contact } from '@/types/models';
 import { toast } from 'sonner';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
+import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
+
+/** API may send snake_case or camelCase; normalize for lot identifier. */
+function pickVehicleMarkFromDto(dto: { vehicle_mark?: string; vehicleMark?: string }): string | undefined {
+  const raw = dto.vehicle_mark ?? dto.vehicleMark;
+  if (raw == null || typeof raw !== 'string') return undefined;
+  const t = raw.trim();
+  return t ? t : undefined;
+}
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { directPrint } from '@/utils/printTemplates';
 import { generateAuctionCompletionPrintHTML } from '@/utils/printDocumentTemplates';
@@ -48,6 +57,8 @@ interface LotInfo {
   commodity_name: string;
   seller_name: string;
   seller_mark: string;
+  /** Vehicle mark alias from arrival. */
+  vehicle_mark?: string;
   seller_vehicle_id: string;
   vehicle_number: string;
   was_modified: boolean;
@@ -144,15 +155,17 @@ const STATUS_CONFIG: Record<LotStatus, { label: string; bg: string; text: string
 };
 
 /**
- * Lot identifier format: Vehicle QTY / Seller QTY / Lot Name - Lot QTY
- * e.g. 200/150/50-50 (vehicle 200, seller 150, lot "50" with 50 bags)
- * Falls back to legacy format when vehicle/seller totals are not available.
+ * Lot identifier: {vehicleMark}-{vehicleTotal}/{sellerMark}-{sellerTotal}/{lotName}/{lotQty}
+ * e.g. AB-200/SA-122/SA1/22
  */
 function formatLotDisplayName(lot: {
   vehicle_number: string;
   seller_name: string;
   bag_count: number;
   lot_name?: string;
+  vehicle_mark?: string;
+  vehicleMark?: string;
+  seller_mark?: string;
   vehicle_total_qty?: number;
   seller_total_qty?: number;
 }): string {
@@ -160,7 +173,14 @@ function formatLotDisplayName(lot: {
   const sTotal = lot.seller_total_qty ?? lot.bag_count;
   const lotName = lot.lot_name ?? String(lot.bag_count);
   const lotQty = lot.bag_count;
-  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+  return formatAuctionLotIdentifier({
+    vehicleMark: pickVehicleMarkFromDto(lot),
+    vehicleTotalQty: vTotal,
+    sellerMark: lot.seller_mark,
+    sellerTotalQty: sTotal,
+    lotName,
+    lotQty,
+  });
 }
 
 // ── Map API DTOs to UI types ──────────────────────────────
@@ -179,6 +199,7 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     commodity_name: dto.commodity_name ?? '',
     seller_name: dto.seller_name ?? '',
     seller_mark: dto.seller_mark ?? '',
+    vehicle_mark: pickVehicleMarkFromDto(dto as LotSummaryDTO & { vehicleMark?: string }),
     seller_vehicle_id: String(dto.seller_vehicle_id ?? ''),
     vehicle_number: dto.vehicle_number ?? '',
     was_modified: dto.was_modified ?? false,
@@ -199,10 +220,13 @@ function selfSaleUnitToLotInfo(dto: AuctionSelfSaleUnitDTO): LotInfo {
     commodity_name: dto.commodity_name ?? '',
     seller_name: dto.seller_name ?? '',
     seller_mark: dto.seller_mark ?? '',
+    vehicle_mark: pickVehicleMarkFromDto(dto as AuctionSelfSaleUnitDTO & { vehicleMark?: string }),
     seller_vehicle_id: String(dto.seller_vehicle_id ?? ''),
     vehicle_number: dto.vehicle_number ?? '',
     was_modified: false,
     status: 'self_sale',
+    vehicle_total_qty: dto.vehicle_total_qty,
+    seller_total_qty: dto.seller_total_qty,
     selfSaleQty: dto.self_sale_qty ?? 0,
     remainingQty: dto.remaining_qty ?? 0,
     selfSaleRate: dto.rate ?? 0,
@@ -876,7 +900,7 @@ const AuctionsPage = () => {
     });
   }, [selectedLot, entries, rate, qty, preset, presetType, showPresetMargin, scribbleMark]);
 
-  // Filter lots (lot identifier format e.g. 320/320/110-110 also searchable)
+  // Filter lots (lot identifier format e.g. AB-200/SA-122/SA1/22 also searchable)
   const filteredLots = useMemo(() => {
     let result = statusFilter === 'self_sale' ? selfSaleLots : availableLots;
     if (lotSearchQuery) {
@@ -1091,13 +1115,22 @@ const AuctionsPage = () => {
     const lotId = selectedLot?.lot_id;
     const selfSaleUnitId = selectedLot?.selfSaleUnitId;
     if (session.lot && lotId) {
+      const sl = session.lot as LotSummaryDTO & { vehicleMark?: string };
+      const vm = pickVehicleMarkFromDto(sl);
       setSelectedLot(prev =>
         prev && prev.lot_id === lotId
           ? {
             ...prev,
-            bag_count: session.lot!.bag_count ?? prev.bag_count,
-            original_bag_count: session.lot!.original_bag_count ?? prev.original_bag_count,
-            was_modified: session.lot!.was_modified ?? prev.was_modified,
+            bag_count: sl.bag_count ?? prev.bag_count,
+            original_bag_count: sl.original_bag_count ?? prev.original_bag_count,
+            was_modified: sl.was_modified ?? prev.was_modified,
+            vehicle_mark: vm ?? prev.vehicle_mark,
+            seller_mark: sl.seller_mark ?? prev.seller_mark,
+            vehicle_total_qty: sl.vehicle_total_qty ?? prev.vehicle_total_qty,
+            seller_total_qty: sl.seller_total_qty ?? prev.seller_total_qty,
+            vehicle_number: sl.vehicle_number ?? prev.vehicle_number,
+            seller_name: sl.seller_name ?? prev.seller_name,
+            commodity_name: sl.commodity_name ?? prev.commodity_name,
           }
           : prev
       );
@@ -1106,9 +1139,16 @@ const AuctionsPage = () => {
           l.lot_id === lotId && session.lot
             ? {
               ...l,
-              bag_count: session.lot!.bag_count ?? l.bag_count,
-              original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
-              was_modified: session.lot!.was_modified ?? l.was_modified,
+              bag_count: sl.bag_count ?? l.bag_count,
+              original_bag_count: sl.original_bag_count ?? l.original_bag_count,
+              was_modified: sl.was_modified ?? l.was_modified,
+              vehicle_mark: vm ?? l.vehicle_mark,
+              seller_mark: sl.seller_mark ?? l.seller_mark,
+              vehicle_total_qty: sl.vehicle_total_qty ?? l.vehicle_total_qty,
+              seller_total_qty: sl.seller_total_qty ?? l.seller_total_qty,
+              vehicle_number: sl.vehicle_number ?? l.vehicle_number,
+              seller_name: sl.seller_name ?? l.seller_name,
+              commodity_name: sl.commodity_name ?? l.commodity_name,
             }
             : l
         )
@@ -1118,10 +1158,17 @@ const AuctionsPage = () => {
           l.selfSaleUnitId === selfSaleUnitId && session.lot
             ? {
               ...l,
-              bag_count: session.lot!.bag_count ?? l.bag_count,
-              original_bag_count: session.lot!.original_bag_count ?? l.original_bag_count,
-              was_modified: session.lot!.was_modified ?? l.was_modified,
-              remainingQty: session.lot!.bag_count ?? l.remainingQty,
+              bag_count: sl.bag_count ?? l.bag_count,
+              original_bag_count: sl.original_bag_count ?? l.original_bag_count,
+              was_modified: sl.was_modified ?? l.was_modified,
+              remainingQty: sl.bag_count ?? l.remainingQty,
+              vehicle_mark: vm ?? l.vehicle_mark,
+              seller_mark: sl.seller_mark ?? l.seller_mark,
+              vehicle_total_qty: sl.vehicle_total_qty ?? l.vehicle_total_qty,
+              seller_total_qty: sl.seller_total_qty ?? l.seller_total_qty,
+              vehicle_number: sl.vehicle_number ?? l.vehicle_number,
+              seller_name: sl.seller_name ?? l.seller_name,
+              commodity_name: sl.commodity_name ?? l.commodity_name,
             }
             : l
         )
@@ -2098,7 +2145,10 @@ const AuctionsPage = () => {
           status: source === 'self_sale' ? 'self_sale' : info.status,
           seller_name: info.seller_name || lot.seller_name || '',
           seller_mark: info.seller_mark || lot.seller_mark || '',
+          vehicle_mark: info.vehicle_mark || lot.vehicle_mark,
           vehicle_number: info.vehicle_number || lot.vehicle_number || '',
+          vehicle_total_qty: info.vehicle_total_qty ?? lot.vehicle_total_qty,
+          seller_total_qty: info.seller_total_qty ?? lot.seller_total_qty,
           commodity_name: info.commodity_name || lot.commodity_name || '',
         });
         setEntries(mapOrderedSessionEntries(session.entries));
@@ -2262,7 +2312,7 @@ const AuctionsPage = () => {
               <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
                 <input
-                  placeholder="Search lot, seller, vehicle, or 320/320/110-110…"
+                  placeholder="Search lot, seller, vehicle, or AB-200/SA-122/SA1/22…"
                   value={lotSearchQuery}
                   onChange={e => setLotSearchQuery(e.target.value)}
                   className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/20 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
@@ -2272,7 +2322,7 @@ const AuctionsPage = () => {
               <div className="relative">
                 <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
                 <input
-                  placeholder="Lot # or 320/320/110-110…"
+                  placeholder="Lot # or AB-200/SA-122/SA1/22…"
                   value={lotNumberSearch}
                   onChange={e => setLotNumberSearch(e.target.value)}
                   className="w-full h-10 pl-10 pr-4 rounded-xl bg-white/15 backdrop-blur text-white placeholder:text-white/50 text-sm border border-white/10 focus:outline-none focus:border-white/30"
@@ -2296,7 +2346,7 @@ const AuctionsPage = () => {
                 <div className="relative w-56">
                   <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    placeholder="Lot # or 320/320/110-110…"
+                    placeholder="Lot # or AB-200/SA-122/SA1/22…"
                     value={lotNumberSearch}
                     onChange={e => setLotNumberSearch(e.target.value)}
                     className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
@@ -2305,7 +2355,7 @@ const AuctionsPage = () => {
                 <div className="relative w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
-                    placeholder="Search lot, seller, vehicle, or 320/320/110-110…"
+                    placeholder="Search lot, seller, vehicle, or AB-200/SA-122/SA1/22…"
                     value={lotSearchQuery}
                     onChange={e => setLotSearchQuery(e.target.value)}
                     className="w-full h-10 pl-10 pr-4 rounded-xl bg-muted/50 text-foreground text-sm border border-border focus:outline-none focus:border-primary/50"
@@ -2708,7 +2758,7 @@ const AuctionsPage = () => {
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Quick Lot Navigation</p>
                 <div className="relative w-40">
                   <Hash className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-                  <input placeholder="Lot # or 320/320/110-110" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
+                  <input placeholder="Lot # or AB-200/SA-122/SA1/22" value={lotNumberSearch} onChange={e => setLotNumberSearch(e.target.value)}
                     className="w-full h-7 pl-7 pr-2 rounded-lg bg-muted/50 text-foreground text-xs border border-border focus:outline-none focus:border-primary/50" />
                 </div>
               </div>

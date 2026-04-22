@@ -2,6 +2,7 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 import { toast } from "sonner";
 
 import { bluetoothPrintersApi } from "@/services/api/bluetoothPrinters";
+import { formatAuctionLotIdentifier } from "@/utils/auctionLotIdentifier";
 
 // ── Print Templates for Print Hub ──────────────────────────
 // REQ-LOG-002: All print formats per SRS (same format as client_origin)
@@ -29,10 +30,20 @@ export interface BidInfo {
   buyerMark: string;
   buyerName: string;
   quantity: number;
+  /** Vehicle mark alias (arrival) for lot identifier prefix. */
+  vehicleMark?: string;
+  /** Seller mark for lot identifier. */
+  sellerMark?: string;
   /** Total bags for this vehicle across all sellers (vehicle total qty) */
   vehicleTotalQty?: number;
   /** Total bags for this seller on the same vehicle (seller qty) */
   sellerVehicleQty?: number;
+  /**
+   * When set (e.g. from completed auction API), overrides summed bid quantities for identifier totals.
+   * Logistics may omit so totals are derived from bids.
+   */
+  auctionVehicleTotalQty?: number;
+  auctionSellerTotalQty?: number;
   rate: number;
   lotId: string;
   lotName: string;
@@ -56,7 +67,14 @@ type PrintPayload = string | ThermalPayload;
 // ── Helpers ───────────────────────────────────────────────
 function lotDisplay(bid: BidInfo): string {
   if (bid.vehicleTotalQty != null && bid.sellerVehicleQty != null) {
-    return `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`;
+    const vm = (bid.vehicleMark ?? '').trim();
+    const sm = (bid.sellerMark ?? '').trim();
+    const v = bid.vehicleTotalQty;
+    const s = bid.sellerVehicleQty;
+    if (vm || sm) {
+      return `${vm ? `${vm}-${v}` : String(v)}/${sm ? `${sm}-${s}` : String(s)}`;
+    }
+    return `${v}/${s}`;
   }
   if (bid.lotName && bid.lotName !== String(bid.lotNumber)) {
     return `${bid.lotNumber} / ${bid.lotName}`;
@@ -65,15 +83,22 @@ function lotDisplay(bid: BidInfo): string {
 }
 
 /**
- * Lot identifier format: Vehicle QTY / Seller QTY / Lot Name - Lot QTY (e.g. 320/320/110-110).
- * Aligns with AuctionsPage format for list display and search consistency.
+ * Lot identifier: {vehicleMark}-{vehicleTotal}/{sellerMark}-{sellerTotal}/{lotName}/{lineQty}
+ * (e.g. AB-200/SA-122/SA1/22). Aligns with Sales Pad / Billing.
  */
 export function formatLotIdentifierForBid(bid: BidInfo): string {
   const vTotal = bid.vehicleTotalQty ?? bid.quantity;
   const sTotal = bid.sellerVehicleQty ?? bid.quantity;
   const lotName = (bid.lotName || '').trim() || String(bid.lotNumber);
   const lotQty = bid.quantity;
-  return `${vTotal}/${sTotal}/${lotName}-${lotQty}`;
+  return formatAuctionLotIdentifier({
+    vehicleMark: bid.vehicleMark,
+    vehicleTotalQty: vTotal,
+    sellerMark: bid.sellerMark,
+    sellerTotalQty: sTotal,
+    lotName,
+    lotQty,
+  });
 }
 
 function todayStr(): string {

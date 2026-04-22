@@ -159,7 +159,18 @@ const LogisticsPage = () => {
         if (auction?.lotId != null) auctionLotIds.add(String(auction.lotId));
       });
 
-      const lotIdMetaFromList = new Map<string, { sellerName?: string; lotName?: string; vehicleNumber?: string; origin?: string; godown?: string }>();
+      const lotIdMetaFromList = new Map<
+        string,
+        {
+          sellerName?: string;
+          lotName?: string;
+          vehicleNumber?: string;
+          vehicleMark?: string;
+          sellerMark?: string;
+          origin?: string;
+          godown?: string;
+        }
+      >();
       const vehicleIdsToFetch = new Set<number>();
       arrivalDetails.forEach((arr) => {
         (arr.sellers || []).forEach((seller) => {
@@ -171,6 +182,8 @@ const LogisticsPage = () => {
               sellerName: seller.sellerName,
               lotName: lot.lotName,
               vehicleNumber: arr.vehicleNumber,
+              vehicleMark: arr.vehicleMarkAlias?.trim() || undefined,
+              sellerMark: seller.sellerMark?.trim() || undefined,
               origin: arr.origin,
               godown: arr.godown,
             });
@@ -224,6 +237,12 @@ const LogisticsPage = () => {
           let lotNumber = lotIdToLotSerial.get(String(auction.lotId)) ?? 0;
           let origin: string | undefined;
           let godown: string | undefined;
+          let vehicleMark = String(auction.vehicleMark ?? '').trim();
+          let sellerMark = String(auction.sellerMark ?? '').trim();
+          const apiVTot = Number(auction.vehicleTotalQty);
+          const apiSTot = Number(auction.sellerTotalQty);
+          const auctionVehicleTotalQty = Number.isFinite(apiVTot) && apiVTot > 0 ? apiVTot : undefined;
+          const auctionSellerTotalQty = Number.isFinite(apiSTot) && apiSTot > 0 ? apiSTot : undefined;
 
           if (listMeta) {
             sellerName = listMeta.sellerName || sellerName;
@@ -231,6 +250,8 @@ const LogisticsPage = () => {
             lotName = listMeta.lotName || lotName;
             origin = listMeta.origin;
             godown = listMeta.godown;
+            if (!vehicleMark) vehicleMark = String(listMeta.vehicleMark ?? '').trim();
+            if (!sellerMark) sellerMark = String(listMeta.sellerMark ?? '').trim();
           }
 
           const auctionEntryId =
@@ -255,6 +276,10 @@ const LogisticsPage = () => {
             godown,
             auctionEntryId,
             selfSaleUnitId,
+            vehicleMark: vehicleMark || undefined,
+            sellerMark: sellerMark || undefined,
+            auctionVehicleTotalQty,
+            auctionSellerTotalQty,
           });
         });
       });
@@ -279,8 +304,8 @@ const LogisticsPage = () => {
         const vsKey = `${vKey}||${b.sellerName}`;
         return {
           ...b,
-          vehicleTotalQty: vehicleTotals.get(vKey) ?? b.quantity,
-          sellerVehicleQty: vehicleSellerTotals.get(vsKey) ?? b.quantity,
+          vehicleTotalQty: b.auctionVehicleTotalQty ?? vehicleTotals.get(vKey) ?? b.quantity,
+          sellerVehicleQty: b.auctionSellerTotalQty ?? vehicleSellerTotals.get(vsKey) ?? b.quantity,
         };
       });
       if (!cancelled) setBids(withQty);
@@ -295,8 +320,8 @@ const LogisticsPage = () => {
           sellerSerial: b.sellerSerial,
           // Lot serial must come from arrival auto-generated serial only.
           lotNumber: b.lotNumber,
-          vehicleTotalQty: vehicleTotals.get(b.vehicleNumber || '') ?? b.quantity,
-          sellerVehicleQty: vehicleSellerTotals.get(`${b.vehicleNumber || ''}||${b.sellerName}`) ?? b.quantity,
+          vehicleTotalQty: b.auctionVehicleTotalQty ?? vehicleTotals.get(b.vehicleNumber || '') ?? b.quantity,
+          sellerVehicleQty: b.auctionSellerTotalQty ?? vehicleSellerTotals.get(`${b.vehicleNumber || ''}||${b.sellerName}`) ?? b.quantity,
         }));
         setBids(withSerials);
       })
@@ -307,8 +332,8 @@ const LogisticsPage = () => {
           const vsKey = `${vKey}||${b.sellerName}`;
           return {
             ...b,
-            vehicleTotalQty: vehicleTotals.get(vKey) ?? b.quantity,
-            sellerVehicleQty: vehicleSellerTotals.get(vsKey) ?? b.quantity,
+            vehicleTotalQty: b.auctionVehicleTotalQty ?? vehicleTotals.get(vKey) ?? b.quantity,
+            sellerVehicleQty: b.auctionSellerTotalQty ?? vehicleSellerTotals.get(vsKey) ?? b.quantity,
           };
         });
         setBids(withQtyFallback);
