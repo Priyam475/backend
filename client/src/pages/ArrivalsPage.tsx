@@ -64,6 +64,27 @@ interface SellerEntry {
   lots: LotEntry[];
 }
 
+/**
+ * REQ-ARR-005: Lot SL no + same vehicle/seller bag ratio as desktop "SL. NO" column.
+ * Single source for desktop table + mobile/tablet lot cards.
+ */
+function formatArrivalLotSlNoAndRatio(
+  lotSerialNumber: number | null | undefined,
+  vehicleTotalBags: number,
+  sellerTotalBags: number,
+): { slAssigned: boolean; slNo: string; ratioLine: string } {
+  const slAssigned = lotSerialNumber != null && lotSerialNumber > 0;
+  if (slAssigned) {
+    const slNo = String(lotSerialNumber);
+    return {
+      slAssigned: true,
+      slNo,
+      ratioLine: `${slNo} — ${vehicleTotalBags} / ${sellerTotalBags}`,
+    };
+  }
+  return { slAssigned: false, slNo: '—', ratioLine: '—' };
+}
+
 interface ArrivalRecord {
   vehicle: Vehicle;
   loaded_weight: number;
@@ -3440,7 +3461,11 @@ const ArrivalsPage = () => {
                                         </thead>
                                         <tbody>
                                           {seller.lots.map((lot, li) => {
-                                            const lotSerialLabel = lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
+                                            const lotSl = formatArrivalLotSlNoAndRatio(
+                                              lot.lot_serial_number,
+                                              vehicleTotalBags,
+                                              sellerTotal,
+                                            );
                                             const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
                                             return (
                                               <tr
@@ -3452,9 +3477,9 @@ const ArrivalsPage = () => {
                                                 )}
                                               >
                                                 <td className="py-1 px-2.5 align-middle text-center">
-                                                  {lotSerialLabel !== "-" ? (
+                                                  {lotSl.slAssigned ? (
                                                     <span className="inline-flex items-center rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold leading-none text-blue-700 dark:text-blue-300 whitespace-nowrap ring-1 ring-blue-500/20">
-                                                      {lotSerialLabel} — {vehicleTotalBags} / {sellerTotal}
+                                                      {lotSl.ratioLine}
                                                     </span>
                                                   ) : (
                                                     <span className="text-muted-foreground font-mono text-[9px] sm:text-[10px]">—</span>
@@ -4514,8 +4539,11 @@ const ArrivalsPage = () => {
                                                   >
                                                     {chunk.map((lot, localIdx) => {
                                                       const li = start + localIdx;
-                                                      const lotSerialLabel =
-                                                        lot.lot_serial_number != null && lot.lot_serial_number > 0 ? String(lot.lot_serial_number) : "-";
+                                                      const lotSl = formatArrivalLotSlNoAndRatio(
+                                                        lot.lot_serial_number,
+                                                        vehicleTotalBags,
+                                                        sellerTotal,
+                                                      );
                                                       const isBeingEdited = addLotForm?.editingLotId === lot.lot_id;
                                                       const subParts: string[] = [];
                                                       if (lot.commodity_name?.trim()) subParts.push(lot.commodity_name.trim());
@@ -4540,22 +4568,38 @@ const ArrivalsPage = () => {
                                                             isBeingEdited && 'border-[#6075FF]/50 shadow-md ring-2 ring-[#6075FF]/50',
                                                           )}
                                                         >
+                                                          <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                                                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                                                              SL
+                                                            </span>
+                                                            {lotSl.slAssigned ? (
+                                                              <span
+                                                                className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1 rounded-full bg-blue-500/10 px-2 py-1 text-[9px] font-semibold leading-snug text-blue-700 ring-1 ring-blue-500/20 dark:text-blue-300 sm:text-[10px]"
+                                                                title={lotSl.ratioLine}
+                                                              >
+                                                                <span className="tabular-nums">{lotSl.slNo}</span>
+                                                                <span className="text-blue-600/70 dark:text-blue-200/80" aria-hidden>
+                                                                  —
+                                                                </span>
+                                                                <span className="whitespace-nowrap tabular-nums">
+                                                                  {vehicleTotalBags} / {sellerTotal}
+                                                                </span>
+                                                              </span>
+                                                            ) : (
+                                                              <span className="inline-flex rounded-full bg-muted/60 px-2 py-0.5 font-mono text-[10px] font-medium text-muted-foreground ring-1 ring-border/40">
+                                                                {lotSl.slNo}
+                                                              </span>
+                                                            )}
+                                                          </div>
                                                           <div className="flex items-center gap-3">
                                                             <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-blue-500 to-violet-500 shadow-md">
                                                               <Package className="relative z-10 h-4 w-4 text-white" aria-hidden />
                                                               <div className="absolute inset-0 bg-white/20 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
                                                             </div>
                                                             <div className="min-w-0 flex-1">
-                                                              <div className="flex min-w-0 items-center gap-2">
-                                                                <p className="truncate text-sm font-semibold text-foreground">
-                                                                  {lot.lot_name?.trim() || `Lot ${li + 1}`}
-                                                                </p>
-                                                                {lotSerialLabel !== "-" ? (
-                                                                  <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-blue-700 ring-1 ring-blue-500/20 dark:text-blue-300">
-                                                                    #{lotSerialLabel}
-                                                                  </span>
-                                                                ) : null}
-                                                              </div>
+                                                              <p className="truncate text-sm font-semibold text-foreground">
+                                                                {lot.lot_name?.trim() || `Lot ${li + 1}`}
+                                                              </p>
                                                               <p className="mt-0.5 truncate text-xs text-muted-foreground">{subLine}</p>
                                                             </div>
                                                             <div className="flex shrink-0 items-center gap-1.5">
