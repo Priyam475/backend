@@ -105,4 +105,6 @@
     <include file="config/liquibase/changelog/20260414120000_print_setting_dual_paper_sizes.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260415120000_daily_sales_report_indexes.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260421120000_bluetooth_printer_schema.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260422120000_vehicle_mark_alias.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260422130000_vehicle_mark_alias_varchar8.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

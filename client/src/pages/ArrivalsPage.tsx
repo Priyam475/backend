@@ -6,7 +6,7 @@ import { Keyboard } from '@capacitor/keyboard';
 import BottomNav from '@/components/BottomNav';
 import {
   ArrowLeft, Plus, Truck, Scale, ChevronDown, ChevronUp, ChevronRight, ChevronsUpDown, Trash2,
-  AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter, Share2, MapPin
+  AlertTriangle, Search, Package, Users, Banknote, FileText, Pencil, Filter, Share2, MapPin, Tag
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -237,28 +237,46 @@ function sanitizeSubmitPayload(payload: ArrivalCreatePayload): ArrivalCreatePayl
 const ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS =
   'px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-bold shrink-0';
 
+const VEHICLE_MARK_ALIAS_MAX_LEN = 8;
+
+const sanitizeVehicleMarkAliasInput = (raw: string) =>
+  raw.replace(/[^A-Za-z0-9]/g, '').slice(0, VEHICLE_MARK_ALIAS_MAX_LEN);
+
 /** Arrivals summary first column: Vehicle | Seller | Qty (shared desktop table + mobile cards). */
 function ArrivalSummaryVehicleSellerQty({
   vehicleNumber,
+  vehicleMarkAlias,
   primarySellerName,
   totalBags,
   layout = 'inline',
 }: Pick<ArrivalSummary, 'vehicleNumber' | 'primarySellerName' | 'totalBags'> & {
+  vehicleMarkAlias?: string | null;
   layout?: 'inline' | 'stack';
 }) {
   const seller = primarySellerName ?? '-';
   const qty = totalBags ?? 0;
   const vehicle = vehicleNumber?.trim() ? vehicleNumber : '—';
+  const alias = vehicleMarkAlias?.trim() ? vehicleMarkAlias.trim() : '';
 
   if (layout === 'stack') {
     return (
       <div className="flex min-w-0 flex-col gap-1 text-left">
-        <span
-          className={cn(ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS, 'max-w-full self-start truncate')}
-          title={vehicleNumber?.trim() ? vehicleNumber : undefined}
-        >
-          {vehicle}
-        </span>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            className={cn(ARRIVAL_SUMMARY_PRIMARY_PILL_CLASS, 'max-w-full self-start truncate')}
+            title={vehicleNumber?.trim() ? vehicleNumber : undefined}
+          >
+            {vehicle}
+          </span>
+          {alias ? (
+            <span
+              className="max-w-full self-start truncate rounded-md border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-800 dark:border-violet-800/50 dark:bg-violet-950/40 dark:text-violet-200"
+              title={alias}
+            >
+              {alias}
+            </span>
+          ) : null}
+        </div>
         <span className="truncate text-sm font-semibold text-foreground" title={seller}>
           {seller}
         </span>
@@ -278,6 +296,16 @@ function ArrivalSummaryVehicleSellerQty({
       >
         {vehicle}
       </span>
+      {alias ? (
+        <>
+          <span
+            className="max-w-[min(100%,8rem)] truncate rounded-md border border-violet-200/80 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800 dark:border-violet-800/50 dark:bg-violet-950/40 dark:text-violet-200"
+            title={alias}
+          >
+            {alias}
+          </span>
+        </>
+      ) : null}
       <span className="shrink-0 text-xs text-muted-foreground" aria-hidden>
         |
       </span>
@@ -912,6 +940,8 @@ const ArrivalsPage = () => {
 
   // Step 1: Vehicle & Tonnage
   const [vehicleNumber, setVehicleNumber] = useState('');
+  const [vehicleMarkAlias, setVehicleMarkAlias] = useState('');
+  const [vehicleMarkAliasApiError, setVehicleMarkAliasApiError] = useState<string | null>(null);
   const [loadedWeight, setLoadedWeight] = useState('');
   const [emptyWeight, setEmptyWeight] = useState('');
   const [deductedWeight, setDeductedWeight] = useState('');
@@ -1264,6 +1294,7 @@ const ArrivalsPage = () => {
         step,
         isMultiSeller,
         vehicleNumber,
+        vehicleMarkAlias,
         loadedWeight,
         emptyWeight,
         deductedWeight,
@@ -1291,6 +1322,7 @@ const ArrivalsPage = () => {
 
     const hasMeaningfulStep1Data = [
       vehicleNumber.trim(),
+      vehicleMarkAlias.trim(),
       loadedWeight.trim(),
       emptyWeight.trim(),
       deductedWeight.trim(),
@@ -1315,6 +1347,7 @@ const ArrivalsPage = () => {
     step,
     isMultiSeller,
     vehicleNumber,
+    vehicleMarkAlias,
     loadedWeight,
     emptyWeight,
     deductedWeight,
@@ -1335,6 +1368,7 @@ const ArrivalsPage = () => {
 
   const buildPartialPayload = useCallback((): ArrivalCreatePayload => ({
     vehicle_number: isMultiSeller ? vehicleNumber.trim().toUpperCase() || undefined : undefined,
+    vehicle_mark_alias: vehicleMarkAlias.trim() || undefined,
     is_multi_seller: isMultiSeller,
     loaded_weight: parseFloat(loadedWeight) || 0,
     empty_weight: parseFloat(emptyWeight) || 0,
@@ -1368,14 +1402,16 @@ const ArrivalsPage = () => {
         })),
       };
     }),
-  }), [isMultiSeller, vehicleNumber, loadedWeight, emptyWeight, deductedWeight, freightMethod, freightRate, freightKgs, noRental, advancePaid, brokerName, brokerContactId, narration, godown, gatepassNumber, origin, sellers]);
+  }), [isMultiSeller, vehicleNumber, vehicleMarkAlias, loadedWeight, emptyWeight, deductedWeight, freightMethod, freightRate, freightKgs, noRental, advancePaid, brokerName, brokerContactId, narration, godown, gatepassNumber, origin, sellers]);
 
   const handlePartialSave = useCallback(async (): Promise<boolean> => {
     try {
+      setVehicleMarkAliasApiError(null);
       if (editingVehicleId != null) {
         const payload = buildPartialPayload();
         await arrivalsApi.update(editingVehicleId, {
           vehicle_number: payload.vehicle_number,
+          vehicle_mark_alias: vehicleMarkAlias.trim(),
           godown: payload.godown,
           gatepass_number: payload.gatepass_number,
           origin: payload.origin,
@@ -1403,10 +1439,14 @@ const ArrivalsPage = () => {
       toast.success('Partial arrival saved');
       return true;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save partial data');
+      const message = err instanceof Error ? err.message : 'Failed to save partial data';
+      if (message.includes('Vehicle mark/alias')) {
+        setVehicleMarkAliasApiError(message);
+      }
+      toast.error(message);
       return false;
     }
-  }, [editingVehicleId, buildPartialPayload]);
+  }, [editingVehicleId, buildPartialPayload, vehicleMarkAlias]);
 
   const { confirmIfDirty, UnsavedChangesDialog } = useUnsavedChangesGuard({
     when: isArrivalDirty,
@@ -1480,6 +1520,13 @@ const ArrivalsPage = () => {
     if (!v) return false;
     return v.length < 2 || v.length > 12;
   }, [isMultiSeller, vehicleNumber]);
+
+  const isVehicleMarkAliasInvalid = useMemo(() => {
+    const v = vehicleMarkAlias.trim();
+    if (!v) return false;
+    if (v.length > VEHICLE_MARK_ALIAS_MAX_LEN) return true;
+    return !/^[A-Za-z0-9]+$/.test(v);
+  }, [vehicleMarkAlias]);
 
   const isGodownInvalid = useMemo(() => {
     const g = godown.trim();
@@ -1603,7 +1650,7 @@ const ArrivalsPage = () => {
   };
 
   const isFormInvalid = useMemo(() => {
-    if (isVehicleNumberInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
+    if (isVehicleNumberInvalid || isVehicleMarkAliasInvalid || isLoadedWeightInvalid || isEmptyWeightInvalid || isDeductedWeightInvalid ||
         isGodownInvalid || isGatepassNumberInvalid || isBrokerNameInvalid || isFreightRateInvalid || isFreightKgsInvalid || isAdvancePaidInvalid) return true;
     for (let i = 0; i < sellers.length; i++) {
       const s = sellers[i];
@@ -1614,7 +1661,7 @@ const ArrivalsPage = () => {
       }
     }
     return false;
-  }, [isVehicleNumberInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isFreightKgsInvalid, isAdvancePaidInvalid, sellers, contacts, lotNameCountsBySellerId, isLotNameDuplicateInvalid, isSellerMarkInvalid]);
+  }, [isVehicleNumberInvalid, isVehicleMarkAliasInvalid, isLoadedWeightInvalid, isEmptyWeightInvalid, isDeductedWeightInvalid, isGodownInvalid, isGatepassNumberInvalid, isBrokerNameInvalid, isFreightRateInvalid, isFreightKgsInvalid, isAdvancePaidInvalid, sellers, contacts, lotNameCountsBySellerId, isLotNameDuplicateInvalid, isSellerMarkInvalid]);
 
   // Summary stats for four cards (mobile-first, same as raghav-style UI)
   const totalVehicles = useMemo(() => apiArrivals.length, [apiArrivals]);
@@ -1635,6 +1682,7 @@ const ArrivalsPage = () => {
     if (q) {
       result = result.filter(a => {
         if (String(a.vehicleNumber).toLowerCase().includes(q)) return true;
+        if (String(a.vehicleMarkAlias ?? '').toLowerCase().includes(q)) return true;
         const detail = arrivalDetails.find(d => String(d.vehicleId) === String(a.vehicleId));
         if (detail?.sellers?.some(s => (s.sellerName ?? '').toLowerCase().includes(q))) return true;
         return false;
@@ -2292,6 +2340,9 @@ const ArrivalsPage = () => {
       } catch (err) {
         console.error('Submit arrival error:', err);
         const message = err instanceof Error ? err.message : 'Failed to submit arrival. Please try again.';
+        if (message.includes('Vehicle mark/alias')) {
+          setVehicleMarkAliasApiError(message);
+        }
         toast.error(message);
       }
     } finally {
@@ -2303,6 +2354,8 @@ const ArrivalsPage = () => {
   const resetForm = () => {
     setStep(1);
     setVehicleNumber('');
+    setVehicleMarkAlias('');
+    setVehicleMarkAliasApiError(null);
     setLoadedWeight('');
     setEmptyWeight('');
     setDeductedWeight('');
@@ -2364,6 +2417,7 @@ const ArrivalsPage = () => {
     setActiveSellerSearch(null);
     setSellerDropdown(false);
     setAddLotForm(null);
+    setVehicleMarkAliasApiError(null);
     setEditingVehicleId(a.vehicleId);
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
@@ -2373,6 +2427,7 @@ const ArrivalsPage = () => {
     try {
       const detail = await arrivalsApi.getById(a.vehicleId);
       setVehicleNumber(detail?.vehicleNumber ?? '');
+      setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(detail?.vehicleMarkAlias ?? ''));
       setLoadedWeight(detail?.loadedWeight != null ? String(detail.loadedWeight) : '');
       setEmptyWeight(detail?.emptyWeight != null ? String(detail.emptyWeight) : '');
       setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
@@ -2421,6 +2476,7 @@ const ArrivalsPage = () => {
         step: 2,
         isMultiSeller: resolvedMulti,
         vehicleNumber: detail?.vehicleNumber ?? '',
+        vehicleMarkAlias: detail?.vehicleMarkAlias ?? '',
         loadedWeight: detail?.loadedWeight != null ? String(detail.loadedWeight) : '',
         emptyWeight: detail?.emptyWeight != null ? String(detail.emptyWeight) : '',
         deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
@@ -2463,8 +2519,10 @@ const ArrivalsPage = () => {
       return;
     }
     try {
+      setVehicleMarkAliasApiError(null);
       await arrivalsApi.update(editingVehicleId, {
         vehicle_number: vehicleNumber.trim() || undefined,
+        vehicle_mark_alias: vehicleMarkAlias.trim(),
         godown: godown || undefined,
         gatepass_number: gatepassNumber || undefined,
         origin: origin || undefined,
@@ -2509,7 +2567,11 @@ const ArrivalsPage = () => {
       setDesktopTab('summary');
       toast.success('Arrival updated');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update arrival');
+      const message = err instanceof Error ? err.message : 'Failed to update arrival';
+      if (message.includes('Vehicle mark/alias')) {
+        setVehicleMarkAliasApiError(message);
+      }
+      toast.error(message);
     }
   };
 
@@ -2734,10 +2796,11 @@ const ArrivalsPage = () => {
                         )
                       ) : (
                     <div className="glass-card rounded-2xl overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
-                      <table className="w-full min-w-[56rem] text-sm border-separate border-spacing-0">
+                      <table className="w-full min-w-[62rem] text-sm border-separate border-spacing-0">
                         <thead className={cn(ARRIVALS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
                           <tr className="border-b border-white/20">
                             <th className="rounded-tl-xl text-left px-4 py-3 font-semibold text-white/95 text-xs uppercase tracking-wide">Vehicle | Seller | Qty</th>
+                            <th className="text-left px-4 py-3 font-semibold text-white/95 text-xs uppercase tracking-wide">Mark / Alias</th>
                             <th className="text-left px-4 py-3 font-semibold text-white/95 text-xs uppercase tracking-wide">Status</th>
                             <th className="text-left px-4 py-3 font-semibold text-white/95 text-xs uppercase tracking-wide">From</th>
                             <th className="text-right px-4 py-3 font-semibold text-white/95 text-xs uppercase tracking-wide">Bids</th>
@@ -2770,6 +2833,9 @@ const ArrivalsPage = () => {
                                         totalBags={a.totalBags}
                                       />
                                     </td>
+                                    <td className="px-4 py-3 text-muted-foreground text-xs max-w-[10rem] truncate" title={a.vehicleMarkAlias?.trim() || undefined}>
+                                      {a.vehicleMarkAlias?.trim() ? a.vehicleMarkAlias.trim() : '—'}
+                                    </td>
                                     <td className="px-4 py-3"><ArrivalStatusBadge status={status} /></td>
                                     <td className="px-4 py-3 text-muted-foreground text-xs">{a.godown ?? '—'}</td>
                                     <td className="px-4 py-3 text-right text-muted-foreground">{a.bidsCount ?? 0}</td>
@@ -2792,7 +2858,7 @@ const ArrivalsPage = () => {
                                   </motion.tr>
                                   {isExpanded && (
                                     <tr key={a.vehicleId + '-exp'} className="border-b border-border/20 bg-muted/10">
-                                      <td colSpan={11} className="px-4 py-4">
+                                      <td colSpan={12} className="px-4 py-4">
                                         {expandedDetailLoading ? (
                                           <p className="text-sm text-muted-foreground">Loading…</p>
                                         ) : expandedDetail ? (
@@ -2987,14 +3053,44 @@ const ArrivalsPage = () => {
                     </div>
 
                     {isMultiSeller && (
+                      <div className="glass-card rounded-2xl p-4 grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-4">
+                        <div className="min-w-0">
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                            <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12 characters</span>}
+                          </label>
+                          <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
+                            onChange={e => { setVehicleMarkAliasApiError(null); setVehicleNumber(e.target.value.toUpperCase()); }}
+                            ref={vehicleNumberInputRef}
+                            className={cn("h-11 rounded-xl text-sm font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
+                        </div>
+                        <div className="min-w-0">
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5 flex-wrap", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) ? "text-red-500" : "text-violet-600 dark:text-violet-400")}>
+                            <Tag className="w-3.5 h-3.5" /> Vehicle Mark / Alias <span className="font-normal text-muted-foreground">(optional)</span>
+                          </label>
+                          <Input placeholder="e.g. A1B2C3D4 (max 8)" value={vehicleMarkAlias}
+                            onChange={e => { setVehicleMarkAliasApiError(null); setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(e.target.value)); }}
+                            className={cn("h-11 rounded-xl text-sm font-medium", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                            maxLength={VEHICLE_MARK_ALIAS_MAX_LEN} />
+                          {vehicleMarkAliasApiError ? <p className="text-xs text-red-600 mt-1.5">{vehicleMarkAliasApiError}</p> : null}
+                          {isVehicleMarkAliasInvalid ? (
+                            <p className="text-xs text-red-600 mt-1.5">Letters and numbers only, max {VEHICLE_MARK_ALIAS_MAX_LEN} characters</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+                    {!isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12 characters</span>}
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) ? "text-red-500" : "text-violet-600 dark:text-violet-400")}>
+                          <Tag className="w-3.5 h-3.5" /> Vehicle Mark / Alias <span className="font-normal text-muted-foreground">(optional)</span>
                         </label>
-                        <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
-                          onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          ref={vehicleNumberInputRef}
-                          className={cn("h-11 rounded-xl text-sm font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
+                        <Input placeholder="e.g. A1B2C3D4 (max 8)" value={vehicleMarkAlias}
+                          onChange={e => { setVehicleMarkAliasApiError(null); setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(e.target.value)); }}
+                          className={cn("h-11 rounded-xl text-sm font-medium", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                          maxLength={VEHICLE_MARK_ALIAS_MAX_LEN} />
+                        {vehicleMarkAliasApiError ? <p className="text-xs text-red-600 mt-1.5">{vehicleMarkAliasApiError}</p> : null}
+                        {isVehicleMarkAliasInvalid ? (
+                          <p className="text-xs text-red-600 mt-1.5">Letters and numbers only, max {VEHICLE_MARK_ALIAS_MAX_LEN} characters</p>
+                        ) : null}
                       </div>
                     )}
 
@@ -3738,6 +3834,7 @@ const ArrivalsPage = () => {
                           <ArrivalSummaryVehicleSellerQty
                             layout="stack"
                             vehicleNumber={a.vehicleNumber}
+                            vehicleMarkAlias={a.vehicleMarkAlias}
                             primarySellerName={a.primarySellerName}
                             totalBags={a.totalBags}
                           />
@@ -3798,6 +3895,7 @@ const ArrivalsPage = () => {
                             <ArrivalSummaryVehicleSellerQty
                               layout="inline"
                               vehicleNumber={a.vehicleNumber}
+                              vehicleMarkAlias={a.vehicleMarkAlias}
                               primarySellerName={a.primarySellerName}
                               totalBags={a.totalBags}
                             />
@@ -4022,14 +4120,44 @@ const ArrivalsPage = () => {
                     </div>
 
                     {isMultiSeller && (
+                      <div className="glass-card rounded-2xl p-4 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-3">
+                        <div className="min-w-0">
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
+                            <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12</span>}
+                          </label>
+                          <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
+                            onChange={e => { setVehicleMarkAliasApiError(null); setVehicleNumber(e.target.value.toUpperCase()); }}
+                            ref={vehicleNumberInputRef}
+                            className={cn("h-12 rounded-xl text-base font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
+                        </div>
+                        <div className="min-w-0">
+                          <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5 flex-wrap", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) ? "text-red-500" : "text-violet-600 dark:text-violet-400")}>
+                            <Tag className="w-3.5 h-3.5" /> Mark / Alias <span className="font-normal text-muted-foreground">(optional)</span>
+                          </label>
+                          <Input placeholder="e.g. A1B2C3D4 (max 8)" value={vehicleMarkAlias}
+                            onChange={e => { setVehicleMarkAliasApiError(null); setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(e.target.value)); }}
+                            className={cn("h-12 rounded-xl text-base font-medium", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                            maxLength={VEHICLE_MARK_ALIAS_MAX_LEN} />
+                          {vehicleMarkAliasApiError ? <p className="text-xs text-red-600 mt-1.5">{vehicleMarkAliasApiError}</p> : null}
+                          {isVehicleMarkAliasInvalid ? (
+                            <p className="text-xs text-red-600 mt-1.5">Letters and numbers only, max {VEHICLE_MARK_ALIAS_MAX_LEN} characters</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+                    {!isMultiSeller && (
                       <div className="glass-card rounded-2xl p-4">
-                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", isVehicleNumberInvalid ? "text-red-500" : "text-blue-600 dark:text-blue-400")}>
-                          <Truck className="w-3.5 h-3.5" /> Vehicle Number {isVehicleNumberInvalid && <span className="font-normal text-red-500">2–12</span>}
+                        <label className={cn("text-xs font-bold uppercase tracking-wider mb-2 block flex items-center gap-1.5", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) ? "text-red-500" : "text-violet-600 dark:text-violet-400")}>
+                          <Tag className="w-3.5 h-3.5" /> Vehicle Mark / Alias <span className="font-normal text-muted-foreground">(optional)</span>
                         </label>
-                        <Input placeholder="e.g., MH12AB1234" value={vehicleNumber}
-                          onChange={e => setVehicleNumber(e.target.value.toUpperCase())}
-                          ref={vehicleNumberInputRef}
-                          className={cn("h-12 rounded-xl text-base font-medium", isVehicleNumberInvalid && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")} maxLength={12} />
+                        <Input placeholder="e.g. A1B2C3D4 (max 8)" value={vehicleMarkAlias}
+                          onChange={e => { setVehicleMarkAliasApiError(null); setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(e.target.value)); }}
+                          className={cn("h-12 rounded-xl text-base font-medium", (isVehicleMarkAliasInvalid || vehicleMarkAliasApiError) && "border-red-500 ring-2 ring-red-500/30 bg-red-50 dark:bg-red-950/20")}
+                          maxLength={VEHICLE_MARK_ALIAS_MAX_LEN} />
+                        {vehicleMarkAliasApiError ? <p className="text-xs text-red-600 mt-1.5">{vehicleMarkAliasApiError}</p> : null}
+                        {isVehicleMarkAliasInvalid ? (
+                          <p className="text-xs text-red-600 mt-1.5">Letters and numbers only, max {VEHICLE_MARK_ALIAS_MAX_LEN} characters</p>
+                        ) : null}
                       </div>
                     )}
 
