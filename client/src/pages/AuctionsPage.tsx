@@ -77,6 +77,8 @@ interface LotInfo {
     buyerMark: string;
     registered: boolean;
   }>;
+  /** Latest auction bags sold (list + session sync). Self-sale: derived from unit qty − remaining. */
+  sold_bags?: number;
 }
 
 type LotStatus = 'available' | 'sold' | 'partial' | 'pending' | 'self_sale';
@@ -196,6 +198,7 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
     lot_name: dto.lot_name ?? '',
     bag_count: dto.bag_count ?? 0,
     original_bag_count: dto.original_bag_count ?? dto.bag_count ?? 0,
+    sold_bags: dto.sold_bags ?? 0,
     commodity_name: dto.commodity_name ?? '',
     seller_name: dto.seller_name ?? '',
     seller_mark: dto.seller_mark ?? '',
@@ -211,12 +214,15 @@ function lotSummaryToLotInfo(dto: LotSummaryDTO): LotInfo {
 }
 
 function selfSaleUnitToLotInfo(dto: AuctionSelfSaleUnitDTO): LotInfo {
+  const remaining = dto.remaining_qty ?? dto.bag_count ?? 0;
+  const unitQty = dto.self_sale_qty ?? 0;
   return {
     lot_id: String(dto.lot_id),
     selfSaleUnitId: String(dto.self_sale_unit_id),
     lot_name: dto.lot_name ?? '',
-    bag_count: dto.remaining_qty ?? dto.bag_count ?? 0,
+    bag_count: remaining,
     original_bag_count: dto.original_bag_count ?? dto.self_sale_qty ?? dto.bag_count ?? 0,
+    sold_bags: Math.max(0, unitQty - remaining),
     commodity_name: dto.commodity_name ?? '',
     seller_name: dto.seller_name ?? '',
     seller_mark: dto.seller_mark ?? '',
@@ -640,6 +646,9 @@ const AuctionsPage = () => {
   const qtyInputRef = useRef<HTMLInputElement>(null);
   const userClearedRateRef = useRef(false);
   const [preferRateForFirstBidFormFocus, setPreferRateForFirstBidFormFocus] = useState(true);
+  /** Session-local MRU for buyer strip ordering (newest first when not searching by prefix). */
+  const [contactLastUsedMs, setContactLastUsedMs] = useState<Record<string, number>>({});
+  const [tempMarkLastUsedMs, setTempMarkLastUsedMs] = useState<Record<string, number>>({});
 
   // Lot selection
   const [showLotSelector, setShowLotSelector] = useState(true);
@@ -974,21 +983,34 @@ const AuctionsPage = () => {
   const filteredContacts = useMemo(() => {
     const q = (scribbleMark || '').trim().toLowerCase();
     const list = buyers;
-    if (!q) return list;
-    return list.filter(b =>
-      b.name?.toLowerCase().startsWith(q) ||
-      (b.phone && b.phone.startsWith(q)) ||
-      (b.mark && b.mark.toLowerCase().startsWith(q))
-    );
-  }, [buyers, scribbleMark]);
+    const filtered = !q
+      ? list
+      : list.filter(
+          b =>
+            b.name?.toLowerCase().startsWith(q) ||
+            (b.phone && b.phone.startsWith(q)) ||
+            (b.mark && b.mark.toLowerCase().startsWith(q))
+        );
+    return [...filtered].sort((a, b) => {
+      const ta = contactLastUsedMs[String(a.contact_id)] ?? 0;
+      const tb = contactLastUsedMs[String(b.contact_id)] ?? 0;
+      if (tb !== ta) return tb - ta;
+      return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+    });
+  }, [buyers, scribbleMark, contactLastUsedMs]);
 
   // Row 2: Temporary (scribble) marks for today — server-scoped; filter by search box
   const filteredTemporaryMarks = useMemo(() => {
     const q = (scribbleMark || '').trim().toLowerCase();
     const list = temporaryBuyerMarks;
-    if (!q) return list;
-    return list.filter(m => m.toLowerCase().startsWith(q));
-  }, [temporaryBuyerMarks, scribbleMark]);
+    const filtered = !q ? list : list.filter(m => m.toLowerCase().startsWith(q));
+    return [...filtered].sort((a, b) => {
+      const ta = tempMarkLastUsedMs[a] ?? 0;
+      const tb = tempMarkLastUsedMs[b] ?? 0;
+      if (tb !== ta) return tb - ta;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+  }, [temporaryBuyerMarks, scribbleMark, tempMarkLastUsedMs]);
 
   const clampInsideClosingParen = useCallback((value: string, proposedPos: number, allowManualExit = false) => {
     if (!braceLockActiveRef.current) return proposedPos;
@@ -1123,6 +1145,7 @@ const AuctionsPage = () => {
             ...prev,
             bag_count: sl.bag_count ?? prev.bag_count,
             original_bag_count: sl.original_bag_count ?? prev.original_bag_count,
+            sold_bags: sl.sold_bags ?? session.total_sold_bags ?? prev.sold_bags,
             was_modified: sl.was_modified ?? prev.was_modified,
             vehicle_mark: vm ?? prev.vehicle_mark,
             seller_mark: sl.seller_mark ?? prev.seller_mark,
@@ -1141,6 +1164,7 @@ const AuctionsPage = () => {
               ...l,
               bag_count: sl.bag_count ?? l.bag_count,
               original_bag_count: sl.original_bag_count ?? l.original_bag_count,
+              sold_bags: sl.sold_bags ?? session.total_sold_bags ?? l.sold_bags,
               was_modified: sl.was_modified ?? l.was_modified,
               vehicle_mark: vm ?? l.vehicle_mark,
               seller_mark: sl.seller_mark ?? l.seller_mark,
@@ -1158,10 +1182,16 @@ const AuctionsPage = () => {
           l.selfSaleUnitId === selfSaleUnitId && session.lot
             ? {
               ...l,
-              bag_count: sl.bag_count ?? l.bag_count,
+              bag_count: session.remaining_bags ?? sl.bag_count ?? l.bag_count,
               original_bag_count: sl.original_bag_count ?? l.original_bag_count,
               was_modified: sl.was_modified ?? l.was_modified,
-              remainingQty: sl.bag_count ?? l.remainingQty,
+              remainingQty: session.remaining_bags ?? sl.bag_count ?? l.remainingQty,
+              sold_bags: Math.max(
+                0,
+                (sl.original_bag_count ?? l.selfSaleQty ?? l.original_bag_count ?? 0) -
+                  (session.remaining_bags ?? sl.bag_count ?? l.bag_count ?? 0)
+              ),
+              selfSaleQty: l.selfSaleQty ?? sl.original_bag_count,
               vehicle_mark: vm ?? l.vehicle_mark,
               seller_mark: sl.seller_mark ?? l.seller_mark,
               vehicle_total_qty: sl.vehicle_total_qty ?? l.vehicle_total_qty,
@@ -1377,6 +1407,13 @@ const AuctionsPage = () => {
       applyAuctionSession(session);
       void loadTemporaryBuyerMarks();
       hapticNotification(NotificationType.Success);
+      const t = Date.now();
+      if (entry.buyerContactId) {
+        setContactLastUsedMs(p => ({ ...p, [String(entry.buyerContactId)]: t }));
+      } else if (entry.isScribble && !entry.isSelfSale) {
+        const m = (entry.buyerMark || '').trim();
+        if (m) setTempMarkLastUsedMs(p => ({ ...p, [m]: t }));
+      }
       setRate('');
       setQty('');
       setSelectedBuyer(null);
@@ -1427,6 +1464,14 @@ const AuctionsPage = () => {
         });
         applyAuctionSession(session);
         void loadTemporaryBuyerMarks();
+        {
+          const t = Date.now();
+          if (duplicateMarkDialog.buyerContactId) {
+            setContactLastUsedMs(p => ({ ...p, [String(duplicateMarkDialog.buyerContactId)]: t }));
+          } else if (duplicateMarkDialog.isScribble) {
+            setTempMarkLastUsedMs(p => ({ ...p, [duplicateMarkDialog.mark]: t }));
+          }
+        }
         toast.success(`Merged ${newQty} bags into existing bid #${existingEntry.bidNumber}`);
         setRate('');
         setQty('');
@@ -2919,6 +2964,7 @@ const AuctionsPage = () => {
                                 hapticSelection();
                                 hideNativeKeyboard();
                                 setSelectedBuyer(b);
+                                setContactLastUsedMs((p) => ({ ...p, [String(b.contact_id)]: Date.now() }));
                                 lastScribbleSegmentRef.current = '';
                                 setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
                                 setScribblePadResetTrigger((t) => t + 1);
@@ -2973,6 +3019,7 @@ const AuctionsPage = () => {
                                   hapticSelection();
                                   hideNativeKeyboard();
                                   setSelectedBuyer(null);
+                                  setTempMarkLastUsedMs((p) => ({ ...p, [mark]: Date.now() }));
                                   lastScribbleSegmentRef.current = '';
                                   setScribbleMark(mark);
                                   setScribblePadResetTrigger((t) => t + 1);
@@ -3148,14 +3195,14 @@ const AuctionsPage = () => {
 
         {/* Auction Grid — entries list */}
         <motion.div ref={auctionGridSectionRef} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className={cn(!isDesktop && "order-2")}>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          <p className={cn('font-semibold text-muted-foreground uppercase tracking-wider mb-2', isDesktop ? 'text-xs' : 'text-sm')}>
             Auction Grid · {entries.length} entries
           </p>
 
           {entries.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center">
               <Gavel className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">No bids yet. Start the auction!</p>
+              <p className={cn('text-muted-foreground', isDesktop ? 'text-sm' : 'text-base')}>No bids yet. Start the auction!</p>
             </div>
           ) : (
             <div className="glass-card rounded-2xl h-auto min-h-0 overflow-hidden">
@@ -3176,13 +3223,13 @@ const AuctionsPage = () => {
                 <table className={cn("w-[42rem] md:w-full text-sm sm:text-base table-fixed border-collapse", showPresetMargin ? "min-w-[480px]" : "min-w-[420px]")}>
                   <thead className="sticky top-0 z-[3] bg-background">
                     <tr className="border-b border-border/50 bg-muted/95 backdrop-blur">
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-left", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Mark / Buyer</th>
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Rate</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-left", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[12px] text-xs")}>Mark / Buyer</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[12px] text-xs")}>Rate</th>
                       {showPresetMargin && (
-                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Preset</th>
+                        <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[12px] text-xs")}>Preset</th>
                       )}
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Qty</th>
-                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[10px] text-[10px]")}>Action</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-center", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[12px] text-xs")}>Qty</th>
+                      <th className={cn("font-semibold text-muted-foreground uppercase tracking-wider text-right", isDesktop ? "px-3 py-[14px] text-xs" : "px-2 py-[12px] text-xs")}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3207,25 +3254,41 @@ const AuctionsPage = () => {
                             editingBidId === entry.id && "bg-primary/5 ring-1 ring-inset ring-primary/35"
                           )}
                         >
-                          <td className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[10px]")}>
+                          <td className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[12px]")}>
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className={cn("font-medium text-foreground truncate max-w-[120px]", isDesktop ? "text-base" : "text-sm")} title={entry.buyerName}>
+                              <span
+                                className={cn("font-medium text-foreground truncate max-w-[120px]", isDesktop ? "text-base" : "text-[16px]")}
+                                title={entry.buyerName}
+                              >
                                 {normalizeScribbleBuyerName(entry.buyerName, entry.isScribble)}
                               </span>
-                              {entry.isSelfSale && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[8px] font-bold">SELF</span>}
+                              {entry.isSelfSale && (
+                                <span
+                                  className={cn(
+                                    'px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold',
+                                    isDesktop ? 'text-[8px]' : 'text-[10px]'
+                                  )}
+                                >
+                                  SELF
+                                </span>
+                              )}
                               {editingBidId === entry.id && (
-                                <span className="px-1 py-0.5 rounded bg-primary/20 text-primary text-[8px] font-bold">EDITING</span>
+                                <span
+                                  className={cn('px-1 py-0.5 rounded bg-primary/20 text-primary font-bold', isDesktop ? 'text-[8px]' : 'text-[10px]')}
+                                >
+                                  EDITING
+                                </span>
                               )}
                             </div>
                           </td>
-                          <td className={cn("align-middle text-center font-semibold text-foreground", isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[10px] text-sm")}>
+                          <td className={cn("align-middle text-center font-semibold text-foreground", isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[12px] text-[16px]")}>
                             <div>₹{entry.rate}</div>
                           </td>
                           {showPresetMargin && (
                             <td
                               className={cn(
                                 "align-middle text-center font-medium tabular-nums",
-                                isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[10px] text-sm",
+                                isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[12px] text-[16px]",
                                 entry.presetApplied > 0 && "text-success",
                                 entry.presetApplied < 0 && "text-destructive"
                               )}
@@ -3233,10 +3296,10 @@ const AuctionsPage = () => {
                               {formatPresetMarginCell(entry.presetApplied)}
                             </td>
                           )}
-                          <td className={cn("align-middle text-center text-muted-foreground", isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[10px] text-sm")}>
+                          <td className={cn("align-middle text-center text-muted-foreground", isDesktop ? "px-3 py-[12px] text-base" : "px-2 py-[12px] text-[16px]")}>
                             {entry.quantity}
                           </td>
-                          <td className={cn("text-right", isDesktop ? "px-3 py-[12px]" : "px-2 py-[10px]")}>
+                          <td className={cn("text-right", isDesktop ? "px-3 py-[12px]" : "px-2 py-[12px]")}>
                             <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
@@ -3248,7 +3311,7 @@ const AuctionsPage = () => {
                                 )}
                                 title="Token advance"
                               >
-                                <Banknote className={cn(isDesktop ? "w-4 h-4" : "w-3.5 h-3.5")} />
+                                <Banknote className={cn(isDesktop ? "w-4 h-4" : "h-4 w-4")} />
                               </button>
                               <button
                                 onClick={() => setPendingDeleteBid({ id: entry.id, label: `${entry.buyerName} (${entry.buyerMark})` })}
@@ -3257,7 +3320,7 @@ const AuctionsPage = () => {
                                 className="p-1.5 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-40"
                                 title="Delete bid"
                               >
-                                <Trash2 className={cn(isDesktop ? "w-4 h-4" : "w-3.5 h-3.5")} />
+                                <Trash2 className={cn(isDesktop ? "w-4 h-4" : "h-4 w-4")} />
                               </button>
                               {isDesktop && can('Auctions / Sales', 'Edit') && (
                                 <button
@@ -3282,18 +3345,22 @@ const AuctionsPage = () => {
                               transition={{ duration: 0.15 }}
                               className="border-b border-border/30 bg-muted/10"
                             >
-                              <td colSpan={showPresetMargin ? 5 : 4} className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[10px]")}>
+                              <td colSpan={showPresetMargin ? 5 : 4} className={cn("px-3 py-[12px]", isDesktop ? "" : "px-2 py-[12px]")}>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] text-muted-foreground whitespace-nowrap">Token ₹</span>
+                                  <span className={cn('text-muted-foreground whitespace-nowrap', isDesktop ? 'text-[10px]' : 'text-xs')}>Token ₹</span>
                                   <Input
                                     type="number"
                                     defaultValue={entry.tokenAdvance || ""}
                                     placeholder="0"
-                                    className={cn("rounded-lg text-center flex-1", isDesktop ? "h-8 text-xs" : "h-7 text-xs")}
+                                    className={cn("rounded-lg text-center flex-1", isDesktop ? "h-8 text-xs" : "h-[30px] text-sm")}
                                     onBlur={e => setTokenAdvanceAmount(entry.id, parseInt(e.target.value) || 0)}
                                     onKeyDown={e => { if (e.key === "Enter") setTokenAdvanceAmount(entry.id, parseInt((e.target as HTMLInputElement).value) || 0); }}
                                   />
-                                  {entry.tokenAdvance > 0 && <span className="text-[10px] text-success font-semibold">✓ ₹{entry.tokenAdvance}</span>}
+                                  {entry.tokenAdvance > 0 && (
+                                    <span className={cn('text-success font-semibold', isDesktop ? 'text-[10px]' : 'text-xs')}>
+                                      ✓ ₹{entry.tokenAdvance}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                             </motion.tr>
@@ -3311,7 +3378,7 @@ const AuctionsPage = () => {
         {/* Remaining indicator */}
         {entries.length > 0 && selectedLot && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn("glass-card rounded-2xl p-3", !isDesktop && "order-1")}>
-            <div className="flex items-center justify-between text-sm mb-2">
+            <div className={cn("flex items-center justify-between mb-2", isDesktop ? "text-sm" : "text-base")}>
               <span className="text-muted-foreground">Sold</span>
               <span className="font-bold text-foreground">
                 {totalSold} / {selectedLot.bag_count}{selectedLot.was_modified ? '*' : ''} bags
@@ -3326,7 +3393,9 @@ const AuctionsPage = () => {
             </div>
             {remaining > 0 && (
               <>
-                <p className="text-[10px] text-muted-foreground mt-1">{remaining} bags remaining</p>
+                <p className={cn("text-muted-foreground mt-1", isDesktop ? "text-[10px]" : "text-xs")}>
+                  {remaining} bags remaining
+                </p>
                 {isDesktop && (
                   <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
                     <Button
@@ -3350,7 +3419,9 @@ const AuctionsPage = () => {
             )}
             {remaining <= 0 && (
               <>
-                <p className="text-[10px] text-success font-semibold mt-1">✓ All bags sold!</p>
+                <p className={cn("text-success font-semibold mt-1", isDesktop ? "text-[10px]" : "text-xs")}>
+                  ✓ All bags sold!
+                </p>
                 {isDesktop && (
                   <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
                     <Button
@@ -3403,23 +3474,24 @@ const AuctionsPage = () => {
                         hapticSelection();
                         hideNativeKeyboard();
                         setSelectedBuyer(b);
+                        setContactLastUsedMs((p) => ({ ...p, [String(b.contact_id)]: Date.now() }));
                         lastScribbleSegmentRef.current = '';
                         setScribbleMark((b.mark || b.name.charAt(0) || '').toString());
                         setScribblePadResetTrigger((t) => t + 1);
                       }}
                       className={cn(
-                        'flex-shrink-0 px-2.5 py-1.5 rounded-lg text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1 min-h-[40px]',
+                        'flex-shrink-0 px-3 py-2 rounded-md text-left transition-all border border-l-4 border-l-emerald-500 flex items-center gap-1 min-h-[42px]',
                         selectedBuyer?.contact_id === b.contact_id
                           ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
                           : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                       )}
                     >
-                      <span className="text-xs font-semibold truncate max-w-[78px] sm:max-w-[90px]">{b.name}</span>
-                      {b.mark && <span className="text-[10px] opacity-90 flex-shrink-0">({b.mark})</span>}
+                      <span className="text-sm font-semibold truncate max-w-[78px] sm:max-w-[90px]">{b.name}</span>
+                      {b.mark && <span className="text-xs opacity-90 flex-shrink-0">({b.mark})</span>}
                     </button>
                   ))
                 ) : (
-                  <div className="flex-shrink-0 px-3 py-2 rounded-lg border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-xs font-medium">
+                  <div className="flex-shrink-0 px-3 py-2.5 rounded-md border border-l-4 border-l-emerald-500 border-dashed bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
                     No matching contact
                   </div>
                 )}
@@ -3448,21 +3520,22 @@ const AuctionsPage = () => {
                           hapticSelection();
                           hideNativeKeyboard();
                           setSelectedBuyer(null);
+                          setTempMarkLastUsedMs((p) => ({ ...p, [mark]: Date.now() }));
                           lastScribbleSegmentRef.current = '';
                           setScribbleMark(mark);
                           setScribblePadResetTrigger((t) => t + 1);
                         }}
                         className={cn(
-                          'flex-shrink-0 px-2.5 py-1.5 rounded-lg text-left transition-all border border-l-4 border-l-violet-500 flex items-center min-h-[40px]',
+                          'flex-shrink-0 px-3 py-2 rounded-md text-left transition-all border border-l-4 border-l-violet-500 flex items-center min-h-[42px]',
                           isSelected ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary' : 'bg-muted/40 border-border/50 hover:bg-muted/60'
                         )}
                       >
-                        <span className="text-xs font-semibold truncate max-w-[72px]">{mark}</span>
+                        <span className="text-sm font-semibold truncate max-w-[72px]">{mark}</span>
                       </button>
                     );
                   })
                 ) : (
-                  <div className="flex-shrink-0 px-3 py-2 rounded-lg border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-xs font-medium">
+                  <div className="flex-shrink-0 px-3 py-2.5 rounded-md border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-sm font-medium">
                     No temporary marks yet today
                   </div>
                 )}
@@ -3471,7 +3544,7 @@ const AuctionsPage = () => {
           </div>
           <div className="flex gap-1.5 mb-1 min-w-0">
             <div className="min-w-0 flex-1">
-              <label htmlFor="sales-pad-rate-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
+              <label htmlFor="sales-pad-rate-mobile" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
                 Rate ₹
               </label>
               <Input
@@ -3501,13 +3574,13 @@ const AuctionsPage = () => {
                 placeholder="0"
                 aria-label="Bid rate in rupees"
                 className={cn(
-                  "h-9 rounded-lg text-center font-bold text-[11px] sm:text-sm bg-muted/20 border-primary/20 min-w-0",
+                  "h-[38px] rounded-md text-center font-bold text-[13px] sm:text-base bg-muted/20 border-primary/20 min-w-0",
                   activeNumpadField === 'rate' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
                 )}
               />
             </div>
             <div className="min-w-0 flex-[1.15]">
-              <label htmlFor="sales-pad-mark-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate text-center">
+              <label htmlFor="sales-pad-mark-mobile" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate text-center">
                 Mark
               </label>
               <Input
@@ -3543,11 +3616,11 @@ const AuctionsPage = () => {
                 onFocus={() => { setActiveNumpadField('mark'); hideNativeKeyboard(); }}
                 placeholder="Search…"
                 aria-label="Search mark or name"
-                className="h-9 rounded-lg text-[11px] sm:text-xs font-medium text-center bg-muted/20 border-violet-400/20 px-2 min-w-0"
+                className="h-[38px] rounded-md text-[13px] sm:text-sm font-medium text-center bg-muted/20 border-violet-400/20 px-2 min-w-0"
               />
             </div>
             <div className="min-w-0 flex-1">
-              <label htmlFor="sales-pad-qty-mobile" className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
+              <label htmlFor="sales-pad-qty-mobile" className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 block truncate">
                 Qty
               </label>
               <Input
@@ -3573,7 +3646,7 @@ const AuctionsPage = () => {
                 placeholder="0"
                 aria-label="Quantity in bags"
                 className={cn(
-                  "h-9 rounded-lg text-center font-bold text-[11px] sm:text-sm bg-muted/20 border-primary/20 min-w-0",
+                  "h-[38px] rounded-md text-center font-bold text-[13px] sm:text-base bg-muted/20 border-primary/20 min-w-0",
                   activeNumpadField === 'qty' && "ring-2 ring-primary border-primary shadow-[0_0_0_2px_hsl(var(--primary))]"
                 )}
               />
@@ -3582,9 +3655,9 @@ const AuctionsPage = () => {
           {/* Preset margin: compact row below rate/qty */}
           {canUsePreset && (
             <div className="flex items-center justify-between gap-2 mb-1 py-0.5">
-              <span className="text-[9px] font-semibold text-muted-foreground uppercase">Preset</span>
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase">Preset</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-muted-foreground">Show</span>
+                <span className="text-[11px] text-muted-foreground">Show</span>
                 <Switch checked={showPresetMargin} onCheckedChange={handleShowPresetMarginChange} aria-label="Show preset margin" className="scale-75 origin-right" />
               </div>
             </div>
@@ -3598,7 +3671,7 @@ const AuctionsPage = () => {
                     type="button"
                     onClick={() => applyPreset(opt.value)}
                     className={cn(
-                      'flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                      'flex-1 py-2 rounded-md text-[13px] font-bold transition-all',
                       preset === opt.value
                         ? opt.value >= 0
                           ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white'
@@ -3613,14 +3686,14 @@ const AuctionsPage = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-[10px] text-muted-foreground rounded-md border border-dashed border-border px-2 py-1 mb-1">
+              <p className="text-xs text-muted-foreground rounded-md border border-dashed border-border px-2.5 py-1.5 mb-1">
                 Preset is not set. Please configure it in Preset Settings.
               </p>
             )
           )}
           <div className="grid grid-cols-[1.4fr_1fr] gap-1.5 items-stretch">
             <div className="rounded-xl border border-violet-400/20 bg-card/80 p-1.5 h-full min-h-[15rem] flex flex-col gap-1">
-              <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide text-muted-foreground px-0.5 shrink-0">
+              <p className="text-xs sm:text-sm font-semibold uppercase tracking-wide text-muted-foreground px-0.5 shrink-0">
                 Scribble pad
               </p>
               <div className="flex-1 min-h-0">
@@ -3642,7 +3715,7 @@ const AuctionsPage = () => {
                     key={k}
                     type="button"
                     onClick={() => handleNumpadKey(k)}
-                    className="h-11 rounded-xl bg-muted/60 hover:bg-muted text-sm font-bold text-foreground transition-colors"
+                    className="h-[46px] rounded-sm bg-muted/60 hover:bg-muted text-base font-bold text-foreground transition-colors"
                   >
                     {k}
                   </button>
@@ -3653,7 +3726,7 @@ const AuctionsPage = () => {
                 <button
                   type="button"
                   onClick={handleNumpadBackspace}
-                  className="h-10 rounded-lg bg-muted/60 hover:bg-muted text-foreground text-xs font-semibold inline-flex items-center justify-center disabled:opacity-50"
+                  className="h-[42px] rounded-sm bg-muted/60 hover:bg-muted text-foreground text-sm font-semibold inline-flex items-center justify-center disabled:opacity-50"
                   aria-label="Backspace (remove last character)"
                   title="Back"
                 >
@@ -3662,7 +3735,7 @@ const AuctionsPage = () => {
                 <button
                   type="button"
                   onClick={handleNumpadClear}
-                  className="h-10 col-span-2 rounded-lg bg-muted/60 hover:bg-muted text-[11px] font-bold text-foreground disabled:opacity-50 uppercase tracking-wide"
+                  className="h-[42px] col-span-2 rounded-sm bg-muted/60 hover:bg-muted text-[13px] font-bold text-foreground disabled:opacity-50 uppercase tracking-wide"
                   aria-label="Clear current bid draft fields"
                   title="Clear"
                 >
@@ -3677,7 +3750,7 @@ const AuctionsPage = () => {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={appendMarkParenFromNumpad}
                   disabled={!!editingBidId}
-                  className="h-10 rounded-lg bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/35 text-[11px] font-bold"
+                  className="h-[42px] rounded-sm bg-violet-500/15 text-violet-800 dark:text-violet-200 border border-violet-500/35 text-[13px] font-bold"
                   title="Add ( or ) to mark"
                   aria-label="Add opening or closing parenthesis to mark"
                 >
@@ -3689,7 +3762,7 @@ const AuctionsPage = () => {
                     type="button"
                     onClick={handleSelfSale}
                     disabled={remaining <= 0}
-                    className="h-10 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[11px] font-bold disabled:opacity-50"
+                    className="h-[42px] rounded-sm bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[13px] font-bold disabled:opacity-50"
                     aria-label="Self Sale"
                     title="Self Sale"
                   >
@@ -3705,14 +3778,14 @@ const AuctionsPage = () => {
                       type="button"
                       onClick={() => { if (editingEntry) void saveEditBid(editingEntry); }}
                       disabled={!editingEntry || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                      className="h-10 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[11px] font-bold disabled:opacity-50"
+                      className="h-[42px] rounded-sm bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[13px] font-bold disabled:opacity-50"
                     >
                       Update Bid
                     </button>
                     <button
                       type="button"
                       onClick={cancelEditBid}
-                      className="h-10 rounded-xl bg-muted/60 text-foreground border border-border/50 text-[11px] font-bold"
+                      className="h-[42px] rounded-sm bg-muted/60 text-foreground border border-border/50 text-[13px] font-bold"
                     >
                       Cancel
                     </button>
@@ -3722,7 +3795,7 @@ const AuctionsPage = () => {
                       type="button"
                       disabled={completeLoading || entries.length === 0}
                       onClick={handleSaveAndCompleteAuction}
-                      className="h-11 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white text-[12px] font-bold disabled:opacity-50 px-1 leading-tight"
+                      className="h-[46px] rounded-sm bg-gradient-to-r from-emerald-500 to-green-500 text-white text-sm font-bold disabled:opacity-50 px-1 leading-tight"
                     >
                       {completeLoading ? 'Completing…' : 'Save & Close'}
                     </button>
@@ -3734,7 +3807,7 @@ const AuctionsPage = () => {
                     type="button"
                     onClick={handleUnifiedAdd}
                     disabled={(!scribbleMark.trim() && !selectedBuyer) || !rate || !qty || parseInt(qty) <= 0 || parseInt(rate) <= 0}
-                    className="h-11 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[12px] font-bold disabled:opacity-50 px-1 leading-tight"
+                    className="h-[46px] rounded-sm bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-bold disabled:opacity-50 px-1 leading-tight"
                   >
                     + Add Bid
                   </button>
@@ -3742,7 +3815,7 @@ const AuctionsPage = () => {
                   type="button"
                   disabled={completeLoading || entries.length === 0}
                   onClick={handleSaveAndCompleteAuction}
-                  className="h-11 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 text-white text-[12px] font-bold disabled:opacity-50 px-1 leading-tight"
+                  className="h-[46px] rounded-sm bg-gradient-to-r from-emerald-500 to-green-500 text-white text-sm font-bold disabled:opacity-50 px-1 leading-tight"
                 >
                   {completeLoading ? 'Completing…' : 'Save & Close'}
                 </button>
@@ -3859,10 +3932,24 @@ const AuctionsPage = () => {
   );
 };
 
+/** Lot list column: pending (unsold) / sold — not sold/total. */
+function getLotListPendingSold(lot: LotInfo): { pending: number; sold: number } {
+  if (lot.selfSaleUnitId != null) {
+    const pending = Math.max(0, lot.remainingQty ?? lot.bag_count ?? 0);
+    const unitTotal = lot.selfSaleQty ?? lot.original_bag_count ?? 0;
+    const sold = lot.sold_bags ?? Math.max(0, unitTotal - pending);
+    return { pending, sold: Math.max(0, sold) };
+  }
+  const total = Math.max(0, lot.bag_count ?? 0);
+  const sold = Math.max(0, lot.sold_bags ?? 0);
+  return { pending: Math.max(0, total - sold), sold };
+}
+
 // ── Lot Row Component with Status Badge ──────────────────
 const LotRow = ({ lot, onSelect, statusFilter }: { lot: LotInfo; onSelect: (lot: LotInfo) => void; statusFilter: LotStatus | 'all' }) => {
   const status = getRowLotStatus(lot, statusFilter);
   const cfg = STATUS_CONFIG[status];
+  const { pending, sold } = getLotListPendingSold(lot);
 
   return (
     <button onClick={() => onSelect(lot)}
@@ -3885,9 +3972,9 @@ const LotRow = ({ lot, onSelect, statusFilter }: { lot: LotInfo; onSelect: (lot:
           {lot.commodity_name}
         </p>
       </div>
-      <div className="text-right flex-shrink-0">
-        <p className="text-sm font-bold text-foreground">{lot.bag_count}</p>
-        <p className="text-[10px] text-muted-foreground">bags</p>
+      <div className="text-right flex-shrink-0 tabular-nums">
+        <p className="text-sm font-bold text-foreground">{pending}/{sold}</p>
+        <p className="text-[10px] text-muted-foreground">pending / sold</p>
       </div>
     </button>
   );

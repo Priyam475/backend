@@ -1,25 +1,12 @@
-import { Capacitor, registerPlugin } from "@capacitor/core";
+import { Capacitor } from "@capacitor/core";
 import { toast } from "sonner";
 
 import { bluetoothPrintersApi } from "@/services/api/bluetoothPrinters";
+import { mercoPrinter } from "@/plugins/mercoPrinter";
 import { formatAuctionLotIdentifier } from "@/utils/auctionLotIdentifier";
 
 // ── Print Templates for Print Hub ──────────────────────────
 // REQ-LOG-002: All print formats per SRS (same format as client_origin)
-
-type MercoPrinterPlugin = {
-  printHtml(options: {
-    html: string;
-    thermalText?: string;
-    mode?: "auto" | "system" | "thermal";
-    deviceMac?: string;
-    jobName?: string;
-  }): Promise<{ ok?: boolean }>;
-  listPrinters(): Promise<{ printers: { mac: string; name: string }[] }>;
-  requestBluetoothPermissions(): Promise<{ granted: boolean }>;
-};
-
-const mercoPrinter = registerPlugin<MercoPrinterPlugin>("MercoPrinter");
 
 type PrintMode = "auto" | "system" | "thermal";
 
