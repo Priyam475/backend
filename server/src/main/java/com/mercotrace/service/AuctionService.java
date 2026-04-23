@@ -16,6 +16,7 @@ import com.mercotrace.repository.AuctionSelfSaleUnitRepository;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.repository.LotRepository;
+import com.mercotrace.repository.PrintLogRepository;
 import com.mercotrace.repository.SellerInVehicleRepository;
 import com.mercotrace.repository.VehicleRepository;
 import com.mercotrace.service.dto.*;
@@ -107,6 +108,10 @@ public class AuctionService {
     private final CommodityRepository commodityRepository;
     private final TraderContextService traderContextService;
     private final AuctionSelfSaleUnitRepository auctionSelfSaleUnitRepository;
+    private final PrintLogRepository printLogRepository;
+
+    /** Matches client Print Hub `BUYER_CHITI_BID` — per-bid print completion key {@code lotId:bidNumber}. */
+    private static final String PRINT_LOG_BUYER_CHITI_BID = "BUYER_CHITI_BID";
 
     public AuctionService(
         AuctionRepository auctionRepository,
@@ -119,7 +124,8 @@ public class AuctionService {
         ContactService contactService,
         CommodityRepository commodityRepository,
         TraderContextService traderContextService,
-        AuctionSelfSaleUnitRepository auctionSelfSaleUnitRepository
+        AuctionSelfSaleUnitRepository auctionSelfSaleUnitRepository,
+        PrintLogRepository printLogRepository
     ) {
         this.auctionRepository = auctionRepository;
         this.auctionEntryRepository = auctionEntryRepository;
@@ -132,6 +138,7 @@ public class AuctionService {
         this.commodityRepository = commodityRepository;
         this.traderContextService = traderContextService;
         this.auctionSelfSaleUnitRepository = auctionSelfSaleUnitRepository;
+        this.printLogRepository = printLogRepository;
     }
 
     /** Contact-linked sellers: use contact name/mark. Free-text sellers (no contact): use SellerInVehicle fields. */
@@ -526,7 +533,7 @@ public class AuctionService {
             entry.setPresetType(request.getPresetType());
         }
 
-        applyBillingBuyerReassignFromPatch(entry, request, traderId);
+        applyBillingBuyerReassignFromPatch(entry, auction, request, traderId);
 
         BigDecimal bidRate = entry.getBidRate();
         BigDecimal extra = entry.getExtraRate() != null ? entry.getExtraRate() : BigDecimal.ZERO;
@@ -700,7 +707,7 @@ public class AuctionService {
             entry.setPresetType(request.getPresetType());
         }
 
-        applyBillingBuyerReassignFromPatch(entry, request, traderId);
+        applyBillingBuyerReassignFromPatch(entry, auction, request, traderId);
 
         BigDecimal bidRate = entry.getBidRate();
         BigDecimal extra = entry.getExtraRate() != null ? entry.getExtraRate() : BigDecimal.ZERO;
@@ -1457,7 +1464,12 @@ public class AuctionService {
     /**
      * Billing module: move auction bid ownership to the sales bill buyer (same trader).
      */
-    private void applyBillingBuyerReassignFromPatch(AuctionEntry entry, AuctionBidUpdateRequest request, Long traderId) {
+    private void applyBillingBuyerReassignFromPatch(
+        AuctionEntry entry,
+        Auction auction,
+        AuctionBidUpdateRequest request,
+        Long traderId
+    ) {
         if (!Boolean.TRUE.equals(request.getBillingReassignBuyer())) {
             return;
         }
@@ -1465,6 +1477,18 @@ public class AuctionService {
         String name = request.getBuyerName() != null ? request.getBuyerName().trim() : "";
         if (mark.isEmpty() || name.isEmpty()) {
             throw new IllegalArgumentException("buyer_name and buyer_mark are required when billing_reassign_buyer is true");
+        }
+        /* Print Hub stores BUYER_CHITI_BID completion by lotId:bidNumber only — clear so line can print under new buyer. */
+        Long lotId = auction != null ? auction.getLotId() : null;
+        Integer bidNum = entry.getBidNumber();
+        if (lotId != null && bidNum != null && traderId != null) {
+            String refId = lotId + ":" + bidNum;
+            printLogRepository.deleteByTraderIdAndReferenceTypeAndReferenceId(traderId, PRINT_LOG_BUYER_CHITI_BID, refId);
+            LOG.debug(
+                "Cleared Print Hub BUYER_CHITI_BID logs for {} after billing buyer reassign (auction entry {})",
+                refId,
+                entry.getId()
+            );
         }
         entry.setBuyerMark(mark);
         entry.setBuyerName(name);

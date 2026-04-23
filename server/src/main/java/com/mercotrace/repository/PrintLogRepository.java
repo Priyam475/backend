@@ -22,4 +22,7 @@ public interface PrintLogRepository extends JpaRepository<PrintLog, Long> {
         @Param("traderId") Long traderId,
         @Param("refType") String referenceType
     );
+
+    /** Used when auction bid buyer changes — Print Hub completion is per line id, must reset for new buyer chitti. */
+    void deleteByTraderIdAndReferenceTypeAndReferenceId(Long traderId, String referenceType, String referenceId);
 }

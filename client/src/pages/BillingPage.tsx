@@ -31,6 +31,7 @@ import type {
   LotSummaryDTO,
 } from '@/services/api/auction';
 import ForbiddenPage from '@/components/ForbiddenPage';
+import { MAX_MARK_LEN } from '@/components/InlineScribblePad';
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { usePermissions } from '@/lib/permissions';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
@@ -137,6 +138,12 @@ function getBidSelectionKey(entry: Pick<BillEntry, 'bidNumber' | 'lotId'>): stri
 
 function normalizeLotNameKey(name: string): string {
   return (name || '').trim().toLowerCase();
+}
+
+/** Buyer headline when name optional (temp/scribble): prefer trimmed name, else mark. */
+function billingBuyerDisplayLine(b: { buyerName?: string; buyerMark?: string }): string {
+  const name = (b.buyerName ?? '').trim();
+  return name || (b.buyerMark ?? '').trim();
 }
 
 /**
@@ -261,6 +268,8 @@ interface BillData {
   buyerName: string;
   buyerMark: string;
   buyerContactId: string | null;
+  /** True when bill buyer is mark-only (scribble/temp) until a contact is linked. Client-only unless API adds field. */
+  buyerIsTemporary?: boolean;
   buyerPhone: string;
   buyerAddress: string;
   buyerAsBroker: boolean;
@@ -496,6 +505,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
   return roundBillMoneyValues({
     ...b,
     buyerContactId: (b as any).buyerContactId ?? null,
+    buyerIsTemporary: Boolean((b as any).buyerIsTemporary),
     buyerPhone: (b as any).buyerPhone ?? '',
     buyerAddress: (b as any).buyerAddress ?? '',
     buyerAsBroker: Boolean((b as any).buyerAsBroker),
@@ -519,12 +529,18 @@ function validateBill(
   const errors: ValidationErrors = {};
   const warnings: ValidationErrors = {};
 
-  const trimmedName = (b.billingName ?? '').trim();
-  if (!trimmedName) {
-    errors.billingName = 'Billing name is required';
-  } else if (trimmedName.length < 2) {
-    errors.billingName = 'Minimum 2 characters';
-  } else if (trimmedName.length > 150) {
+  const trimmedBilling = (b.billingName ?? '').trim();
+  const tempFallback =
+    b.buyerIsTemporary === true
+      ? `${(b.buyerMark ?? '').trim()}${(b.buyerName ?? '').trim()}`.trim() || (b.buyerMark ?? '').trim()
+      : '';
+  const effectiveBillingName = trimmedBilling || (b.buyerIsTemporary === true ? tempFallback : '');
+  if (!effectiveBillingName) {
+    errors.billingName =
+      b.buyerIsTemporary === true ? 'Mark or billing name is required' : 'Billing name is required';
+  } else if (effectiveBillingName.length < (b.buyerIsTemporary === true ? 1 : 2)) {
+    errors.billingName = b.buyerIsTemporary === true ? 'Mark is required' : 'Minimum 2 characters';
+  } else if (effectiveBillingName.length > 150) {
     errors.billingName = 'Maximum 150 characters';
   }
 
@@ -852,7 +868,7 @@ const BillingPage = () => {
   const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
   const [contactsRegistry, setContactsRegistry] = useState<Contact[]>([]);
   const [restorePendingPhone, setRestorePendingPhone] = useState<string | null>(null);
-  const [replaceTarget, setReplaceTarget] = useState<'BUYER' | 'BROKER'>('BUYER');
+  const [replaceTarget, setReplaceTarget] = useState<'BUYER' | 'BROKER' | 'TEMP_BUYER'>('BUYER');
   const [replaceMarkInput, setReplaceMarkInput] = useState('');
   const [replaceSearchResults, setReplaceSearchResults] = useState<Contact[]>([]);
   const [replaceSearchLoading, setReplaceSearchLoading] = useState(false);
@@ -1241,6 +1257,11 @@ const BillingPage = () => {
   };
 
   useEffect(() => {
+    if (replaceTarget === 'TEMP_BUYER') {
+      setReplaceSearchResults([]);
+      setReplaceSearchLoading(false);
+      return;
+    }
     const q = replaceMarkInput.trim();
     const selectedKey = (replaceSelectedContact?.mark || replaceSelectedContact?.name || '').trim().toUpperCase();
     if (replaceSelectedContact && selectedKey && selectedKey === q.toUpperCase()) {
@@ -1273,7 +1294,7 @@ const BillingPage = () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [replaceMarkInput, replaceSelectedContact]);
+  }, [replaceMarkInput, replaceSelectedContact, replaceTarget]);
 
   const pickReplacementContact = (contact: Contact) => {
     setReplaceSelectedContact(contact);
@@ -1294,7 +1315,10 @@ const BillingPage = () => {
     const trimmedName = replaceForm.name.trim();
     const trimmedPhone = replaceForm.phone.trim();
     if (!trimmedMark) errs.mark = 'Mark is required';
-    if (!trimmedName) errs.name = 'Name is required';
+    else if (replaceTarget === 'TEMP_BUYER' && trimmedMark.length > MAX_MARK_LEN) {
+      errs.mark = `Maximum ${MAX_MARK_LEN} characters`;
+    }
+    if (replaceTarget !== 'TEMP_BUYER' && !trimmedName) errs.name = 'Name is required';
     if (trimmedPhone && !/^[6-9]\d{9}$/.test(trimmedPhone)) errs.phone = 'Enter a valid 10-digit mobile number';
     setReplaceErrors(errs);
     return Object.keys(errs).length === 0;
@@ -1320,7 +1344,7 @@ const BillingPage = () => {
           buyerAsBroker: false,
         };
       }
-      return {
+      const buyerNext = {
         ...prev,
         buyerName: nextName,
         buyerMark: nextMark,
@@ -1328,11 +1352,83 @@ const BillingPage = () => {
         buyerPhone: contact.phone ?? '',
         buyerAddress: contact.address ?? '',
         billingName: nextName,
+        buyerIsTemporary: false,
+      };
+      if (!buyerNext.buyerAsBroker) return buyerNext;
+      return {
+        ...buyerNext,
+        brokerName: billingBuyerDisplayLine(buyerNext) || buyerNext.buyerMark,
+        brokerMark: buyerNext.buyerMark,
+        brokerContactId: buyerNext.buyerContactId,
+        brokerPhone: buyerNext.buyerPhone,
+        brokerAddress: buyerNext.buyerAddress,
       };
     });
   };
 
   const submitReplacement = async () => {
+    if (replaceTarget === 'TEMP_BUYER') {
+      if (!bill) return;
+      if (!validateReplacementForm()) return;
+      const trimmedMark = replaceForm.mark.trim().toUpperCase();
+      const trimmedName = replaceForm.name.trim();
+      const trimmedPhone = replaceForm.phone.trim();
+      const markLower = trimmedMark.toLowerCase();
+      try {
+        const hits = await contactApi.search(trimmedMark);
+        const usedByRegisteredContact = hits.some(
+          c => (c.mark || '').trim().toLowerCase() === markLower,
+        );
+        if (usedByRegisteredContact) {
+          setReplaceErrors({ mark: 'This mark is already used by a registered contact' });
+          return;
+        }
+      } catch {
+        toast.error('Could not verify mark against contacts');
+        return;
+      }
+      const billingEff = trimmedName || trimmedMark;
+      setSelectedBuyer(prev =>
+        prev
+          ? {
+              ...prev,
+              buyerName: trimmedName,
+              buyerMark: trimmedMark,
+              buyerContactId: null,
+            }
+          : prev,
+      );
+      setBill(prev => {
+        if (!prev) return prev;
+        const base = {
+          ...prev,
+          buyerName: trimmedName,
+          buyerMark: trimmedMark,
+          buyerContactId: null,
+          buyerPhone: trimmedPhone,
+          buyerAddress: '',
+          billingName: billingEff,
+          buyerIsTemporary: true,
+        };
+        if (!base.buyerAsBroker) return base;
+        const brokerHeadline = billingBuyerDisplayLine({
+          buyerName: trimmedName,
+          buyerMark: trimmedMark,
+        });
+        return {
+          ...base,
+          brokerName: brokerHeadline || trimmedMark,
+          brokerMark: trimmedMark,
+          brokerContactId: null,
+          brokerPhone: trimmedPhone,
+          brokerAddress: '',
+        };
+      });
+      clearReplacementInline();
+      toast.success('Temp buyer set on this bill. Save the bill to update auction bids.');
+      return;
+    }
+
     const hadExistingSelection = !!replaceSelectedContact;
     let resolved: Contact | null = replaceSelectedContact;
     if (!resolved) {
@@ -1378,6 +1474,7 @@ const BillingPage = () => {
         buyerPhone: resolved.phone ?? '',
         buyerAddress: resolved.address ?? '',
         billingName: nextName || bill.billingName,
+        buyerIsTemporary: false,
       };
       void (async () => {
         try {
@@ -1608,6 +1705,7 @@ const BillingPage = () => {
       brokerageValue: b.brokerageValue,
       globalOtherCharges: b.globalOtherCharges,
       pendingBalance: b.pendingBalance,
+      buyerIsTemporary: b.buyerIsTemporary,
     });
   }, []);
 
@@ -1868,6 +1966,7 @@ const BillingPage = () => {
       buyerName: buyer.buyerName,
       buyerMark: buyer.buyerMark,
       buyerContactId: buyer.buyerContactId ?? null,
+      buyerIsTemporary: false,
       buyerPhone: '',
       buyerAddress: '',
       buyerAsBroker: false,
@@ -2685,8 +2784,14 @@ const BillingPage = () => {
       }
       return null;
     }
+    /** Backend @NotBlank buyerName; temp buyer may leave display name empty — mirror mark / billing name. */
+    const buyerNameForApi =
+      billingBuyerDisplayLine(bill)
+      || (bill.billingName ?? '').trim()
+      || (bill.buyerMark ?? '').trim()
+      || '—';
     const payload = {
-      buyerName: bill.buyerName,
+      buyerName: buyerNameForApi,
       buyerMark: bill.buyerMark,
       buyerContactId: bill.buyerContactId,
       buyerPhone: bill.buyerPhone ?? '',
@@ -2810,8 +2915,12 @@ const BillingPage = () => {
     // Assign bill number on save (completed bill), idempotent if already numbered.
     const assigned = await billingApi.assignNumber(result.billId);
     const normalized = recalcGrandTotal(normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData);
-    setBill(normalized);
-    billDirtyBaselineRef.current = serializeBillForDirty(normalized);
+    const withTempFlag: BillData = {
+      ...normalized,
+      buyerIsTemporary: !normalized.buyerContactId && Boolean(bill.buyerIsTemporary),
+    };
+    setBill(withTempFlag);
+    billDirtyBaselineRef.current = serializeBillForDirty(withTempFlag);
     setHasSavedOnce(true);
     toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
     void loadSavedBills();
@@ -3915,14 +4024,18 @@ const BillingPage = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 <div className="rounded-xl border border-border/40 p-3">
                   <p className="text-[10px] text-primary font-semibold uppercase">Buyer</p>
-                  <p className="text-sm sm:text-base font-bold text-foreground truncate">{bill.buyerName || '—'}</p>
+                  <p className="text-sm sm:text-base font-bold text-foreground truncate">
+                    {(bill.buyerName || '').trim() || bill.buyerMark || '—'}
+                  </p>
                   <p className="text-xs text-muted-foreground">{bill.buyerPhone || 'No phone'}</p>
                   <p className="text-xs text-muted-foreground truncate">{bill.buyerAddress || 'No address'}</p>
                 </div>
                 <div className="rounded-xl border border-border/40 p-3">
                   <p className="text-[10px] text-primary font-semibold uppercase">Broker</p>
                   <p className="text-sm sm:text-base font-bold text-foreground truncate">
-                    {bill.buyerAsBroker ? (bill.buyerName || 'Not selected') : (bill.brokerName || 'Not selected')}
+                    {bill.buyerAsBroker
+                      ? (billingBuyerDisplayLine(bill) || 'Not selected')
+                      : (bill.brokerName || 'Not selected')}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {bill.buyerAsBroker ? (bill.buyerPhone || 'No phone') : (bill.brokerPhone || 'No phone')}
@@ -3964,12 +4077,12 @@ const BillingPage = () => {
                 <RadioGroup
                   value={replaceTarget}
                   onValueChange={v => {
-                    if (v === 'BUYER' || v === 'BROKER') {
+                    if (v === 'BUYER' || v === 'BROKER' || v === 'TEMP_BUYER') {
                       setReplaceTarget(v);
                       clearReplacementInline();
                     }
                   }}
-                  className="flex flex-row gap-x-3 min-h-9 shrink-0 items-center rounded-xl border border-border/30 bg-muted/20 px-2.5 py-1.5"
+                  className="flex flex-row flex-wrap gap-x-3 gap-y-1 min-h-9 shrink-0 items-center rounded-xl border border-border/30 bg-muted/20 px-2.5 py-1.5"
                   disabled={!bill}
                 >
                   <div className="flex items-center gap-1.5">
@@ -3984,21 +4097,33 @@ const BillingPage = () => {
                       Broker
                     </Label>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="TEMP_BUYER" id="billing-replace-target-temp-buyer" disabled={!bill} />
+                    <Label htmlFor="billing-replace-target-temp-buyer" className="cursor-pointer text-sm font-medium whitespace-nowrap">
+                      Temp Buyer
+                    </Label>
+                  </div>
                 </RadioGroup>
                 <div className="relative min-w-[7rem] flex-1 basis-[10rem]">
                   <Input
                     value={replaceMarkInput}
                     onChange={e => {
-                      const value = e.target.value.toUpperCase();
+                      const raw = e.target.value.toUpperCase();
+                      const value =
+                        replaceTarget === 'TEMP_BUYER' ? raw.slice(0, MAX_MARK_LEN) : raw;
                       setReplaceMarkInput(value);
                       setReplaceSelectedContact(null);
                       setReplaceForm(prev => ({ ...prev, mark: value }));
                     }}
-                    placeholder="Mark"
+                    placeholder={replaceTarget === 'TEMP_BUYER' ? 'Mark (required)' : 'Mark'}
                     className={cn('h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium', replaceErrors.mark && 'border-destructive')}
                     disabled={!bill}
                   />
-                  {!replaceSearchLoading && replaceMarkInput.trim() && replaceSearchResults.length > 0 && !searchBidDialogOpen && (
+                  {!replaceSearchLoading
+                    && replaceTarget !== 'TEMP_BUYER'
+                    && replaceMarkInput.trim()
+                    && replaceSearchResults.length > 0
+                    && !searchBidDialogOpen && (
                     <div className={cn("absolute mt-1 max-h-44 w-full min-w-[12rem] overflow-y-auto rounded-xl border border-border/50 bg-background shadow-lg", searchBidDialogOpen ? "z-[20]" : "z-[90]")}>
                       {replaceSearchResults.map(c => (
                         <button
@@ -4023,7 +4148,7 @@ const BillingPage = () => {
                     setReplaceSelectedContact(null);
                     setReplaceForm(prev => ({ ...prev, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }));
                   }}
-                  placeholder="Mobile"
+                  placeholder={replaceTarget === 'TEMP_BUYER' ? 'Mobile (optional)' : 'Mobile'}
                   inputMode="numeric"
                   autoComplete="tel"
                   className={cn('h-9 w-[9.25rem] shrink-0 rounded-lg bg-muted/10 border-border/30 text-sm font-medium sm:w-40', replaceErrors.phone && 'border-destructive')}
@@ -4035,7 +4160,7 @@ const BillingPage = () => {
                     setReplaceSelectedContact(null);
                     setReplaceForm(prev => ({ ...prev, name: e.target.value }));
                   }}
-                  placeholder="Name"
+                  placeholder={replaceTarget === 'TEMP_BUYER' ? 'Name (optional)' : 'Name'}
                   className={cn(
                     'h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium min-w-[5.5rem] flex-1 basis-[10rem] max-w-[14rem]',
                     replaceErrors.name && 'border-destructive',
@@ -4057,11 +4182,11 @@ const BillingPage = () => {
                       setBill({
                         ...bill,
                         buyerAsBroker: true,
-                        brokerName: bill.buyerName,
+                        brokerName: billingBuyerDisplayLine(bill) || bill.buyerMark,
                         brokerMark: bill.buyerMark,
                         brokerContactId: bill.buyerContactId,
-                        brokerPhone: bill.buyerPhone,
-                        brokerAddress: bill.buyerAddress,
+                        brokerPhone: bill.buyerPhone ?? '',
+                        brokerAddress: bill.buyerAddress ?? '',
                       });
                     }}
                     disabled={!bill}
@@ -4074,17 +4199,20 @@ const BillingPage = () => {
                   className={cn(arrSolidMd, 'whitespace-nowrap shrink-0')}
                   onClick={() => void submitReplacement()}
                   disabled={
-                    !bill || (!replaceSelectedContact && !canCreateContact)
+                    !bill
+                    || (!replaceSelectedContact && replaceTarget !== 'TEMP_BUYER' && !canCreateContact)
                   }
                   title={
-                    !replaceSelectedContact && !canCreateContact
+                    !replaceSelectedContact && replaceTarget !== 'TEMP_BUYER' && !canCreateContact
                       ? 'You do not have permission to create contacts.'
                       : undefined
                   }
                 >
                   {replaceSelectedContact
                     ? `${replaceTarget === 'BROKER' ? 'Update Broker' : 'Change Buyer'}`
-                    : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
+                    : replaceTarget === 'TEMP_BUYER'
+                      ? 'Add Temp Buyer'
+                      : `Add ${replaceTarget === 'BROKER' ? 'Broker' : 'Buyer'}`}
                
                 </Button>
                 <Button type="button" variant="outline" className={cn(arrSolidMd, 'shrink-0')} onClick={clearReplacementInline}>

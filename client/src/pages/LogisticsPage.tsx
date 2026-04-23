@@ -66,6 +66,17 @@ const bidListKey = (b: BidInfo, indexInList: number): string => {
 };
 
 /**
+ * Migrate dialog selection: must NOT include search-result row index — changing the query reorderes
+ * results and breaks `bidListKey(_, i)`. Use stable id only.
+ */
+const migratePoolStableKey = (b: BidInfo): string => {
+  if (b.auctionEntryId != null && Number.isFinite(Number(b.auctionEntryId))) {
+    return `ae:${b.auctionEntryId}`;
+  }
+  return bidKey(b);
+};
+
+/**
  * Reserved Print Hub "pool" (server auction entry buyer fields).
  * Bids with this mark are unassigned; visible to all users with auction results.
  */
@@ -111,7 +122,7 @@ const chittiDeleteIconBtnClass =
 
 /**
  * Per-bid buyer Chitti completion (server `print_log.reference_id` = `lotId:bidNumber`).
- * Same trader: shared across users / sessions (see GET /print-logs/reference-ids).
+ * Cleared server-side when bid buyer changes (migrate / pool), so reassigned lines can print again.
  */
 const BUYER_CHITI_BID_REF_TYPE = 'BUYER_CHITI_BID';
 
@@ -254,9 +265,12 @@ const LogisticsPage = () => {
             if (!sellerMark) sellerMark = String(listMeta.sellerMark ?? '').trim();
           }
 
+          const rawEntryId =
+            entry.auctionEntryId ??
+            (entry as { auction_entry_id?: number | null }).auction_entry_id;
           const auctionEntryId =
-            entry.auctionEntryId != null && Number.isFinite(Number(entry.auctionEntryId))
-              ? Number(entry.auctionEntryId)
+            rawEntryId != null && Number.isFinite(Number(rawEntryId))
+              ? Number(rawEntryId)
               : undefined;
 
           allBids.push({
@@ -418,8 +432,6 @@ const LogisticsPage = () => {
 
   /** Staged removals: moved to Unassigned on “Save & print chitti”, not immediately. */
   const [pendingRemoveByMark, setPendingRemoveByMark] = useState<Record<string, Set<string>>>({});
-  /** After successful Save & print for this buyer, pool migrate is allowed (session). */
-  const [migrateUnlockedByMark, setMigrateUnlockedByMark] = useState<Record<string, boolean>>({});
   const [stagingRemove, setStagingRemove] = useState<{ buyerMark: string; bid: BidInfo } | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [migrateTarget, setMigrateTarget] = useState<{ buyerName: string; buyerMark: string } | null>(null);
@@ -496,39 +508,37 @@ const LogisticsPage = () => {
     });
   }, [stagingRemove, canEditAuctionBids]);
 
-  const migrateAllowedForMark = useCallback(
-    (buyerMark: string) => {
-      if (migrateUnlockedByMark[buyerMark]) return true;
-      const group = buyerGroups.find((x) => x.buyerMark === buyerMark);
-      return group?.bids.some((b) => printedBidKeys.has(bidKey(b))) ?? false;
-    },
-    [buyerGroups, migrateUnlockedByMark, printedBidKeys]
-  );
-
   const runMigrateFromPool = useCallback(async () => {
     if (!migrateTarget || migrateSelectedKeys.size === 0) return;
-    if (!migrateAllowedForMark(migrateTarget.buyerMark)) {
-      toast.error('Save & print chitti for this buyer first, then you can migrate from the pool.');
-      return;
-    }
     if (!canEditAuctionBids) {
       toast.error('You do not have permission to reassign bids.');
       return;
     }
     setMigrateBusy(true);
     try {
+      let reassigned = 0;
       for (const k of migrateSelectedKeys) {
-        const b = migrateSearchResults.find((x, i) => bidListKey(x, i) === k);
+        const b = unassignedPoolBids.find((x) => migratePoolStableKey(x) === k);
         if (b && b.auctionEntryId != null) {
           await reassignBidBuyer(b, migrateTarget.buyerName, migrateTarget.buyerMark);
+          reassigned += 1;
         }
       }
+      if (reassigned === 0) {
+        toast.error('No bids matched your selection. Change search or refresh, then try again.');
+        return;
+      }
       await refetchAuctions();
+      await loadPrintedBidKeysFromServer();
       setMigrateOpen(false);
       setMigrateTarget(null);
       setMigrateSearch('');
       setMigrateSelectedKeys(new Set());
-      toast.success('Bids assigned to this buyer.');
+      toast.success(
+        reassigned === migrateSelectedKeys.size
+          ? 'Bids assigned to this buyer.'
+          : `Assigned ${reassigned} bid(s); some selections could not be matched (refresh if needed).`
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not assign bids');
     } finally {
@@ -537,11 +547,11 @@ const LogisticsPage = () => {
   }, [
     migrateTarget,
     migrateSelectedKeys,
-    migrateAllowedForMark,
     canEditAuctionBids,
-    migrateSearchResults,
+    unassignedPoolBids,
     reassignBidBuyer,
     refetchAuctions,
+    loadPrintedBidKeysFromServer,
   ]);
 
   useEffect(() => {
@@ -765,7 +775,6 @@ const LogisticsPage = () => {
       await refetchAuctions().catch(() => {});
     }
     setPendingRemoveByMark((p) => ({ ...p, [mark]: new Set() }));
-    setMigrateUnlockedByMark((p) => ({ ...p, [mark]: true }));
     await loadPrintedBidKeysFromServer();
     if (toPrint.length > 0 && pending.size > 0) {
       toast.success('Chitti printed and staged bids moved to Unassigned.');
@@ -1054,12 +1063,7 @@ const LogisticsPage = () => {
                               type="button"
                               className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 max-w-full sm:max-w-[min(100%,14rem)] justify-center inline-flex items-center gap-1')}
                               style={buyerChittiBulkBtnStyle}
-                              disabled={unassignedPoolBids.length === 0}
-                              title={
-                                unassignedPoolBids.length === 0
-                                  ? 'No bids in the Unassigned pool'
-                                  : 'Search unassigned bids to add here'
-                              }
+                              title="Search unassigned pool bids to assign to this buyer"
                               onClick={() => {
                                 setMigrateTarget({ buyerName: g.buyerName, buyerMark: g.buyerMark });
                                 setMigrateSearch('');
@@ -1073,7 +1077,7 @@ const LogisticsPage = () => {
                           )}
                         </div>
                         <p id={`${printRateId}-desc`} className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-                          When on, the rate column is included on this buyer&apos;s Chiti print. Assigning from the pool is allowed after Save &amp; print chitti once for this buyer, or if this buyer already has printed lots on file.
+                          When on, the rate column is included on this buyer&apos;s Chiti print. Add lots from the Unassigned pool with Search &amp; migrate bid first if needed, then select rows and tap Save &amp; print chitti when you are ready to print.
                         </p>
                       </div>
                       <p className="text-[10px] font-semibold text-muted-foreground">
@@ -1489,11 +1493,16 @@ const LogisticsPage = () => {
             <DialogTitle>Search &amp; migrate bid</DialogTitle>
             <DialogDescription>
               {migrateTarget
-                ? `Add unassigned bids to ${migrateTarget.buyerName} (${migrateTarget.buyerMark}). Type to search — no full list.`
+                ? `Pull unassigned pool bids onto ${migrateTarget.buyerName} (${migrateTarget.buyerMark}). Then close and use Save & print chitti to print. Type to search — no full list.`
                 : 'Choose a buyer on the card first.'}
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 flex flex-col gap-2 min-h-0 flex-1">
+            {unassignedPoolBids.length === 0 ? (
+              <p className="text-sm text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 leading-snug">
+                No bids are in the Unassigned pool right now (nothing to migrate). Send lines to Unassigned from a buyer card if needed, or refresh after auction updates.
+              </p>
+            ) : null}
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               <Input
@@ -1516,11 +1525,11 @@ const LogisticsPage = () => {
             ) : (
               <ul className="min-h-0 max-h-[min(42vh,320px)] overflow-y-auto space-y-1.5 pr-0.5 py-1" role="list">
                 {migrateSearchResults.map((b, rowIdx) => {
-                  const sk = bidListKey(b, rowIdx);
+                  const sk = migratePoolStableKey(b);
                   const selected = migrateSelectedKeys.has(sk);
-                  const migDomId = `mig-${sk.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                  const migDomId = `mig-${sk.replace(/[^a-zA-Z0-9_-]/g, '_')}-${rowIdx}`;
                   return (
-                    <li key={sk}>
+                    <li key={`mig-${sk}-${rowIdx}`}>
                       <div className="flex items-start gap-2 rounded-lg border border-border/60 p-2 hover:bg-foreground/5">
                         <Checkbox
                           id={migDomId}
@@ -1558,7 +1567,7 @@ const LogisticsPage = () => {
                   className={BUYER_CHITTI_BULK_BTN_CLASS}
                   style={buyerChittiBulkBtnStyle}
                   onClick={() =>
-                    setMigrateSelectedKeys(new Set(migrateSearchResults.map((x, i) => bidListKey(x, i))))
+                    setMigrateSelectedKeys(new Set(migrateSearchResults.map((x) => migratePoolStableKey(x))))
                   }
                 >
                   Select all shown
@@ -1587,18 +1596,12 @@ const LogisticsPage = () => {
             </button>
             <button
               type="button"
-              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-w-[10rem]')}
+              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-w-[10rem] disabled:opacity-40')}
               style={buyerChittiBulkBtnStyle}
               disabled={
                 migrateSelectedKeys.size === 0 ||
                 migrateBusy ||
-                !migrateTarget ||
-                !migrateAllowedForMark(migrateTarget.buyerMark)
-              }
-              title={
-                migrateTarget && !migrateAllowedForMark(migrateTarget.buyerMark)
-                  ? 'Save & print chitti for this buyer once to enable assigning from the pool.'
-                  : undefined
+                !migrateTarget
               }
               onClick={() => void runMigrateFromPool()}
             >
