@@ -384,6 +384,11 @@ public class SalesBillServiceImpl implements SalesBillService {
                 item.setAuctionEntryId(it.getAuctionEntryId());
                 item.setSelfSaleUnitId(it.getSelfSaleUnitId());
                 item.setSellerName(it.getSellerName());
+                item.setLotTotalQty(it.getLotTotalQty());
+                item.setVehicleTotalQty(it.getVehicleTotalQty());
+                item.setSellerVehicleQty(it.getSellerVehicleQty());
+                item.setVehicleMark(it.getVehicleMark());
+                item.setSellerMark(it.getSellerMark());
                 item.setQuantity(it.getQuantity() != null ? it.getQuantity() : 0);
                 item.setWeight(it.getWeight() != null ? it.getWeight() : BigDecimal.ZERO);
                 item.setBaseRate(it.getBaseRate() != null ? it.getBaseRate() : BigDecimal.ZERO);
@@ -465,6 +470,11 @@ public class SalesBillServiceImpl implements SalesBillService {
                 idto.setAuctionEntryId(it.getAuctionEntryId());
                 idto.setSelfSaleUnitId(it.getSelfSaleUnitId());
                 idto.setSellerName(it.getSellerName());
+                idto.setLotTotalQty(it.getLotTotalQty());
+                idto.setVehicleTotalQty(it.getVehicleTotalQty());
+                idto.setSellerVehicleQty(it.getSellerVehicleQty());
+                idto.setVehicleMark(it.getVehicleMark());
+                idto.setSellerMark(it.getSellerMark());
                 idto.setQuantity(it.getQuantity());
                 idto.setWeight(it.getWeight());
                 idto.setBaseRate(it.getBaseRate());

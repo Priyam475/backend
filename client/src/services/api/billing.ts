@@ -10,6 +10,12 @@ export interface BillLineItemDTO {
   auctionEntryId?: number | null;
   selfSaleUnitId?: number | null;
   sellerName?: string;
+  /** Lot-level bag count for canonical lot identifier (Sales Pad format); not billed qty. */
+  lotTotalQty?: number | null;
+  vehicleTotalQty?: number | null;
+  sellerVehicleQty?: number | null;
+  vehicleMark?: string | null;
+  sellerMark?: string | null;
   quantity: number;
   weight: number;
   baseRate: number;

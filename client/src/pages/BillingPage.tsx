@@ -362,12 +362,20 @@ function roundBillMoneyValues(b: BillData): BillData {
 
 /** Lot identifier for billing rows (same pattern as Sales Pad / Logistics). */
 function formatLotIdentifierForBillEntry(entry: BillEntry | BillLineItem): string {
-  const lotQty = Number((entry as any).lotTotalQty ?? (entry as any).quantity ?? 0) || 0;
-  const lotName = String((entry as any).lotName || lotQty || '');
-  const vTotal = Number((entry as any).vehicleTotalQty ?? lotQty) || lotQty;
-  const sTotal = Number((entry as any).sellerVehicleQty ?? lotQty) || lotQty;
-  const vm = String((entry as any).vehicleMark ?? '').trim();
-  const sm = String((entry as any).sellerMark ?? '').trim();
+  const e = entry as any;
+  const lineQty = Number(e.quantity ?? 0) || 0;
+  const rawLt = e.lotTotalQty;
+  const lotQty =
+    rawLt != null && Number.isFinite(Number(rawLt)) && Number(rawLt) > 0 ? Number(rawLt) : lineQty;
+  const lotName = String(e.lotName || lotQty || '');
+  const rawVt = e.vehicleTotalQty;
+  const vTotal =
+    rawVt != null && Number.isFinite(Number(rawVt)) && Number(rawVt) > 0 ? Number(rawVt) : lotQty;
+  const rawSv = e.sellerVehicleQty;
+  const sTotal =
+    rawSv != null && Number.isFinite(Number(rawSv)) && Number(rawSv) > 0 ? Number(rawSv) : lotQty;
+  const vm = String(e.vehicleMark ?? '').trim();
+  const sm = String(e.sellerMark ?? '').trim();
   return formatAuctionLotIdentifier({
     vehicleMark: vm,
     vehicleTotalQty: vTotal,
@@ -2811,15 +2819,7 @@ const BillingPage = () => {
           ? { gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: Number(g.igstRate) || 0 }
           : { gstRate: Number(g.gstRate) || 0, sgstRate: Number(g.sgstRate) || 0, cgstRate: Number(g.cgstRate) || 0, igstRate: 0 }),
         items: (g.items ?? []).map((it: any) => {
-          const {
-            sellerOtherCharges: _soc,
-            lotTotalQty: _ltq,
-            vehicleTotalQty: _vtq,
-            sellerVehicleQty: _svq,
-            vehicleMark: _vm,
-            sellerMark: _sm,
-            ...restIt
-          } = it;
+          const { sellerOtherCharges: _soc, ...restIt } = it;
           return restIt;
         }),
       })),

@@ -26,6 +26,14 @@ public final class SalesBillDTOs {
         private Long auctionEntryId;
         private Long selfSaleUnitId;
         private String sellerName;
+        /** Lot-level bag count for canonical lot identifier; optional on legacy rows. */
+        private Integer lotTotalQty;
+        private Integer vehicleTotalQty;
+        private Integer sellerVehicleQty;
+        @Size(max = 32)
+        private String vehicleMark;
+        @Size(max = 32)
+        private String sellerMark;
         private Integer quantity;
         private BigDecimal weight;
         private BigDecimal baseRate;
@@ -50,6 +58,16 @@ public final class SalesBillDTOs {
         public void setSelfSaleUnitId(Long selfSaleUnitId) { this.selfSaleUnitId = selfSaleUnitId; }
         public String getSellerName() { return sellerName; }
         public void setSellerName(String sellerName) { this.sellerName = sellerName; }
+        public Integer getLotTotalQty() { return lotTotalQty; }
+        public void setLotTotalQty(Integer lotTotalQty) { this.lotTotalQty = lotTotalQty; }
+        public Integer getVehicleTotalQty() { return vehicleTotalQty; }
+        public void setVehicleTotalQty(Integer vehicleTotalQty) { this.vehicleTotalQty = vehicleTotalQty; }
+        public Integer getSellerVehicleQty() { return sellerVehicleQty; }
+        public void setSellerVehicleQty(Integer sellerVehicleQty) { this.sellerVehicleQty = sellerVehicleQty; }
+        public String getVehicleMark() { return vehicleMark; }
+        public void setVehicleMark(String vehicleMark) { this.vehicleMark = vehicleMark; }
+        public String getSellerMark() { return sellerMark; }
+        public void setSellerMark(String sellerMark) { this.sellerMark = sellerMark; }
         public Integer getQuantity() { return quantity; }
         public void setQuantity(Integer quantity) { this.quantity = quantity; }
         public BigDecimal getWeight() { return weight; }

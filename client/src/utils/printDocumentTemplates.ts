@@ -156,10 +156,17 @@ function commodityNetTotal(group: BillPrintData['commodityGroups'][number]): num
 function formatLotIdentifierForPrint(
   item: BillPrintData['commodityGroups'][number]['items'][number],
 ): string {
-  const lotQty = Number(item.lotTotalQty ?? item.quantity ?? 0) || 0;
+  const lineQty = Number(item.quantity ?? 0) || 0;
+  const rawLt = item.lotTotalQty;
+  const lotQty =
+    rawLt != null && Number.isFinite(Number(rawLt)) && Number(rawLt) > 0 ? Number(rawLt) : lineQty;
   const lotName = String(item.lotName || String(lotQty || ''));
-  const vTotal = Number(item.vehicleTotalQty ?? lotQty) || lotQty;
-  const sTotal = Number(item.sellerVehicleQty ?? lotQty) || lotQty;
+  const rawVt = item.vehicleTotalQty;
+  const vTotal =
+    rawVt != null && Number.isFinite(Number(rawVt)) && Number(rawVt) > 0 ? Number(rawVt) : lotQty;
+  const rawSv = item.sellerVehicleQty;
+  const sTotal =
+    rawSv != null && Number.isFinite(Number(rawSv)) && Number(rawSv) > 0 ? Number(rawSv) : lotQty;
   return formatAuctionLotIdentifier({
     vehicleMark: item.vehicleMark,
     vehicleTotalQty: vTotal,
