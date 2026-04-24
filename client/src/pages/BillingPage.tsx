@@ -3119,8 +3119,9 @@ const BillingPage = () => {
     when: isBillingDirty,
     title: 'Save your progress?',
     description: 'You have unsaved changes. Would you like to save your progress before leaving?',
-    continueLabel: 'Save',
+    continueLabel: 'Save to Bill In Progress',
     stayLabel: 'Discard',
+    closeLabel: 'Stay On Page',
     onBeforeContinue: handleBillingPartialSave,
   });
   billingTabConfirmIfDirtyRef.current = confirmIfDirty;
@@ -3870,7 +3871,7 @@ const BillingPage = () => {
               <button type="button" onClick={() => requestBillingMainTab('create')}
                 className={billingToggleTabBtnOnHero(billingMainTab === 'create')}>
                 <Plus className="w-4 h-4 shrink-0 hidden sm:block" />
-                <span>Create New Bill{tabHint('Alt X')}</span>
+                <span>Bill Operations{tabHint('Alt X')}</span>
               </button>
               <button type="button" onClick={() => requestBillingMainTab('progress')}
                 className={billingToggleTabBtnOnHero(billingMainTab === 'progress')}>
@@ -3909,7 +3910,7 @@ const BillingPage = () => {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-4">
             <div className="flex items-center gap-2 w-full lg:w-auto overflow-x-auto" role="tablist" aria-label="Billing views">
               <button type="button" onClick={() => requestBillingMainTab('create')} className={billingToggleTabBtn(billingMainTab === 'create')}>
-                <Plus className="w-4 h-4" /> Create New Bill{tabHint('Alt X')}
+                <Plus className="w-4 h-4" /> Bill Operations{tabHint('Alt X')}
               </button>
               <button type="button" onClick={() => requestBillingMainTab('progress')} className={billingToggleTabBtn(billingMainTab === 'progress')}>
                 <Clock className="w-4 h-4" /> Bill In Progress{tabHint('Alt Y')}
@@ -4002,7 +4003,7 @@ const BillingPage = () => {
                 disabled={!bill && !selectedBuyer}
                 className={cn(arrSolidLg, 'sm:self-end')}
               >
-                Change Bill
+                Create New Bill
               </Button>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">

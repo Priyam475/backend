@@ -729,8 +729,7 @@ export function generateSalesBillPrintHTMLForCopies(
 // ─────────────────────────────────────────────────────────────────────────────
 // Non-GST Sales Bill (Buyer)
 // Always: no header (no firm letterhead), A5 portrait by default.
-// Layout mirrors design spec: "Sold X Bags of ITEM..." info block,
-// combined 7-col table (items left + particulars right), words strip, copy name.
+// Info block: buyer/vehicle; combined 7-col table (items left + particulars right), words strip, copy name.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildNonGstBillCSS(pageSize: 'A4' | 'A5'): string {
@@ -836,7 +835,6 @@ function generateNonGstCommodityPage(
     ? String(bill.billDate)
     : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
-  const commodity = escapeHtml((group.commodityName || 'Item').trim());
   const divisor   = Number(group.divisor) > 0 ? Number(group.divisor) : 50;
   const billNum   = escapeHtml(bill.billNumber || 'DRAFT');
   const buyerName = escapeHtml((bill.billingName || bill.buyerName || '—').trim());
@@ -883,7 +881,6 @@ function generateNonGstCommodityPage(
   const totalParsAmt = roundMoney2(pars.reduce((s, p) => s + p.amount, 0));
   const net          = commodityNetTotal(group);
   const wordsStr     = inrAmountToWords(net);
-  const totalQtyInt  = Math.round(totalQty);
 
   /* ── Build data rows (max of items vs particulars count) ── */
   const maxRows = Math.max(items.length, pars.length);
@@ -917,7 +914,6 @@ function generateNonGstCommodityPage(
   <div class="${pageNum < totalPages ? 'pg pg-break' : 'pg'}">
     <div class="info-blk">
       <div class="info-l">
-        <div>Sold <strong>${totalQtyInt}</strong> Bags of <strong>${commodity}</strong> on account and risk of</div>
         <div>${buyerName}${contact ? ', ' + contact : ''}</div>
         ${addr    ? `<div>${addr}</div>`                       : ''}
         ${vehicle ? `<div>Vehicle No : ${vehicle}</div>` : ''}
