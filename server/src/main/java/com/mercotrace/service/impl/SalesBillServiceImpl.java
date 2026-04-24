@@ -166,8 +166,17 @@ public class SalesBillServiceImpl implements SalesBillService {
             .orElse(DEFAULT_BILL_PREFIX);
     }
 
+    /**
+     * Assigns the next number for the given {@code prefix}. {@code print_settings.bill_number_start_from} (BILLING)
+     * is only applied for the trader's default bill prefix (e.g. MT from profile): it is the starting index for
+     * that line (555 → MT-00555, then MT-00556). Commodity-based prefixes (ON, OP, …) each have their own counter
+     * starting at 1 and are not forced to the same "start from" value.
+     */
     private String generateBillNumber(String prefix, Long traderId) {
         String key = prefix != null && !prefix.isBlank() ? prefix.trim().toUpperCase() : DEFAULT_BILL_PREFIX;
+        String traderDefaultPrefix = getTraderFallbackPrefix(traderId);
+        boolean applyStartFrom = key.equalsIgnoreCase(traderDefaultPrefix);
+
         BillNumberSequence seq = billNumberSequenceRepository.findByPrefixForUpdate(key)
             .orElseGet(() -> {
                 BillNumberSequence newSeq = new BillNumberSequence();
@@ -176,10 +185,13 @@ public class SalesBillServiceImpl implements SalesBillService {
                 return newSeq;
             });
         long seqNext = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
-        Integer floor = printSettingRepository
-            .findByTraderIdAndModuleKey(traderId, "BILLING")
-            .map(PrintSetting::getBillNumberStartFrom)
-            .orElse(null);
+        Integer floor = null;
+        if (applyStartFrom) {
+            floor = printSettingRepository
+                .findByTraderIdAndModuleKey(traderId, "BILLING")
+                .map(PrintSetting::getBillNumberStartFrom)
+                .orElse(null);
+        }
         long effective = floor != null ? Math.max(seqNext, floor.longValue()) : seqNext;
         seq.setNextValue(effective + 1);
         billNumberSequenceRepository.save(seq);

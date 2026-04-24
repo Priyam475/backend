@@ -3,13 +3,20 @@ package com.mercotrace.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mercotrace.domain.BillNumberSequence;
+import com.mercotrace.domain.Commodity;
+import com.mercotrace.domain.CommodityConfig;
+import com.mercotrace.domain.PrintSetting;
 import com.mercotrace.domain.SalesBill;
 import com.mercotrace.domain.SalesBillCommodityGroup;
 import com.mercotrace.domain.SalesBillLineItem;
+import com.mercotrace.domain.Trader;
 import com.mercotrace.repository.BillNumberSequenceRepository;
 import com.mercotrace.repository.SalesBillRepository;
 import com.mercotrace.repository.TraderRepository;
@@ -315,6 +322,76 @@ class SalesBillServiceImplTest {
         SalesBillLineItem li = billCaptor.getValue().getCommodityGroups().get(0).getItems().get(0);
         assertThat(li.getPresetApplied()).isEqualByComparingTo("-2.50");
         assertThat(li.getOtherCharges()).isEqualByComparingTo("3.00");
+    }
+
+    @Test
+    void assignNumber_appliesBillNumberStartFrom_onlyForTraderDefaultPrefix() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+
+        SalesBill bill = new SalesBill();
+        bill.setId(1L);
+        bill.setTraderId(TRADER_ID);
+        // empty groups → default trader prefix (MT)
+        when(salesBillRepository.findByIdWithGroupsAndVersions(1L)).thenReturn(Optional.of(bill));
+
+        Trader trader = new Trader();
+        trader.setId(TRADER_ID);
+        trader.setBillPrefix("MT");
+        when(traderRepository.findById(TRADER_ID)).thenReturn(Optional.of(trader));
+
+        when(billNumberSequenceRepository.findByPrefixForUpdate("MT")).thenReturn(Optional.empty());
+
+        PrintSetting ps = new PrintSetting();
+        ps.setBillNumberStartFrom(555);
+        when(printSettingRepository.findByTraderIdAndModuleKey(eq(TRADER_ID), eq("BILLING"))).thenReturn(Optional.of(ps));
+
+        when(salesBillRepository.save(any(SalesBill.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        SalesBillDTO dto = service.assignNumber(1L);
+
+        assertThat(dto.getBillNumber()).isEqualTo("MT-00555");
+        ArgumentCaptor<BillNumberSequence> cap = ArgumentCaptor.forClass(BillNumberSequence.class);
+        verify(billNumberSequenceRepository).save(cap.capture());
+        assertThat(cap.getValue().getNextValue()).isEqualTo(556L);
+    }
+
+    @Test
+    void assignNumber_ignoresBillNumberStartFrom_forCommodityPrefix() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(printSettingRepository.findByTraderIdAndModuleKey(any(), any())).thenReturn(Optional.empty());
+
+        SalesBillCommodityGroup g = new SalesBillCommodityGroup();
+        g.setCommodityName("Onion");
+
+        SalesBill bill = new SalesBill();
+        bill.setId(2L);
+        bill.setTraderId(TRADER_ID);
+        bill.getCommodityGroups().add(g);
+
+        when(salesBillRepository.findByIdWithGroupsAndVersions(2L)).thenReturn(Optional.of(bill));
+
+        Trader trader = new Trader();
+        trader.setId(TRADER_ID);
+        trader.setBillPrefix("MT");
+        when(traderRepository.findById(TRADER_ID)).thenReturn(Optional.of(trader));
+
+        Commodity commodity = new Commodity();
+        commodity.setId(5L);
+        when(commodityRepository.findOneByTraderIdAndCommodityNameIgnoreCase(eq(TRADER_ID), eq("Onion")))
+            .thenReturn(Optional.of(commodity));
+
+        CommodityConfig config = new CommodityConfig();
+        config.setBillPrefix("ON");
+        when(commodityConfigRepository.findOneByCommodityId(5L)).thenReturn(Optional.of(config));
+
+        when(billNumberSequenceRepository.findByPrefixForUpdate("ON")).thenReturn(Optional.empty());
+
+        when(salesBillRepository.save(any(SalesBill.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        SalesBillDTO dto = service.assignNumber(2L);
+
+        assertThat(dto.getBillNumber()).isEqualTo("ON-00001");
+        verify(printSettingRepository, never()).findByTraderIdAndModuleKey(any(), any());
     }
 }
 

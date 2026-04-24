@@ -301,7 +301,7 @@ const PrintSettingsPage = () => {
     const floorFieldLabel = isBilling ? 'Minimum numeric suffix for next bill' : 'Minimum numeric suffix for next patti';
     const floorIntro =
       row.moduleKey === 'BILLING'
-        ? 'Optional floor for the shared bill counter (per prefix). Use when you want the next printed or assigned bill to jump up to at least this suffix.'
+        ? 'Starting value for the numeric part of the bill (e.g. 555 so the next default-prefix bill is …-00555, then 556). Applies only to your default bill prefix from the trader profile; other prefixes (e.g. commodity bill prefixes) each have their own counter that increments from 1.'
         : 'Optional floor for the shared patti counter (per prefix). Same idea as billing: a minimum for the next reserved base, not a forced reset.';
     const floorHelperId = `${row.moduleKey}-floor-helper`;
     const copiesSectionId = `${row.moduleKey}-copies-heading`;
