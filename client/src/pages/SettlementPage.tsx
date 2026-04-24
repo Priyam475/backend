@@ -3817,12 +3817,13 @@ const SettlementPage = () => {
   amountSummaryForExpensePullRef.current = amountSummaryDisplay;
 
   /**
-   * Saved patti, after Enable edit (Alt+M): sticky summary including while viewing original snapshot (Alt+O).
+   * Saved patti, after Enable edit (Alt+M): sticky compare summary. Hidden while viewing original snapshot (Alt+O).
    * Uses same figures as Vehicle details and Expenses & Invoice where noted.
    */
   const savedPattiCompareStickyFooter = useMemo(() => {
     if (
       !isLatestEditUnlocked ||
+      isOriginalReferenceMode ||
       settlementFormMode !== 'saved' ||
       !pattiData ||
       !selectedSeller
@@ -3870,6 +3871,7 @@ const SettlementPage = () => {
     };
   }, [
     isLatestEditUnlocked,
+    isOriginalReferenceMode,
     settlementFormMode,
     pattiData,
     selectedSeller,
