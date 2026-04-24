@@ -9,6 +9,7 @@ import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.ContactRepository;
 import com.mercotrace.repository.FreightCalculationRepository;
 import com.mercotrace.repository.BillNumberSequenceRepository;
+import com.mercotrace.repository.PrintSettingRepository;
 import com.mercotrace.repository.HamaliSlabRepository;
 import com.mercotrace.repository.LotRepository;
 import com.mercotrace.repository.PattiRepository;
@@ -80,6 +81,7 @@ public class SettlementServiceImpl implements SettlementService {
     private final ContactService contactService;
     private final HamaliSlabRepository hamaliSlabRepository;
     private final CommodityConfigRepository commodityConfigRepository;
+    private final PrintSettingRepository printSettingRepository;
     private final ObjectMapper objectMapper;
 
     public SettlementServiceImpl(
@@ -104,6 +106,7 @@ public class SettlementServiceImpl implements SettlementService {
         ContactService contactService,
         HamaliSlabRepository hamaliSlabRepository,
         CommodityConfigRepository commodityConfigRepository,
+        PrintSettingRepository printSettingRepository,
         ObjectMapper objectMapper
     ) {
         this.traderContextService = traderContextService;
@@ -127,6 +130,7 @@ public class SettlementServiceImpl implements SettlementService {
         this.contactService = contactService;
         this.hamaliSlabRepository = hamaliSlabRepository;
         this.commodityConfigRepository = commodityConfigRepository;
+        this.printSettingRepository = printSettingRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -420,6 +424,7 @@ public class SettlementServiceImpl implements SettlementService {
     @Override
     @Transactional(readOnly = false)
     public String reserveNextPattiBaseNumber(String sellerId) {
+        Long traderId = traderContextService.getCurrentTraderId();
         String billPrefix = resolveCommodityPrefixForSeller(sellerId);
         String seqKey = billPrefix != null ? billPrefix : PATTI_BASE_SEQUENCE_KEY;
         BillNumberSequence seq = billNumberSequenceRepository
@@ -430,13 +435,18 @@ public class SettlementServiceImpl implements SettlementService {
                 s.setNextValue(1L);
                 return s;
             });
-        long next = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
-        seq.setNextValue(next + 1L);
+        long seqNext = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
+        Integer floor = printSettingRepository
+            .findByTraderIdAndModuleKey(traderId, "SETTLEMENT")
+            .map(PrintSetting::getBillNumberStartFrom)
+            .orElse(null);
+        long effective = floor != null ? Math.max(seqNext, floor.longValue()) : seqNext;
+        seq.setNextValue(effective + 1L);
         billNumberSequenceRepository.save(seq);
         if (billPrefix != null) {
-            return billPrefix + "-" + String.format("%05d", next);
+            return billPrefix + "-" + String.format("%05d", effective);
         }
-        return String.valueOf(next);
+        return String.valueOf(effective);
     }
 
     private String resolveCommodityPrefixForSeller(String sellerId) {

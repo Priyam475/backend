@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
@@ -19,7 +20,17 @@ import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useAuctionResults } from '@/hooks/useAuctionResults';
-import { commodityApi, printLogApi, printSettingsApi, weighingApi, billingApi, arrivalsApi, contactApi, auctionApi } from '@/services/api';
+import {
+  commodityApi,
+  printLogApi,
+  printSettingsApi,
+  parsePrintCopiesJson,
+  weighingApi,
+  billingApi,
+  arrivalsApi,
+  contactApi,
+  auctionApi,
+} from '@/services/api';
 import { ContactApiError } from '@/services/api/contacts';
 import type { Contact } from '@/types/models';
 import type {
@@ -39,7 +50,13 @@ import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { SalesBillDTO } from '@/services/api/billing';
 import type { ArrivalDetail } from '@/services/api/arrivals';
 import { directPrint } from '@/utils/printTemplates';
-import { generateSalesBillPrintHTML, generateNonGstSalesBillPrintHTML, type BillPrintData } from '@/utils/printDocumentTemplates';
+import {
+  generateNonGstSalesBillPrintHTML,
+  generateNonGstSalesBillPrintHTMLForCopies,
+  generateSalesBillPrintHTML,
+  generateSalesBillPrintHTMLForCopies,
+  type BillPrintData,
+} from '@/utils/printDocumentTemplates';
 import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
 import {
   billGroupSubtotalWithTaxAndCharges,
@@ -221,8 +238,12 @@ interface CommodityGroup {
   userFeePercent: number;
   coolieRate: number; // Per-commodity coolie rate
   coolieAmount: number; // Per-commodity coolie amount (rate * qty)
+  /** Persisted bag count for coolie; when unset, qty = sum(line quantities). */
+  coolieChargeQty?: number;
   weighmanChargeRate: number; // Per-commodity weighman charge rate
   weighmanChargeAmount: number; // Per-commodity weighman charge amount (rate * qty)
+  /** Persisted bag count for weighman; when unset, qty = sum(line quantities). */
+  weighmanChargeQty?: number;
   discount: number; // Per-commodity discount amount or percentage
   discountType: 'PERCENT' | 'AMOUNT'; // Per-commodity discount type
   manualRoundOff: number; // Per-commodity manual round off
@@ -231,6 +252,26 @@ interface CommodityGroup {
   commissionAmount: number;
   userFeeAmount: number;
   totalCharges: number;
+}
+
+const MAX_COOLIE_WEIGHMAN_CHARGE_QTY = 1_000_000;
+
+function sumGroupItemQuantity(g: Pick<CommodityGroup, 'items'>): number {
+  return g.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+}
+
+function effectiveCoolieChargeQty(g: CommodityGroup): number {
+  if (g.coolieChargeQty != null && Number.isFinite(g.coolieChargeQty)) {
+    return Math.max(0, Math.round(g.coolieChargeQty));
+  }
+  return sumGroupItemQuantity(g);
+}
+
+function effectiveWeighmanChargeQty(g: CommodityGroup): number {
+  if (g.weighmanChargeQty != null && Number.isFinite(g.weighmanChargeQty)) {
+    return Math.max(0, Math.round(g.weighmanChargeQty));
+  }
+  return sumGroupItemQuantity(g);
 }
 
 interface BillLineItem {
@@ -336,8 +377,16 @@ function roundBillMoneyValues(b: BillData): BillData {
       userFeePercent: roundMoney2(Number(g.userFeePercent) || 0),
       coolieRate: roundMoney2(Number(g.coolieRate) || 0),
       coolieAmount: roundMoney2(Number(g.coolieAmount) || 0),
+      coolieChargeQty:
+        g.coolieChargeQty != null && Number.isFinite(Number(g.coolieChargeQty))
+          ? Math.max(0, Math.round(Number(g.coolieChargeQty)))
+          : undefined,
       weighmanChargeRate: roundMoney2(Number(g.weighmanChargeRate) || 0),
       weighmanChargeAmount: roundMoney2(Number(g.weighmanChargeAmount) || 0),
+      weighmanChargeQty:
+        g.weighmanChargeQty != null && Number.isFinite(Number(g.weighmanChargeQty))
+          ? Math.max(0, Math.round(Number(g.weighmanChargeQty)))
+          : undefined,
       discount: roundMoney2(Number(g.discount) || 0),
       manualRoundOff: roundMoney2(Number(g.manualRoundOff) || 0),
       subtotal: roundMoney2(Number(g.subtotal) || 0),
@@ -427,8 +476,18 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     const preferredTaxMode: 'GST' | 'IGST' | 'NONE' = hasAnyTaxConfigured
       ? (Number(resolvedIgstRate) > 0 ? 'IGST' : 'GST')
       : 'NONE';
+    const coolieChargeQtyRaw = g.coolieChargeQty ?? g.coolie_charge_qty;
+    const weighmanChargeQtyRaw = g.weighmanChargeQty ?? g.weighman_charge_qty;
     return {
     ...g,
+    coolieChargeQty:
+      coolieChargeQtyRaw != null && Number.isFinite(Number(coolieChargeQtyRaw))
+        ? Math.max(0, Math.round(Number(coolieChargeQtyRaw)))
+        : undefined,
+    weighmanChargeQty:
+      weighmanChargeQtyRaw != null && Number.isFinite(Number(weighmanChargeQtyRaw))
+        ? Math.max(0, Math.round(Number(weighmanChargeQtyRaw)))
+        : undefined,
     taxMode: preferredTaxMode,
     gstInputMode: (g.gstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
     sgstInputMode: (g.sgstInputMode === 'AMOUNT' ? 'AMOUNT' : 'PERCENT'),
@@ -575,15 +634,29 @@ function validateBill(
     errors.globalOtherCharges = 'Cannot exceed ₹1,00,000';
   }
 
-  // Validate per-commodity coolie charges
+  // Validate per-commodity coolie / weighman charges and optional qty overrides
   b.commodityGroups.forEach((g, gi) => {
+    const ccq = g.coolieChargeQty;
+    if (
+      ccq != null
+      && (!Number.isFinite(ccq) || ccq < 0 || ccq > MAX_COOLIE_WEIGHMAN_CHARGE_QTY)
+    ) {
+      errors[`coolieQty-${gi}`] = `Quantity must be 0–${MAX_COOLIE_WEIGHMAN_CHARGE_QTY.toLocaleString('en-IN')}`;
+    }
+    const wcq = g.weighmanChargeQty;
+    if (
+      wcq != null
+      && (!Number.isFinite(wcq) || wcq < 0 || wcq > MAX_COOLIE_WEIGHMAN_CHARGE_QTY)
+    ) {
+      errors[`weighmanQty-${gi}`] = `Quantity must be 0–${MAX_COOLIE_WEIGHMAN_CHARGE_QTY.toLocaleString('en-IN')}`;
+    }
     if (!Number.isFinite(g.coolieAmount) || g.coolieAmount < 0) {
-      errors[`coolie-${gi}`] = 'Must be a positive number';
+      errors[`coolie-${gi}`] = 'Must be zero or positive';
     } else if (g.coolieAmount > 100000) {
       errors[`coolie-${gi}`] = 'Cannot exceed ₹1,00,000';
     }
     if (!Number.isFinite(g.weighmanChargeAmount) || g.weighmanChargeAmount < 0) {
-      errors[`weighman-${gi}`] = 'Must be a positive number';
+      errors[`weighman-${gi}`] = 'Must be zero or positive';
     } else if (g.weighmanChargeAmount > 100000) {
       errors[`weighman-${gi}`] = 'Cannot exceed ₹1,00,000';
     }
@@ -601,12 +674,27 @@ function validateBill(
     }
   });
 
-  if (!Number.isFinite(b.outboundFreight) || b.outboundFreight < 0) {
+    if (!Number.isFinite(b.outboundFreight) || b.outboundFreight < 0) {
     errors.outboundFreight = 'Must be a positive number';
   } else if (b.outboundFreight > 100000) {
     errors.outboundFreight = 'Cannot exceed ₹1,00,000';
   }
 
+  // Non-blocking: coolie / weighman effective qty differs from total bid line quantity for this group.
+  b.commodityGroups.forEach((g, gi) => {
+    const lineQty = sumGroupItemQuantity(g);
+    const cEff = effectiveCoolieChargeQty(g);
+    const wEff = effectiveWeighmanChargeQty(g);
+    const label = (g.commodityName || '').trim() || `Commodity ${gi + 1}`;
+    if (cEff !== lineQty) {
+      warnings[`chargeQty.coolie.${gi}`] =
+        `${label}: coolie charge qty (${cEff}) does not match bill line qty (${lineQty}).`;
+    }
+    if (wEff !== lineQty) {
+      warnings[`chargeQty.weighman.${gi}`] =
+        `${label}: weighman charge qty (${wEff}) does not match bill line qty (${lineQty}).`;
+    }
+  });
 
   b.commodityGroups.forEach((group, gi) => {
     group.items.forEach((item, ii) => {
@@ -658,6 +746,9 @@ const BillingPage = () => {
 
   // Bill state
   const [bill, setBill] = useState<BillData | null>(null);
+  /** Latest bill for save payload (avoids stale closure if Save runs before input blur/live commit flushes). */
+  const billRef = useRef<BillData | null>(null);
+  billRef.current = bill;
   const [editLocked, setEditLocked] = useState(true);
   const [hasSavedOnce, setHasSavedOnce] = useState(false);
   const [selectedPrintVersion, setSelectedPrintVersion] = useState<'latest' | number>('latest');
@@ -671,6 +762,8 @@ const BillingPage = () => {
   );
   /** Page size used when the bill has no GST on any commodity. Defaults to A5. */
   const [nonGstPrintSize, setNonGstPrintSize] = useState<'A4' | 'A5'>('A5');
+  /** Footer copy labels from print settings (BILLING row); order = print order. */
+  const [billingPrintCopyLabels, setBillingPrintCopyLabels] = useState<string[]>(['ORIGINAL COPY']);
 
   type BillingMainTab = 'create' | 'progress' | 'saved';
   const [billingMainTab, setBillingMainTab] = useState<BillingMainTab>('create');
@@ -709,6 +802,7 @@ const BillingPage = () => {
           setBillingPaperWithHeader(gstRow.paper_size_with_header === 'A5' ? 'A5' : 'A4');
           setBillingPaperWithoutHeader(gstRow.paper_size_without_header === 'A5' ? 'A5' : 'A4');
           setBillingIncludeHeader(gstRow.include_header !== false);
+          setBillingPrintCopyLabels(parsePrintCopiesJson(gstRow.print_copies_json ?? null).map((c) => c.label));
         }
         if (nonGstRow?.paper_size_without_header) {
           setNonGstPrintSize(nonGstRow.paper_size_without_header);
@@ -757,20 +851,53 @@ const BillingPage = () => {
     );
   }, [bill]);
 
-  const salesBillPrintHtml = useMemo(() => {
+  const billingCopyLabelsResolved = useMemo(
+    () => (billingPrintCopyLabels.length > 0 ? billingPrintCopyLabels : ['ORIGINAL COPY']),
+    [billingPrintCopyLabels],
+  );
+
+  const salesBillPreviewPrintHtml = useMemo(() => {
+    if (!billPrintPayload) return '';
+    const previewLabel = billingCopyLabelsResolved[0] || 'ORIGINAL COPY';
+    if (isGstBill) {
+      return generateSalesBillPrintHTML(billPrintPayload, {
+        pageSize: billingEffectivePrintSize,
+        includeHeader: billingIncludeHeader,
+        copyLabel: previewLabel,
+      });
+    }
+    return generateNonGstSalesBillPrintHTML(billPrintPayload, {
+      pageSize: nonGstPrintSize,
+      copyLabel: previewLabel,
+    });
+  }, [
+    billPrintPayload,
+    billingEffectivePrintSize,
+    billingIncludeHeader,
+    nonGstPrintSize,
+    isGstBill,
+    billingCopyLabelsResolved,
+  ]);
+
+  const salesBillPrintJobHtml = useMemo(() => {
     if (!billPrintPayload) return '';
     if (isGstBill) {
-      // GST (or mixed): page size follows default layout (with vs without letterhead) from print settings
-      return generateSalesBillPrintHTML(billPrintPayload, {
+      return generateSalesBillPrintHTMLForCopies(billPrintPayload, billingCopyLabelsResolved, {
         pageSize: billingEffectivePrintSize,
         includeHeader: billingIncludeHeader,
       });
     }
-    // Fully Non-GST: always no header; page size from BILLING_NON_GST print setting
-    return generateNonGstSalesBillPrintHTML(billPrintPayload, {
+    return generateNonGstSalesBillPrintHTMLForCopies(billPrintPayload, billingCopyLabelsResolved, {
       pageSize: nonGstPrintSize,
     });
-  }, [billPrintPayload, billingEffectivePrintSize, billingIncludeHeader, nonGstPrintSize, isGstBill]);
+  }, [
+    billPrintPayload,
+    billingEffectivePrintSize,
+    billingIncludeHeader,
+    nonGstPrintSize,
+    isGstBill,
+    billingCopyLabelsResolved,
+  ]);
 
   const handleSummaryTableScroll = useCallback(() => {
     const el = summaryTableScrollRef.current;
@@ -1663,6 +1790,12 @@ const BillingPage = () => {
       next.commissionAmount = charges.commissionAmount;
       next.userFeeAmount = charges.userFeeAmount;
       next.totalCharges = charges.totalCharges;
+      const cr = Number(next.coolieRate) || 0;
+      const wr = Number(next.weighmanChargeRate) || 0;
+      const cq = effectiveCoolieChargeQty(next);
+      const wq = effectiveWeighmanChargeQty(next);
+      next.coolieAmount = cr > 0 ? roundMoney2(cr * cq) : 0;
+      next.weighmanChargeAmount = wr > 0 ? roundMoney2(wr * wq) : 0;
       return next;
     });
 
@@ -2813,16 +2946,28 @@ const BillingPage = () => {
       billingName: bill.billingName,
       billDate: typeof bill.billDate === 'string' ? bill.billDate : new Date(bill.billDate).toISOString(),
       // Keep all persisted commodity-group values; only remove frontend-only helper fields.
-      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, taxMode: _taxMode, ...g }: any) => ({
-        ...g,
-        ...(g.taxMode === 'IGST'
-          ? { gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: Number(g.igstRate) || 0 }
-          : { gstRate: Number(g.gstRate) || 0, sgstRate: Number(g.sgstRate) || 0, cgstRate: Number(g.cgstRate) || 0, igstRate: 0 }),
-        items: (g.items ?? []).map((it: any) => {
-          const { sellerOtherCharges: _soc, ...restIt } = it;
-          return restIt;
-        }),
-      })),
+      commodityGroups: bill.commodityGroups.map(({ divisor: _divisor, taxMode: _taxMode, ...g }: any) => {
+        const coolieChargeQty =
+          g.coolieChargeQty != null && Number.isFinite(Number(g.coolieChargeQty))
+            ? Math.max(0, Math.round(Number(g.coolieChargeQty)))
+            : null;
+        const weighmanChargeQty =
+          g.weighmanChargeQty != null && Number.isFinite(Number(g.weighmanChargeQty))
+            ? Math.max(0, Math.round(Number(g.weighmanChargeQty)))
+            : null;
+        return {
+          ...g,
+          ...(g.taxMode === 'IGST'
+            ? { gstRate: 0, sgstRate: 0, cgstRate: 0, igstRate: Number(g.igstRate) || 0 }
+            : { gstRate: Number(g.gstRate) || 0, sgstRate: Number(g.sgstRate) || 0, cgstRate: Number(g.cgstRate) || 0, igstRate: 0 }),
+          coolieChargeQty,
+          weighmanChargeQty,
+          items: (g.items ?? []).map((it: any) => {
+            const { sellerOtherCharges: _soc, ...restIt } = it;
+            return restIt;
+          }),
+        };
+      }),
       outboundFreight: bill.outboundFreight ?? 0,
       outboundVehicle: bill.outboundVehicle ?? '',
       tokenAdvance: sumLineTokenAdvances(bill),
@@ -3131,8 +3276,14 @@ const BillingPage = () => {
           <iframe
             title="GST sales bill print preview"
             className="w-full min-h-[72vh] border border-border rounded-xl bg-white shadow-lg"
-            srcDoc={salesBillPrintHtml}
+            srcDoc={salesBillPreviewPrintHtml}
           />
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            Preview shows first copy ({billingCopyLabelsResolved[0] || 'ORIGINAL COPY'})
+            {billingCopyLabelsResolved.length > 1
+              ? ` · Print job includes: ${billingCopyLabelsResolved.join(', ')}`
+              : ''}
+          </p>
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-4">
             <div className="flex gap-3 w-full sm:w-auto">
@@ -3150,14 +3301,7 @@ const BillingPage = () => {
                   } catch {
                     // backend optional
                   }
-                  const printHtml = isGstBill
-                    ? generateSalesBillPrintHTML(billPrintPayload!, {
-                        pageSize: billingEffectivePrintSize,
-                        includeHeader: billingIncludeHeader,
-                      })
-                    : generateNonGstSalesBillPrintHTML(billPrintPayload!, {
-                        pageSize: nonGstPrintSize,
-                      });
+                  const printHtml = salesBillPrintJobHtml;
                   const ok = await directPrint(printHtml, { mode: "system" });
                   ok ? toast.success('Sales Bill sent to printer!') : toast.error('Printer not connected.');
                 }}
@@ -4688,6 +4832,23 @@ const BillingPage = () => {
               <p className="text-[11px] font-bold text-foreground uppercase tracking-wider">
                 Bill Summary
               </p>
+              {Object.keys(validationWarnings).some(k => k.startsWith('chargeQty.')) && (
+                <div
+                  className="rounded-lg border border-destructive/45 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+                  role="status"
+                >
+                  <p className="font-semibold leading-snug">Charge quantity differs from total bill line quantity</p>
+                  <ul className="mt-1.5 list-disc pl-4 space-y-0.5">
+                    {Object.entries(validationWarnings)
+                      .filter(([k]) => k.startsWith('chargeQty.'))
+                      .map(([k, msg]) => (
+                        <li key={k} className="leading-snug">
+                          {msg}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
               <div className="flex items-stretch gap-2">
                 <div
                   ref={summaryTableScrollRef}
@@ -4812,9 +4973,7 @@ const BillingPage = () => {
 
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Coolie Charge</td>
-                      {bill.commodityGroups.map((g, gi) => {
-                        const qty = g.items.reduce((s, i) => s + (i.quantity || 0), 0);
-                        return (
+                      {bill.commodityGroups.map((g, gi) => (
                           <td
                             key={`coolie-${gi}`}
                             className={cn(
@@ -4831,7 +4990,6 @@ const BillingPage = () => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
                                   cg.coolieRate = rate;
-                                  cg.coolieAmount = rate > 0 && qty > 0 ? roundMoney2(rate * qty) : 0;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
@@ -4840,21 +4998,42 @@ const BillingPage = () => {
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
-                              <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
-                                {formatBillingInr(qty)}
-                              </span>
+                              <BillingMoneyInput
+                                value={effectiveCoolieChargeQty(g)}
+                                min={0}
+                                integerOnly
+                                commitMode="live"
+                                onCommit={qtyVal => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.coolieChargeQty = Math.min(
+                                    MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
+                                    Math.max(0, Math.round(qtyVal)),
+                                  );
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  flushSync(() => {
+                                    setBill(recalcGrandTotal(updated));
+                                  });
+                                }}
+                                className={cn(
+                                  billingSummaryInputClass,
+                                  (validationErrors[`coolieQty-${gi}`] || validationErrors[`coolie-${gi}`])
+                                    && 'border-destructive ring-1 ring-destructive/30',
+                                  validationWarnings[`chargeQty.coolie.${gi}`]
+                                    && 'ring-1 ring-destructive/50 border-destructive/50',
+                                )}
+                                placeholder="Qty"
+                              />
                               <span className={billingSummaryValueClass}>₹{formatBillingInr(g.coolieAmount || 0)}</span>
                             </div>
                           </td>
-                        );
-                      })}
+                        ))}
                     </tr>
 
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Weighman Charge</td>
-                      {bill.commodityGroups.map((g, gi) => {
-                        const qty = g.items.reduce((s, i) => s + (i.quantity || 0), 0);
-                        return (
+                      {bill.commodityGroups.map((g, gi) => (
                           <td
                             key={`weighman-${gi}`}
                             className={cn(
@@ -4871,7 +5050,6 @@ const BillingPage = () => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
                                   cg.weighmanChargeRate = rate;
-                                  cg.weighmanChargeAmount = rate > 0 && qty > 0 ? roundMoney2(rate * qty) : 0;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
@@ -4880,14 +5058,37 @@ const BillingPage = () => {
                                 placeholder="Rate"
                               />
                               <span className="text-[10px] font-semibold text-muted-foreground">x</span>
-                              <span className="h-10 lg:h-6 px-2 inline-flex items-center justify-center rounded border border-border bg-background text-[10px] font-bold text-foreground min-w-[2.5rem]">
-                                {formatBillingInr(qty)}
-                              </span>
+                              <BillingMoneyInput
+                                value={effectiveWeighmanChargeQty(g)}
+                                min={0}
+                                integerOnly
+                                commitMode="live"
+                                onCommit={qtyVal => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.weighmanChargeQty = Math.min(
+                                    MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
+                                    Math.max(0, Math.round(qtyVal)),
+                                  );
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  flushSync(() => {
+                                    setBill(recalcGrandTotal(updated));
+                                  });
+                                }}
+                                className={cn(
+                                  billingSummaryInputClass,
+                                  (validationErrors[`weighmanQty-${gi}`] || validationErrors[`weighman-${gi}`])
+                                    && 'border-destructive ring-1 ring-destructive/30',
+                                  validationWarnings[`chargeQty.weighman.${gi}`]
+                                    && 'ring-1 ring-destructive/50 border-destructive/50',
+                                )}
+                                placeholder="Qty"
+                              />
                               <span className={billingSummaryValueClass}>₹{formatBillingInr(g.weighmanChargeAmount || 0)}</span>
                             </div>
                           </td>
-                        );
-                      })}
+                        ))}
                     </tr>
 
                     <tr className="border-t border-border/30">

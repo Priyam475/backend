@@ -108,4 +108,6 @@
     <include file="config/liquibase/changelog/20260422120000_vehicle_mark_alias.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260422130000_vehicle_mark_alias_varchar8.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260423120000_sales_bill_line_item_lot_display_context.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260424100000_print_setting_bill_floor_and_copies.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260424111000_sales_bill_commodity_group_charge_qty.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>

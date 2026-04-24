@@ -8,9 +8,11 @@ import com.mercotrace.domain.SalesBill;
 import com.mercotrace.domain.SalesBillCommodityGroup;
 import com.mercotrace.domain.SalesBillLineItem;
 import com.mercotrace.domain.SalesBillVersion;
+import com.mercotrace.domain.PrintSetting;
 import com.mercotrace.domain.Trader;
 import com.mercotrace.domain.Voucher;
 import com.mercotrace.repository.BillNumberSequenceRepository;
+import com.mercotrace.repository.PrintSettingRepository;
 import com.mercotrace.repository.CommodityConfigRepository;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.SalesBillRepository;
@@ -20,6 +22,7 @@ import com.mercotrace.service.SalesBillService;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SalesBillDTOs.*;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -49,6 +52,7 @@ public class SalesBillServiceImpl implements SalesBillService {
     private final VoucherRepository voucherRepository;
     private final CommodityRepository commodityRepository;
     private final CommodityConfigRepository commodityConfigRepository;
+    private final PrintSettingRepository printSettingRepository;
     private final ObjectMapper objectMapper;
 
     public SalesBillServiceImpl(
@@ -59,6 +63,7 @@ public class SalesBillServiceImpl implements SalesBillService {
         VoucherRepository voucherRepository,
         CommodityRepository commodityRepository,
         CommodityConfigRepository commodityConfigRepository,
+        PrintSettingRepository printSettingRepository,
         ObjectMapper objectMapper
     ) {
         this.traderContextService = traderContextService;
@@ -68,6 +73,7 @@ public class SalesBillServiceImpl implements SalesBillService {
         this.voucherRepository = voucherRepository;
         this.commodityRepository = commodityRepository;
         this.commodityConfigRepository = commodityConfigRepository;
+        this.printSettingRepository = printSettingRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -160,7 +166,7 @@ public class SalesBillServiceImpl implements SalesBillService {
             .orElse(DEFAULT_BILL_PREFIX);
     }
 
-    private String generateBillNumber(String prefix) {
+    private String generateBillNumber(String prefix, Long traderId) {
         String key = prefix != null && !prefix.isBlank() ? prefix.trim().toUpperCase() : DEFAULT_BILL_PREFIX;
         BillNumberSequence seq = billNumberSequenceRepository.findByPrefixForUpdate(key)
             .orElseGet(() -> {
@@ -169,10 +175,15 @@ public class SalesBillServiceImpl implements SalesBillService {
                 newSeq.setNextValue(1L);
                 return newSeq;
             });
-        long next = seq.getNextValue();
-        seq.setNextValue(next + 1);
+        long seqNext = seq.getNextValue() != null && seq.getNextValue() > 0 ? seq.getNextValue() : 1L;
+        Integer floor = printSettingRepository
+            .findByTraderIdAndModuleKey(traderId, "BILLING")
+            .map(PrintSetting::getBillNumberStartFrom)
+            .orElse(null);
+        long effective = floor != null ? Math.max(seqNext, floor.longValue()) : seqNext;
+        seq.setNextValue(effective + 1);
         billNumberSequenceRepository.save(seq);
-        return key + "-" + String.format("%05d", next);
+        return key + "-" + String.format("%05d", effective);
     }
 
     /**
@@ -269,7 +280,7 @@ public class SalesBillServiceImpl implements SalesBillService {
             return toDto(bill);
         }
         String prefix = resolveBillPrefixFromCommodities(bill);
-        String billNumber = generateBillNumber(prefix);
+        String billNumber = generateBillNumber(prefix, traderId);
         bill.setBillNumber(billNumber);
         bill = salesBillRepository.save(bill);
         return toDto(bill);
@@ -338,12 +349,17 @@ public class SalesBillServiceImpl implements SalesBillService {
             group.setCommissionAmount(nullToZero(g.getCommissionAmount()));
             group.setUserFeeAmount(nullToZero(g.getUserFeeAmount()));
             group.setTotalCharges(nullToZero(g.getTotalCharges()));
-            // Per-commodity coolie charge
-            group.setCoolieRate(nullToZero(g.getCoolieRate()));
-            group.setCoolieAmount(nullToZero(g.getCoolieAmount()));
-            // Per-commodity weighman charge
-            group.setWeighmanChargeRate(nullToZero(g.getWeighmanChargeRate()));
-            group.setWeighmanChargeAmount(nullToZero(g.getWeighmanChargeAmount()));
+            int sumLineQty = sumLineItemQuantities(g);
+            group.setCoolieChargeQty(g.getCoolieChargeQty());
+            group.setWeighmanChargeQty(g.getWeighmanChargeQty());
+            BigDecimal coolieRate = nullToZero(g.getCoolieRate());
+            BigDecimal weighmanRate = nullToZero(g.getWeighmanChargeRate());
+            group.setCoolieRate(coolieRate);
+            group.setWeighmanChargeRate(weighmanRate);
+            int effCoolieQty = effectiveChargeQty(g.getCoolieChargeQty(), sumLineQty);
+            int effWeighmanQty = effectiveChargeQty(g.getWeighmanChargeQty(), sumLineQty);
+            group.setCoolieAmount(roundedRateTimesQty(coolieRate, effCoolieQty));
+            group.setWeighmanChargeAmount(roundedRateTimesQty(weighmanRate, effWeighmanQty));
             // Per-commodity discount and round-off
             group.setDiscount(nullToZero(g.getDiscount()));
             group.setDiscountType(g.getDiscountType() != null ? g.getDiscountType() : "AMOUNT");
@@ -444,9 +460,11 @@ public class SalesBillServiceImpl implements SalesBillService {
             // Per-commodity coolie charge
             gdto.setCoolieRate(g.getCoolieRate());
             gdto.setCoolieAmount(g.getCoolieAmount());
+            gdto.setCoolieChargeQty(g.getCoolieChargeQty());
             // Per-commodity weighman charge
             gdto.setWeighmanChargeRate(g.getWeighmanChargeRate());
             gdto.setWeighmanChargeAmount(g.getWeighmanChargeAmount());
+            gdto.setWeighmanChargeQty(g.getWeighmanChargeQty());
             // Per-commodity discount and round-off
             gdto.setDiscount(g.getDiscount());
             gdto.setDiscountType(g.getDiscountType());
@@ -506,6 +524,31 @@ public class SalesBillServiceImpl implements SalesBillService {
         }
         dto.setVersions(versions);
         return dto;
+    }
+
+    private static int sumLineItemQuantities(CommodityGroupDTO g) {
+        if (g.getItems() == null || g.getItems().isEmpty()) {
+            return 0;
+        }
+        int s = 0;
+        for (BillLineItemDTO it : g.getItems()) {
+            s += it.getQuantity() != null ? it.getQuantity() : 0;
+        }
+        return s;
+    }
+
+    private static int effectiveChargeQty(Integer storedOverride, int sumLineQty) {
+        if (storedOverride == null) {
+            return sumLineQty;
+        }
+        return Math.max(0, storedOverride);
+    }
+
+    private static BigDecimal roundedRateTimesQty(BigDecimal rate, int qty) {
+        if (rate == null || rate.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return rate.multiply(BigDecimal.valueOf(qty)).setScale(2, RoundingMode.HALF_UP);
     }
 
     private static BigDecimal nullToZero(BigDecimal v) {

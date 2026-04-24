@@ -48,6 +48,17 @@ export interface CommodityGroupDTO {
   cgstInputMode?: 'PERCENT' | 'AMOUNT';
   igstRate?: number;
   igstInputMode?: 'PERCENT' | 'AMOUNT';
+  coolieRate?: number;
+  coolieAmount?: number;
+  /** When omitted, server uses sum of line quantities for coolie amount. */
+  coolieChargeQty?: number | null;
+  weighmanChargeRate?: number;
+  weighmanChargeAmount?: number;
+  /** When omitted, server uses sum of line quantities for weighman amount. */
+  weighmanChargeQty?: number | null;
+  discount?: number;
+  discountType?: 'PERCENT' | 'AMOUNT';
+  manualRoundOff?: number;
 }
 
 /** Version snapshot (backend BillVersionDTO). */

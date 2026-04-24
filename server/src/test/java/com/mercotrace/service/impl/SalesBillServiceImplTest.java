@@ -15,6 +15,7 @@ import com.mercotrace.repository.TraderRepository;
 import com.mercotrace.repository.VoucherRepository;
 import com.mercotrace.repository.CommodityRepository;
 import com.mercotrace.repository.CommodityConfigRepository;
+import com.mercotrace.repository.PrintSettingRepository;
 import com.mercotrace.service.TraderContextService;
 import com.mercotrace.service.dto.SalesBillDTOs.BillLineItemDTO;
 import com.mercotrace.service.dto.SalesBillDTOs.CommodityGroupDTO;
@@ -60,10 +61,14 @@ class SalesBillServiceImplTest {
     @Mock
     private CommodityConfigRepository commodityConfigRepository;
 
+    @Mock
+    private PrintSettingRepository printSettingRepository;
+
     private SalesBillServiceImpl service;
 
     @BeforeEach
     void setUp() {
+        when(printSettingRepository.findByTraderIdAndModuleKey(any(), any())).thenReturn(Optional.empty());
         service = new SalesBillServiceImpl(
             traderContextService,
             salesBillRepository,
@@ -72,6 +77,7 @@ class SalesBillServiceImplTest {
             voucherRepository,
             commodityRepository,
             commodityConfigRepository,
+            printSettingRepository,
             new ObjectMapper()
         );
     }
@@ -230,6 +236,56 @@ class SalesBillServiceImplTest {
         assertThat(page.getContent()).hasSize(1);
         assertThat(page.getContent().get(0).getBillNumber()).isEqualTo("MT-00002");
         assertThat(page.getContent().get(0).getBuyerName()).isEqualTo("Filtered Buyer");
+    }
+
+    @Test
+    void create_persistsCoolieChargeQtyAndComputesAmountFromOverride() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(salesBillRepository.save(any(SalesBill.class))).thenAnswer(inv -> {
+            SalesBill b = inv.getArgument(0);
+            if (b.getId() == null) {
+                b.setId(77L);
+            }
+            return b;
+        });
+
+        SalesBillCreateOrUpdateRequest req = sampleCreateRequest();
+        CommodityGroupDTO g = req.getCommodityGroups().get(0);
+        g.setCoolieRate(BigDecimal.valueOf(2.5));
+        g.setCoolieChargeQty(4);
+
+        service.create(req);
+
+        ArgumentCaptor<SalesBill> billCaptor = ArgumentCaptor.forClass(SalesBill.class);
+        verify(salesBillRepository).save(billCaptor.capture());
+        SalesBillCommodityGroup sg = billCaptor.getValue().getCommodityGroups().get(0);
+        assertThat(sg.getCoolieChargeQty()).isEqualTo(4);
+        assertThat(sg.getCoolieAmount()).isEqualByComparingTo("10.00");
+    }
+
+    @Test
+    void create_computesCoolieAmountFromLineSumWhenQtyOverrideNull() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+        when(salesBillRepository.save(any(SalesBill.class))).thenAnswer(inv -> {
+            SalesBill b = inv.getArgument(0);
+            if (b.getId() == null) {
+                b.setId(78L);
+            }
+            return b;
+        });
+
+        SalesBillCreateOrUpdateRequest req = sampleCreateRequest();
+        CommodityGroupDTO g = req.getCommodityGroups().get(0);
+        g.setCoolieRate(BigDecimal.valueOf(2));
+        g.setCoolieChargeQty(null);
+
+        service.create(req);
+
+        ArgumentCaptor<SalesBill> billCaptor = ArgumentCaptor.forClass(SalesBill.class);
+        verify(salesBillRepository).save(billCaptor.capture());
+        SalesBillCommodityGroup sg = billCaptor.getValue().getCommodityGroups().get(0);
+        assertThat(sg.getCoolieChargeQty()).isNull();
+        assertThat(sg.getCoolieAmount()).isEqualByComparingTo("20.00");
     }
 }
 

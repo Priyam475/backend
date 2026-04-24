@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 import {
+  parsePrintCopiesJson,
   printLogApi,
   printSettingsApi,
   settlementApi,
@@ -40,7 +41,11 @@ import type { ArrivalFullDetail, ArrivalSellerFullDetail } from '@/services/api/
 import type { FullCommodityConfigDto } from '@/services/api/commodities';
 import type { Commodity, Contact } from '@/types/models';
 import { directPrint } from '@/utils/printTemplates';
-import { generateSalesPattiBatchPrintHTML, generateSalesPattiPrintHTML, type PattiPrintData } from '@/utils/printDocumentTemplates';
+import {
+  generateSalesPattiBatchPrintHTML,
+  generateSalesPattiPrintHTMLForCopies,
+  type PattiPrintData,
+} from '@/utils/printDocumentTemplates';
 import { useAuth } from '@/context/AuthContext';
 import ForbiddenPage from '@/components/ForbiddenPage';
 import { usePermissions } from '@/lib/permissions';
@@ -1764,6 +1769,11 @@ const SettlementPage = () => {
     () => (settlementIncludeHeader ? settlementPaperWithHeader : settlementPaperWithoutHeader),
     [settlementIncludeHeader, settlementPaperWithHeader, settlementPaperWithoutHeader],
   );
+  const [settlementPrintCopyLabels, setSettlementPrintCopyLabels] = useState<string[]>(['ORIGINAL COPY']);
+  const settlementCopyLabelsResolved = useMemo(
+    () => (settlementPrintCopyLabels.length > 0 ? settlementPrintCopyLabels : ['ORIGINAL COPY']),
+    [settlementPrintCopyLabels],
+  );
   /** Prevents overlapping save/update requests (buttons + shortcut). */
   const pattiSaveBusyRef = useRef(false);
   /** After a successful save, re-baseline dirty tracking once `pattiSaveBusy` is false and state has settled. */
@@ -1809,6 +1819,7 @@ const SettlementPage = () => {
           setSettlementPaperWithHeader(row.paper_size_with_header === 'A5' ? 'A5' : 'A4');
           setSettlementPaperWithoutHeader(row.paper_size_without_header === 'A5' ? 'A5' : 'A4');
           setSettlementIncludeHeader(row.include_header !== false);
+          setSettlementPrintCopyLabels(parsePrintCopiesJson(row.print_copies_json ?? null).map((c) => c.label));
         }
       } catch {
         // keep defaults
@@ -4739,7 +4750,7 @@ const SettlementPage = () => {
       /* optional */
     }
     const ok = await directPrint(
-      generateSalesPattiPrintHTML(printPayload, {
+      generateSalesPattiPrintHTMLForCopies(printPayload, settlementCopyLabelsResolved, {
         pageSize: settlementEffectivePrintSize,
         includeHeader: settlementIncludeHeader,
       }),
@@ -4765,6 +4776,7 @@ const SettlementPage = () => {
     vehicleNetPayableFromPatti,
     settlementEffectivePrintSize,
     settlementIncludeHeader,
+    settlementCopyLabelsResolved,
     firmInfo,
     displayMainSalesPattiNo,
     mainPattiPrintHeaderIdentity,
@@ -4810,7 +4822,7 @@ const SettlementPage = () => {
         firm: firmInfo,
       };
       const ok = await directPrint(
-        generateSalesPattiPrintHTML(payload, {
+        generateSalesPattiPrintHTMLForCopies(payload, settlementCopyLabelsResolved, {
           pageSize: settlementEffectivePrintSize,
           includeHeader: settlementIncludeHeader,
         }),
@@ -4833,6 +4845,7 @@ const SettlementPage = () => {
       isWeighingMergedIntoFreight,
       settlementEffectivePrintSize,
       settlementIncludeHeader,
+      settlementCopyLabelsResolved,
       firmInfo,
       sellerSalesPattiNumberBySellerId,
     ]
@@ -4887,10 +4900,14 @@ const SettlementPage = () => {
       return;
     }
     const ok = await directPrint(
-      generateSalesPattiBatchPrintHTML(payloads, {
-        pageSize: settlementEffectivePrintSize,
-        includeHeader: settlementIncludeHeader,
-      }),
+      generateSalesPattiBatchPrintHTML(
+        payloads,
+        {
+          pageSize: settlementEffectivePrintSize,
+          includeHeader: settlementIncludeHeader,
+        },
+        settlementCopyLabelsResolved,
+      ),
       { mode: 'system' },
     );
     if (!ok) {
@@ -4914,6 +4931,7 @@ const SettlementPage = () => {
     isWeighingMergedIntoFreight,
     settlementEffectivePrintSize,
     settlementIncludeHeader,
+    settlementCopyLabelsResolved,
     firmInfo,
     sellerSalesPattiNumberBySellerId,
   ]);
@@ -5490,6 +5508,9 @@ const SettlementPage = () => {
               <p className="font-bold text-sm text-foreground">MERCOTRACE</p>
               <p className="text-muted-foreground">Sales Patti (Settlement)</p>
               <p className="text-muted-foreground">{new Date(pattiData.createdAt).toLocaleDateString()} {new Date(pattiData.createdAt).toLocaleTimeString()}</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Print copies: {settlementCopyLabelsResolved.join(', ')}
+              </p>
             </div>
 
             <div className="border-b border-dashed border-border pb-2 space-y-1">
@@ -5570,7 +5591,7 @@ const SettlementPage = () => {
                 // backend optional
               }
               const ok = await directPrint(
-                generateSalesPattiPrintHTML(
+                generateSalesPattiPrintHTMLForCopies(
                   {
                     ...pattiData,
                     firm: firmInfo,
@@ -5584,6 +5605,7 @@ const SettlementPage = () => {
                       : {}),
                     pattiNoDisplay: mainPattiNumberForDisplay(displayMainSalesPattiNo, pattiData.pattiId),
                   },
+                  settlementCopyLabelsResolved,
                   { pageSize: settlementEffectivePrintSize, includeHeader: settlementIncludeHeader },
                 ),
                 { mode: "system" },

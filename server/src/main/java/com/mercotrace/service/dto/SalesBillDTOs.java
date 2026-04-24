@@ -95,8 +95,16 @@ public final class SalesBillDTOs {
         private BigDecimal userFeePercent;
         private BigDecimal coolieRate;
         private BigDecimal coolieAmount;
+        /** Nullable: when absent, server uses sum of line quantities for coolie amount. */
+        @Min(value = 0, message = "coolieChargeQty must be >= 0")
+        @Max(value = 1_000_000, message = "coolieChargeQty too large")
+        private Integer coolieChargeQty;
         private BigDecimal weighmanChargeRate;
         private BigDecimal weighmanChargeAmount;
+        /** Nullable: when absent, server uses sum of line quantities for weighman amount. */
+        @Min(value = 0, message = "weighmanChargeQty must be >= 0")
+        @Max(value = 1_000_000, message = "weighmanChargeQty too large")
+        private Integer weighmanChargeQty;
         private BigDecimal discount;
         private String discountType; // PERCENT | AMOUNT
         private BigDecimal manualRoundOff;
@@ -130,10 +138,14 @@ public final class SalesBillDTOs {
         public void setCoolieRate(BigDecimal coolieRate) { this.coolieRate = coolieRate; }
         public BigDecimal getCoolieAmount() { return coolieAmount; }
         public void setCoolieAmount(BigDecimal coolieAmount) { this.coolieAmount = coolieAmount; }
+        public Integer getCoolieChargeQty() { return coolieChargeQty; }
+        public void setCoolieChargeQty(Integer coolieChargeQty) { this.coolieChargeQty = coolieChargeQty; }
         public BigDecimal getWeighmanChargeRate() { return weighmanChargeRate; }
         public void setWeighmanChargeRate(BigDecimal weighmanChargeRate) { this.weighmanChargeRate = weighmanChargeRate; }
         public BigDecimal getWeighmanChargeAmount() { return weighmanChargeAmount; }
         public void setWeighmanChargeAmount(BigDecimal weighmanChargeAmount) { this.weighmanChargeAmount = weighmanChargeAmount; }
+        public Integer getWeighmanChargeQty() { return weighmanChargeQty; }
+        public void setWeighmanChargeQty(Integer weighmanChargeQty) { this.weighmanChargeQty = weighmanChargeQty; }
         public BigDecimal getDiscount() { return discount; }
         public void setDiscount(BigDecimal discount) { this.discount = discount; }
         public String getDiscountType() { return discountType; }
