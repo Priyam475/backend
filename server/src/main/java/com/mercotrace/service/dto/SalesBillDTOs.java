@@ -38,6 +38,8 @@ public final class SalesBillDTOs {
         private BigDecimal weight;
         private BigDecimal baseRate;
         private BigDecimal brokerage;
+        /** Signed preset (auction margin); not included in {@link #otherCharges}. */
+        private BigDecimal presetApplied;
         private BigDecimal otherCharges;
         private BigDecimal newRate;
         private BigDecimal amount;
@@ -76,6 +78,8 @@ public final class SalesBillDTOs {
         public void setBaseRate(BigDecimal baseRate) { this.baseRate = baseRate; }
         public BigDecimal getBrokerage() { return brokerage; }
         public void setBrokerage(BigDecimal brokerage) { this.brokerage = brokerage; }
+        public BigDecimal getPresetApplied() { return presetApplied; }
+        public void setPresetApplied(BigDecimal presetApplied) { this.presetApplied = presetApplied; }
         public BigDecimal getOtherCharges() { return otherCharges; }
         public void setOtherCharges(BigDecimal otherCharges) { this.otherCharges = otherCharges; }
         public BigDecimal getNewRate() { return newRate; }

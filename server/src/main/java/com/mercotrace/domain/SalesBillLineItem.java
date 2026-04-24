@@ -82,6 +82,11 @@ public class SalesBillLineItem implements Serializable {
     @Column(name = "brokerage", precision = 15, scale = 2, nullable = false)
     private BigDecimal brokerage = BigDecimal.ZERO;
 
+    /** Signed auction preset margin (₹/rate add); independent of {@link #otherCharges}. */
+    @NotNull
+    @Column(name = "preset_applied", precision = 15, scale = 2, nullable = false)
+    private BigDecimal presetApplied = BigDecimal.ZERO;
+
     @NotNull
     @Column(name = "other_charges", precision = 15, scale = 2, nullable = false)
     private BigDecimal otherCharges = BigDecimal.ZERO;
@@ -137,6 +142,8 @@ public class SalesBillLineItem implements Serializable {
     public void setBaseRate(BigDecimal baseRate) { this.baseRate = baseRate; }
     public BigDecimal getBrokerage() { return brokerage; }
     public void setBrokerage(BigDecimal brokerage) { this.brokerage = brokerage; }
+    public BigDecimal getPresetApplied() { return presetApplied; }
+    public void setPresetApplied(BigDecimal presetApplied) { this.presetApplied = presetApplied; }
     public BigDecimal getOtherCharges() { return otherCharges; }
     public void setOtherCharges(BigDecimal otherCharges) { this.otherCharges = otherCharges; }
     public BigDecimal getNewRate() { return newRate; }

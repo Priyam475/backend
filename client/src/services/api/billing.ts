@@ -20,6 +20,8 @@ export interface BillLineItemDTO {
   weight: number;
   baseRate: number;
   brokerage?: number;
+  /** Signed auction preset (₹ rate add); not merged into otherCharges. */
+  presetApplied?: number;
   otherCharges?: number;
   newRate: number;
   amount: number;

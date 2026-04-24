@@ -295,7 +295,7 @@ interface BillLineItem {
   baseRate: number; // B = Auction bid
   presetApplied: number; // P = Preset
   brokerage: number; // BRK
-  otherCharges: number; // Other (from preset or manual)
+  otherCharges: number; // Buyer dynamic other charges only (not preset)
   sellerOtherCharges: number; // Other (dynamic, appliesTo=SELLER) - read-only for settlement deductions
   newRate: number; // REQ-BIL-002: NR = B + P + BRK + Other
   amount: number;
@@ -357,7 +357,7 @@ function roundBillMoneyValues(b: BillData): BillData {
       quantity: roundMoney2(Number(it.quantity) || 0),
       weight: roundMoney2(Number(it.weight) || 0),
       baseRate: roundMoney2(Number(it.baseRate) || 0),
-      presetApplied: roundMoney2(Number(it.presetApplied) || 0),
+      presetApplied: roundMoney2(Number(it.presetApplied ?? 0)),
       brokerage: roundMoney2(Number(it.brokerage) || 0),
       otherCharges: roundMoney2(Number(it.otherCharges) || 0),
       sellerOtherCharges: roundMoney2(Number(it.sellerOtherCharges) || 0),
@@ -503,8 +503,12 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
       const brk = Number(item.brokerage) || 0;
       const other = Number(item.otherCharges) || 0;
       const nr = Number(item.newRate) || 0;
-      const preset = Math.max(0, nr - base - brk - other);
-      const presetApplied = item.presetApplied ?? preset;
+      const inferredPreset = roundMoney2(nr - base - brk - other);
+      const rawPreset = item.presetApplied ?? item.preset_applied;
+      const presetApplied =
+        rawPreset != null && Number.isFinite(Number(rawPreset))
+          ? roundMoney2(Number(rawPreset))
+          : inferredPreset;
 
       const divisorUsed = (g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50) > 0
         ? (g.divisor ?? configByCommName.get(g.commodityName)?.divisor ?? 50)
@@ -718,6 +722,11 @@ function validateBill(
       } else if (item.brokerage > 10000000) {
         errors[`items.${gi}.${ii}.brokerage`] = 'Too large';
       }
+      if (!Number.isFinite(item.presetApplied)) {
+        errors[`items.${gi}.${ii}.presetApplied`] = 'Invalid';
+      } else if (item.presetApplied < -10000 || item.presetApplied > 10000) {
+        errors[`items.${gi}.${ii}.presetApplied`] = 'Out of range (±₹10,000)';
+      }
       if (!Number.isFinite(item.otherCharges) || item.otherCharges < 0) {
         errors[`items.${gi}.${ii}.otherCharges`] = 'Invalid';
       } else if (item.otherCharges > 10000) {
@@ -848,6 +857,14 @@ const BillingPage = () => {
     if (!bill) return false;
     return bill.commodityGroups.some(
       (g) => effectiveGstPercent(g) > 0 || g.taxMode === 'GST' || g.taxMode === 'IGST',
+    );
+  }, [bill]);
+
+  /** Show Preset column when any line has a non-zero preset (REQ-BIL-002). */
+  const showPresetColumn = useMemo(() => {
+    if (!bill) return false;
+    return bill.commodityGroups.some(g =>
+      g.items.some(it => roundMoney2(Number(it.presetApplied) || 0) !== 0),
     );
   }, [bill]);
 
@@ -1722,7 +1739,7 @@ const BillingPage = () => {
             Number.isFinite(apiSTot) && apiSTot > 0 ? apiSTot : (vehicleSellerTotals.get(sKey) ?? entry.quantity),
           vehicleMark: vehicleMark || undefined,
           sellerMark: sellerMark || undefined,
-          presetApplied: entry.presetApplied || 0,
+          presetApplied: Number(entry.presetApplied ?? 0),
           isSelfSale: Boolean(entry.isSelfSale),
           tokenAdvance,
         });
@@ -2044,14 +2061,13 @@ const BillingPage = () => {
 
       const group = commodityMap.get(commName)!;
 
-      // REQ-BIL-002: NR = B + P + BRK + Other Charges
+      // REQ-BIL-002: NR = B + P + BRK + Other (preset and buyer dynamic other charges are separate)
       const brokerage = 0; // default, can be edited
-      const presetApplied = entry.presetApplied ?? 0;
-      // Show preset inside "Other Charges" so UI displays total rate-add in one field.
-      const otherCharges = presetApplied + computeBuyerOtherChargesRateAdd(entry, commName, group.divisor);
+      const presetApplied = roundMoney2(Number(entry.presetApplied ?? 0));
+      const otherCharges = roundMoney2(computeBuyerOtherChargesRateAdd(entry, commName, group.divisor));
       const sellerOtherCharges = computeSellerOtherChargesRateAdd(entry, commName, group.divisor);
       const div = group.divisor > 0 ? group.divisor : 50;
-      const newRate = roundMoney2(entry.rate + brokerage + otherCharges);
+      const newRate = roundMoney2(entry.rate + brokerage + presetApplied + otherCharges);
       const amount = roundMoney2((entry.weight * newRate) / div);
 
       group.items.push({
@@ -2440,7 +2456,7 @@ const BillingPage = () => {
         sellerVehicleQty: addBidSelectedLot.seller_total_qty ?? matchedAuction.quantity ?? 0,
         vehicleMark: String(addBidSelectedLot.vehicle_mark ?? '').trim() || undefined,
         sellerMark: String(addBidSelectedLot.seller_mark ?? '').trim() || undefined,
-        presetApplied: Number(matchedAuction.preset_margin) || 0,
+        presetApplied: Number(matchedAuction.preset_margin ?? 0),
         isSelfSale: !!matchedAuction.is_self_sale,
         tokenAdvance: Number(matchedAuction.token_advance) || 0,
       };
@@ -2734,7 +2750,7 @@ const BillingPage = () => {
   const updateLineItem = (
     commIdx: number,
     itemIdx: number,
-    field: 'quantity' | 'weight' | 'baseRate' | 'brokerage' | 'otherCharges' | 'tokenAdvance',
+    field: 'quantity' | 'weight' | 'baseRate' | 'brokerage' | 'otherCharges' | 'presetApplied' | 'tokenAdvance',
     value: number,
   ) => {
     if (!bill) return;
@@ -2755,7 +2771,7 @@ const BillingPage = () => {
     const item = { ...group.items[itemIdx] };
     (item as any)[field] = v;
     const preset = (item as { presetApplied?: number }).presetApplied ?? 0;
-    item.newRate = roundMoney2(item.baseRate + item.brokerage + item.otherCharges);
+    item.newRate = roundMoney2(item.baseRate + preset + item.brokerage + item.otherCharges);
     const divisorUsed = group.divisor > 0 ? group.divisor : 50;
     item.amount = roundMoney2((item.weight * item.newRate) / divisorUsed);
 
@@ -2853,7 +2869,7 @@ const BillingPage = () => {
           ...item,
           brokerage: brk,
           otherCharges: globalOther,
-          newRate: roundMoney2(item.baseRate + brk + globalOther),
+          newRate: roundMoney2(item.baseRate + preset + brk + globalOther),
           amount: 0,
         };
         newItem.amount = roundMoney2(
@@ -3477,7 +3493,7 @@ const BillingPage = () => {
                       </div>
                       <p className="text-xs">{entry.quantity}</p>
                       <p className="text-xs">{Number(entry.rate || 0)}</p>
-                      <p className="text-xs">{Number(entry.presetApplied || 0)}</p>
+                      <p className="text-xs">{formatBillingInr(Number(entry.presetApplied ?? 0))}</p>
                     </div>
                   </button>
                 );
@@ -4516,11 +4532,19 @@ const BillingPage = () => {
                       {!isCollapsed && (
                         <div className="p-3 space-y-2">
                           {/* Table header for commodity items */}
-                          <div className="hidden lg:grid lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] gap-1.5 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center">
+                          <div
+                            className={cn(
+                              'hidden lg:grid gap-1.5 px-1 pb-1 text-[10px] font-semibold text-muted-foreground uppercase text-center',
+                              showPresetColumn
+                                ? 'lg:grid-cols-[minmax(140px,1.6fr),repeat(10,minmax(0,1fr)),minmax(44px,0.5fr)]'
+                                : 'lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)]',
+                            )}
+                          >
                             <span>Item</span>
                             <span>Qty</span>
                             <span>Weight (kg)</span>
                             <span>Avg Wt (kg)</span>
+                            {showPresetColumn && <span>Preset (₹)</span>}
                             <span>Other Charges</span>
                             <span>Brokerage (₹)</span>
                             <span>Token (₹)</span>
@@ -4567,7 +4591,12 @@ const BillingPage = () => {
                               return (
                                 <div
                                   key={ii}
-                                  className="relative shrink-0 w-full snap-start grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)] lg:gap-x-1.5 items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-center lg:w-auto"
+                                  className={cn(
+                                    'relative shrink-0 w-full snap-start grid grid-cols-2 sm:grid-cols-3 gap-x-2 gap-y-1 text-[11px] lg:text-[10px] lg:gap-x-1.5 items-start lg:items-center rounded-xl bg-card border border-border/60 shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-2.5 py-2 lg:px-2 lg:py-1.5 text-center lg:w-auto',
+                                    showPresetColumn
+                                      ? 'lg:grid-cols-[minmax(140px,1.6fr),repeat(10,minmax(0,1fr)),minmax(44px,0.5fr)]'
+                                      : 'lg:grid-cols-[minmax(140px,1.6fr),repeat(9,minmax(0,1fr)),minmax(44px,0.5fr)]',
+                                  )}
                                 >
                                   <button
                                     type="button"
@@ -4659,6 +4688,35 @@ const BillingPage = () => {
                                     )}
                                   </div>
 
+                                  {showPresetColumn && (
+                                    <div>
+                                      <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">
+                                        Preset ₹
+                                      </p>
+                                      <BillingMoneyInput
+                                        value={item.presetApplied ?? 0}
+                                        onCommit={n => {
+                                          updateLineItem(gi, ii, 'presetApplied', n);
+                                        }}
+                                        title={
+                                          item.auctionEntryId != null
+                                            ? 'Preset (editable; may differ from auction)'
+                                            : 'Per-line preset (signed)'
+                                        }
+                                        className={cn(
+                                          'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
+                                          validationErrors[`items.${gi}.${ii}.presetApplied`] &&
+                                            'ring-1 ring-destructive/40 rounded',
+                                        )}
+                                      />
+                                      {validationErrors[`items.${gi}.${ii}.presetApplied`] && (
+                                        <p className="text-[9px] lg:text-[8px] text-destructive mt-0.5 text-center">
+                                          {validationErrors[`items.${gi}.${ii}.presetApplied`]}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+
                                   <div>
                                     <p className="lg:hidden text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5 text-center">Other ₹</p>
                                     <BillingMoneyInput
@@ -4731,7 +4789,7 @@ const BillingPage = () => {
                                         billingCommodityReadOnlyCellClass,
                                         'font-bold text-primary/85 dark:text-primary/75 border-primary/25 bg-primary/[0.07]',
                                       )}
-                                      title="Calculated from bid rate, brokerage, and other charges (not editable)"
+                                      title="Calculated from bid rate, preset, brokerage, and other charges (not editable)"
                                       aria-label={`New rate ₹${formatBillingInr(item.newRate)}, calculated, read-only`}
                                     >
                                       ₹{formatBillingInr(item.newRate)}

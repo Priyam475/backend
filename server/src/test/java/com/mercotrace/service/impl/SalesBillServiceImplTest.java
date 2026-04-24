@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mercotrace.domain.SalesBill;
 import com.mercotrace.domain.SalesBillCommodityGroup;
+import com.mercotrace.domain.SalesBillLineItem;
 import com.mercotrace.repository.BillNumberSequenceRepository;
 import com.mercotrace.repository.SalesBillRepository;
 import com.mercotrace.repository.TraderRepository;
@@ -286,6 +287,34 @@ class SalesBillServiceImplTest {
         SalesBillCommodityGroup sg = billCaptor.getValue().getCommodityGroups().get(0);
         assertThat(sg.getCoolieChargeQty()).isNull();
         assertThat(sg.getCoolieAmount()).isEqualByComparingTo("20.00");
+    }
+
+    @Test
+    void create_persistsPresetAppliedSeparateFromOtherCharges() {
+        when(traderContextService.getCurrentTraderId()).thenReturn(TRADER_ID);
+
+        when(salesBillRepository.save(any(SalesBill.class))).thenAnswer(inv -> {
+            SalesBill b = inv.getArgument(0);
+            if (b.getId() == null) {
+                b.setId(88L);
+            }
+            return b;
+        });
+
+        SalesBillCreateOrUpdateRequest req = sampleCreateRequest();
+        BillLineItemDTO item = req.getCommodityGroups().get(0).getItems().get(0);
+        item.setBrokerage(BigDecimal.ZERO);
+        item.setPresetApplied(BigDecimal.valueOf(-2.5));
+        item.setOtherCharges(BigDecimal.valueOf(3));
+        item.setNewRate(BigDecimal.valueOf(100.5)); // 100 base - 2.5 preset + 3 other
+
+        service.create(req);
+
+        ArgumentCaptor<SalesBill> billCaptor = ArgumentCaptor.forClass(SalesBill.class);
+        verify(salesBillRepository).save(billCaptor.capture());
+        SalesBillLineItem li = billCaptor.getValue().getCommodityGroups().get(0).getItems().get(0);
+        assertThat(li.getPresetApplied()).isEqualByComparingTo("-2.50");
+        assertThat(li.getOtherCharges()).isEqualByComparingTo("3.00");
     }
 }
 

@@ -409,6 +409,7 @@ public class SalesBillServiceImpl implements SalesBillService {
                 item.setWeight(it.getWeight() != null ? it.getWeight() : BigDecimal.ZERO);
                 item.setBaseRate(it.getBaseRate() != null ? it.getBaseRate() : BigDecimal.ZERO);
                 item.setBrokerage(nullToZero(it.getBrokerage()));
+                item.setPresetApplied(nullToZero(it.getPresetApplied()));
                 item.setOtherCharges(nullToZero(it.getOtherCharges()));
                 item.setNewRate(it.getNewRate() != null ? it.getNewRate() : BigDecimal.ZERO);
                 item.setAmount(it.getAmount() != null ? it.getAmount() : BigDecimal.ZERO);
@@ -497,6 +498,7 @@ public class SalesBillServiceImpl implements SalesBillService {
                 idto.setWeight(it.getWeight());
                 idto.setBaseRate(it.getBaseRate());
                 idto.setBrokerage(it.getBrokerage());
+                idto.setPresetApplied(it.getPresetApplied());
                 idto.setOtherCharges(it.getOtherCharges());
                 idto.setNewRate(it.getNewRate());
                 idto.setAmount(it.getAmount());

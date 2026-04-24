@@ -110,4 +110,5 @@
     <include file="config/liquibase/changelog/20260423120000_sales_bill_line_item_lot_display_context.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260424100000_print_setting_bill_floor_and_copies.xml" relativeToChangelogFile="false"/>
     <include file="config/liquibase/changelog/20260424111000_sales_bill_commodity_group_charge_qty.xml" relativeToChangelogFile="false"/>
+    <include file="config/liquibase/changelog/20260424120000_sales_bill_line_item_preset_applied.xml" relativeToChangelogFile="false"/>
 </databaseChangeLog>
