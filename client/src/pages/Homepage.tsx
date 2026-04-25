@@ -34,6 +34,7 @@ const modules = [
   { image: imgContacts, title: 'Contacts', desc: 'Manage sellers, buyers & brokers', path: '/contacts', accent: 'from-cyan-400 to-blue-500' },
   { image: imgArrivals, title: 'Arrivals', desc: 'Vehicle entry, tonnage & lots', path: '/arrivals', accent: 'from-emerald-400 to-teal-500' },
   { image: imgAuctions, title: 'Auctions / Sales Pad', desc: 'Bidding & scribble pad', path: '/auctions', accent: 'from-violet-400 to-purple-600' },
+  { image: imgArrivals, title: 'Summary page', desc: 'Post-auction lots & vehicle operations', path: '/summary-page', accent: 'from-indigo-400 to-violet-500' },
   { image: imgLogistics, title: 'Print Hub', desc: 'Print stickers & chiti', path: '/logistics', accent: 'from-sky-400 to-indigo-500' },
   { image: imgWeighing, title: 'Weighing', desc: 'Liability management & dual records', path: '/weighing', accent: 'from-rose-400 to-pink-500' },
   { image: imgWritersPad, title: "Writer's Pad", desc: 'Scale-connected bid weighing', path: '/writers-pad', accent: 'from-fuchsia-400 to-violet-500' },

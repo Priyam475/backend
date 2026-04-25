@@ -347,7 +347,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0">
       {!isDesktop ? hero : null}
       {isDesktop ? (
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
           <Button
             type="button"
             variant="default"

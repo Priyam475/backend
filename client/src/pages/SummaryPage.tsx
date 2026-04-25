@@ -636,7 +636,7 @@ const SummaryPage = () => {
       )}
 
       {isDesktop && showFullVehicleOps && selectedFromUrl && (
-        <div className="max-w-[100vw] overflow-x-hidden px-4 pb-6 sm:px-6 lg:px-8">
+        <div className="max-w-[100vw] overflow-x-hidden px-4 pt-5 pb-6 sm:px-6 sm:pt-5 lg:px-8 lg:pt-5">
           <SummaryVehicleOperationsView
             arrival={selectedFromUrl}
             isDesktop
