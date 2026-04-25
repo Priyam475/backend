@@ -2695,7 +2695,7 @@ const ArrivalsPage = () => {
                           </div>
                         )
                       ) : (
-                    <div className="glass-card rounded-2xl overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                    <div className="glass-card rounded-2xl overflow-x-auto max-w-full [-webkit-overflow-scrolling:touch] touch-[pan-x_pan-y] lg:touch-auto">
                       <table className="w-full min-w-[62rem] text-sm border-separate border-spacing-0">
                         <thead className={cn(ARRIVALS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
                           <tr className="border-b border-white/20">
@@ -2762,7 +2762,7 @@ const ArrivalsPage = () => {
                                         {expandedDetailLoading ? (
                                           <p className="text-sm text-muted-foreground">Loading…</p>
                                         ) : expandedDetail ? (
-                                          <div className="overflow-x-auto -mx-1 px-1 max-w-full [-webkit-overflow-scrolling:touch] touch-pan-x">
+                                          <div className="overflow-x-auto -mx-1 px-1 max-w-full [-webkit-overflow-scrolling:touch] touch-[pan-x_pan-y] lg:touch-auto">
                                           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm min-w-0 w-full">
                                             <div className="space-y-3">
                                               <FreightDetailsCard
@@ -4555,7 +4555,7 @@ const ArrivalsPage = () => {
                                               }}
                                               data-arrival-mobile-lots-carousel="1"
                                               onScroll={() => handleArrivalLotsCarouselScroll(seller.seller_vehicle_id, seller.lots.length)}
-                                              className="flex w-full max-w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] snap-x snap-mandatory touch-pan-x"
+                                              className="flex w-full max-w-full overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] snap-x snap-mandatory touch-[pan-x_pan-y] lg:touch-auto"
                                             >
                                               {Array.from({ length: lotPageCount }, (_, pageIdx) => {
                                                 const start = pageIdx * MOBILE_ARRIVAL_LOTS_PER_PAGE;

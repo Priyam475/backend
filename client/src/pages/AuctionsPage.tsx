@@ -2943,7 +2943,7 @@ const AuctionsPage = () => {
                         aria-label="Registered buyers"
                         tabIndex={0}
                         {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-[pan-x_pan-y] lg:touch-auto select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                         style={{
                           scrollbarWidth: 'thin',
                           WebkitOverflowScrolling: 'touch',
@@ -2996,7 +2996,7 @@ const AuctionsPage = () => {
                         aria-label="Temporary buyers"
                         tabIndex={0}
                         {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                        className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-hidden flex flex-nowrap gap-2.5 py-1.5 -mx-1 px-0.5 scroll-smooth touch-[pan-x_pan-y] lg:touch-auto select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                         style={{
                           scrollbarWidth: 'thin',
                           WebkitOverflowScrolling: 'touch',
@@ -3460,7 +3460,7 @@ const AuctionsPage = () => {
                 aria-label="Registered buyers"
                 tabIndex={0}
                 {...makeScrollHandlers(contactScrollRef, didDragContactRef)}
-                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-[pan-x_pan-y] lg:touch-auto select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                 style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
               >
                 {filteredContacts.length > 0 ? (
@@ -3504,7 +3504,7 @@ const AuctionsPage = () => {
                 aria-label="Temporary buyers"
                 tabIndex={0}
                 {...makeScrollHandlers(markScrollRef, didDragMarkRef)}
-                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-pan-x select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
+                className="overflow-x-auto overflow-y-hidden flex gap-1.5 py-0.5 -mx-1 px-0.5 scroll-smooth touch-[pan-x_pan-y] lg:touch-auto select-none cursor-grab active:cursor-grabbing overscroll-x-contain"
                 style={{ scrollbarWidth: 'thin', WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
               >
                 {filteredTemporaryMarks.length > 0 ? (

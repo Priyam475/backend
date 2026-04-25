@@ -3867,7 +3867,7 @@ const BillingPage = () => {
               <div className="flex-shrink-0" />
             </div>
 
-            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-pan-x" role="tablist" aria-label="Billing views">
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-1 -mx-1 px-1 touch-[pan-x_pan-y] lg:touch-auto" role="tablist" aria-label="Billing views">
               <button type="button" onClick={() => requestBillingMainTab('create')}
                 className={billingToggleTabBtnOnHero(billingMainTab === 'create')}>
                 <Plus className="w-4 h-4 shrink-0 hidden sm:block" />

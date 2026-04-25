@@ -314,7 +314,7 @@ const SummaryPage = () => {
                   </div>
                 )
               ) : (
-                <div className="glass-card max-w-full touch-pan-x overflow-x-auto rounded-2xl [-webkit-overflow-scrolling:touch]">
+                <div className="glass-card max-w-full touch-[pan-x_pan-y] lg:touch-auto overflow-x-auto rounded-2xl [-webkit-overflow-scrolling:touch]">
                   <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-sm">
                     <thead className={cn(ARRIVALS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
                       <tr className="border-b border-white/20">

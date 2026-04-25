@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ARRIVALS_TABLE_HEADER_GRADIENT } from '@/components/arrivals/arrivalsTableTokens';
 import { auctionApi, type AuctionEntryDTO, type AuctionSessionDTO } from '@/services/api/auction';
 import { cn } from '@/lib/utils';
+import { vehicleOpsPrimaryBtnClass } from './vehicleOpsUi';
 
 /** Display-only — matches `readOnlyLotInputClass` in SellerDetailPanel (dashed, muted). */
 const readOnlyBidTextClass =
@@ -103,18 +105,19 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="default"
           size="sm"
-          className="rounded-xl border-[#6075FF]/40 bg-gradient-to-r from-violet-500/10 to-blue-500/10"
+          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
           disabled={busy}
           onClick={() => toast.message('Add bid', { description: 'Not wired from Summary vehicle ops yet.' })}
         >
-          + Add bid
+          Add New Bid
         </Button>
         <Button
           type="button"
+          variant="default"
           size="sm"
-          className="rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 text-white shadow-md"
+          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
           disabled={busy}
           onClick={() => {
             // TODO(merco): PATCH auctionApi.updateBid with mapped rate/preset when product confirms field mapping.
@@ -153,18 +156,24 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
       <div className="hidden max-w-full overflow-x-auto rounded-xl border border-border/30 bg-background/40 lg:block">
         <Table className="min-w-[720px] text-xs sm:text-sm">
           <TableHeader>
-            <TableRow className="border-border/40 hover:bg-muted/40">
-              <TableHead className="whitespace-nowrap">Mark</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
-              <TableHead className="text-right">Buyer rate</TableHead>
-              <TableHead className="text-right">
+            <TableRow
+              className={cn(
+                ARRIVALS_TABLE_HEADER_GRADIENT,
+                'border-0 border-b border-white/25 shadow-[0_4px_12px_rgba(91,140,255,0.35)]',
+                'hover:bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] hover:brightness-[1.03]',
+              )}
+            >
+              <TableHead className="whitespace-nowrap text-white/95 first:rounded-tl-xl">Mark</TableHead>
+              <TableHead className="text-right text-white/95">Qty</TableHead>
+              <TableHead className="text-right text-white/95">Buyer rate</TableHead>
+              <TableHead className="text-right text-white/95">
                 <span className="inline-flex items-center gap-1">
                   Ref seller rate
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="rounded-full p-0.5 text-white/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                         aria-label="Reference seller rate hint"
                       >
                         <Info className="h-3.5 w-3.5" />
@@ -176,16 +185,16 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                   </Tooltip>
                 </span>
               </TableHead>
-              <TableHead className="text-right">Brokerage</TableHead>
-              <TableHead className="text-right">Preset</TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-right text-white/95">Brokerage</TableHead>
+              <TableHead className="text-right text-white/95">Preset</TableHead>
+              <TableHead className="text-right text-white/95">
                 <span className="inline-flex items-center gap-1">
                   New seller rate
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="rounded-full p-0.5 text-white/85 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                         aria-label="New seller rate hint"
                       >
                         <Info className="h-3.5 w-3.5" />
@@ -197,7 +206,7 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                   </Tooltip>
                 </span>
               </TableHead>
-              <TableHead className="w-12 text-center"> </TableHead>
+              <TableHead className="w-12 text-center text-white/95 last:rounded-tr-xl"> </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -291,7 +300,7 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
         <div
           ref={mobileBuyersCarouselRef}
           onScroll={handleBuyersCarouselScroll}
-          className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x no-scrollbar snap-x snap-mandatory"
+          className="flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] touch-[pan-x_pan-y] lg:touch-auto no-scrollbar snap-x snap-mandatory"
         >
           {entries.map((e) => {
             const id = e.auction_entry_id;
@@ -304,21 +313,8 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                 key={id}
                 className="glass-card w-[calc(100%-0.1rem)] shrink-0 snap-start space-y-3 rounded-xl border border-border/50 bg-card/80 p-3 shadow-sm"
               >
-                <div className="flex items-center justify-end border-b border-border/30 pb-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex shrink-0 rounded-lg p-2 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      busy && 'pointer-events-none opacity-50',
-                    )}
-                    aria-label={`Delete bid ${e.bid_number}`}
-                    onClick={() => setDeleteTarget(e)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <div className="min-w-0 space-y-1">
+                <div className="flex items-end justify-between gap-2 border-b border-border/30 pb-2">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <FieldLabel>Mark</FieldLabel>
                     <Input
                       readOnly
@@ -328,6 +324,19 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                       className={readOnlyBidTextClass}
                     />
                   </div>
+                  <button
+                    type="button"
+                    className={cn(
+                      'mb-0.5 inline-flex shrink-0 rounded-lg p-2 text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      busy && 'pointer-events-none opacity-50',
+                    )}
+                    aria-label={`Delete bid ${e.bid_number}`}
+                    onClick={() => setDeleteTarget(e)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div className="min-w-0 space-y-1">
                     <FieldLabel>Qty</FieldLabel>
                     <Input
@@ -369,69 +378,71 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                     />
                   </div>
                 </div>
-                <div>
-                  <div className="mb-1 flex items-center gap-1">
-                    <FieldLabel>Ref seller rate (₹)</FieldLabel>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-label="Reference seller rate hint"
-                        >
-                          <Info className="h-3 w-3" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                        {REF_FORMULA_HINT}
-                      </TooltipContent>
-                    </Tooltip>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <FieldLabel>Ref seller rate (₹)</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label="Reference seller rate hint"
+                          >
+                            <Info className="h-3 w-3" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-left text-xs">
+                          {REF_FORMULA_HINT}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <Input
+                      inputMode="decimal"
+                      className="h-10 w-full min-w-0 rounded-lg border-border/50 text-right tabular-nums text-sm"
+                      value={draft.ref}
+                      aria-label={`Reference seller rate for ${e.buyer_mark}`}
+                      onChange={(ev) => {
+                        const v = ev.target.value;
+                        setDraftByEntryId((p) => {
+                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
+                          return { ...p, [id]: { ...cur, ref: v } };
+                        });
+                      }}
+                    />
                   </div>
-                  <Input
-                    inputMode="decimal"
-                    className="h-10 w-full rounded-lg border-border/50 text-right tabular-nums text-sm"
-                    value={draft.ref}
-                    aria-label={`Reference seller rate for ${e.buyer_mark}`}
-                    onChange={(ev) => {
-                      const v = ev.target.value;
-                      setDraftByEntryId((p) => {
-                        const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                        return { ...p, [id]: { ...cur, ref: v } };
-                      });
-                    }}
-                  />
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center gap-1">
-                    <FieldLabel>New seller rate (₹)</FieldLabel>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-label="New seller rate hint"
-                        >
-                          <Info className="h-3 w-3" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                        Proposed seller-side rate; local only until PATCH is wired.
-                      </TooltipContent>
-                    </Tooltip>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <FieldLabel>New seller rate (₹)</FieldLabel>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="rounded-full p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label="New seller rate hint"
+                          >
+                            <Info className="h-3 w-3" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs text-left text-xs">
+                          Proposed seller-side rate; local only until PATCH is wired.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <Input
+                      inputMode="decimal"
+                      className="h-10 w-full min-w-0 rounded-lg border-border/50 text-right tabular-nums text-sm"
+                      value={draft.neu}
+                      aria-label={`New seller rate for ${e.buyer_mark}`}
+                      onChange={(ev) => {
+                        const v = ev.target.value;
+                        setDraftByEntryId((p) => {
+                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
+                          return { ...p, [id]: { ...cur, neu: v } };
+                        });
+                      }}
+                    />
                   </div>
-                  <Input
-                    inputMode="decimal"
-                    className="h-10 w-full rounded-lg border-border/50 text-right tabular-nums text-sm"
-                    value={draft.neu}
-                    aria-label={`New seller rate for ${e.buyer_mark}`}
-                    onChange={(ev) => {
-                      const v = ev.target.value;
-                      setDraftByEntryId((p) => {
-                        const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                        return { ...p, [id]: { ...cur, neu: v } };
-                      });
-                    }}
-                  />
                 </div>
               </div>
             );

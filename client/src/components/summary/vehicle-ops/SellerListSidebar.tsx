@@ -46,8 +46,8 @@ export function SellerListSidebar({
       className={cn(
         'flex min-h-0 gap-2 pb-1 [-webkit-overflow-scrolling:touch]',
         /* Horizontal strip + touch pan for phone/tablet; vertical sidebar from lg (1024px) with VehicleOpsSellerWorkspace grid. */
-        'touch-pan-x overflow-x-auto no-scrollbar',
-        'lg:flex-col lg:touch-auto lg:gap-2 lg:overflow-y-auto lg:overflow-x-visible lg:pb-0 lg:pr-1',
+        'touch-[pan-x_pan-y] overflow-x-auto no-scrollbar',
+        'lg:flex-col lg:touch-auto lg:gap-2 lg:overflow-y-visible lg:overflow-x-visible lg:pb-0 lg:pr-1',
       )}
     >
       {sellers.map((seller, i) => {

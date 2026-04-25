@@ -7,6 +7,7 @@ import { auctionApi } from '@/services/api/auction';
 import { cn } from '@/lib/utils';
 import { formatLotLabelFromSummary, sellerBagSoldPending, sellerKeyFromArrivalSeller } from './vehicleOpsUtils';
 import { LotBidsTable } from './LotBidsTable';
+import { vehicleOpsPrimaryBtnClass, vehicleOpsSecondaryOutlineBtnClass } from './vehicleOpsUi';
 
 const LG_MIN_WIDTH = '(min-width: 1024px)';
 
@@ -58,7 +59,10 @@ function LotBlockHeader({
       {showExpandToggle && onToggleExpand ? (
         <button
           type="button"
-          className="ml-auto inline-flex shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6075FF]"
+          className={cn(
+            'ml-auto inline-flex shrink-0 rounded-lg p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6075FF]',
+            vehicleOpsSecondaryOutlineBtnClass,
+          )}
           aria-expanded={expanded}
           aria-controls={`lot-panel-${lotId}`}
           id={`lot-trigger-${lotId}`}
@@ -220,7 +224,8 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
         <Button
           type="button"
           size="sm"
-          className="shrink-0 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 text-white shadow-md"
+          variant="default"
+          className={cn(vehicleOpsPrimaryBtnClass, 'shrink-0 rounded-xl')}
           onClick={onPrint}
         >
           <Printer className="mr-2 h-4 w-4" />
@@ -311,7 +316,7 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
                 <div
                   ref={mobileLotsCarouselRef}
                   onScroll={handleLotsCarouselScroll}
-                  className="flex min-h-0 gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x no-scrollbar snap-x snap-mandatory"
+                  className="flex min-h-0 gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] touch-[pan-x_pan-y] lg:touch-auto no-scrollbar snap-x snap-mandatory"
                 >
                   {sortedLots.map((lot) => {
                     const lid = lot.lot_id;

@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import type { ArrivalFullDetail, ArrivalSummary } from '@/services/api/arrivals';
 import { arrivalsApi } from '@/services/api';
 import { VehicleOpsSellerWorkspace } from '@/components/summary/vehicle-ops/VehicleOpsSellerWorkspace';
+import { vehicleOpsBackCircleClass, vehicleOpsPrimaryBtnClass } from '@/components/summary/vehicle-ops/vehicleOpsUi';
 import { auctionApi, type LotSummaryDTO, fetchAllAuctionResults } from '@/services/api/auction';
 import { billingApi } from '@/services/api/billing';
 import type { AuctionResultDTO } from '@/services/api/auction';
@@ -230,7 +231,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
         <button
           type="button"
           onClick={onBack}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 touch-manipulation backdrop-blur"
+          className={vehicleOpsBackCircleClass}
           aria-label="Back to summary"
         >
           <ArrowLeft className="h-5 w-5 text-white" />
@@ -349,9 +350,9 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             onClick={onBack}
-            className="h-10 w-fit shrink-0 gap-1.5 rounded-xl border-border/60"
+            className={cn(vehicleOpsPrimaryBtnClass, 'h-10 w-fit shrink-0 gap-1.5 rounded-xl')}
             aria-label="Back to summary"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -366,12 +367,14 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
           </div>
         </div>
       ) : null}
-      {threeCards}
-      <VehicleOpsSellerWorkspace
-        arrivalDetail={arrivalFullDetail}
-        lotSummariesForVehicle={lotRows}
-        detailLoading={loading && arrivalFullDetail == null}
-      />
+      <div className={cn(!isDesktop && 'px-4 md:px-6')}>
+        {threeCards}
+        <VehicleOpsSellerWorkspace
+          arrivalDetail={arrivalFullDetail}
+          lotSummariesForVehicle={lotRows}
+          detailLoading={loading && arrivalFullDetail == null}
+        />
+      </div>
     </motion.div>
   );
 };
