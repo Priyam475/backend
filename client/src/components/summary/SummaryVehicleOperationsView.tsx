@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import type { ArrivalFullDetail, ArrivalSummary } from '@/services/api/arrivals';
 import { arrivalsApi } from '@/services/api';
+import { VehicleOpsSellerWorkspace } from '@/components/summary/vehicle-ops/VehicleOpsSellerWorkspace';
 import { auctionApi, type LotSummaryDTO, fetchAllAuctionResults } from '@/services/api/auction';
 import { billingApi } from '@/services/api/billing';
 import type { AuctionResultDTO } from '@/services/api/auction';
@@ -114,6 +115,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
   const [rdActual, setRdActual] = useState<number | null>(null);
   const [billingUnbounded, setBillingUnbounded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [arrivalFullDetail, setArrivalFullDetail] = useState<ArrivalFullDetail | null>(null);
 
   const vid = arrival.vehicleId;
   const vidStr = String(vid);
@@ -144,6 +146,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
     setRdActual(null);
 
     const detail = (await arrivalsApi.getById(vid).catch(() => null)) as ArrivalFullDetail | null;
+    setArrivalFullDetail(detail);
     const lotKeys = collectLotIdKeys(detail);
 
     try {
@@ -196,6 +199,10 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
       setLoading(false);
     }
   }, [canShowRd, vid, vidNum, vidStr]);
+
+  useEffect(() => {
+    setArrivalFullDetail(null);
+  }, [vid]);
 
   useEffect(() => {
     void runLoad();
@@ -340,6 +347,11 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
         </div>
       ) : null}
       {threeCards}
+      <VehicleOpsSellerWorkspace
+        arrivalDetail={arrivalFullDetail}
+        lotSummariesForVehicle={lotRows}
+        detailLoading={loading && arrivalFullDetail == null}
+      />
     </motion.div>
   );
 };
