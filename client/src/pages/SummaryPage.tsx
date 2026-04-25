@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate, useMatch } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ClipboardList, Truck, Users, Package, Scale, Search, MapPin, Filter } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Cog, Truck, Users, Package, Scale, Search, MapPin, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import BottomNav from '@/components/BottomNav';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -13,6 +13,8 @@ import type { ArrivalSummary, ArrivalDetail } from '@/services/api/arrivals';
 import ArrivalStatusBadge, { getArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import ArrivalSummaryVehicleSellerQty from '@/components/arrivals/ArrivalSummaryVehicleSellerQty';
 import { ARRIVALS_TABLE_HEADER_GRADIENT } from '@/components/arrivals/arrivalsTableTokens';
+import { arrivalsTabCountPill, arrivalsToggleTabBtn, mobileArrivalsStyleTab } from '@/components/arrivals/arrivalsTabStyles';
+import SummaryVehicleOperationsView from '@/components/summary/SummaryVehicleOperationsView';
 import { toast } from 'sonner';
 
 const SUMMARY_MODULE = 'SummaryPage' as const;
@@ -22,6 +24,10 @@ const SummaryPage = () => {
   const isDesktop = useDesktopMode();
   const { canAccessModule } = usePermissions();
   const canView = canAccessModule(SUMMARY_MODULE);
+  const vehicleRouteMatch = useMatch({ path: '/summary-page/vehicle/:vehicleId', end: true });
+  const vehicleIdFromUrl = vehicleRouteMatch?.params.vehicleId ?? null;
+  const lastVehicleIdRef = useRef<string | null>(null);
+  const [vehicleTabEmpty, setVehicleTabEmpty] = useState(false);
 
   const [apiArrivals, setApiArrivals] = useState<ArrivalSummary[]>([]);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
@@ -92,40 +98,124 @@ const SummaryPage = () => {
     [auctionedArrivals],
   );
 
+  const selectedFromUrl = useMemo(
+    () =>
+      vehicleIdFromUrl == null
+        ? null
+        : auctionedArrivals.find((a) => String(a.vehicleId) === String(vehicleIdFromUrl)) ?? null,
+    [vehicleIdFromUrl, auctionedArrivals],
+  );
+
+  useEffect(() => {
+    if (!vehicleIdFromUrl) return;
+    setVehicleTabEmpty(false);
+  }, [vehicleIdFromUrl]);
+
+  useEffect(() => {
+    if (!canView || loading) return;
+    if (vehicleIdFromUrl && !selectedFromUrl) {
+      toast.error('This vehicle is not in the current post-auction summary');
+      navigate('/summary-page', { replace: true });
+    }
+  }, [canView, loading, vehicleIdFromUrl, selectedFromUrl, navigate]);
+
+  const showList = !vehicleIdFromUrl && !vehicleTabEmpty;
+  const showFullVehicleOps = Boolean(vehicleIdFromUrl && selectedFromUrl);
+  const showVehicleOpsEmpty = !vehicleIdFromUrl && vehicleTabEmpty;
+
+  const onSelectArrival = useCallback(
+    (a: ArrivalSummary) => {
+      lastVehicleIdRef.current = String(a.vehicleId);
+      setVehicleTabEmpty(false);
+      navigate(`/summary-page/vehicle/${a.vehicleId}`);
+    },
+    [navigate],
+  );
+
+  const onTabSummary = useCallback(() => {
+    setVehicleTabEmpty(false);
+    navigate('/summary-page');
+  }, [navigate]);
+
+  const onTabVehicle = useCallback(() => {
+    if (lastVehicleIdRef.current) {
+      navigate(`/summary-page/vehicle/${lastVehicleIdRef.current}`);
+    } else {
+      setVehicleTabEmpty(true);
+    }
+  }, [navigate]);
+
+  const onBackFromOps = useCallback(() => {
+    setVehicleTabEmpty(false);
+    navigate('/summary-page');
+  }, [navigate]);
+
   if (!canView) {
     return <ForbiddenPage moduleName={SUMMARY_MODULE} />;
   }
 
+  const summaryTabListDesktop = (
+    <div
+      className="mb-6 flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch]"
+      role="tablist"
+      aria-label="Summary main tabs"
+    >
+      <button type="button" onClick={onTabSummary} className={arrivalsToggleTabBtn(showList)}>
+        <Truck className="h-4 w-4" />
+        Summary
+        <span className={arrivalsTabCountPill(showList)}>{loading ? '…' : auctionedArrivals.length}</span>
+      </button>
+      <button type="button" onClick={onTabVehicle} className={arrivalsToggleTabBtn(!showList)}>
+        <Cog className="h-4 w-4" />
+        Vehicle operations
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
-      {/* Mobile hero — same structure as Arrivals (gradient header, stats line). */}
-      {!isDesktop && (
+      {/* Mobile hero — same structure as Arrivals (gradient header, two tabs, stats line). */}
+      {!isDesktop && showList && (
         <div className="relative mb-4 overflow-hidden rounded-b-3xl bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 px-4 pb-6 pt-[max(2rem,env(safe-area-inset-top))]">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(123,97,255,0.2)_0%,transparent_40%)]" />
-          <div className="relative z-10 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/home')}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur touch-manipulation"
-              aria-label="Back to home"
-            >
-              <ArrowLeft className="h-5 w-5 text-white" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <h1 className="text-xl font-bold text-white">Summary</h1>
-              <p className="text-xs text-white/80">
-                {loading ? '…' : `${totalLotsSubtitle} lots`} · Post-auction arrivals (auctioned, not fully weighed)
-              </p>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/home')}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur touch-manipulation"
+                aria-label="Back to home"
+              >
+                <ArrowLeft className="h-5 w-5 text-white" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl font-bold text-white">Summary</h1>
+                <p className="text-xs text-white/80">
+                  {loading ? '…' : `${totalLotsSubtitle} lots`} · Post-auction arrivals (auctioned, not fully weighed)
+                </p>
+              </div>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur text-white">
+                <ClipboardList className="h-5 w-5" />
+              </div>
             </div>
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur text-white">
-              <ClipboardList className="h-5 w-5" />
+            <div
+              className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1 backdrop-blur"
+              role="tablist"
+              aria-label="Summary main tabs"
+            >
+              <button type="button" onClick={onTabSummary} className={mobileArrivalsStyleTab(showList)}>
+                Summary
+              </button>
+              <button type="button" onClick={onTabVehicle} className={mobileArrivalsStyleTab(!showList)}>
+                Vehicle operations
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {isDesktop && (
+      {isDesktop && showList && (
         <div className="max-w-[100vw] overflow-x-hidden px-4 pb-6 sm:px-6 lg:px-8">
           <div className="mb-4">
             <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
@@ -137,6 +227,8 @@ const SummaryPage = () => {
               pipeline (same status as &quot;Auctioned&quot; on Arrivals)
             </p>
           </div>
+
+          {summaryTabListDesktop}
 
           {loading ? (
             <div className="glass-card rounded-2xl p-12 text-center">
@@ -270,7 +362,16 @@ const SummaryPage = () => {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ delay: i * 0.03 }}
-                            className="border-b border-border/20 transition-colors hover:bg-muted/20"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => onSelectArrival(a)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onSelectArrival(a);
+                              }
+                            }}
+                            className="cursor-pointer border-b border-border/20 transition-colors hover:bg-muted/20"
                           >
                             <td className="px-4 py-3 text-foreground">
                               <ArrivalSummaryVehicleSellerQty
@@ -312,7 +413,7 @@ const SummaryPage = () => {
         </div>
       )}
 
-      {!isDesktop && (
+      {!isDesktop && showList && (
         <>
           {!loading && auctionedArrivals.length > 0 && (
             <div className="mb-4 px-4">
@@ -418,7 +519,16 @@ const SummaryPage = () => {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.04 }}
-                    className="glass-card max-w-full overflow-x-hidden rounded-2xl md:mx-auto md:max-w-4xl md:rounded-xl md:shadow-sm"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectArrival(a)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectArrival(a);
+                      }
+                    }}
+                    className="glass-card max-w-full cursor-pointer overflow-x-hidden rounded-2xl md:mx-auto md:max-w-4xl md:rounded-xl md:shadow-sm"
                   >
                     <div className="flex w-full min-w-0 touch-manipulation items-start gap-3 p-3.5 md:items-center md:gap-2 md:p-2.5">
                       <div className="min-w-0 flex-1 space-y-2 md:hidden">
@@ -523,6 +633,81 @@ const SummaryPage = () => {
             )}
           </div>
         </>
+      )}
+
+      {isDesktop && showFullVehicleOps && selectedFromUrl && (
+        <div className="max-w-[100vw] overflow-x-hidden px-4 pb-6 sm:px-6 lg:px-8">
+          <SummaryVehicleOperationsView
+            arrival={selectedFromUrl}
+            isDesktop
+            onBack={onBackFromOps}
+          />
+        </div>
+      )}
+
+      {isDesktop && showVehicleOpsEmpty && (
+        <div className="max-w-[100vw] overflow-x-hidden px-4 pb-6 sm:px-6 lg:px-8">
+          <div className="mb-4">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+              <ClipboardList className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              Summary
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">Post-auction pipeline</p>
+          </div>
+          {summaryTabListDesktop}
+          <div className="glass-card rounded-2xl p-10 text-center">
+            <Cog className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+            <h3 className="mb-1 text-lg font-bold text-foreground">Vehicle operations</h3>
+            <p className="text-sm text-muted-foreground">
+              Select a vehicle on the <span className="font-medium text-foreground">Summary</span> tab (click a row), or open a
+              vehicle you used before from this tab.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!isDesktop && showFullVehicleOps && selectedFromUrl && (
+        <div className="px-0">
+          <SummaryVehicleOperationsView arrival={selectedFromUrl} isDesktop={false} onBack={onBackFromOps} />
+        </div>
+      )}
+
+      {!isDesktop && showVehicleOpsEmpty && (
+        <div className="relative mb-4 overflow-hidden rounded-b-3xl bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 px-4 pb-6 pt-[max(2rem,env(safe-area-inset-top))]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.2)_0%,transparent_50%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(123,97,255,0.2)_0%,transparent_40%)]" />
+          <div className="relative z-10">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => navigate('/home')}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur touch-manipulation"
+                aria-label="Back to home"
+              >
+                <ArrowLeft className="h-5 w-5 text-white" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl font-bold text-white">Summary</h1>
+                <p className="text-xs text-white/80">Choose a vehicle to see operations</p>
+              </div>
+            </div>
+            <div
+              className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1 backdrop-blur"
+              role="tablist"
+              aria-label="Summary main tabs"
+            >
+              <button type="button" onClick={onTabSummary} className={mobileArrivalsStyleTab(showList)}>
+                Summary
+              </button>
+              <button type="button" onClick={onTabVehicle} className={mobileArrivalsStyleTab(!showList)}>
+                Vehicle operations
+              </button>
+            </div>
+          </div>
+          <div className="relative z-10 mt-4 rounded-2xl border border-white/20 bg-white/10 p-6 text-center text-white/95 backdrop-blur">
+            <p className="text-sm">Tap a row on the Summary tab, or use Vehicle operations after you have selected a vehicle once.</p>
+          </div>
+        </div>
       )}
 
       <BottomNav />

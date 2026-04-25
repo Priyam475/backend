@@ -18,6 +18,11 @@ import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail, ArrivalDe
 import ArrivalStatusBadge, { getArrivalStatus, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import ArrivalSummaryVehicleSellerQty from '@/components/arrivals/ArrivalSummaryVehicleSellerQty';
 import { ARRIVALS_TABLE_HEADER_GRADIENT } from '@/components/arrivals/arrivalsTableTokens';
+import {
+  arrivalsTabCountPill,
+  arrivalsToggleTabBtn,
+  mobileArrivalsStyleTab,
+} from '@/components/arrivals/arrivalsTabStyles';
 import FreightDetailsCard from '@/components/arrivals/FreightDetailsCard';
 import SellerInfoCard from '@/components/arrivals/SellerInfoCard';
 import BuyerMarkSection from '@/components/arrivals/BuyerMarkSection';
@@ -127,15 +132,6 @@ const VARIANT_OPTIONS = [
   { value: 'Medium', label: 'Medium' },
   { value: 'Large', label: 'Large' },
 ];
-
-/** Keep Arrivals desktop tab styling aligned with Billing/Settlement toggle language. */
-const arrivalsToggleTabBtn = (active: boolean) =>
-  cn(
-    'shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all inline-flex items-center justify-center gap-2 min-h-10',
-    active
-      ? 'bg-gradient-to-r from-primary to-accent text-white shadow-md'
-      : 'glass-card text-muted-foreground hover:text-foreground',
-  );
 
 const ARRIVALS_SETTLEMENT_BUTTON_GRADIENT =
   '!bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] !text-white border border-white/25 shadow-[0_10px_24px_-12px_rgba(91,140,255,0.85)] hover:!brightness-110 hover:border-white/45 hover:shadow-[0_14px_30px_-12px_rgba(123,97,255,0.9)] active:scale-[0.99] transition-all';
@@ -2525,16 +2521,13 @@ const ArrivalsPage = () => {
                 <Plus className="w-5 h-5 text-white" />
               </button>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1 backdrop-blur">
+            <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-white/15 p-1 backdrop-blur" role="tablist" aria-label="Arrivals main tabs">
               <button
                 type="button"
                 onClick={() => {
                   void tryCloseArrivalPanel(() => setShowAdd(false));
                 }}
-                className={cn(
-                  "h-9 rounded-lg text-xs font-semibold transition-colors",
-                  !showAdd ? "bg-white text-[#6075FF]" : "text-white/85 hover:text-white",
-                )}
+                className={mobileArrivalsStyleTab(!showAdd)}
               >
                 Summary
               </button>
@@ -2544,10 +2537,7 @@ const ArrivalsPage = () => {
                   resetForm();
                   setShowAdd(true);
                 }}
-                className={cn(
-                  "h-9 rounded-lg text-xs font-semibold transition-colors",
-                  showAdd ? "bg-white text-[#6075FF]" : "text-white/85 hover:text-white",
-                )}
+                className={mobileArrivalsStyleTab(showAdd)}
               >
                 New Arrival
               </button>
@@ -2581,12 +2571,7 @@ const ArrivalsPage = () => {
             >
               <Truck className="w-4 h-4" />
               Summary
-              <span
-                className={cn(
-                  'ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold',
-                  desktopTab === 'summary' ? 'bg-white/20 text-white' : 'bg-muted text-foreground',
-                )}
-              >
+              <span className={arrivalsTabCountPill(desktopTab === 'summary')}>
                 {apiArrivalsLoading ? '…' : apiArrivals.length}
               </span>
             </button>
