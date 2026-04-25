@@ -43,7 +43,12 @@ export function SellerListSidebar({
     <div
       role="listbox"
       aria-label="Sellers on this vehicle"
-      className="flex min-h-0 gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] md:flex-col md:gap-2 md:overflow-y-auto md:overflow-x-visible md:pb-0 md:pr-1"
+      className={cn(
+        'flex min-h-0 gap-2 pb-1 [-webkit-overflow-scrolling:touch]',
+        /* Horizontal strip + touch pan for phone/tablet; vertical sidebar from lg (1024px) with VehicleOpsSellerWorkspace grid. */
+        'touch-pan-x overflow-x-auto no-scrollbar',
+        'lg:flex-col lg:touch-auto lg:gap-2 lg:overflow-y-auto lg:overflow-x-visible lg:pb-0 lg:pr-1',
+      )}
     >
       {sellers.map((seller, i) => {
         const key = sellerKeyFromArrivalSeller(seller);
@@ -83,7 +88,7 @@ export function SellerListSidebar({
               }
             }}
             className={cn(
-              'flex min-w-[220px] shrink-0 touch-manipulation rounded-2xl border text-left transition-colors md:min-w-0',
+              'flex min-w-[220px] shrink-0 touch-manipulation rounded-2xl border text-left transition-colors lg:min-w-0',
               selected
                 ? 'border-[#6075FF]/50 bg-violet-500/10 shadow-sm dark:bg-violet-500/15'
                 : 'border-border/40 bg-white/80 hover:bg-muted/30 dark:bg-card/80',

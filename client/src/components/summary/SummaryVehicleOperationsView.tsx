@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Cog, Info, MapPin, Package, Settings2, Truck, Wallet } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import type { ArrivalFullDetail, ArrivalSummary } from '@/services/api/arrivals';
@@ -345,12 +346,24 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0">
       {!isDesktop ? hero : null}
       {isDesktop ? (
-        <div className="mb-4">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-            <Settings2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
-            Vehicle operations
-          </h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">Vehicle {arrival.vehicleNumber}</p>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onBack}
+            className="h-10 w-fit shrink-0 gap-1.5 rounded-xl border-border/60"
+            aria-label="Back to summary"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+              <Settings2 className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              Vehicle operations
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">Vehicle {arrival.vehicleNumber}</p>
+          </div>
         </div>
       ) : null}
       {threeCards}

@@ -108,10 +108,11 @@ export function VehicleOpsSellerWorkspace({
         <div
           className={cn(
             'grid min-h-0 min-w-0 gap-3',
-            'grid-cols-1 md:grid-cols-[minmax(200px,280px)_minmax(0,1fr)] md:items-start md:gap-4',
+            /* Two-column + scroll panes from lg so tablets keep horizontal seller strip (matches SellerListSidebar). */
+            'grid-cols-1 lg:grid-cols-[minmax(200px,280px)_minmax(0,1fr)] lg:items-start lg:gap-4',
           )}
         >
-          <div className="min-h-0 min-w-0 md:max-h-[calc(100vh-16rem)] md:overflow-y-auto">
+          <div className="min-h-0 min-w-0 lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto">
             <SellerListSidebar
               sellers={filteredSellers}
               lotSummaries={lotSummariesForVehicle}
@@ -119,7 +120,7 @@ export function VehicleOpsSellerWorkspace({
               onSelectKey={setSelectedKey}
             />
           </div>
-          <div className="min-h-0 min-w-0 md:max-h-[calc(100vh-12rem)] md:overflow-y-auto">
+          <div className="min-h-0 min-w-0 lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto">
             <SellerDetailPanel seller={selectedSeller} sellerLots={sellerLots} onPrint={handlePrint} />
           </div>
         </div>

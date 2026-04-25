@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Printer, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ArrivalSellerFullDetail } from '@/services/api/arrivals';
@@ -7,6 +7,70 @@ import { auctionApi } from '@/services/api/auction';
 import { cn } from '@/lib/utils';
 import { formatLotLabelFromSummary, sellerBagSoldPending, sellerKeyFromArrivalSeller } from './vehicleOpsUtils';
 import { LotBidsTable } from './LotBidsTable';
+
+const LG_MIN_WIDTH = '(min-width: 1024px)';
+
+function useIsLgUp(): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(LG_MIN_WIDTH).matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(LG_MIN_WIDTH);
+    const onChange = () => setMatches(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return matches;
+}
+
+/** One row: lot identifier (project format) + pending count + expand only on `lg+` (desktop). */
+function LotBlockHeader({
+  lot,
+  pendingBags,
+  lotId,
+  showExpandToggle,
+  expanded = false,
+  onToggleExpand,
+}: {
+  lot: LotSummaryDTO;
+  pendingBags: number;
+  lotId: number;
+  showExpandToggle: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+}) {
+  const label = formatLotLabelFromSummary(lot);
+  return (
+    <div className="flex w-full min-w-0 items-start gap-2 sm:items-center sm:gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="break-words text-sm font-semibold leading-tight text-foreground sm:truncate" title={label}>
+          {label}
+        </p>
+      </div>
+      <div
+        className="shrink-0 text-right"
+        title={`${pendingBags} pending for auction`}
+        aria-label={`${pendingBags} pending bags for auction`}
+      >
+        <p className="text-base font-bold tabular-nums text-foreground sm:text-sm">{pendingBags}</p>
+      </div>
+      {showExpandToggle && onToggleExpand ? (
+        <button
+          type="button"
+          className="ml-auto inline-flex shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6075FF]"
+          aria-expanded={expanded}
+          aria-controls={`lot-panel-${lotId}`}
+          id={`lot-trigger-${lotId}`}
+          aria-label={expanded ? `Collapse lot` : `Expand lot`}
+          onClick={onToggleExpand}
+        >
+          {expanded ? <ChevronUp className="h-5 w-5" aria-hidden /> : <ChevronDown className="h-5 w-5" aria-hidden />}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 export type SellerDetailPanelProps = {
   seller: ArrivalSellerFullDetail | null;
@@ -22,13 +86,28 @@ type LotSessionState = {
 };
 
 export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailPanelProps) {
+  const isLgUp = useIsLgUp();
+  const isLgUpRef = useRef(isLgUp);
   const [expandedLotId, setExpandedLotId] = useState<number | null>(null);
   const [sessionByLotId, setSessionByLotId] = useState<Record<number, LotSessionState>>({});
+  /** Lot snap carousel + dots below lg only (see VehicleOpsSellerWorkspace / useDesktopMode 1024px). */
+  const mobileLotsCarouselRef = useRef<HTMLDivElement | null>(null);
+  const [activeLotSlide, setActiveLotSlide] = useState(0);
 
   const sortedLots = useMemo(
     () => [...sellerLots].sort((a, b) => (a.lot_id ?? 0) - (b.lot_id ?? 0)),
     [sellerLots],
   );
+
+  const handleLotsCarouselScroll = useCallback(() => {
+    const el = mobileLotsCarouselRef.current;
+    const n = sortedLots.length;
+    if (!el || n <= 0) return;
+    const step = el.scrollWidth / n;
+    if (step <= 0) return;
+    const idx = Math.max(0, Math.min(n - 1, Math.round(el.scrollLeft / step)));
+    setActiveLotSlide(idx);
+  }, [sortedLots]);
 
   const sellerKey = seller ? sellerKeyFromArrivalSeller(seller) : '';
   const firstLotId = sortedLots[0]?.lot_id ?? null;
@@ -40,8 +119,36 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
   }, [sellerKey, firstLotId]);
 
   useEffect(() => {
-    if (expandedLotId == null) return;
-    const lotId = expandedLotId;
+    setActiveLotSlide(0);
+    mobileLotsCarouselRef.current?.scrollTo({ left: 0 });
+  }, [sellerKey]);
+
+  /** Leaving desktop: align snap position with whichever lot was expanded. */
+  useEffect(() => {
+    const prev = isLgUpRef.current;
+    isLgUpRef.current = isLgUp;
+    if (prev !== true || isLgUp !== false) return;
+    const n = sortedLots.length;
+    if (n <= 0) return;
+    const idx = sortedLots.findIndex((l) => l.lot_id === expandedLotId);
+    if (idx < 0) return;
+    setActiveLotSlide(idx);
+    requestAnimationFrame(() => {
+      const el = mobileLotsCarouselRef.current;
+      if (!el || n <= 0) return;
+      el.scrollTo({ left: (el.scrollWidth / n) * idx });
+    });
+  }, [isLgUp, expandedLotId, sortedLots]);
+
+  /** `lg+`: follow expanded (accordion). `< lg`: follow carousel — one source of truth avoids session/scroll desync. */
+  const visibleLotId = !isLgUp ? (sortedLots[activeLotSlide]?.lot_id ?? null) : null;
+  const lotIdForSession: number | null = isLgUp ? expandedLotId : visibleLotId;
+  const mobilePanelSt =
+    !isLgUp && visibleLotId != null ? sessionByLotId[visibleLotId] : undefined;
+
+  useEffect(() => {
+    if (lotIdForSession == null) return;
+    const lotId = lotIdForSession;
     let cancelled = false;
 
     setSessionByLotId((m) => {
@@ -66,7 +173,7 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
     return () => {
       cancelled = true;
     };
-  }, [expandedLotId]);
+  }, [lotIdForSession]);
 
   const toggleLot = useCallback((lotId: number) => {
     setExpandedLotId((cur) => (cur === lotId ? null : lotId));
@@ -127,67 +234,122 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
             No auction lots matched this seller for this vehicle.
           </div>
         ) : (
-          sortedLots.map((lot) => {
-            const lid = lot.lot_id;
-            const open = expandedLotId === lid;
-            const st = sessionByLotId[lid];
-            const sessionLoading = open && (st?.loading ?? st == null);
-            const pendingBags =
-              st?.session != null
-                ? st.session.remaining_bags
-                : Math.max(0, (lot.bag_count ?? 0) - (lot.sold_bags ?? 0));
-            const label = formatLotLabelFromSummary(lot);
-            return (
+          <>
+            {sortedLots.length > 1 && (
               <div
-                key={lid}
-                className="glass-card overflow-hidden rounded-2xl border border-border/40 shadow-sm"
+                className="lg:hidden flex items-center justify-center gap-1.5"
+                role="tablist"
+                aria-label="Lots for this seller"
               >
-                <button
-                  type="button"
-                  className="flex w-full min-w-0 items-center gap-2 px-3 py-3 text-left transition-colors hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6075FF]"
-                  aria-expanded={open}
-                  aria-controls={`lot-panel-${lid}`}
-                  id={`lot-trigger-${lid}`}
-                  onClick={() => toggleLot(lid)}
-                >
-                  <span className="shrink-0 text-sm font-bold tabular-nums text-foreground">#{lid}</span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{label}</span>
-                  <span className="hidden shrink-0 items-center gap-1 rounded-lg bg-muted/50 px-2 py-1 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-                    Pending bags for auction
-                    <span className="rounded-md bg-background/80 px-1.5 py-0.5 tabular-nums text-foreground">{pendingBags}</span>
-                  </span>
-                  <span className="inline-flex shrink-0 sm:hidden">
-                    <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-foreground">
-                      {pendingBags}
-                    </span>
-                  </span>
-                  {open ? (
-                    <ChevronUp className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-                  ) : (
-                    <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-                  )}
-                </button>
-                <div
-                  id={`lot-panel-${lid}`}
-                  role="region"
-                  aria-labelledby={`lot-trigger-${lid}`}
-                  className={cn('border-t border-border/30 px-3 py-3', !open && 'hidden')}
-                >
-                  <p className="mb-2 text-[11px] text-muted-foreground sm:hidden">
-                    Pending bags for auction:{' '}
-                    <span className="font-semibold tabular-nums text-foreground">{pendingBags}</span>
-                  </p>
-                  <LotBidsTable
-                    lotId={lid}
-                    session={st?.session ?? null}
-                    loading={sessionLoading}
-                    error={st?.error ?? null}
-                    onSessionUpdated={(s) => onSessionUpdated(lid, s)}
+                {sortedLots.map((lot, li) => (
+                  <button
+                    key={`vehicle-ops-lot-dot-${lot.lot_id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeLotSlide === li}
+                    aria-label={`Go to lot ${li + 1}`}
+                    onClick={() => {
+                      const el = mobileLotsCarouselRef.current;
+                      if (!el) return;
+                      const left = (el.scrollWidth / sortedLots.length) * li;
+                      el.scrollTo({ left, behavior: 'smooth' });
+                    }}
+                    className={cn(
+                      'rounded-full transition-all bg-muted-foreground/40',
+                      activeLotSlide === li ? 'h-2 w-4 bg-primary' : 'h-2 w-2',
+                    )}
                   />
-                </div>
+                ))}
               </div>
-            );
-          })
+            )}
+            {isLgUp ? (
+              <div className="min-h-0 space-y-2">
+                {sortedLots.map((lot) => {
+                  const lid = lot.lot_id;
+                  const panelOpen = expandedLotId === lid;
+                  const st = sessionByLotId[lid];
+                  const sessionLoading = panelOpen && (st?.loading ?? st == null);
+                  const pendingBags =
+                    st?.session != null
+                      ? st.session.remaining_bags
+                      : Math.max(0, (lot.bag_count ?? 0) - (lot.sold_bags ?? 0));
+                  return (
+                    <div
+                      key={lid}
+                      className="glass-card overflow-hidden rounded-2xl border border-border/40 shadow-sm"
+                    >
+                      <div className="px-3 py-3">
+                        <LotBlockHeader
+                          lot={lot}
+                          lotId={lid}
+                          pendingBags={pendingBags}
+                          showExpandToggle
+                          expanded={panelOpen}
+                          onToggleExpand={() => toggleLot(lid)}
+                        />
+                      </div>
+                      <div
+                        id={`lot-panel-${lid}`}
+                        role="region"
+                        aria-labelledby={`lot-trigger-${lid}`}
+                        className={cn('border-t border-border/30 px-3 py-3', !panelOpen && 'hidden')}
+                      >
+                        <LotBidsTable
+                          lotId={lid}
+                          session={st?.session ?? null}
+                          loading={sessionLoading}
+                          error={st?.error ?? null}
+                          onSessionUpdated={(s) => onSessionUpdated(lid, s)}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex min-h-0 flex-col gap-2">
+                <div
+                  ref={mobileLotsCarouselRef}
+                  onScroll={handleLotsCarouselScroll}
+                  className="flex min-h-0 gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] touch-pan-x no-scrollbar snap-x snap-mandatory"
+                >
+                  {sortedLots.map((lot) => {
+                    const lid = lot.lot_id;
+                    const st = sessionByLotId[lid];
+                    const pendingBags =
+                      st?.session != null
+                        ? st.session.remaining_bags
+                        : Math.max(0, (lot.bag_count ?? 0) - (lot.sold_bags ?? 0));
+                    return (
+                      <div
+                        key={lid}
+                        className="glass-card w-[calc(100%-0.1rem)] shrink-0 snap-start overflow-hidden rounded-2xl border border-border/40 shadow-sm"
+                      >
+                        <div className="px-3 py-3">
+                          <LotBlockHeader lot={lot} lotId={lid} pendingBags={pendingBags} showExpandToggle={false} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {visibleLotId != null && (
+                  <div
+                    className="glass-card rounded-2xl border border-border/40 px-3 py-3 shadow-sm"
+                    role="region"
+                    aria-label={`Lot ${visibleLotId} bids and auction session`}
+                  >
+                    <LotBidsTable
+                      lotId={visibleLotId}
+                      session={mobilePanelSt?.session ?? null}
+                      loading={mobilePanelSt?.loading ?? mobilePanelSt == null}
+                      error={mobilePanelSt?.error ?? null}
+                      onSessionUpdated={(s) => onSessionUpdated(visibleLotId, s)}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

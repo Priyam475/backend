@@ -196,7 +196,7 @@ const SummaryPage = () => {
                 </p>
               </div>
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur text-white">
-                <ClipboardList className="h-5 w-5" />
+              <ClipboardList className="h-5 w-5" />
               </div>
             </div>
             <div
@@ -468,8 +468,8 @@ const SummaryPage = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-10 w-full rounded-xl border border-border/40 bg-white pl-10 pr-4 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6075FF] dark:bg-card"
               />
-            </div>
-          </div>
+        </div>
+      </div>
 
           <div className="space-y-2.5 px-4 md:space-y-1.5 md:px-6">
             {loading ? (
@@ -658,11 +658,11 @@ const SummaryPage = () => {
           <div className="glass-card rounded-2xl p-10 text-center">
             <Cog className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
             <h3 className="mb-1 text-lg font-bold text-foreground">Vehicle operations</h3>
-            <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
               Select a vehicle on the <span className="font-medium text-foreground">Summary</span> tab (click a row), or open a
               vehicle you used before from this tab.
-            </p>
-          </div>
+        </p>
+      </div>
         </div>
       )}
 
