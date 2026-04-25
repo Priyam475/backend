@@ -52,14 +52,13 @@ function collectLotIdKeys(detail: ArrivalFullDetail | null): Set<string> {
   return s;
 }
 
-function sumEstimatedRdForVehicle(
+/** `AuctionResultDTO.sellerVehicleId` is SellerInVehicle id — match those for this vehicle’s lots, not the vehicle id. */
+function sumEstimatedRdForSellerVehicles(
   results: AuctionResultDTO[],
-  vehicleIdStr: string,
-  vidNum: number,
+  sellerVehicleIds: Set<number>,
 ): number {
-  const rows = results.filter(
-    (r) => r.sellerVehicleId === vidNum || String(r.sellerVehicleId) === vehicleIdStr,
-  );
+  if (sellerVehicleIds.size === 0) return 0;
+  const rows = results.filter((r) => sellerVehicleIds.has(r.sellerVehicleId));
   let sum = 0;
   for (const r of rows) {
     for (const e of r.entries ?? []) {
@@ -118,13 +117,13 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
   const [arrivalFullDetail, setArrivalFullDetail] = useState<ArrivalFullDetail | null>(null);
 
   const vid = arrival.vehicleId;
-  const vidStr = String(vid);
-  const vidNum = typeof vid === 'number' ? vid : Number(vid);
 
-  const lotRows = useMemo(
-    () => allLots.filter((l) => l.seller_vehicle_id === vidNum),
-    [allLots, vidNum],
-  );
+  /** `seller_vehicle_id` on lots is the SellerInVehicle row id, not the vehicle id — match by vehicle number. */
+  const lotRows = useMemo(() => {
+    const n = (arrival.vehicleNumber ?? '').trim().toLowerCase();
+    if (!n) return [];
+    return allLots.filter((l) => (l.vehicle_number ?? '').trim().toLowerCase() === n);
+  }, [allLots, arrival.vehicleNumber]);
 
   const bagBlock = useMemo(() => {
     const soldBags = lotRows.reduce((s, l) => s + (l.sold_bags ?? 0), 0);
@@ -149,9 +148,11 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
     setArrivalFullDetail(detail);
     const lotKeys = collectLotIdKeys(detail);
 
+    let lotsList: LotSummaryDTO[] = [];
     try {
-      const lots = await auctionApi.listLots({ size: 2000, sort: 'id,asc' });
-      setAllLots(Array.isArray(lots) ? lots : []);
+      const res = await auctionApi.listLots({ size: 2000, sort: 'id,asc' });
+      lotsList = Array.isArray(res) ? res : [];
+      setAllLots(lotsList);
     } catch {
       setAllLots([]);
       setLotErr(true);
@@ -164,10 +165,16 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
 
     try {
       const results = await fetchAllAuctionResults(12, 100);
-      const est = sumEstimatedRdForVehicle(results, vidStr, Number.isNaN(vidNum) ? -1 : vidNum);
-      if (!Number.isNaN(vidNum) && vidNum > 0) {
-        setRdEst(est);
-      }
+      const vn = (arrival.vehicleNumber ?? '').trim().toLowerCase();
+      const forVehicle = vn
+        ? lotsList.filter((l) => (l.vehicle_number ?? '').trim().toLowerCase() === vn)
+        : [];
+      const svIds = new Set(
+        forVehicle
+          .map((l) => Number(l.seller_vehicle_id))
+          .filter((x) => !Number.isNaN(x) && x > 0),
+      );
+      setRdEst(svIds.size > 0 ? sumEstimatedRdForSellerVehicles(results, svIds) : 0);
     } catch {
       setAuctionErr(true);
     }
@@ -198,7 +205,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
     } finally {
       setLoading(false);
     }
-  }, [canShowRd, vid, vidNum, vidStr]);
+  }, [canShowRd, vid, arrival.vehicleNumber]);
 
   useEffect(() => {
     setArrivalFullDetail(null);

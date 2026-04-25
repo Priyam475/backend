@@ -9,12 +9,17 @@ export function sellerKeyFromArrivalSeller(s: ArrivalSellerFullDetail): string {
   return `${cid}|${name}|${mark}`;
 }
 
-/** Match arrival seller to auction lot row (same vehicle list is pre-filtered). */
+/** Match arrival seller to auction lot: prefer lot id (stable), else name+mark. */
 export function lotSummaryBelongsToSeller(lot: LotSummaryDTO, seller: ArrivalSellerFullDetail): boolean {
-  const ln = (lot.seller_name ?? '').trim().toLowerCase();
-  const lm = (lot.seller_mark ?? '').trim().toLowerCase();
-  const sn = (seller.sellerName ?? '').trim().toLowerCase();
-  const sm = (seller.sellerMark ?? '').trim().toLowerCase();
+  const ids = new Set((seller.lots ?? []).map((x) => x.id).filter((x): x is number => x != null));
+  if (ids.size > 0) {
+    return ids.has(lot.lot_id);
+  }
+  const normalize = (s: string | undefined) => (s ?? '').trim().toLowerCase();
+  const ln = normalize(lot.seller_name);
+  const lm = normalize(lot.seller_mark);
+  const sn = normalize(seller.sellerName);
+  const sm = normalize(seller.sellerMark);
   return ln === sn && lm === sm;
 }
 
