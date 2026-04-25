@@ -1040,7 +1040,8 @@ const BillingPage = () => {
   const [addBidRemainingQty, setAddBidRemainingQty] = useState<number>(0);
   const [addBidQty, setAddBidQty] = useState('');
   const [addBidBaseRate, setAddBidBaseRate] = useState('');
-  const [addBidExtraAmount, setAddBidExtraAmount] = useState('0');
+  /** Signed preset margin (₹) — maps to auction `preset_applied` / `preset_margin`, not `extra_rate`. */
+  const [addBidPresetMargin, setAddBidPresetMargin] = useState('0');
   const [addBidTokenAdvance, setAddBidTokenAdvance] = useState('0');
   const [addBidSaving, setAddBidSaving] = useState(false);
   /** Cached session for the selected lot (auction parity: merge, lot increase). */
@@ -2335,7 +2336,7 @@ const BillingPage = () => {
     setAddBidDuplicateDialog(null);
     setAddBidQty('');
     setAddBidBaseRate('');
-    setAddBidExtraAmount('0');
+    setAddBidPresetMargin('0');
     setAddBidTokenAdvance('0');
   }, []);
 
@@ -2503,9 +2504,12 @@ const BillingPage = () => {
         toast.error('Open a buyer bill first');
         return;
       }
-      const qty = roundMoney2(Number(addBidQty));
+      const qtyDigits = String(addBidQty).replace(/[^\d]/g, '');
+      const qty = qtyDigits === '' ? NaN : Math.max(1, parseInt(qtyDigits, 10));
       const rate = roundMoney2(Number(addBidBaseRate));
-      const extra = roundMoney2(Number(addBidExtraAmount || 0));
+      const presetRaw = String(addBidPresetMargin ?? '0').replace(/,/g, '').trim();
+      const presetMargin =
+        presetRaw === '' || presetRaw === '-' ? 0 : roundMoney2(Number(presetRaw));
       const tokenAdvance = roundMoney2(Number(addBidTokenAdvance || 0));
       if (!Number.isFinite(qty) || qty <= 0) {
         toast.error('Enter valid bid quantity');
@@ -2515,8 +2519,8 @@ const BillingPage = () => {
         toast.error('Enter valid base rate');
         return;
       }
-      if (!Number.isFinite(extra) || !Number.isFinite(tokenAdvance)) {
-        toast.error('Enter valid extra/token values');
+      if (!Number.isFinite(presetMargin) || !Number.isFinite(tokenAdvance)) {
+        toast.error('Enter valid preset margin and token values');
         return;
       }
 
@@ -2532,10 +2536,10 @@ const BillingPage = () => {
         buyer_mark: (bill.buyerMark || '').trim(),
         rate,
         quantity: qty,
-        extra_rate: extra,
+        extra_rate: 0,
         token_advance: tokenAdvance,
-        preset_applied: 0,
-        preset_type: 'PROFIT',
+        preset_applied: presetMargin,
+        preset_type: presetMargin < 0 ? 'LOSS' : 'PROFIT',
         is_scribble: false,
         is_self_sale: false,
         allow_lot_increase: allow,
@@ -2566,7 +2570,7 @@ const BillingPage = () => {
     },
     [
       addBidBaseRate,
-      addBidExtraAmount,
+      addBidPresetMargin,
       addBidQty,
       addBidRetryAllowIncrease,
       addBidSelectedLot,
@@ -2593,10 +2597,10 @@ const BillingPage = () => {
         toast.error('Lot session not loaded — re-select the lot');
         return;
       }
-      const qty = Number(addBidQty);
+      const qty = Math.max(0, parseInt(String(addBidQty).replace(/[^\d]/g, '') || '0', 10));
       const rate = Number(addBidBaseRate);
       if (!Number.isFinite(qty) || qty <= 0) {
-        toast.error('Enter valid bid quantity');
+        toast.error('Enter a whole-number bid quantity (bags)');
         return;
       }
       if (!Number.isFinite(rate) || rate <= 0) {
@@ -3467,7 +3471,7 @@ const BillingPage = () => {
                 <span>Item</span>
                 <span>Quantity</span>
                 <span>Base Rate</span>
-                <span>Extra Rate</span>
+                <span>Preset</span>
               </div>
               {searchBidVisibleEntries.map(entry => {
                 const checked = searchBidSelectedKeys.includes(getBidSelectionKey(entry));
@@ -3619,12 +3623,12 @@ const BillingPage = () => {
             </div>
             <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
               <div className="space-y-1">
-                <Label className="text-xs">Qty *</Label>
+                <Label className="text-xs">Qty (bags) *</Label>
                 <BillingMoneyInput
                   value={Number(addBidQty) || 0}
                   min={0}
                   integerOnly
-                  onCommit={n => setAddBidQty(n > 0 ? String(roundMoney2(n)) : '')}
+                  onCommit={(n) => setAddBidQty(n > 0 ? String(Math.max(1, Math.round(n))) : '')}
                   placeholder={String(addBidRemainingQty)}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                   title={`Remaining bags: ${addBidRemainingQty}`}
@@ -3640,12 +3644,16 @@ const BillingPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Extra</Label>
+                <Label className="text-xs">Preset (margin)</Label>
                 <BillingMoneyInput
-                  value={Number(addBidExtraAmount) || 0}
-                  min={0}
-                  onCommit={n => setAddBidExtraAmount(String(roundMoney2(n)))}
+                  value={(() => {
+                    const t = String(addBidPresetMargin ?? '').replace(/,/g, '').trim();
+                    const n = parseFloat(t);
+                    return Number.isFinite(n) ? n : 0;
+                  })()}
+                  onCommit={(n) => setAddBidPresetMargin(String(roundMoney2(n)))}
                   className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                  title="Signed margin per bag (matches auction preset). Use negative for loss preset."
                 />
               </div>
               <div className="space-y-1">

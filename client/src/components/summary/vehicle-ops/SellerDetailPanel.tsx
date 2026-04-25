@@ -81,6 +81,8 @@ export type SellerDetailPanelProps = {
   /** Lots for this seller on the current vehicle (pre-filtered). */
   sellerLots: LotSummaryDTO[];
   onPrint: () => void;
+  /** Refetch vehicle-ops summary after auction writes (lots, RD, billing slice). */
+  onAuctionDataInvalidate?: () => void | Promise<void>;
 };
 
 type LotSessionState = {
@@ -89,7 +91,7 @@ type LotSessionState = {
   error: string | null;
 };
 
-export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailPanelProps) {
+export function SellerDetailPanel({ seller, sellerLots, onPrint, onAuctionDataInvalidate }: SellerDetailPanelProps) {
   const isLgUp = useIsLgUp();
   const isLgUpRef = useRef(isLgUp);
   const [expandedLotId, setExpandedLotId] = useState<number | null>(null);
@@ -301,10 +303,12 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
                       >
                         <LotBidsTable
                           lotId={lid}
+                          lotSummary={lot}
                           session={st?.session ?? null}
                           loading={sessionLoading}
                           error={st?.error ?? null}
                           onSessionUpdated={(s) => onSessionUpdated(lid, s)}
+                          onAuctionDataInvalidate={onAuctionDataInvalidate}
                         />
                       </div>
                     </div>
@@ -345,10 +349,12 @@ export function SellerDetailPanel({ seller, sellerLots, onPrint }: SellerDetailP
                   >
                     <LotBidsTable
                       lotId={visibleLotId}
+                      lotSummary={sortedLots.find((l) => l.lot_id === visibleLotId) ?? null}
                       session={mobilePanelSt?.session ?? null}
                       loading={mobilePanelSt?.loading ?? mobilePanelSt == null}
                       error={mobilePanelSt?.error ?? null}
                       onSessionUpdated={(s) => onSessionUpdated(visibleLotId, s)}
+                      onAuctionDataInvalidate={onAuctionDataInvalidate}
                     />
                   </div>
                 )}

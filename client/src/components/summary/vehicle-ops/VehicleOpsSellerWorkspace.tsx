@@ -12,12 +12,15 @@ export type VehicleOpsSellerWorkspaceProps = {
   lotSummariesForVehicle: LotSummaryDTO[];
   /** True while parent is still loading arrival detail */
   detailLoading?: boolean;
+  /** Refetch summary aggregates after auction add/update/delete */
+  onAuctionDataInvalidate?: () => void | Promise<void>;
 };
 
 export function VehicleOpsSellerWorkspace({
   arrivalDetail,
   lotSummariesForVehicle,
   detailLoading,
+  onAuctionDataInvalidate,
 }: VehicleOpsSellerWorkspaceProps) {
   const [sellerSearch, setSellerSearch] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -107,7 +110,12 @@ export function VehicleOpsSellerWorkspace({
             />
           </div>
           <div className="min-w-0">
-            <SellerDetailPanel seller={selectedSeller} sellerLots={sellerLots} onPrint={handlePrint} />
+            <SellerDetailPanel
+              seller={selectedSeller}
+              sellerLots={sellerLots}
+              onPrint={handlePrint}
+              onAuctionDataInvalidate={onAuctionDataInvalidate}
+            />
           </div>
         </div>
       )}

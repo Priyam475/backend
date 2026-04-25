@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Info, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { BillingMoneyInput } from '@/components/billing/BillingMoneyInput';
 import { ConfirmDeleteDialog } from '@/components/ConfirmDeleteDialog';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ARRIVALS_TABLE_HEADER_GRADIENT } from '@/components/arrivals/arrivalsTableTokens';
-import { auctionApi, type AuctionEntryDTO, type AuctionSessionDTO } from '@/services/api/auction';
+import {
+  auctionApi,
+  type AuctionBidCreateRequest,
+  type AuctionEntryDTO,
+  type AuctionSessionDTO,
+  type LotSummaryDTO,
+} from '@/services/api/auction';
 import { cn } from '@/lib/utils';
+import { roundMoney2 } from '@/utils/billingMoney';
 import { vehicleOpsPrimaryBtnClass } from './vehicleOpsUi';
 
 /** Display-only — matches `readOnlyLotInputClass` in SellerDetailPanel (dashed, muted). */
@@ -16,8 +26,11 @@ const readOnlyBidTextClass =
   'h-9 w-full min-w-0 cursor-default border-dashed bg-muted/25 text-sm text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 const readOnlyBidNumericClass = cn(readOnlyBidTextClass, 'text-right tabular-nums');
 
+const numberInputNoSpinnerClass =
+  '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+
 const REF_FORMULA_HINT =
-  'Reference seller rate defaults to buyer rate − brokerage − preset. Edits are local until PATCH wiring (TODO).';
+  'Reference = buyer rate − brokerage (extra) − preset margin. “New seller rate” is the bid base (auction `rate`); Save updates that.';
 
 function roundDisplay(n: number): string {
   if (!Number.isFinite(n)) return '';
@@ -31,6 +44,10 @@ export type LotBidsTableProps = {
   loading: boolean;
   error: string | null;
   onSessionUpdated: (s: AuctionSessionDTO) => void;
+  /** From `listLots` — used for buyer suggestions when adding a bid */
+  lotSummary?: LotSummaryDTO | null;
+  /** Refetch vehicle-ops summary (lots, RD, billing slice) after auction writes */
+  onAuctionDataInvalidate?: () => void | Promise<void>;
 };
 
 /** Form field label styling — matches Billing mobile line-item hints. */
@@ -38,10 +55,41 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{children}</p>;
 }
 
-export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated }: LotBidsTableProps) {
+export function LotBidsTable({
+  lotId,
+  session,
+  loading,
+  error,
+  onSessionUpdated,
+  lotSummary,
+  onAuctionDataInvalidate,
+}: LotBidsTableProps) {
   const [draftByEntryId, setDraftByEntryId] = useState<Record<number, { ref: string; neu: string }>>({});
   const [deleteTarget, setDeleteTarget] = useState<AuctionEntryDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveRetryAllowLotIncrease, setSaveRetryAllowLotIncrease] = useState(false);
+  const [addBidOpen, setAddBidOpen] = useState(false);
+  const [addBidSaving, setAddBidSaving] = useState(false);
+  const [addBidRetryAllowIncrease, setAddBidRetryAllowIncrease] = useState(false);
+  const [addBidQty, setAddBidQty] = useState('');
+  const [addBidBaseRate, setAddBidBaseRate] = useState('');
+  /** Signed preset margin — maps to auction `preset_applied`, not `extra_rate` (auction pad keeps extra at 0). */
+  const [addBidPresetMargin, setAddBidPresetMargin] = useState('0');
+  const [addBidToken, setAddBidToken] = useState('0');
+  const [addBuyerMark, setAddBuyerMark] = useState('');
+  const [addBuyerName, setAddBuyerName] = useState('');
+  const [addBidScribble, setAddBidScribble] = useState(true);
+  const [addBidQtyDialog, setAddBidQtyDialog] = useState<{
+    currentTotal: number;
+    lotTotal: number;
+    attemptedQty: number;
+  } | null>(null);
+  const [addBidDuplicateDialog, setAddBidDuplicateDialog] = useState<{
+    existingEntry: AuctionEntryDTO;
+    rate: number;
+    qty: number;
+  } | null>(null);
   /** Buyer carousel below lg — scroll-snap + dots (BillingPage lot-item pattern). */
   const mobileBuyersCarouselRef = useRef<HTMLDivElement | null>(null);
   const [activeEntrySlide, setActiveEntrySlide] = useState(0);
@@ -58,11 +106,12 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
         const buyer = Number(e.buyer_rate ?? e.bid_rate ?? 0);
         const brokerage = Number(e.extra_rate ?? 0);
         const preset = Number(e.preset_margin ?? 0);
-        const fromApi = e.seller_rate != null && Number.isFinite(Number(e.seller_rate)) ? Number(e.seller_rate) : null;
-        const computed = buyer - brokerage - preset;
-        const base = fromApi ?? computed;
+        /** Reference column: economic back-out from buyer-facing total (not API `seller_rate`, which equals bid base). */
+        const refFromFormula = buyer - brokerage - preset;
+        /** Editable save column: auction bid base (`bid_rate` / `seller_rate` on row). */
+        const bidBase = Number(e.bid_rate ?? e.seller_rate ?? 0);
         const existing = prev[id];
-        next[id] = existing ?? { ref: roundDisplay(base), neu: roundDisplay(base) };
+        next[id] = existing ?? { ref: roundDisplay(refFromFormula), neu: roundDisplay(bidBase) };
       }
       return next;
     });
@@ -90,48 +139,246 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
       const updated = await auctionApi.deleteBid(lotId, deleteTarget.auction_entry_id);
       onSessionUpdated(updated);
       toast.success('Bid removed');
+      /** Full summary reload is heavy; refresh in background so delete feels instant. */
+      void Promise.resolve(onAuctionDataInvalidate?.()).catch(() => {});
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Delete failed');
     } finally {
       setDeleting(false);
       setDeleteTarget(null);
     }
-  }, [deleteTarget, lotId, onSessionUpdated]);
+  }, [deleteTarget, lotId, onAuctionDataInvalidate, onSessionUpdated]);
 
-  const busy = loading || deleting;
+  const resetAddBidForm = useCallback(() => {
+    setAddBidQty('');
+    setAddBidBaseRate('');
+    setAddBidPresetMargin('0');
+    setAddBidToken('0');
+    setAddBuyerMark('');
+    setAddBuyerName('');
+    setAddBidScribble(true);
+    setAddBidRetryAllowIncrease(false);
+    setAddBidQtyDialog(null);
+    setAddBidDuplicateDialog(null);
+  }, []);
 
-  const footer = useMemo(
-    () => (
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
-          disabled={busy}
-          onClick={() => toast.message('Add bid', { description: 'Not wired from Summary vehicle ops yet.' })}
-        >
-          Add New Bid
-        </Button>
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
-          disabled={busy}
-          onClick={() => {
-            // TODO(merco): PATCH auctionApi.updateBid with mapped rate/preset when product confirms field mapping.
-            toast.success('Saved locally', {
-              description: 'Rate changes stay in this panel until API wiring is complete.',
-            });
-          }}
-        >
-          Save
-        </Button>
-      </div>
-    ),
-    [busy],
+  useEffect(() => {
+    if (!addBidOpen) return;
+    const rem = session != null ? Number(session.remaining_bags) || 0 : 0;
+    setAddBidQty(rem > 0 ? String(rem) : '');
+    setAddBidBaseRate('');
+    setAddBidPresetMargin('0');
+    setAddBidToken('0');
+    setAddBuyerMark('');
+    setAddBuyerName('');
+    setAddBidScribble(true);
+    setAddBidRetryAllowIncrease(false);
+    setAddBidQtyDialog(null);
+    setAddBidDuplicateDialog(null);
+  }, [addBidOpen, session?.remaining_bags, session?.auction_id, lotId]);
+
+  const executeVehicleOpsAddBid = useCallback(
+    async (allowLotIncreaseFromStep: boolean) => {
+      if (!session) {
+        toast.error('Session not loaded');
+        return;
+      }
+      const qtyDigits = String(addBidQty).replace(/[^\d]/g, '');
+      const qty = qtyDigits === '' ? NaN : Math.max(1, parseInt(qtyDigits, 10));
+      const rate = roundMoney2(Number(addBidBaseRate));
+      const presetRaw = String(addBidPresetMargin ?? '0').replace(/,/g, '').trim();
+      const presetMargin =
+        presetRaw === '' || presetRaw === '-' ? 0 : roundMoney2(Number(presetRaw));
+      const tokenAdvance = roundMoney2(Number(addBidToken || 0));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter valid bid quantity');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate < 1) {
+        toast.error('Enter valid base rate (at least 1)');
+        return;
+      }
+      if (!Number.isFinite(presetMargin) || !Number.isFinite(tokenAdvance)) {
+        toast.error('Enter valid preset margin and token values');
+        return;
+      }
+      const mark = addBuyerMark.trim();
+      const name = addBuyerName.trim();
+      if (!mark || !name) {
+        toast.error('Enter buyer mark and name');
+        return;
+      }
+      const allow = allowLotIncreaseFromStep || addBidRetryAllowIncrease;
+      const body: AuctionBidCreateRequest = {
+        buyer_name: name,
+        buyer_mark: mark,
+        is_scribble: addBidScribble,
+        is_self_sale: false,
+        rate,
+        quantity: qty,
+        extra_rate: 0,
+        token_advance: tokenAdvance,
+        preset_applied: presetMargin,
+        preset_type: presetMargin < 0 ? 'LOSS' : 'PROFIT',
+        allow_lot_increase: allow,
+      };
+      try {
+        setAddBidSaving(true);
+        const next = await auctionApi.addBid(lotId, body);
+        onSessionUpdated(next);
+        setAddBidRetryAllowIncrease(false);
+        setAddBidOpen(false);
+        resetAddBidForm();
+        await onAuctionDataInvalidate?.();
+        toast.success('Bid added');
+      } catch (err: unknown) {
+        const e = err as { isConflict?: boolean; message?: string };
+        if (e.isConflict) {
+          setAddBidRetryAllowIncrease(true);
+          toast.error('Quantity exceeds lot. Tap Save bid again to allow lot increase and retry.');
+        } else {
+          toast.error(e instanceof Error ? e.message : 'Failed to add bid');
+        }
+      } finally {
+        setAddBidSaving(false);
+      }
+    },
+    [
+      addBidPresetMargin,
+      addBidQty,
+      addBidBaseRate,
+      addBidRetryAllowIncrease,
+      addBidScribble,
+      addBidToken,
+      addBuyerMark,
+      addBuyerName,
+      lotId,
+      onAuctionDataInvalidate,
+      onSessionUpdated,
+      resetAddBidForm,
+      session,
+    ],
   );
+
+  const beginVehicleOpsAddBid = useCallback(
+    (allowLotIncreaseFromStep: boolean) => {
+      if (!session) {
+        toast.error('Session not loaded');
+        return;
+      }
+      const qty = Math.max(0, parseInt(String(addBidQty).replace(/[^\d]/g, '') || '0', 10));
+      const rate = Number(addBidBaseRate);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error('Enter a whole-number bid quantity (bags)');
+        return;
+      }
+      if (!Number.isFinite(rate) || rate < 1) {
+        toast.error('Enter valid base rate');
+        return;
+      }
+      const markNorm = addBuyerMark.trim().toLowerCase();
+      if (!markNorm || !addBuyerName.trim()) {
+        toast.error('Enter buyer mark and name');
+        return;
+      }
+      const lotTotal = session.lot?.bag_count ?? 0;
+      const currentSold = Number(session.total_sold_bags) || 0;
+      const newTotal = currentSold + qty;
+      if (newTotal > lotTotal && !addBidRetryAllowIncrease && !allowLotIncreaseFromStep) {
+        setAddBidQtyDialog({ currentTotal: currentSold, lotTotal, attemptedQty: qty });
+        return;
+      }
+      const dup = (session.entries ?? []).find(
+        (en) => !en.is_self_sale && (en.buyer_mark || '').trim().toLowerCase() === markNorm,
+      );
+      if (dup) {
+        setAddBidDuplicateDialog({ existingEntry: dup, rate, qty });
+        return;
+      }
+      void executeVehicleOpsAddBid(allowLotIncreaseFromStep);
+    },
+    [
+      addBidBaseRate,
+      addBidQty,
+      addBidRetryAllowIncrease,
+      addBuyerMark,
+      addBuyerName,
+      executeVehicleOpsAddBid,
+      session,
+    ],
+  );
+
+  const handleSaveRates = useCallback(async () => {
+    if (!session || entries.length === 0) {
+      toast.message('Nothing to save', { description: 'Add a bid first or open a lot with entries.' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const dirty: { entry: AuctionEntryDTO; newRate: number }[] = [];
+      for (const e of entries) {
+        const id = e.auction_entry_id;
+        const bidBase = Number(e.bid_rate ?? e.seller_rate ?? 0);
+        const draft = draftByEntryId[id];
+        const raw = (draft?.neu ?? roundDisplay(bidBase)).replace(/,/g, '').trim();
+        const neuN = raw === '' ? NaN : roundMoney2(Number(raw));
+        if (!Number.isFinite(neuN) || neuN < 1) {
+          toast.error(`Invalid new seller rate for ${e.buyer_mark || 'this bid'} (must be at least 1).`);
+          return;
+        }
+        if (Math.abs(roundMoney2(neuN) - roundMoney2(bidBase)) < 0.005) continue;
+        dirty.push({ entry: e, newRate: neuN });
+      }
+      if (dirty.length === 0) {
+        toast.message('No changes to save');
+        return;
+      }
+      for (const { entry, newRate } of dirty) {
+        try {
+          const updated = await auctionApi.updateBid(lotId, entry.auction_entry_id, {
+            rate: newRate,
+            expected_last_modified_ms: entry.last_modified_ms ?? undefined,
+            allow_lot_increase: saveRetryAllowLotIncrease,
+          });
+          onSessionUpdated(updated);
+        } catch (err: unknown) {
+          const ex = err as { isStaleBid?: boolean; isConflict?: boolean; message?: string };
+          if (ex.isStaleBid) {
+            toast.error(ex.message || 'This bid was changed elsewhere. Refreshing…');
+            try {
+              const fresh = await auctionApi.getOrStartSession(lotId);
+              onSessionUpdated(fresh);
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+          if (ex.isConflict) {
+            setSaveRetryAllowLotIncrease(true);
+            toast.error('Tap Save again to allow lot increase and retry.');
+            return;
+          }
+          toast.error(err instanceof Error ? err.message : 'Failed to save');
+          return;
+        }
+      }
+      setSaveRetryAllowLotIncrease(false);
+      await onAuctionDataInvalidate?.();
+      toast.success('Seller rates saved');
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    draftByEntryId,
+    entries,
+    lotId,
+    onAuctionDataInvalidate,
+    onSessionUpdated,
+    saveRetryAllowLotIncrease,
+    session,
+  ]);
+
+  const busy = loading || deleting || saving;
 
   if (error) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -146,14 +393,22 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
     );
   }
 
-  if (!session || entries.length === 0) {
-    return <p className="py-4 text-center text-sm text-muted-foreground">No bids for this lot in the current session.</p>;
-  }
+  const showTable = session != null && entries.length > 0;
+  const emptyHint =
+    session == null && !loading
+      ? 'No auction session for this lot yet.'
+      : 'No bids for this lot in the current session.';
 
   return (
     <div className="min-w-0">
-      {/* Desktop: unchanged wide table from lg (1024px) — aligns with VehicleOps seller strip / lot carousel. */}
-      <div className="hidden max-w-full overflow-x-auto rounded-xl border border-border/30 bg-background/40 lg:block">
+      {!showTable ? (
+        <p className="py-4 text-center text-sm text-muted-foreground">{emptyHint}</p>
+      ) : null}
+
+      {showTable ? (
+        <>
+          {/* Desktop: unchanged wide table from lg (1024px) — aligns with VehicleOps seller strip / lot carousel. */}
+          <div className="hidden max-w-full overflow-x-auto rounded-xl border border-border/30 bg-background/40 lg:block">
         <Table className="min-w-[720px] text-xs sm:text-sm">
           <TableHeader>
             <TableRow
@@ -201,7 +456,7 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                      Proposed seller-side rate; local only until PATCH is wired.
+                      Seller-side bid base; Save updates the auction row (buyer rate is recalculated on the server).
                     </TooltipContent>
                   </Tooltip>
                 </span>
@@ -215,7 +470,10 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
               const buyerRate = Number(e.buyer_rate ?? e.bid_rate ?? 0);
               const brokerage = Number(e.extra_rate ?? 0);
               const preset = Number(e.preset_margin ?? 0);
-              const draft = draftByEntryId[id] ?? { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(buyerRate - brokerage - preset) };
+              const bidBaseRow = Number(e.bid_rate ?? e.seller_rate ?? 0);
+              const draft =
+                draftByEntryId[id] ??
+                { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(bidBaseRow) };
               return (
                 <TableRow key={id} className="border-border/30">
                   <TableCell className="font-medium">{e.buyer_mark || '—'}</TableCell>
@@ -271,9 +529,9 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
             })}
           </TableBody>
         </Table>
-      </div>
+          </div>
 
-      <div className="lg:hidden">
+          <div className="lg:hidden">
         {entries.length > 1 && (
           <div className="mb-2 flex items-center justify-center gap-1.5" role="tablist" aria-label="Buyers in this lot">
             {entries.map((e, ei) => (
@@ -307,7 +565,10 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
             const buyerRate = Number(e.buyer_rate ?? e.bid_rate ?? 0);
             const brokerage = Number(e.extra_rate ?? 0);
             const preset = Number(e.preset_margin ?? 0);
-            const draft = draftByEntryId[id] ?? { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(buyerRate - brokerage - preset) };
+            const bidBaseRow = Number(e.bid_rate ?? e.seller_rate ?? 0);
+            const draft =
+              draftByEntryId[id] ??
+              { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(bidBaseRow) };
             return (
               <div
                 key={id}
@@ -425,7 +686,7 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                          Proposed seller-side rate; local only until PATCH is wired.
+                          Seller-side bid base; Save updates the auction row (buyer rate is recalculated on the server).
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -448,9 +709,244 @@ export function LotBidsTable({ lotId, session, loading, error, onSessionUpdated 
             );
           })}
         </div>
+          </div>
+        </>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
+          disabled={busy || session == null}
+          onClick={() => setAddBidOpen(true)}
+        >
+          Add New Bid
+        </Button>
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          className={cn(vehicleOpsPrimaryBtnClass, 'rounded-xl')}
+          disabled={busy || session == null || entries.length === 0}
+          onClick={() => void handleSaveRates()}
+        >
+          {saveRetryAllowLotIncrease ? 'Save (allow lot increase)' : 'Save'}
+        </Button>
       </div>
 
-      {footer}
+      <Dialog
+        open={addBidOpen}
+        onOpenChange={(open) => {
+          setAddBidOpen(open);
+          if (!open) resetAddBidForm();
+        }}
+      >
+        <DialogContent className="max-h-[min(92dvh,880px)] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Add New Bid</DialogTitle>
+            <p className="text-left text-sm font-normal text-muted-foreground">
+              Lot session — remaining bags:{' '}
+              <span className="font-semibold tabular-nums text-foreground">
+                {session != null ? Number(session.remaining_bags) || 0 : '—'}
+              </span>
+            </p>
+          </DialogHeader>
+          <div className="space-y-3 pt-1">
+            {lotSummary?.participating_buyers != null && lotSummary.participating_buyers.length > 0 ? (
+              <div className="space-y-1">
+                <Label className="text-xs">Buyers on this lot</Label>
+                <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
+                  {lotSummary.participating_buyers.map((b) => (
+                    <button
+                      key={b.group_key}
+                      type="button"
+                      className={cn(
+                        'rounded-lg border border-border/50 bg-muted/30 px-2 py-1 text-left text-xs transition-colors hover:bg-muted/60',
+                        addBuyerMark === b.buyer_mark && addBuyerName === b.buyer_name && 'border-primary bg-primary/10',
+                      )}
+                      onClick={() => {
+                        setAddBuyerMark(b.buyer_mark);
+                        setAddBuyerName(b.buyer_name);
+                        setAddBidScribble(!b.registered);
+                      }}
+                    >
+                      <span className="font-semibold">{b.buyer_mark}</span>
+                      <span className="text-muted-foreground"> · {b.buyer_name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Buyer mark *</Label>
+                <Input
+                  value={addBuyerMark}
+                  onChange={(ev) => setAddBuyerMark(ev.target.value)}
+                  className="h-9 rounded-lg text-sm"
+                  placeholder="Mark"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Buyer name *</Label>
+                <Input
+                  value={addBuyerName}
+                  onChange={(ev) => setAddBuyerName(ev.target.value)}
+                  className="h-9 rounded-lg text-sm"
+                  placeholder="Name"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="rounded border-border"
+                checked={addBidScribble}
+                onChange={(ev) => setAddBidScribble(ev.target.checked)}
+              />
+              Temporary / scribble buyer
+            </label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="space-y-1">
+                <Label className="text-xs">Qty (bags) *</Label>
+                <BillingMoneyInput
+                  value={Number(addBidQty) || 0}
+                  min={0}
+                  integerOnly
+                  onCommit={(n) => setAddBidQty(n > 0 ? String(Math.max(1, Math.round(n))) : '')}
+                  placeholder={session != null ? String(Number(session.remaining_bags) || 0) : ''}
+                  className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Base *</Label>
+                <BillingMoneyInput
+                  value={Number(addBidBaseRate) || 0}
+                  min={0}
+                  onCommit={(n) => setAddBidBaseRate(n >= 1 ? String(roundMoney2(n)) : '')}
+                  className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Preset (margin)</Label>
+                <BillingMoneyInput
+                  value={(() => {
+                    const t = String(addBidPresetMargin ?? '').replace(/,/g, '').trim();
+                    const n = parseFloat(t);
+                    return Number.isFinite(n) ? n : 0;
+                  })()}
+                  onCommit={(n) => setAddBidPresetMargin(String(roundMoney2(n)))}
+                  className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                  title="Signed margin per bag (same as auction grid preset). Negative = loss preset. Not brokerage."
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Token</Label>
+                <BillingMoneyInput
+                  value={Number(addBidToken) || 0}
+                  min={0}
+                  onCommit={(n) => setAddBidToken(String(roundMoney2(n)))}
+                  className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 border-t pt-4 sm:justify-end">
+            <Button type="button" variant="outline" disabled={addBidSaving} onClick={() => setAddBidOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={addBidSaving}
+              className={vehicleOpsPrimaryBtnClass}
+              onClick={() => beginVehicleOpsAddBid(false)}
+            >
+              {addBidSaving ? 'Saving…' : addBidRetryAllowIncrease ? 'Save (allow lot increase)' : 'Save bid'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={addBidQtyDialog != null}
+        onOpenChange={(o) => {
+          if (!o) setAddBidQtyDialog(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Quantity exceeds lot</DialogTitle>
+          </DialogHeader>
+          {addBidQtyDialog ? (
+            <p className="text-sm text-muted-foreground">
+              Sold {addBidQtyDialog.currentTotal} of {addBidQtyDialog.lotTotal} bags. Adding {addBidQtyDialog.attemptedQty}{' '}
+              would exceed the lot. Allow the lot size to increase and try again?
+            </p>
+          ) : null}
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setAddBidQtyDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setAddBidQtyDialog(null);
+                beginVehicleOpsAddBid(true);
+              }}
+            >
+              Allow increase
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={addBidDuplicateDialog != null}
+        onOpenChange={(o) => {
+          if (!o) setAddBidDuplicateDialog(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Buyer mark already on this lot</DialogTitle>
+          </DialogHeader>
+          {addBidDuplicateDialog ? (
+            <p className="text-sm text-muted-foreground">
+              Mark <span className="font-semibold">{addBidDuplicateDialog.existingEntry.buyer_mark}</span> already has a
+              bid. Add anyway (server may merge) or use a different mark.
+            </p>
+          ) : null}
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button type="button" variant="outline" onClick={() => setAddBidDuplicateDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAddBidDuplicateDialog(null);
+                toast.info('Change buyer mark, then add the bid again.');
+              }}
+            >
+              Different mark
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setAddBidDuplicateDialog(null);
+                void executeVehicleOpsAddBid(false);
+              }}
+            >
+              Add anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         open={deleteTarget != null}

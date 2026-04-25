@@ -33,9 +33,17 @@ type BillingMoneyInputProps = {
  * incomplete (e.g. lone minus/dot), or invalid — parent state is left unchanged until blur
  * or a complete number, so clearing a field does not force artificial values (e.g. qty → 1).
  */
-function parseDraftToNumber(raw: string, min?: number): number | null {
+function parseDraftToNumber(raw: string, min?: number, integerOnly?: boolean): number | null {
   const t = raw.replace(/,/g, '').trim();
   if (t === '') return null;
+  if (integerOnly) {
+    if (!/^\d+$/.test(t)) return null;
+    const n = parseInt(t, 10);
+    if (!Number.isFinite(n)) return null;
+    let x = n;
+    if (min !== undefined && x < min) x = min;
+    return x;
+  }
   if (t === '.') return null;
   if (t === '-') return null;
   if (!/^-?\d*\.?\d*$/.test(t)) return null;
@@ -67,14 +75,19 @@ export function BillingMoneyInput({
   /** True after any input/paste while focused; false on focus until user edits. */
   const editedSinceFocusRef = useRef(false);
 
-  const display = draft !== null ? draft : roundMoney2(value).toFixed(2);
+  const display =
+    draft !== null
+      ? draft
+      : integerOnly
+        ? String(Math.max(min ?? 0, Math.round(Number(value) || 0)))
+        : roundMoney2(value).toFixed(2);
   const guardMode = numericGuardModeForBillingMoney(integerOnly);
 
   const pushDraft = (next: string) => {
     editedSinceFocusRef.current = true;
     setDraft(next);
     if (commitMode === 'live') {
-      const live = parseDraftToNumber(next, min);
+      const live = parseDraftToNumber(next, min, integerOnly);
       if (live !== null) {
         onCommit(live);
       }
@@ -117,11 +130,12 @@ export function BillingMoneyInput({
         editedSinceFocusRef.current = false;
         let n = parseFloat(raw.replace(/,/g, ''));
         if (!Number.isFinite(n)) {
-          onCommit(allowEmptyZero ? 0 : roundMoney2(value));
+          onCommit(allowEmptyZero ? 0 : integerOnly ? Math.max(min ?? 0, Math.round(Number(value) || 0)) : roundMoney2(value));
           return;
         }
         if (min !== undefined && n < min) n = min;
-        onCommit(roundMoney2(n));
+        const committed = integerOnly ? Math.round(n) : roundMoney2(n);
+        onCommit(committed);
       }}
       className={cn(className)}
     />

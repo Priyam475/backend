@@ -373,6 +373,7 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
           arrivalDetail={arrivalFullDetail}
           lotSummariesForVehicle={lotRows}
           detailLoading={loading && arrivalFullDetail == null}
+          onAuctionDataInvalidate={runLoad}
         />
       </div>
     </motion.div>
