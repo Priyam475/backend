@@ -1339,6 +1339,9 @@ public class AuctionService {
                 remainingSelfSale.setBuyerMark(entry.getBuyerMark());
                 remainingSelfSale.setBuyerName(entry.getBuyerName());
                 remainingSelfSale.setRate(unit.getRate());
+                remainingSelfSale.setSummarySellerRate(
+                    entry.getSummarySellerRate() != null ? entry.getSummarySellerRate() : entry.getBidRate()
+                );
                 remainingSelfSale.setQuantity(unit.getRemainingQty());
                 remainingSelfSale.setAmount(unit.getRate().multiply(BigDecimal.valueOf(unit.getRemainingQty())));
                 remainingSelfSale.setIsSelfSale(Boolean.TRUE);
@@ -1534,6 +1537,7 @@ public class AuctionService {
         dto.setBuyerMark(entry.getBuyerMark());
         dto.setBuyerName(entry.getBuyerName());
         dto.setRate(entry.getBidRate());
+        dto.setSummarySellerRate(entry.getSummarySellerRate() != null ? entry.getSummarySellerRate() : entry.getBidRate());
         dto.setQuantity(entry.getQuantity());
         dto.setAmount(entry.getAmount());
         dto.setIsSelfSale(entry.getIsSelfSale());

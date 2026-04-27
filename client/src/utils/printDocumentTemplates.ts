@@ -34,6 +34,7 @@ function normalizeOptions(options?: DocumentPrintOptions): Required<DocumentPrin
   return {
     pageSize: options?.pageSize === 'A5' ? 'A5' : 'A4',
     includeHeader: options?.includeHeader !== false,
+    copyLabel: (options?.copyLabel && String(options.copyLabel).trim()) || 'ORIGINAL COPY',
   };
 }
 
@@ -1279,25 +1280,43 @@ function buildSalesPattiA4Html(
   `;
 }
 
+/**
+ * One document: each page is a (possibly different) patti payload with its own footer label.
+ * Use for Original vs Modified (ALT O / ALT M) settlement copies.
+ */
+export function generateSalesPattiPrintHTMLPages(
+  pages: { patti: PattiPrintData; copyLabel: string }[],
+  options?: DocumentPrintOptions,
+): string {
+  const printOptions = normalizeOptions(options);
+  if (pages.length === 0) {
+    return wrapPrintDocument(`${buildSalesPattiStyle()}`, printOptions.pageSize);
+  }
+  const inner = pages
+    .map((pg, i) => {
+      const label = (pg.copyLabel && String(pg.copyLabel).trim()) || 'COPY';
+      const chunk = buildSalesPattiA4Html(pg.patti, printOptions, label);
+      const pba = i < pages.length - 1 ? 'page-break-after: always;' : '';
+      return `<div class="patti-print-job" style="${pba}">${chunk}</div>`;
+    })
+    .join('');
+  return wrapPrintDocument(`${buildSalesPattiStyle()}${inner}`, printOptions.pageSize);
+}
+
 /** One document; each entry in `copyLabels` is a full patti with footer label and page break between copies. */
 export function generateSalesPattiPrintHTMLForCopies(
   patti: PattiPrintData,
   copyLabels: string[],
   options?: DocumentPrintOptions,
 ): string {
-  const printOptions = normalizeOptions(options);
   const labels =
     copyLabels.length > 0
       ? copyLabels.map((l) => (l && String(l).trim()) || 'COPY').filter((s) => s.length > 0)
       : ['ORIGINAL COPY'];
-  const inner = labels
-    .map((label, i) => {
-      const chunk = buildSalesPattiA4Html(patti, printOptions, label);
-      const pba = i < labels.length - 1 ? 'page-break-after: always;' : '';
-      return `<div class="patti-print-job" style="${pba}">${chunk}</div>`;
-    })
-    .join('');
-  return wrapPrintDocument(`${buildSalesPattiStyle()}${inner}`, printOptions.pageSize);
+  return generateSalesPattiPrintHTMLPages(
+    labels.map((copyLabel) => ({ patti, copyLabel })),
+    options,
+  );
 }
 
 export function generateSalesPattiPrintHTML(patti: PattiPrintData, options?: DocumentPrintOptions): string {

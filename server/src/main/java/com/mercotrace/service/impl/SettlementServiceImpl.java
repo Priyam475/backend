@@ -219,6 +219,9 @@ public class SettlementServiceImpl implements SettlementService {
                 se.setBuyerMark(entry.getBuyerMark());
                 se.setBuyerName(entry.getBuyerName());
                 se.setRate(entry.getRate());
+                se.setSummarySellerRate(
+                    entry.getSummarySellerRate() != null ? entry.getSummarySellerRate() : entry.getRate()
+                );
                 se.setPresetMargin(entry.getPresetApplied());
                 se.setQuantity(entry.getQuantity());
                 BigDecimal weight = bidToWeight.getOrDefault(entry.getBidNumber(), entry.getQuantity() != null ? BigDecimal.valueOf(entry.getQuantity() * 50) : BigDecimal.ZERO);
