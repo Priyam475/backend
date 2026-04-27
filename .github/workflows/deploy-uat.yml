@@ -116,7 +116,11 @@ jobs:
           ssh "${SSH_USER}@${SSH_HOST}" "chmod +x /tmp/deploy-uat-remote-${SHORT_SHA}.sh && DEPLOY_ROOT='${DEPLOY_PATH}' RELEASE_ID='${SHORT_SHA}' SERVICE_NAME='${SERVICE}' bash /tmp/deploy-uat-remote-${SHORT_SHA}.sh && rm -f /tmp/deploy-uat-remote-${SHORT_SHA}.sh"
 
       - name: Smoke check (optional)
-        if: ${{ secrets.UAT_HEALTH_URL != '' }}
         env:
           UAT_HEALTH_URL: ${{ secrets.UAT_HEALTH_URL }}
-        run: curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$UAT_HEALTH_URL"
+        run: |
+          if [ -z "$UAT_HEALTH_URL" ]; then
+            echo "UAT_HEALTH_URL not set, skipping smoke check"
+            exit 0
+          fi
+          curl -fsS --retry 5 --retry-delay 3 --retry-all-errors "$UAT_HEALTH_URL"
