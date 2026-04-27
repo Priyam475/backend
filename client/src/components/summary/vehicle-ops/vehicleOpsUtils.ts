@@ -44,7 +44,7 @@ export function formatLotLabelFromSummary(lot: LotSummaryDTO): string {
 }
 
 /**
- * Sidebar "Sold / Pending" uses bag totals across this seller's lots (LotSummaryDTO.sold_bags vs remainder).
+ * Sidebar seller row shows `sold / pending` counts from bag totals across this seller's lots (sold_bags vs remainder).
  * Lot-level completion is a separate concept; bags match Sales Pad / summary cards.
  */
 export function sellerBagSoldPending(lots: LotSummaryDTO[]): { sold: number; pending: number } {

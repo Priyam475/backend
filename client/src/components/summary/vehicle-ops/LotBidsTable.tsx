@@ -30,13 +30,33 @@ const numberInputNoSpinnerClass =
   '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
 const REF_FORMULA_HINT =
-  'Reference = buyer rate − brokerage (extra) − preset margin. “New seller rate” is the bid base (auction `rate`); Save updates that.';
+  'Computed from this row: buyer rate − brokerage (extra) − preset margin. Display only — not editable.';
+
+const NEW_SELLER_HINT =
+  'Stored separately from the auction bid and buyer rate. Save writes summary_seller_rate only; Sales Pad bid / buyer totals are unchanged.';
+
+/** Persisted Summary column (defaults from auction bid until you edit here). */
+function serverSummarySellerRate(e: AuctionEntryDTO): number {
+  const s = e.summary_seller_rate;
+  if (s != null && Number.isFinite(Number(s))) return roundMoney2(Number(s));
+  return roundMoney2(Number(e.bid_rate ?? e.seller_rate ?? 0));
+}
+
+/** Display-only reference back-out for the row. */
+function refSellerRateDisplay(e: AuctionEntryDTO): number {
+  const buyer = Number(e.buyer_rate ?? e.bid_rate ?? 0);
+  const brokerage = Number(e.extra_rate ?? 0);
+  const preset = Number(e.preset_margin ?? 0);
+  return roundMoney2(buyer - brokerage - preset);
+}
 
 function roundDisplay(n: number): string {
   if (!Number.isFinite(n)) return '';
   const t = Math.round(n * 100) / 100;
   return String(t);
 }
+
+const EMPTY_SESSION_ENTRIES: AuctionEntryDTO[] = [];
 
 export type LotBidsTableProps = {
   lotId: number;
@@ -48,6 +68,8 @@ export type LotBidsTableProps = {
   lotSummary?: LotSummaryDTO | null;
   /** Refetch vehicle-ops summary (lots, RD, billing slice) after auction writes */
   onAuctionDataInvalidate?: () => void | Promise<void>;
+  /** True while “new seller rate” differs from saved summary_seller_rate (same rule as Save). */
+  onUnsavedRatesChange?: (hasUnsaved: boolean) => void;
 };
 
 /** Form field label styling — matches Billing mobile line-item hints. */
@@ -63,8 +85,10 @@ export function LotBidsTable({
   onSessionUpdated,
   lotSummary,
   onAuctionDataInvalidate,
+  onUnsavedRatesChange,
 }: LotBidsTableProps) {
-  const [draftByEntryId, setDraftByEntryId] = useState<Record<number, { ref: string; neu: string }>>({});
+  /** Local overrides after BillingMoneyInput commit; cleared when they match server summary_seller_rate. */
+  const [localSummaryByEntryId, setLocalSummaryByEntryId] = useState<Record<number, number>>({});
   const [deleteTarget, setDeleteTarget] = useState<AuctionEntryDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,24 +118,18 @@ export function LotBidsTable({
   const mobileBuyersCarouselRef = useRef<HTMLDivElement | null>(null);
   const [activeEntrySlide, setActiveEntrySlide] = useState(0);
 
-  const entries = session?.entries ?? [];
+  const entries = session?.entries ?? EMPTY_SESSION_ENTRIES;
 
   const entryIdsKey = useMemo(() => entries.map((e) => e.auction_entry_id).join(','), [entries]);
 
   useEffect(() => {
-    setDraftByEntryId((prev) => {
-      const next: Record<number, { ref: string; neu: string }> = {};
-      for (const e of entries) {
-        const id = e.auction_entry_id;
-        const buyer = Number(e.buyer_rate ?? e.bid_rate ?? 0);
-        const brokerage = Number(e.extra_rate ?? 0);
-        const preset = Number(e.preset_margin ?? 0);
-        /** Reference column: economic back-out from buyer-facing total (not API `seller_rate`, which equals bid base). */
-        const refFromFormula = buyer - brokerage - preset;
-        /** Editable save column: auction bid base (`bid_rate` / `seller_rate` on row). */
-        const bidBase = Number(e.bid_rate ?? e.seller_rate ?? 0);
-        const existing = prev[id];
-        next[id] = existing ?? { ref: roundDisplay(refFromFormula), neu: roundDisplay(bidBase) };
+    setLocalSummaryByEntryId((prev) => {
+      const next = { ...prev };
+      for (const idStr of Object.keys(next)) {
+        const id = Number(idStr);
+        const row = entries.find((x) => x.auction_entry_id === id);
+        if (!row) delete next[id];
+        else if (Math.abs(roundMoney2(next[id]) - serverSummarySellerRate(row)) < 0.005) delete next[id];
       }
       return next;
     });
@@ -315,30 +333,27 @@ export function LotBidsTable({
     }
     setSaving(true);
     try {
-      const dirty: { entry: AuctionEntryDTO; newRate: number }[] = [];
+      const dirty: { entry: AuctionEntryDTO; newSummary: number }[] = [];
       for (const e of entries) {
-        const id = e.auction_entry_id;
-        const bidBase = Number(e.bid_rate ?? e.seller_rate ?? 0);
-        const draft = draftByEntryId[id];
-        const raw = (draft?.neu ?? roundDisplay(bidBase)).replace(/,/g, '').trim();
-        const neuN = raw === '' ? NaN : roundMoney2(Number(raw));
+        const srv = serverSummarySellerRate(e);
+        const cur = localSummaryByEntryId[e.auction_entry_id] ?? srv;
+        const neuN = roundMoney2(cur);
         if (!Number.isFinite(neuN) || neuN < 1) {
           toast.error(`Invalid new seller rate for ${e.buyer_mark || 'this bid'} (must be at least 1).`);
           return;
         }
-        if (Math.abs(roundMoney2(neuN) - roundMoney2(bidBase)) < 0.005) continue;
-        dirty.push({ entry: e, newRate: neuN });
+        if (Math.abs(neuN - srv) < 0.005) continue;
+        dirty.push({ entry: e, newSummary: neuN });
       }
       if (dirty.length === 0) {
         toast.message('No changes to save');
         return;
       }
-      for (const { entry, newRate } of dirty) {
+      for (const { entry, newSummary } of dirty) {
         try {
           const updated = await auctionApi.updateBid(lotId, entry.auction_entry_id, {
-            rate: newRate,
+            summary_seller_rate: newSummary,
             expected_last_modified_ms: entry.last_modified_ms ?? undefined,
-            allow_lot_increase: saveRetryAllowLotIncrease,
           });
           onSessionUpdated(updated);
         } catch (err: unknown) {
@@ -364,21 +379,36 @@ export function LotBidsTable({
       }
       setSaveRetryAllowLotIncrease(false);
       await onAuctionDataInvalidate?.();
-      toast.success('Seller rates saved');
+      toast.success('Summary seller rates saved');
     } finally {
       setSaving(false);
     }
   }, [
-    draftByEntryId,
     entries,
+    localSummaryByEntryId,
     lotId,
     onAuctionDataInvalidate,
     onSessionUpdated,
-    saveRetryAllowLotIncrease,
     session,
   ]);
 
   const busy = loading || deleting || saving;
+
+  const hasUnsavedRates = useMemo(() => {
+    if (!session || entries.length === 0) return false;
+    for (const e of entries) {
+      const srv = serverSummarySellerRate(e);
+      const cur = localSummaryByEntryId[e.auction_entry_id] ?? srv;
+      const neuN = roundMoney2(cur);
+      if (!Number.isFinite(neuN) || neuN < 1) return true;
+      if (Math.abs(neuN - srv) >= 0.005) return true;
+    }
+    return false;
+  }, [entries, localSummaryByEntryId, session]);
+
+  useEffect(() => {
+    onUnsavedRatesChange?.(hasUnsavedRates);
+  }, [hasUnsavedRates, onUnsavedRatesChange]);
 
   if (error) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -456,7 +486,7 @@ export function LotBidsTable({
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                      Seller-side bid base; Save updates the auction row (buyer rate is recalculated on the server).
+                      {NEW_SELLER_HINT}
                     </TooltipContent>
                   </Tooltip>
                 </span>
@@ -470,10 +500,8 @@ export function LotBidsTable({
               const buyerRate = Number(e.buyer_rate ?? e.bid_rate ?? 0);
               const brokerage = Number(e.extra_rate ?? 0);
               const preset = Number(e.preset_margin ?? 0);
-              const bidBaseRow = Number(e.bid_rate ?? e.seller_rate ?? 0);
-              const draft =
-                draftByEntryId[id] ??
-                { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(bidBaseRow) };
+              const summaryVal =
+                localSummaryByEntryId[id] !== undefined ? localSummaryByEntryId[id] : serverSummarySellerRate(e);
               return (
                 <TableRow key={id} className="border-border/30">
                   <TableCell className="font-medium">{e.buyer_mark || '—'}</TableCell>
@@ -481,34 +509,31 @@ export function LotBidsTable({
                   <TableCell className="text-right tabular-nums">₹{roundDisplay(buyerRate)}</TableCell>
                   <TableCell className="text-right">
                     <Input
-                      inputMode="decimal"
-                      className="h-8 w-[5.5rem] rounded-lg border-border/50 text-right tabular-nums"
-                      value={draft.ref}
+                      readOnly
+                      tabIndex={-1}
+                      aria-readonly
+                      value={`₹${roundDisplay(refSellerRateDisplay(e))}`}
+                      title="Reference seller rate (display only)"
                       aria-label={`Reference seller rate for ${e.buyer_mark}`}
-                      onChange={(ev) => {
-                        const v = ev.target.value;
-                        setDraftByEntryId((p) => {
-                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                          return { ...p, [id]: { ...cur, ref: v } };
-                        });
-                      }}
+                      className={cn(readOnlyBidNumericClass, 'h-8 w-[5.5rem]')}
                     />
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">₹{roundDisplay(brokerage)}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">₹{roundDisplay(preset)}</TableCell>
                   <TableCell className="text-right">
-                    <Input
-                      inputMode="decimal"
-                      className="h-8 w-[5.5rem] rounded-lg border-border/50 text-right tabular-nums"
-                      value={draft.neu}
-                      aria-label={`New seller rate for ${e.buyer_mark}`}
-                      onChange={(ev) => {
-                        const v = ev.target.value;
-                        setDraftByEntryId((p) => {
-                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                          return { ...p, [id]: { ...cur, neu: v } };
-                        });
-                      }}
+                    <BillingMoneyInput
+                      commitMode="blur"
+                      min={1}
+                      disabled={busy}
+                      value={summaryVal}
+                      onCommit={(n) =>
+                        setLocalSummaryByEntryId((p) => ({
+                          ...p,
+                          [id]: roundMoney2(n),
+                        }))
+                      }
+                      title={`New seller rate for ${e.buyer_mark}`}
+                      className="h-8 w-[5.5rem] rounded-lg border-border/50 text-right tabular-nums text-sm"
                     />
                   </TableCell>
                   <TableCell className="text-center">
@@ -565,10 +590,8 @@ export function LotBidsTable({
             const buyerRate = Number(e.buyer_rate ?? e.bid_rate ?? 0);
             const brokerage = Number(e.extra_rate ?? 0);
             const preset = Number(e.preset_margin ?? 0);
-            const bidBaseRow = Number(e.bid_rate ?? e.seller_rate ?? 0);
-            const draft =
-              draftByEntryId[id] ??
-              { ref: roundDisplay(buyerRate - brokerage - preset), neu: roundDisplay(bidBaseRow) };
+            const summaryVal =
+              localSummaryByEntryId[id] !== undefined ? localSummaryByEntryId[id] : serverSummarySellerRate(e);
             return (
               <div
                 key={id}
@@ -659,17 +682,13 @@ export function LotBidsTable({
                       </Tooltip>
                     </div>
                     <Input
-                      inputMode="decimal"
-                      className="h-10 w-full min-w-0 rounded-lg border-border/50 text-right tabular-nums text-sm"
-                      value={draft.ref}
+                      readOnly
+                      tabIndex={-1}
+                      aria-readonly
+                      value={`₹${roundDisplay(refSellerRateDisplay(e))}`}
+                      title="Reference seller rate (display only)"
                       aria-label={`Reference seller rate for ${e.buyer_mark}`}
-                      onChange={(ev) => {
-                        const v = ev.target.value;
-                        setDraftByEntryId((p) => {
-                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                          return { ...p, [id]: { ...cur, ref: v } };
-                        });
-                      }}
+                      className={cn(readOnlyBidNumericClass, 'h-10 text-sm')}
                     />
                   </div>
                   <div className="min-w-0 space-y-1">
@@ -686,22 +705,23 @@ export function LotBidsTable({
                           </button>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-xs text-left text-xs">
-                          Seller-side bid base; Save updates the auction row (buyer rate is recalculated on the server).
+                          {NEW_SELLER_HINT}
                         </TooltipContent>
                       </Tooltip>
                     </div>
-                    <Input
-                      inputMode="decimal"
+                    <BillingMoneyInput
+                      commitMode="blur"
+                      min={1}
+                      disabled={busy}
+                      value={summaryVal}
+                      onCommit={(n) =>
+                        setLocalSummaryByEntryId((p) => ({
+                          ...p,
+                          [id]: roundMoney2(n),
+                        }))
+                      }
+                      title={`New seller rate for ${e.buyer_mark}`}
                       className="h-10 w-full min-w-0 rounded-lg border-border/50 text-right tabular-nums text-sm"
-                      value={draft.neu}
-                      aria-label={`New seller rate for ${e.buyer_mark}`}
-                      onChange={(ev) => {
-                        const v = ev.target.value;
-                        setDraftByEntryId((p) => {
-                          const cur = p[id] ?? { ref: draft.ref, neu: draft.neu };
-                          return { ...p, [id]: { ...cur, neu: v } };
-                        });
-                      }}
                     />
                   </div>
                 </div>

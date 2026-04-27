@@ -45,6 +45,8 @@ export interface AuctionEntryDTO {
   preset_margin?: number;
   preset_type?: PresetType;
   seller_rate?: number;
+  /** Vehicle-ops Summary — editable independently of auction bid_rate / buyer_rate */
+  summary_seller_rate?: number | null;
   buyer_rate?: number;
   quantity: number;
   amount: number;
@@ -87,6 +89,8 @@ export interface AuctionBidCreateRequest {
 
 export interface AuctionBidUpdateRequest {
   rate?: number;
+  /** Without `rate`: updates only this column; does not change buyer_rate / auction bid. */
+  summary_seller_rate?: number;
   quantity?: number;
   token_advance?: number;
   extra_rate?: number;

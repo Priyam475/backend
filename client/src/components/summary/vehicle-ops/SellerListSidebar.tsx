@@ -3,31 +3,15 @@ import { cn } from '@/lib/utils';
 import type { ArrivalSellerFullDetail } from '@/services/api/arrivals';
 import type { LotSummaryDTO } from '@/services/api/auction';
 import { lotSummaryBelongsToSeller, sellerBagSoldPending, sellerKeyFromArrivalSeller } from './vehicleOpsUtils';
-
-/** UI-only strip until backend exposes seller/lot pipeline status. */
-export type PlaceholderStripKind = 'not_started' | 'in_progress' | 'completed';
-
-// TODO(merco): Wire strip color to real seller/lot completion from server (not index/hash).
-export function placeholderStripKind(index: number): PlaceholderStripKind {
-  const r = (index * 17 + 3) % 3;
-  if (r === 0) return 'not_started';
-  if (r === 1) return 'in_progress';
-  return 'completed';
-}
-
-const STRIP_CLASS: Record<PlaceholderStripKind, string> = {
-  not_started: 'bg-rose-500',
-  in_progress: 'bg-amber-500',
-  completed: 'bg-emerald-500',
-};
+import { vehicleOpsSaveStripClass } from './vehicleOpsUi';
 
 export type SellerListSidebarProps = {
   sellers: ArrivalSellerFullDetail[];
   lotSummaries: LotSummaryDTO[];
   selectedKey: string | null;
   onSelectKey: (key: string) => void;
-  /** Global index in filtered list for placeholder strip only */
-  stripIndexOffset?: number;
+  /** Lots with unsaved bid rates → rose strip on this seller until Save. */
+  unsavedRatesByLotId?: Record<number, boolean>;
 };
 
 export function SellerListSidebar({
@@ -35,7 +19,7 @@ export function SellerListSidebar({
   lotSummaries,
   selectedKey,
   onSelectKey,
-  stripIndexOffset = 0,
+  unsavedRatesByLotId = {},
 }: SellerListSidebarProps) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -57,7 +41,7 @@ export function SellerListSidebar({
         const name = (seller.sellerName ?? '').trim() || '—';
         const mark = (seller.sellerMark ?? '').trim() || '—';
         const selected = selectedKey === key;
-        const strip = placeholderStripKind(i + stripIndexOffset);
+        const sellerHasUnsavedRates = lots.some((l) => unsavedRatesByLotId[l.lot_id]);
         return (
           <button
             key={key}
@@ -94,16 +78,16 @@ export function SellerListSidebar({
                 : 'border-border/40 bg-white/80 hover:bg-muted/30 dark:bg-card/80',
             )}
           >
-            <span className={cn('w-1.5 shrink-0 self-stretch rounded-l-2xl', STRIP_CLASS[strip])} aria-hidden />
+            <span
+              className={cn('w-1.5 shrink-0 self-stretch rounded-l-2xl', vehicleOpsSaveStripClass(sellerHasUnsavedRates))}
+              aria-hidden
+            />
             <span className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-3">
               <span className="truncate text-sm font-semibold text-foreground">
                 {name} / {mark}
               </span>
-              <span className="text-[11px] text-muted-foreground">
-                Sold / Pending{' '}
-                <span className="font-medium tabular-nums text-foreground">
-                  {sold} / {pending}
-                </span>
+              <span className="text-[11px] font-medium tabular-nums text-foreground">
+                {sold} / {pending}
               </span>
             </span>
           </button>

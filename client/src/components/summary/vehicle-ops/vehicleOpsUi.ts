@@ -21,3 +21,11 @@ export const vehicleOpsBackCircleClass = cn(
   vehicleOpsPrimaryBtnClass,
   'flex h-10 w-10 shrink-0 items-center justify-center rounded-full p-0 touch-manipulation',
 );
+
+/** Summary vehicle-ops save sync: rose = unsaved “new seller rate” edits vs server; emerald = clean. */
+export const vehicleOpsSaveStripUnsavedClass = 'bg-rose-500';
+export const vehicleOpsSaveStripSavedClass = 'bg-emerald-500';
+
+export function vehicleOpsSaveStripClass(hasUnsavedRateEdits: boolean): string {
+  return hasUnsavedRateEdits ? vehicleOpsSaveStripUnsavedClass : vehicleOpsSaveStripSavedClass;
+}

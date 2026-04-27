@@ -496,6 +496,20 @@ public class AuctionService {
                 throw new StaleBidEditException("This bid was changed elsewhere. Refresh and try again.");
             }
         }
+
+        if (request.getSummarySellerRate() != null && request.getRate() == null) {
+            if (request.getSummarySellerRate().compareTo(BigDecimal.ONE) < 0) {
+                throw new IllegalArgumentException("Summary seller rate must be at least 1");
+            }
+            entry.setSummarySellerRate(request.getSummarySellerRate());
+            entry.setLastModifiedDate(Instant.now());
+            auctionEntryRepository.saveAndFlush(entry);
+            List<AuctionEntry> refreshed = auctionEntryRepository.findAllByAuctionId(auction.getId());
+            AuctionSessionDTO dto = buildSessionDTO(auction, lot, refreshed, unit.getRemainingQty(), unit.getSelfSaleQty());
+            dto.setSelfSaleContext(buildSelfSaleContext(unit, lot));
+            return dto;
+        }
+
         if (request.getRate() != null && request.getRate().compareTo(BigDecimal.ONE) < 0) {
             throw new IllegalArgumentException("Rate must be at least 1");
         }
@@ -662,6 +676,18 @@ public class AuctionService {
             if (entry.getLastModifiedDate().toEpochMilli() != request.getExpectedLastModifiedMs()) {
                 throw new StaleBidEditException("This bid was changed elsewhere. Refresh and try again.");
             }
+        }
+
+        /* Summary vehicle-ops: persist negotiated seller figure only — leaves auction bid_rate / buyer_rate unchanged. */
+        if (request.getSummarySellerRate() != null && request.getRate() == null) {
+            if (request.getSummarySellerRate().compareTo(BigDecimal.ONE) < 0) {
+                throw new IllegalArgumentException("Summary seller rate must be at least 1");
+            }
+            entry.setSummarySellerRate(request.getSummarySellerRate());
+            entry.setLastModifiedDate(Instant.now());
+            auctionEntryRepository.saveAndFlush(entry);
+            List<AuctionEntry> refreshed = auctionEntryRepository.findAllByAuctionId(auction.getId());
+            return buildSessionDTO(auction, lot, refreshed);
         }
 
         if (request.getRate() != null && request.getRate().compareTo(BigDecimal.ONE) < 0) {
@@ -1371,6 +1397,7 @@ public class AuctionService {
             entry.setPresetMargin(preset);
             entry.setPresetType(type);
             entry.setSellerRate(rate);
+            entry.setSummarySellerRate(rate);
             entry.setBuyerRate(rate.add(extra));
             entry.setQuantity(request.getQuantity());
             entry.setAmount(entry.getBuyerRate().multiply(BigDecimal.valueOf(request.getQuantity())));
