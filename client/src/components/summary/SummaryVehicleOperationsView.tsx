@@ -11,7 +11,9 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 import type { ArrivalFullDetail, ArrivalSummary } from '@/services/api/arrivals';
-import { arrivalsApi } from '@/services/api';
+import { arrivalsApi, commodityApi } from '@/services/api';
+import type { FullCommodityConfigDto } from '@/services/api/commodities';
+import type { Commodity } from '@/types/models';
 import { VehicleOpsSellerWorkspace } from '@/components/summary/vehicle-ops/VehicleOpsSellerWorkspace';
 import { vehicleOpsBackCircleClass, vehicleOpsPrimaryBtnClass } from '@/components/summary/vehicle-ops/vehicleOpsUi';
 import { auctionApi, type LotSummaryDTO, fetchAllAuctionResults } from '@/services/api/auction';
@@ -20,19 +22,16 @@ import type { AuctionResultDTO } from '@/services/api/auction';
 import type { SalesBillDTO } from '@/services/api/billing';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-const BILLING_RD_ACTUAL_DIVISOR_KG = 1000; // line weights in kg; divide for t-scale display — confirm vs product
+const DEFAULT_COMMODITY_RATE_UNIT = 50;
 const MAX_BILLING_PAGES = 6;
 const BILLS_PAGE_SIZE = 100;
 
 const LOTS_LOAD_USER_MSG = 'Bag totals could not be loaded.';
 const AUCTION_RD_USER_MSG = 'Estimated rate difference could not be loaded.';
 
-const RD_EST_FORMULA_TOOLTIP =
-  'Estimated RD: sum of (preset applied × quantity) for each auction result entry for this vehicle.';
+const RD_EST_FORMULA_TOOLTIP = 'Estimated Rate Difference: ∑(Preset x Qty)';
 
-const RD_ACTUAL_FORMULA_TOOLTIP =
-  `Actual RD: sum of (preset applied × billed line weight) for this arrival’s lots, divided by ${BILLING_RD_ACTUAL_DIVISOR_KG} (billed weights in kg). ` +
-  'If no billed weight, the raw sum may be shown.';
+const RD_ACTUAL_FORMULA_TOOLTIP = 'Actual Rate Difference: ∑(Preset x Weight)/ Rate Unit';
 
 function formatInr(n: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -41,6 +40,13 @@ function formatInr(n: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
+}
+
+function rdSignedClass(n: number | null): string {
+  if (n == null || Number.isNaN(n)) return 'text-foreground';
+  if (n > 0) return 'text-emerald-600 dark:text-emerald-400';
+  if (n < 0) return 'text-rose-600 dark:text-rose-400';
+  return 'text-foreground';
 }
 
 function collectLotIdKeys(detail: ArrivalFullDetail | null): Set<string> {
@@ -73,27 +79,107 @@ function sumEstimatedRdForSellerVehicles(
   return sum;
 }
 
-function aggregateBillingPresetWeightForLots(
-  bills: SalesBillDTO[],
-  lotIdSet: Set<string>,
-): { weightedPresetSum: number; totalBilledWeight: number } {
-  let weightedPresetSum = 0;
-  let totalBilledWeight = 0;
+/** Σ line weights (kg) on sales bills per auction lot id. */
+function sumBilledWeightByLotId(bills: SalesBillDTO[], lotIdSet: Set<string>): Map<string, number> {
+  const m = new Map<string, number>();
   for (const b of bills) {
     for (const g of b.commodityGroups ?? []) {
       for (const line of g.items ?? []) {
-        const lid = line.lotId;
-        if (lid == null || !lotIdSet.has(String(lid))) continue;
-        const w = line.weight ?? 0;
-        const p = line.presetApplied;
-        if (p == null || w === 0) continue;
-        const prod = p * w;
-        weightedPresetSum += prod;
-        totalBilledWeight += w;
+        const lid = line.lotId != null ? String(line.lotId) : '';
+        if (!lid || !lotIdSet.has(lid)) continue;
+        const w = Number(line.weight) || 0;
+        m.set(lid, (m.get(lid) ?? 0) + w);
       }
     }
   }
-  return { weightedPresetSum, totalBilledWeight };
+  return m;
+}
+
+function lotBagCountById(detail: ArrivalFullDetail | null): Map<string, number> {
+  const m = new Map<string, number>();
+  if (!detail) return m;
+  for (const s of detail.sellers ?? []) {
+    for (const l of s.lots ?? []) {
+      if (l.id != null) m.set(String(l.id), l.bagCount ?? 0);
+    }
+  }
+  return m;
+}
+
+function buildCommodityNameToRateUnit(
+  fullConfigs: FullCommodityConfigDto[],
+  list: Commodity[]
+): (commodityName: string) => number {
+  const byName = new Map<string, number>();
+  for (const c of list) {
+    const id = Number(c.commodity_id);
+    if (!Number.isFinite(id)) continue;
+    const name = (c.commodity_name || '').trim().toLowerCase();
+    if (!name) continue;
+    const f = fullConfigs.find((x) => x.commodityId === id);
+    const r = f?.config?.ratePerUnit;
+    byName.set(name, r != null && r > 0 ? r : DEFAULT_COMMODITY_RATE_UNIT);
+  }
+  return (commodityName: string) => {
+    const k = (commodityName || '').trim().toLowerCase();
+    return byName.get(k) ?? DEFAULT_COMMODITY_RATE_UNIT;
+  };
+}
+
+/**
+ * Per lot: (Σ preset×qty) × W / (Q × R) = Est_lot × W / (Q×R), with W from billing when present,
+ * else pro-rata share of arrival final billable weight. R = commodity rate unit (kg per bag, e.g. 50).
+ */
+function sumActualRateDifferenceForVehicle(
+  results: AuctionResultDTO[],
+  svIds: Set<number>,
+  lotIdSet: Set<string>,
+  bills: SalesBillDTO[],
+  getRateUnit: (commodityName: string) => number,
+  arrival: ArrivalSummary,
+  detail: ArrivalFullDetail | null
+): number {
+  if (svIds.size === 0 || lotIdSet.size === 0) return 0;
+
+  const byLot = new Map<string, { est: number; q: number; commodityName: string }>();
+  for (const r of results) {
+    if (!svIds.has(r.sellerVehicleId) || !lotIdSet.has(String(r.lotId))) continue;
+    const k = String(r.lotId);
+    const cur = byLot.get(k) ?? { est: 0, q: 0, commodityName: r.commodityName ?? '' };
+    for (const e of r.entries ?? []) {
+      const p = e.presetApplied;
+      if (p == null) continue;
+      const q = e.quantity ?? 0;
+      cur.est += p * q;
+      cur.q += q;
+    }
+    byLot.set(k, cur);
+  }
+
+  const billedW = sumBilledWeightByLotId(bills, lotIdSet);
+  const bagByLot = lotBagCountById(detail);
+  let totalBags = 0;
+  for (const n of bagByLot.values()) totalBags += n;
+  if (totalBags <= 0 && typeof arrival.totalBags === 'number' && arrival.totalBags > 0) {
+    totalBags = arrival.totalBags;
+  }
+  const fbw = Number(arrival.finalBillableWeight) || 0;
+
+  let sum = 0;
+  for (const [lotId, row] of byLot) {
+    const { est, q, commodityName } = row;
+    if (q <= 0) continue;
+    const R = getRateUnit(commodityName);
+    if (R <= 0) continue;
+    let W = billedW.get(lotId) ?? 0;
+    if (W <= 0 && fbw > 0 && totalBags > 0) {
+      const bgs = bagByLot.get(lotId) ?? 0;
+      if (bgs > 0) W = (bgs / totalBags) * fbw;
+    }
+    if (W <= 0) continue;
+    sum += (est * W) / (q * R);
+  }
+  return sum;
 }
 
 type Props = {
@@ -165,18 +251,24 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
       return;
     }
 
+    const vn = (arrival.vehicleNumber ?? '').trim().toLowerCase();
+    const forVehicle = vn
+      ? lotsList.filter((l) => (l.vehicle_number ?? '').trim().toLowerCase() === vn)
+      : [];
+    const svIdsForVehicle = new Set(
+      forVehicle
+        .map((l) => Number(l.seller_vehicle_id))
+        .filter((x) => !Number.isNaN(x) && x > 0),
+    );
+    let auctionResults: AuctionResultDTO[] = [];
+
     try {
-      const results = await fetchAllAuctionResults(12, 100);
-      const vn = (arrival.vehicleNumber ?? '').trim().toLowerCase();
-      const forVehicle = vn
-        ? lotsList.filter((l) => (l.vehicle_number ?? '').trim().toLowerCase() === vn)
-        : [];
-      const svIds = new Set(
-        forVehicle
-          .map((l) => Number(l.seller_vehicle_id))
-          .filter((x) => !Number.isNaN(x) && x > 0),
+      auctionResults = await fetchAllAuctionResults(12, 100);
+      setRdEst(
+        svIdsForVehicle.size > 0
+          ? sumEstimatedRdForSellerVehicles(auctionResults, svIdsForVehicle)
+          : 0,
       );
-      setRdEst(svIds.size > 0 ? sumEstimatedRdForSellerVehicles(results, svIds) : 0);
     } catch {
       setAuctionErr(true);
     }
@@ -196,18 +288,30 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
           setBillingUnbounded(true);
         }
       }
-      const { weightedPresetSum, totalBilledWeight } = aggregateBillingPresetWeightForLots(allBills, lotKeys);
-      if (totalBilledWeight > 0) {
-        setRdActual(weightedPresetSum / BILLING_RD_ACTUAL_DIVISOR_KG);
-      } else {
-        setRdActual(weightedPresetSum > 0 ? weightedPresetSum : null);
-      }
+      const [commodityList, fullConfigs] = await Promise.all([
+        commodityApi.list().catch(() => [] as Commodity[]),
+        commodityApi.getAllFullConfigs().catch(() => [] as FullCommodityConfigDto[]),
+      ]);
+      const getRate = buildCommodityNameToRateUnit(
+        fullConfigs,
+        Array.isArray(commodityList) ? commodityList : []
+      );
+      const actual = sumActualRateDifferenceForVehicle(
+        auctionResults,
+        svIdsForVehicle,
+        lotKeys,
+        allBills,
+        getRate,
+        arrival,
+        detail
+      );
+      setRdActual(actual);
     } catch {
       setRdActual(null);
     } finally {
       setLoading(false);
     }
-  }, [canShowRd, vid, arrival.vehicleNumber]);
+  }, [canShowRd, vid, arrival.vehicleNumber, arrival.finalBillableWeight, arrival.totalBags]);
 
   useEffect(() => {
     setArrivalFullDetail(null);
@@ -333,7 +437,12 @@ const SummaryVehicleOperationsView = ({ arrival, isDesktop, onBack }: Props) => 
                   </TooltipContent>
                 </Tooltip>
               </div>
-              <span className="shrink-0 text-right font-medium tabular-nums text-foreground">
+              <span
+                className={cn(
+                  'shrink-0 text-right font-medium tabular-nums',
+                  rdSignedClass(rdActual)
+                )}
+              >
                 {rdActual != null && !Number.isNaN(rdActual) ? formatInr(rdActual) : '—'}
               </span>
             </div>
