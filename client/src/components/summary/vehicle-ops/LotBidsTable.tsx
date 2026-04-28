@@ -837,6 +837,7 @@ export function LotBidsTable({
                   value={Number(addBidQty) || 0}
                   min={0}
                   integerOnly
+                  liveDebounceMs={0}
                   onCommit={(n) => setAddBidQty(n > 0 ? String(Math.max(1, Math.round(n))) : '')}
                   placeholder={session != null ? String(Number(session.remaining_bags) || 0) : ''}
                   className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
@@ -847,6 +848,7 @@ export function LotBidsTable({
                 <BillingMoneyInput
                   value={Number(addBidBaseRate) || 0}
                   min={0}
+                  liveDebounceMs={0}
                   onCommit={(n) => setAddBidBaseRate(n >= 1 ? String(roundMoney2(n)) : '')}
                   className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                 />
@@ -859,6 +861,7 @@ export function LotBidsTable({
                     const n = parseFloat(t);
                     return Number.isFinite(n) ? n : 0;
                   })()}
+                  liveDebounceMs={0}
                   onCommit={(n) => setAddBidPresetMargin(String(roundMoney2(n)))}
                   className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                   title="Signed margin per bag (same as auction grid preset). Negative = loss preset. Not brokerage."
@@ -869,6 +872,7 @@ export function LotBidsTable({
                 <BillingMoneyInput
                   value={Number(addBidToken) || 0}
                   min={0}
+                  liveDebounceMs={0}
                   onCommit={(n) => setAddBidToken(String(roundMoney2(n)))}
                   className={cn('h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
                 />

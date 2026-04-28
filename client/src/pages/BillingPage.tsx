@@ -792,7 +792,6 @@ const BillingPage = () => {
   const [selectedBuyerFromDropdown, setSelectedBuyerFromDropdown] = useState<BuyerPurchase | null>(null);
   const [showBuyerSuggestions, setShowBuyerSuggestions] = useState(false);
   const buyerSelectRef = useRef<HTMLDivElement | null>(null);
-  const summaryTableScrollRef = useRef<HTMLDivElement | null>(null);
   const latestVersionSnapshotRef = useRef<BillData | null>(null);
   const mobileCommodityCarouselRef = useRef<HTMLDivElement | null>(null);
   const mobileLotCarouselRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -3258,7 +3257,7 @@ const BillingPage = () => {
   if (showPrint && bill) {
     const activePrintBill: BillData = bill;
     return (
-      <div className="min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
+      <div className="min-h-[100dvh] bg-background bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6">
         <UnsavedChangesDialog />
         {!isDesktop ? (
           <div className="bg-gradient-to-br from-indigo-400 via-blue-500 to-cyan-500 pt-[max(1.5rem,env(safe-area-inset-top))] pb-5 px-4 rounded-b-[2rem]">
@@ -3393,7 +3392,12 @@ const BillingPage = () => {
   const tabHint = (code: string) => (isDesktop ? ` (${code})` : '');
 
   return (
-    <div className={cn("min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6", (searchBidDialogOpen || addBidDialogOpen) && "no-hover")}>
+    <div
+      className={cn(
+        'min-h-[100dvh] bg-background bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 pb-28 lg:pb-6',
+        (searchBidDialogOpen || addBidDialogOpen) && 'no-hover',
+      )}
+    >
       {(searchBidDialogOpen || addBidDialogOpen) && (
         <style dangerouslySetInnerHTML={{
           __html: `
@@ -4924,8 +4928,7 @@ const BillingPage = () => {
               )}
               <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch xl:gap-2 min-w-0">
                 <div
-                  ref={summaryTableScrollRef}
-                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-visible rounded-xl border border-border/50 bg-background/40 shadow-sm [overflow-anchor:none] overscroll-x-contain xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
+                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-clip rounded-xl border border-border/50 bg-background/40 shadow-sm overscroll-x-contain xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
                 >
                   <table
                     className="w-max max-w-none text-[11px] leading-tight border-separate border-spacing-0"
