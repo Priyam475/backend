@@ -1363,8 +1363,9 @@ const ArrivalsPage = () => {
     when: isArrivalDirty,
     title: 'Save your progress?',
     description: 'You have unsaved changes. Would you like to save your progress before leaving?',
-    continueLabel: 'Save',
+    continueLabel: 'Save Partially',
     stayLabel: 'Discard',
+    closeLabel: 'Stay On Page',
     onBeforeContinue: handlePartialSave,
   });
 
