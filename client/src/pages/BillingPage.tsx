@@ -85,8 +85,15 @@ const arrSolidSm = cn(arrSolid, 'h-8 px-2.5 text-xs');
 const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
 const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
 const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
-const billingSummaryInputClass = `h-10 w-24 lg:h-6 lg:w-20 rounded text-right tabular-nums text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`;
-const billingSummaryValueClass = 'text-[10px] font-semibold text-foreground ml-auto tabular-nums min-w-[5.75rem] text-right inline-block';
+const billingSummaryInputClass = `h-10 w-[4.5rem] sm:w-24 lg:h-6 lg:w-20 rounded text-right tabular-nums text-[11px] lg:text-[10px] px-1.5 sm:px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`;
+/** Read-only ₹ amounts in summary cells: never shrink so values stay fully visible inside scrollable table. */
+const billingSummaryValueClass =
+  'text-[10px] font-semibold text-foreground tabular-nums shrink-0 whitespace-nowrap text-right inline-flex items-center justify-end';
+/** Commodity column body cells — minimum width so inputs + ₹ totals are not clipped on tablet. */
+const billingSummaryCommodityTdClass =
+  'min-w-[168px] sm:min-w-[172px] px-2 py-1.5 align-top border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500';
+/** Row controls + computed value: wrap on narrow columns instead of truncating. */
+const billingSummaryCellRowClass = 'flex flex-wrap items-center gap-x-1 gap-y-1 justify-start w-full min-w-0';
 const billingLoginImage = '/login-bg.webp';
 
 /** Commodity line: computed fields (not inputs). Muted + dashed border + not-allowed cursor so they read as read-only. */
@@ -573,6 +580,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
   }
   const tokenAdvance = sumLineTokenAdvances({ commodityGroups: migratedGroups });
 
+  const rawOutboundVehicle = (b as any).outboundVehicle ?? (b as any).outbound_vehicle ?? '';
   return roundBillMoneyValues({
     ...b,
     buyerContactId: (b as any).buyerContactId ?? null,
@@ -585,6 +593,7 @@ function normalizeBillFromApi(b: any, fullConfigs?: FullCommodityConfigDto[], co
     brokerContactId: (b as any).brokerContactId ?? null,
     brokerPhone: (b as any).brokerPhone ?? '',
     brokerAddress: (b as any).brokerAddress ?? '',
+    outboundVehicle: String(rawOutboundVehicle).toUpperCase(),
     tokenAdvance,
     commodityGroups: migratedGroups,
   } as BillData);
@@ -799,7 +808,7 @@ const BillingPage = () => {
   const [weighingSessions, setWeighingSessions] = useState<any[]>([]);
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const [collapsedCommodityIndexes, setCollapsedCommodityIndexes] = useState<number[]>([]);
-  const SUMMARY_COMMODITY_COL_WIDTH = 150;
+  const SUMMARY_COMMODITY_COL_WIDTH = 168;
 
   useEffect(() => {
     const loadPrintSetting = async () => {
@@ -2853,10 +2862,12 @@ const BillingPage = () => {
     setPendingDeleteTarget({ commIdx, itemIdx });
   };
 
-  // Apply global brokerage/charges to all items
-  const applyGlobalCharges = () => {
-    if (!bill) return;
-    const updated = { ...bill };
+  /**
+   * Push bill-level brokerage / global other charges onto every line item and refresh group subtotals.
+   * Used by the Apply button and by live edits so New Rate / Amount update immediately.
+   */
+  const applyGlobalChargesToBillState = (root: BillData): BillData => {
+    const updated = { ...root };
     updated.commodityGroups = updated.commodityGroups.map(group => {
       const commodity = commodities.find((c: any) => c.commodity_name === group.commodityName);
       const fullCfg = commodity
@@ -2865,10 +2876,10 @@ const BillingPage = () => {
       const dynCharges = fullCfg?.dynamicCharges ?? [];
       const items = group.items.map(item => {
         const preset = item.presetApplied ?? 0;
-        const brk = bill.brokerageType === 'PERCENT'
-          ? percentOfAmount(item.baseRate + preset, bill.brokerageValue)
-          : roundMoney2(bill.brokerageValue);
-        const globalOther = roundMoney2(bill.globalOtherCharges);
+        const brk = root.brokerageType === 'PERCENT'
+          ? percentOfAmount(item.baseRate + preset, root.brokerageValue)
+          : roundMoney2(root.brokerageValue);
+        const globalOther = roundMoney2(root.globalOtherCharges);
         const newItem = {
           ...item,
           brokerage: brk,
@@ -2928,7 +2939,12 @@ const BillingPage = () => {
         ),
       };
     });
-    setBill(recalcGrandTotal(updated));
+    return updated;
+  };
+
+  const applyGlobalCharges = () => {
+    if (!bill) return;
+    setBill(recalcGrandTotal(applyGlobalChargesToBillState(bill)));
     toast.success('Global charges applied to all line items');
   };
 
@@ -4398,9 +4414,13 @@ const BillingPage = () => {
                       <p
                         className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-wide cursor-pointer select-none"
                         onClick={() =>
-                          setBill({
-                            ...bill,
-                            brokerageType: bill.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                          setBill(prev => {
+                            if (!prev) return prev;
+                            const next: BillData = {
+                              ...prev,
+                              brokerageType: prev.brokerageType === 'PERCENT' ? 'AMOUNT' : 'PERCENT',
+                            };
+                            return recalcGrandTotal(applyGlobalChargesToBillState(next));
                           })
                         }
                         title={`Click to switch type (${bill.brokerageType === 'PERCENT' ? '%' : '₹'})`}
@@ -4411,7 +4431,10 @@ const BillingPage = () => {
                         value={bill.brokerageValue}
                         min={0}
                         onCommit={n => {
-                          setBill({ ...bill, brokerageValue: n });
+                          setBill(prev => {
+                            if (!prev) return prev;
+                            return recalcGrandTotal(applyGlobalChargesToBillState({ ...prev, brokerageValue: n }));
+                          });
                         }}
                         placeholder={bill.brokerageType === 'PERCENT' ? '% Brokerage' : '₹ Brokerage'}
                         className={cn(
@@ -4436,7 +4459,10 @@ const BillingPage = () => {
                           value={bill.globalOtherCharges}
                           min={0}
                           onCommit={n => {
-                            setBill({ ...bill, globalOtherCharges: n });
+                            setBill(prev => {
+                              if (!prev) return prev;
+                              return recalcGrandTotal(applyGlobalChargesToBillState({ ...prev, globalOtherCharges: n }));
+                            });
                           }}
                           placeholder="Other Charges (₹)"
                           className={cn(
@@ -4916,15 +4942,15 @@ const BillingPage = () => {
                   </ul>
                 </div>
               )}
-              <div className="flex items-stretch gap-2">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch xl:gap-2 min-w-0">
                 <div
                   ref={summaryTableScrollRef}
                   onScroll={handleSummaryTableScroll}
-                  className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm xl:flex-none xl:w-fit xl:max-w-[78%]"
+                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-visible rounded-xl border border-border/50 bg-background/40 shadow-sm xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
                 >
                   <table
-                    className="w-max text-[11px] leading-tight border-separate border-spacing-0"
-                    style={{ minWidth: `${110 + (bill.commodityGroups.length * 150)}px` }}
+                    className="w-max max-w-none text-[11px] leading-tight border-separate border-spacing-0"
+                    style={{ minWidth: `${110 + bill.commodityGroups.length * SUMMARY_COMMODITY_COL_WIDTH}px` }}
                   >
                   <thead>
                     <tr className="bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-sm">
@@ -4933,7 +4959,7 @@ const BillingPage = () => {
                         <th
                           key={`${g.commodityName}-${gi}`}
                           className={cn(
-                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-white uppercase tracking-widest min-w-[150px] border-b border-white/30 border-l border-white/20 bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-sm',
+                            'lg:sticky lg:top-0 z-20 text-center px-3 py-3 font-extrabold text-white uppercase tracking-widest min-w-[168px] sm:min-w-[172px] border-b border-white/30 border-l border-white/20 bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] shadow-sm',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-white/20',
                           )}
                         >
@@ -4950,7 +4976,8 @@ const BillingPage = () => {
                         <td
                           key={`gross-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 text-foreground dark:text-neutral-900 font-semibold border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white',
+                            billingSummaryCommodityTdClass,
+                            'font-semibold',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
@@ -4973,15 +5000,15 @@ const BillingPage = () => {
                         <td
                           key={`com-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex items-center justify-start gap-1 w-full">
+                          <div className={billingSummaryCellRowClass}>
                             <BillingMoneyInput
                               value={g.commissionPercent}
                               min={0}
-                              commitMode="blur"
+                              commitMode="live"
                               onCommit={val => {
                                 const v = Math.max(0, val);
                                 const updated = { ...bill };
@@ -5008,15 +5035,15 @@ const BillingPage = () => {
                         <td
                           key={`uf-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex items-center justify-start gap-1 w-full">
+                          <div className={billingSummaryCellRowClass}>
                             <BillingMoneyInput
                               value={g.userFeePercent}
                               min={0}
-                              commitMode="blur"
+                              commitMode="live"
                               onCommit={val => {
                                 const v = Math.max(0, val);
                                 const updated = { ...bill };
@@ -5044,15 +5071,15 @@ const BillingPage = () => {
                           <td
                             key={`coolie-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              billingSummaryCommodityTdClass,
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center justify-start gap-1 w-full">
+                            <div className={billingSummaryCellRowClass}>
                               <BillingMoneyInput
                                 value={g.coolieRate || 0}
                                 min={0}
-                                commitMode="blur"
+                                commitMode="live"
                                 onCommit={rate => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
@@ -5104,15 +5131,15 @@ const BillingPage = () => {
                           <td
                             key={`weighman-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              billingSummaryCommodityTdClass,
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center justify-start gap-1 w-full">
+                            <div className={billingSummaryCellRowClass}>
                               <BillingMoneyInput
                                 value={g.weighmanChargeRate || 0}
                                 min={0}
-                                commitMode="blur"
+                                commitMode="live"
                                 onCommit={rate => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
@@ -5170,7 +5197,7 @@ const BillingPage = () => {
                           <td
                             key={`tax-mode-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              billingSummaryCommodityTdClass,
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
@@ -5234,14 +5261,14 @@ const BillingPage = () => {
                         <td
                           key={`sgst-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                          <div className={billingSummaryCellRowClass}>
                             <Select
                               value={g.sgstInputMode || 'PERCENT'}
                               onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
@@ -5266,7 +5293,7 @@ const BillingPage = () => {
                                 ? gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0)
                                 : g.sgstRate}
                               min={0}
-                              commitMode="blur"
+                              commitMode="live"
                               onCommit={val => {
                                 const v = Math.max(0, val);
                                 const updated = { ...bill };
@@ -5310,14 +5337,14 @@ const BillingPage = () => {
                         <td
                           key={`cgst-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                          <div className={billingSummaryCellRowClass}>
                             <Select
                               value={g.cgstInputMode || 'PERCENT'}
                               onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
@@ -5342,7 +5369,7 @@ const BillingPage = () => {
                                 ? gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0)
                                 : g.cgstRate}
                               min={0}
-                              commitMode="blur"
+                              commitMode="live"
                               onCommit={val => {
                                 const v = Math.max(0, val);
                                 const updated = { ...bill };
@@ -5386,14 +5413,14 @@ const BillingPage = () => {
                         <td
                           key={`igst-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
                           {!hasTax || !igstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className="flex flex-wrap items-center gap-1 justify-start w-full">
+                          <div className={billingSummaryCellRowClass}>
                             <Select
                               value={g.igstInputMode || 'PERCENT'}
                               onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
@@ -5418,7 +5445,7 @@ const BillingPage = () => {
                                 ? gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0)
                                 : g.igstRate}
                               min={0}
-                              commitMode="blur"
+                              commitMode="live"
                               onCommit={val => {
                                 const v = Math.max(0, val);
                                 const updated = { ...bill };
@@ -5468,11 +5495,11 @@ const BillingPage = () => {
                           <td
                             key={`discount-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                              billingSummaryCommodityTdClass,
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className="flex items-center justify-start gap-1 w-full">
+                            <div className={billingSummaryCellRowClass}>
                               <Select value={g.discountType || 'AMOUNT'} onValueChange={(value: any) => {
                                 const updated = { ...bill };
                                 const cg = { ...updated.commodityGroups[gi] };
@@ -5492,7 +5519,7 @@ const BillingPage = () => {
                               <BillingMoneyInput
                                 value={g.discount || 0}
                                 min={0}
-                                commitMode="blur"
+                                commitMode="live"
                                 onCommit={val => {
                                   const v = Math.max(0, val);
                                   const updated = { ...bill };
@@ -5518,13 +5545,13 @@ const BillingPage = () => {
                         <td
                           key={`roundoff-${gi}`}
                           className={cn(
-                            'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500',
+                            billingSummaryCommodityTdClass,
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
                           <BillingMoneyInput
                             value={g.manualRoundOff || 0}
-                            commitMode="blur"
+                            commitMode="live"
                             onCommit={val => {
                               const updated = { ...bill };
                               const cg = { ...updated.commodityGroups[gi] };
@@ -5555,7 +5582,8 @@ const BillingPage = () => {
                           <td
                             key={`overallrate-${gi}`}
                             className={cn(
-                              'px-2 py-1.5 border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500 font-bold tabular-nums text-right',
+                              billingSummaryCommodityTdClass,
+                              'font-bold tabular-nums text-right',
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
@@ -5580,7 +5608,7 @@ const BillingPage = () => {
                           <BillingMoneyInput
                             value={bill.outboundFreight || 0}
                             min={0}
-                            commitMode="blur"
+                            commitMode="live"
                             onCommit={n => {
                               setBill(recalcGrandTotal({ ...bill, outboundFreight: n }));
                             }}
@@ -5596,7 +5624,7 @@ const BillingPage = () => {
                         <Input
                           value={bill.outboundVehicle}
                           onChange={e => {
-                            setBill({ ...bill, outboundVehicle: e.target.value });
+                            setBill({ ...bill, outboundVehicle: e.target.value.toUpperCase() });
                           }}
                           placeholder="AP03 CK 4323"
                           className={cn("h-10 w-40 lg:h-6 lg:w-36 rounded text-left text-[11px] lg:text-[10px] px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50", validationErrors.outboundVehicle && "border-destructive ring-1 ring-destructive/30")}
