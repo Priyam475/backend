@@ -1456,13 +1456,11 @@ const BillingPage = () => {
   const validateReplacementForm = (): boolean => {
     const errs: Record<string, string> = {};
     const trimmedMark = replaceForm.mark.trim().toUpperCase();
-    const trimmedName = replaceForm.name.trim();
     const trimmedPhone = replaceForm.phone.trim();
     if (!trimmedMark) errs.mark = 'Mark is required';
     else if (replaceTarget === 'TEMP_BUYER' && trimmedMark.length > MAX_MARK_LEN) {
       errs.mark = `Maximum ${MAX_MARK_LEN} characters`;
     }
-    if (replaceTarget !== 'TEMP_BUYER' && !trimmedName) errs.name = 'Name is required';
     if (trimmedPhone && !/^[6-9]\d{9}$/.test(trimmedPhone)) errs.phone = 'Enter a valid 10-digit mobile number';
     setReplaceErrors(errs);
     return Object.keys(errs).length === 0;
@@ -1480,7 +1478,7 @@ const BillingPage = () => {
       if (replaceTarget === 'BROKER') {
         return {
           ...prev,
-          brokerName: nextName,
+          brokerName: nextName || nextMark,
           brokerMark: nextMark,
           brokerContactId: contact.contact_id,
           brokerPhone: contact.phone ?? '',
@@ -1583,7 +1581,7 @@ const BillingPage = () => {
       if (!validateReplacementForm()) return;
       try {
         resolved = await contactApi.create({
-          name: replaceForm.name.trim(),
+          name: replaceForm.name.trim() || replaceForm.mark.trim().toUpperCase(),
           phone: replaceForm.phone.trim(),
           mark: replaceForm.mark.trim().toUpperCase(),
           trader_id: '',
@@ -4327,7 +4325,7 @@ const BillingPage = () => {
                     setReplaceSelectedContact(null);
                     setReplaceForm(prev => ({ ...prev, name: e.target.value }));
                   }}
-                  placeholder={replaceTarget === 'TEMP_BUYER' ? 'Name (optional)' : 'Name'}
+                  placeholder="Name (optional)"
                   className={cn(
                     'h-9 rounded-lg bg-muted/10 border-border/30 text-sm font-medium min-w-[5.5rem] flex-1 basis-[10rem] max-w-[14rem]',
                     replaceErrors.name && 'border-destructive',
