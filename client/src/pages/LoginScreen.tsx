@@ -190,7 +190,7 @@ const LoginScreen = () => {
   };
 
   return (
-    <div className="h-[100dvh] relative overflow-hidden flex flex-col" role="presentation">
+    <div className="fixed inset-0 z-0 flex flex-col overflow-hidden bg-slate-950" role="presentation">
       {/* Background image */}
       <img src={loginBg} alt="" role="presentation" className="absolute inset-0 w-full h-full object-cover z-0" fetchPriority="high" decoding="async" width={1920} height={1080} />
       <div className="absolute inset-0 bg-gradient-to-br from-blue-900/70 via-blue-800/60 to-violet-900/70 z-[1]" />
@@ -228,7 +228,7 @@ const LoginScreen = () => {
         </div>
 
         {/* Right side — Login form */}
-        <main className="flex-1 flex flex-col min-h-0">
+        <main className="flex-1 flex flex-col min-h-0 overflow-y-auto overscroll-y-contain">
           {/* Theme Toggle */}
           <div className="flex justify-end px-5 pt-[max(1rem,env(safe-area-inset-top))]">
             <button onClick={toggleTheme} aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}

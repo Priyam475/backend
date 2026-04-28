@@ -2503,12 +2503,14 @@ const AuctionsPage = () => {
           ) : lotNavMode === 'vehicle' ? (
             Array.from(lotsByVehicle.entries())
               .sort(([a], [b]) => (a || '').localeCompare(b || ''))
-              .map(([vehicle, lots]) => (
+              .map(([vehicle, lots]) => {
+                const { sold, pending } = sumLotsPendingSold(lots);
+                return (
                 <div key={vehicle} className="glass-card rounded-2xl overflow-hidden">
                   <div className="p-3 bg-gradient-to-r from-blue-50 to-violet-50 dark:from-blue-950/20 dark:to-violet-950/20 border-b border-border/30 flex items-center gap-2">
                     <Truck className="w-4 h-4 text-primary" />
                     <span className="text-sm font-bold text-foreground">{vehicle}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{lots.length} lot(s)</span>
+                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">{sold} sold / {pending} pending</span>
                   </div>
                   <div className="divide-y divide-border/20">
                     {lots.map(lot => (
@@ -2516,7 +2518,8 @@ const AuctionsPage = () => {
                     ))}
                   </div>
                 </div>
-              ))
+              );
+              })
           ) : lotNavMode === 'seller' ? (
             (() => {
               const entries = Array.from(lotsBySeller.entries());
@@ -2531,12 +2534,14 @@ const AuctionsPage = () => {
                 return { key, lots, label, sortKey };
               };
               const sorted = entries.map(toLabel).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-              return sorted.map(({ key, lots, label }) => (
+              return sorted.map(({ key, lots, label }) => {
+                const { sold, pending } = sumLotsPendingSold(lots);
+                return (
                 <div key={key} className="glass-card rounded-2xl overflow-hidden">
                   <div className="p-3 bg-gradient-to-r from-emerald-50 to-green-50 dark:from-emerald-950/20 dark:to-green-950/20 border-b border-border/30 flex items-center gap-2">
                     <User className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
                     <span className="text-sm font-bold text-foreground truncate min-w-0">{label}</span>
-                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{lots.length} lot(s)</span>
+                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0 tabular-nums">{sold} sold / {pending} pending</span>
                   </div>
                   <div className="divide-y divide-border/20">
                     {lots.map(lot => (
@@ -2544,7 +2549,8 @@ const AuctionsPage = () => {
                     ))}
                   </div>
                 </div>
-              ));
+              );
+              });
             })()
           ) : lotNavMode === 'buyer' && statusFilter !== 'self_sale' ? (
             (() => {
@@ -2571,7 +2577,9 @@ const AuctionsPage = () => {
                 return { key: groupKey, lots, label, sortKey, registered: pb.registered };
               };
               const sorted = entries.map(toLabel).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-              return sorted.map(({ key, lots, label, registered }) => (
+              return sorted.map(({ key, lots, label, registered }) => {
+                const { sold, pending } = sumLotsPendingSold(lots);
+                return (
                 <div key={key} className="glass-card rounded-2xl overflow-hidden">
                   <div className="p-3 bg-gradient-to-r from-violet-50 to-fuchsia-50 dark:from-violet-950/20 dark:to-fuchsia-950/20 border-b border-border/30 flex items-center gap-2">
                     <Users className="w-4 h-4 text-violet-600 dark:text-violet-400 flex-shrink-0" />
@@ -2586,7 +2594,7 @@ const AuctionsPage = () => {
                         Registered
                       </span>
                     )}
-                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0">{lots.length} lot(s)</span>
+                    <span className="ml-auto text-xs text-muted-foreground flex-shrink-0 tabular-nums">{sold} sold / {pending} pending</span>
                   </div>
                   <div className="divide-y divide-border/20">
                     {lots.map(lot => (
@@ -2594,7 +2602,8 @@ const AuctionsPage = () => {
                     ))}
                   </div>
                 </div>
-              ));
+              );
+              });
             })()
           ) : (
             filteredLots.map(lot => (
@@ -3943,6 +3952,16 @@ function getLotListPendingSold(lot: LotInfo): { pending: number; sold: number } 
   const total = Math.max(0, lot.bag_count ?? 0);
   const sold = Math.max(0, lot.sold_bags ?? 0);
   return { pending: Math.max(0, total - sold), sold };
+}
+
+function sumLotsPendingSold(lots: LotInfo[]): { pending: number; sold: number } {
+  return lots.reduce(
+    (acc, lot) => {
+      const { pending, sold } = getLotListPendingSold(lot);
+      return { pending: acc.pending + pending, sold: acc.sold + sold };
+    },
+    { pending: 0, sold: 0 }
+  );
 }
 
 // ── Lot Row Component with Status Badge ──────────────────

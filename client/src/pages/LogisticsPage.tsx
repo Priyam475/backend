@@ -2,7 +2,18 @@ import { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react'
 import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Printer, Package, User, Search, Layers, ChevronDown, Trash2, Inbox, Undo2,
+  ArrowLeft,
+  ArrowRightLeft,
+  ChevronDown,
+  Eye,
+  Layers,
+  Package,
+  Printer,
+  Save,
+  Search,
+  Trash2,
+  Undo2,
+  User,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -434,6 +445,7 @@ const LogisticsPage = () => {
   const [pendingRemoveByMark, setPendingRemoveByMark] = useState<Record<string, Set<string>>>({});
   const [stagingRemove, setStagingRemove] = useState<{ buyerMark: string; bid: BidInfo } | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [chittiPreviewMark, setChittiPreviewMark] = useState<string | null>(null);
   const [migrateTarget, setMigrateTarget] = useState<{ buyerName: string; buyerMark: string } | null>(null);
   const [migrateSearch, setMigrateSearch] = useState('');
   const [migrateSelectedKeys, setMigrateSelectedKeys] = useState<Set<string>>(() => new Set());
@@ -504,7 +516,7 @@ const LogisticsPage = () => {
     });
     setStagingRemove(null);
     toast.message('Staged for removal', {
-      description: 'Moves to Unassigned when you tap Save & print chitti.',
+      description: 'Moves to Unassigned when you tap Save & Print.',
     });
   }, [stagingRemove, canEditAuctionBids]);
 
@@ -607,6 +619,33 @@ const LogisticsPage = () => {
       return next;
     });
   }, [buyerGroups]);
+
+  const chittiPreviewGroup = useMemo(
+    () =>
+      chittiPreviewMark != null
+        ? buyerGroups.find((x) => x.buyerMark === chittiPreviewMark) ?? null
+        : null,
+    [buyerGroups, chittiPreviewMark],
+  );
+
+  const chittiPreviewDraftBids = useMemo(() => {
+    if (!chittiPreviewGroup) return [] as BidInfo[];
+    const mark = chittiPreviewGroup.buyerMark;
+    const selectedSet = buyerChittiSelected[mark] ?? new Set<string>();
+    const pendingSet = pendingRemoveByMark[mark] ?? new Set<string>();
+    return chittiPreviewGroup.bids.filter((b) => {
+      const k = bidKey(b);
+      return selectedSet.has(k) && !pendingSet.has(k) && !printedBidKeys.has(k);
+    });
+  }, [chittiPreviewGroup, buyerChittiSelected, pendingRemoveByMark, printedBidKeys]);
+
+  const chittiPreviewRateOn =
+    chittiPreviewGroup != null && buyerChittiPrintRateByMark[chittiPreviewGroup.buyerMark] !== false;
+
+  const chittiPreviewHeader = useMemo(
+    () => (chittiPreviewGroup ? buyerChittiHeaderLines(chittiPreviewGroup) : null),
+    [chittiPreviewGroup],
+  );
 
   const toggleBuyerChittiExpand = useCallback((buyerMark: string) => {
     setBuyerChittiCollapsed((p) => {
@@ -1055,15 +1094,14 @@ const LogisticsPage = () => {
                               checked={buyerChittiPrintRateByMark[g.buyerMark] !== false}
                               onCheckedChange={(on) => setBuyerChittiPrintRateByMark((p) => ({ ...p, [g.buyerMark]: on }))}
                               className="shrink-0"
-                              aria-describedby={`${printRateId}-desc`}
                             />
                           </div>
                           {canEditAuctionBids && (
                             <button
                               type="button"
-                              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 max-w-full sm:max-w-[min(100%,14rem)] justify-center inline-flex items-center gap-1')}
+                              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 max-w-full sm:max-w-[min(100%,16rem)] justify-center inline-flex items-center gap-1.5')}
                               style={buyerChittiBulkBtnStyle}
-                              title="Search unassigned pool bids to assign to this buyer"
+                              title="Add lots from unassigned pool"
                               onClick={() => {
                                 setMigrateTarget({ buyerName: g.buyerName, buyerMark: g.buyerMark });
                                 setMigrateSearch('');
@@ -1071,32 +1109,50 @@ const LogisticsPage = () => {
                                 setMigrateOpen(true);
                               }}
                             >
-                              <Inbox className="w-3.5 h-3.5 shrink-0" aria-hidden />
-                              <span className="truncate">Search &amp; migrate bid</span>
+                              <Search className="w-3.5 h-3.5 shrink-0 opacity-95" strokeWidth={2.25} aria-hidden />
+                              <ArrowRightLeft className="w-3.5 h-3.5 shrink-0 opacity-95" aria-hidden />
+                              <span className="truncate">Search &amp; migrate</span>
                             </button>
                           )}
                         </div>
-                        <p id={`${printRateId}-desc`} className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
-                          When on, the rate column is included on this buyer&apos;s Chiti print. Add lots from the Unassigned pool with Search &amp; migrate bid first if needed, then select rows and tap Save &amp; print chitti when you are ready to print.
-                        </p>
                       </div>
                       <p className="text-[10px] font-semibold text-muted-foreground">
-                        {selectedUnprinted.length}/{unprintedBids.length} selected for print · {draftPreviewBids.length} on chitti preview
-                        {pendingSet.size > 0 ? ` · ${pendingSet.size} staged removal` : ''}
+                        {selectedUnprinted.length}/{unprintedBids.length} selected
+                        {pendingSet.size > 0 ? ` · ${pendingSet.size} staged` : ''}
                       </p>
 
-                      <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:gap-3 md:items-start">
-                        {/* Current (server) — left on md+ */}
-                        <section className="min-w-0 rounded-xl border border-border/60 bg-background/40 p-2 md:order-1">
-                          <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground px-1 pb-2">
+                      <section className="min-w-0 w-full rounded-xl border border-border/60 bg-background/40 p-2">
+                        <div className="flex items-center justify-between gap-2 px-1 pb-2">
+                          <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                             Current lots
                           </h3>
-                          {/* md+: table */}
-                          <div className="hidden md:block overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
-                            <table className="w-full text-left text-[11px] border-collapse">
-                              <thead>
-                                <tr style={buyerChittiTableHeadStyle}>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pl-2 pr-0 w-10 rounded-tl-xl align-middle')}>
+                          <button
+                            type="button"
+                            onClick={() => setChittiPreviewMark(g.buyerMark)}
+                            className={cn(
+                              chittiRedoBtnClass,
+                              'h-8 w-8 min-h-8 min-w-8 md:h-8 md:w-8 md:min-h-8 md:min-w-8 rounded-lg border-[rgba(91,140,255,0.4)] text-primary hover:bg-primary/10',
+                            )}
+                            aria-label="Print preview"
+                            title="Print preview"
+                          >
+                            <Eye className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                          </button>
+                        </div>
+                        <div className="hidden md:block overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
+                          <table className="w-full text-left text-[11px] border-collapse table-fixed">
+                            <colgroup>
+                              <col className="w-10" />
+                              <col />
+                              <col className="w-[4.5rem]" />
+                              {printRateOn ? <col className="w-[4.75rem]" /> : null}
+                              <col className="w-[3.5rem]" />
+                              <col className="min-w-[3.25rem] w-16" />
+                            </colgroup>
+                            <thead>
+                              <tr style={buyerChittiTableHeadStyle}>
+                                <th className={cn(CHITTI_TABLE_HEAD_CELL, 'p-0 rounded-tl-xl w-10 align-middle')}>
+                                  <div className="flex h-9 w-full items-center justify-center">
                                     {unprintedKeys.length > 0 ? (
                                       <Checkbox
                                         checked={headerSelectChecked}
@@ -1108,17 +1164,29 @@ const LogisticsPage = () => {
                                         aria-label="Select or deselect all lots not yet printed"
                                       />
                                     ) : null}
+                                  </div>
+                                </th>
+                                <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot name</th>
+                                <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center whitespace-nowrap')}>
+                                  Lot SL
+                                </th>
+                                {printRateOn && (
+                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center whitespace-nowrap')}>
+                                    Rate
                                   </th>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot name</th>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot SL</th>
-                                  {printRateOn && (
-                                    <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Rate</th>
+                                )}
+                                <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center whitespace-nowrap')}>
+                                  Qty
+                                </th>
+                                <th
+                                  className={cn(
+                                    CHITTI_TABLE_HEAD_CELL,
+                                    '!text-center rounded-tr-xl whitespace-nowrap pr-4',
                                   )}
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL)}>Qty</th>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'text-right rounded-tr-xl w-14 min-w-[3.25rem] whitespace-nowrap')}>
-                                    Act.
-                                  </th>
-                                </tr>
+                                >
+                                  Act.
+                                </th>
+                              </tr>
                               </thead>
                               <tbody>
                                 {g.bids.map((b, rowIdx) => {
@@ -1135,18 +1203,20 @@ const LogisticsPage = () => {
                                         pendingRow && 'bg-amber-500/10',
                                       )}
                                     >
-                                      <td className="py-1.5 pl-1">
-                                        <Checkbox
-                                          checked={isPrinted || on}
-                                          onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
-                                          disabled={isPrinted}
-                                          className="h-[18px] w-[18px] rounded-none border-foreground/30"
-                                          aria-label={
-                                            isPrinted
-                                              ? `Lot ${formatLotIdentifierForBid(b)} — printed`
-                                              : `Select lot ${formatLotIdentifierForBid(b)}`
-                                          }
-                                        />
+                                      <td className="p-0 align-middle w-10">
+                                        <div className="flex h-9 w-full items-center justify-center">
+                                          <Checkbox
+                                            checked={isPrinted || on}
+                                            onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
+                                            disabled={isPrinted}
+                                            className="h-[18px] w-[18px] rounded-none border-foreground/30"
+                                            aria-label={
+                                              isPrinted
+                                                ? `Lot ${formatLotIdentifierForBid(b)} — printed`
+                                                : `Select lot ${formatLotIdentifierForBid(b)}`
+                                            }
+                                          />
+                                        </div>
                                       </td>
                                       <td className="py-1.5 pr-2 max-w-[8rem] lg:max-w-[10rem]">
                                         <span className="font-semibold text-foreground break-words line-clamp-2">
@@ -1156,43 +1226,53 @@ const LogisticsPage = () => {
                                           <span className="ml-1 text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">done</span>
                                         )}
                                       </td>
-                                      <td className="py-1.5 pr-2 whitespace-nowrap tabular-nums">
+                                      <td className="py-1.5 text-center whitespace-nowrap tabular-nums align-middle">
                                         {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}
                                       </td>
                                       {printRateOn && (
-                                        <td className="py-1.5 pr-2 whitespace-nowrap tabular-nums">₹{b.rate}</td>
+                                        <td className="py-1.5 px-1 align-middle">
+                                          <div className="flex w-full justify-center">
+                                            <span className="inline-block min-w-[3.25rem] max-w-full text-right tabular-nums whitespace-nowrap">
+                                              ₹{b.rate}
+                                            </span>
+                                          </div>
+                                        </td>
                                       )}
-                                      <td className="py-1.5 pr-2 tabular-nums">{b.quantity}</td>
-                                      <td className="py-1.5 pr-1 text-right whitespace-nowrap align-middle">
-                                        {canEditAuctionBids && !isPrinted && b.auctionEntryId != null && (
-                                          pendingRow ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setPendingRemoveByMark((p) => {
-                                                  const n = new Set(p[g.buyerMark] ?? []);
-                                                  n.delete(k);
-                                                  return { ...p, [g.buyerMark]: n };
-                                                });
-                                                setBidSelected(g.buyerMark, k, true);
-                                              }}
-                                              className={chittiRedoBtnClass}
-                                              aria-label="Undo staged removal"
-                                            >
-                                              <Undo2 className="h-3.5 w-3.5 shrink-0" />
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={() => setStagingRemove({ buyerMark: g.buyerMark, bid: b })}
-                                              className={chittiDeleteIconBtnClass}
-                                              aria-label={`Stage removal — ${formatLotIdentifierForBid(b)}`}
-                                              title="Remove from chitti (saved with Save & print)"
-                                            >
-                                              <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                            </button>
-                                          )
-                                        )}
+                                      <td className="py-1.5 text-center tabular-nums align-middle whitespace-nowrap">
+                                        {b.quantity}
+                                      </td>
+                                      <td className="py-1.5 pl-1 pr-4 text-center align-middle whitespace-nowrap">
+                                        <div className="flex justify-center">
+                                          {canEditAuctionBids && !isPrinted && b.auctionEntryId != null && (
+                                            pendingRow ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setPendingRemoveByMark((p) => {
+                                                    const n = new Set(p[g.buyerMark] ?? []);
+                                                    n.delete(k);
+                                                    return { ...p, [g.buyerMark]: n };
+                                                  });
+                                                  setBidSelected(g.buyerMark, k, true);
+                                                }}
+                                                className={chittiRedoBtnClass}
+                                                aria-label="Undo staged removal"
+                                              >
+                                                <Undo2 className="h-3.5 w-3.5 shrink-0" />
+                                              </button>
+                                            ) : (
+                                              <button
+                                                type="button"
+                                                onClick={() => setStagingRemove({ buyerMark: g.buyerMark, bid: b })}
+                                                className={chittiDeleteIconBtnClass}
+                                                aria-label={`Stage removal — ${formatLotIdentifierForBid(b)}`}
+                                                title="Remove from chitti (Save & Print)"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" strokeWidth={2.2} />
+                                              </button>
+                                            )
+                                          )}
+                                        </div>
                                       </td>
                                     </tr>
                                   );
@@ -1200,20 +1280,21 @@ const LogisticsPage = () => {
                               </tbody>
                             </table>
                           </div>
-                          {/* &lt;md: cards */}
                           <ul className="md:hidden space-y-2" role="list">
                             {unprintedKeys.length > 0 && (
-                              <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5">
-                                <Checkbox
-                                  checked={headerSelectChecked}
-                                  onCheckedChange={(c) => {
-                                    if (c === true) selectAllBuyerBids(g);
-                                    else deselectAllBuyerBids(g);
-                                  }}
-                                  className="h-[18px] w-[18px] shrink-0 rounded-none"
-                                  aria-label="Select or deselect all unprinted lots"
-                                />
-                                <span className="text-[11px] font-semibold text-muted-foreground">All unprinted lots</span>
+                              <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5 min-h-10">
+                                <div className="flex h-9 w-10 shrink-0 items-center justify-center">
+                                  <Checkbox
+                                    checked={headerSelectChecked}
+                                    onCheckedChange={(c) => {
+                                      if (c === true) selectAllBuyerBids(g);
+                                      else deselectAllBuyerBids(g);
+                                    }}
+                                    className="h-[18px] w-[18px] rounded-none"
+                                    aria-label="Select or deselect all unprinted lots"
+                                  />
+                                </div>
+                                <span className="text-[11px] font-semibold text-muted-foreground">All unprinted</span>
                               </li>
                             )}
                             {g.bids.map((b, rowIdx) => {
@@ -1230,14 +1311,16 @@ const LogisticsPage = () => {
                                     pendingRow && 'border-amber-500/50 bg-amber-500/10',
                                   )}
                                 >
-                                  <div className="flex items-start gap-2">
-                                    <Checkbox
-                                      checked={isPrinted || on}
-                                      onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
-                                      disabled={isPrinted}
-                                      className="mt-0.5 h-[18px] w-[18px] shrink-0 rounded-none"
-                                      aria-label={`Select ${formatLotIdentifierForBid(b)}`}
-                                    />
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex h-9 w-10 shrink-0 items-center justify-center">
+                                      <Checkbox
+                                        checked={isPrinted || on}
+                                        onCheckedChange={(c) => setBidSelected(g.buyerMark, k, c === true)}
+                                        disabled={isPrinted}
+                                        className="h-[18px] w-[18px] rounded-none"
+                                        aria-label={`Select ${formatLotIdentifierForBid(b)}`}
+                                      />
+                                    </div>
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-bold text-foreground break-words leading-snug">
                                         {formatLotIdentifierForBid(b)}
@@ -1283,81 +1366,12 @@ const LogisticsPage = () => {
                               );
                             })}
                           </ul>
-                        </section>
-
-                        {/* Chitti preview — right on md+ */}
-                        <section className="min-w-0 rounded-xl border border-primary/25 bg-primary/5 p-2 md:order-2">
-                          <h3 className="text-[11px] font-bold uppercase tracking-wide text-primary px-1 pb-2">
-                            Chitti preview (print)
-                          </h3>
-                          <div className="hidden md:block overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
-                            <table className="w-full text-left text-[11px] border-collapse">
-                              <thead>
-                                <tr style={buyerChittiTableHeadStyle}>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pl-2 rounded-tl-xl whitespace-nowrap')}>
-                                    Lot name
-                                  </th>
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Lot SL</th>
-                                  {printRateOn && (
-                                    <th className={cn(CHITTI_TABLE_HEAD_CELL, 'whitespace-nowrap')}>Rate</th>
-                                  )}
-                                  <th className={cn(CHITTI_TABLE_HEAD_CELL, 'pr-2 rounded-tr-xl')}>Qty</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {draftPreviewBids.length === 0 ? (
-                                  <tr>
-                                    <td
-                                      colSpan={printRateOn ? 4 : 3}
-                                      className="py-4 text-center text-muted-foreground text-[11px]"
-                                    >
-                                      No rows selected for print. Use checkboxes on the left.
-                                    </td>
-                                  </tr>
-                                ) : (
-                                  draftPreviewBids.map((b, rowIdx) => (
-                                    <tr key={bidListKey(b, rowIdx)} className="border-b border-border/30">
-                                      <td className="py-1.5 pl-1 pr-2 max-w-[8rem] lg:max-w-[10rem]">
-                                        <span className="font-semibold break-words line-clamp-2">{formatLotIdentifierForBid(b)}</span>
-                                      </td>
-                                      <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">
-                                        {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}
-                                      </td>
-                                      {printRateOn && (
-                                        <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap">₹{b.rate}</td>
-                                      )}
-                                      <td className="py-1.5 pr-1 tabular-nums">{b.quantity}</td>
-                                    </tr>
-                                  ))
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                          <ul className="md:hidden space-y-2" role="list">
-                            {draftPreviewBids.length === 0 ? (
-                              <li className="text-center text-[11px] text-muted-foreground py-3">Nothing on chitti yet.</li>
-                            ) : (
-                              draftPreviewBids.map((b, rowIdx) => (
-                                <li
-                                  key={bidListKey(b, rowIdx)}
-                                  className="rounded-lg border border-border/50 bg-background/60 px-2.5 py-2 text-[11px]"
-                                >
-                                  <p className="font-bold text-foreground break-words">{formatLotIdentifierForBid(b)}</p>
-                                  <p className="text-muted-foreground mt-0.5">
-                                    SL {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'} · {b.godown || '—'}
-                                    {printRateOn ? ` · ₹${b.rate}` : ''} · Qty {b.quantity}
-                                  </p>
-                                </li>
-                              ))
-                            )}
-                          </ul>
-                        </section>
-                      </div>
+                      </section>
 
                       <div className="flex flex-row flex-wrap items-stretch justify-end gap-2 sm:gap-3 pt-1 w-full">
                         <button
                           type="button"
-                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[12rem] justify-center')}
+                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[12rem] justify-center inline-flex items-center gap-2')}
                           style={buyerChittiBulkBtnStyle}
                           disabled={
                             (draftPreviewBids.length === 0 && pendingSet.size === 0) ||
@@ -1365,11 +1379,12 @@ const LogisticsPage = () => {
                           }
                           onClick={() => void handleSavePrintBuyerChitti(g)}
                         >
-                          Save &amp; print chitti
+                          <Save className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                          Save &amp; Print
                         </button>
                         <button
                           type="button"
-                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[11rem] justify-center')}
+                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[11rem] justify-center inline-flex items-center gap-2')}
                           style={buyerChittiBulkBtnStyle}
                           disabled={pendingSet.size === 0}
                           onClick={() => {
@@ -1382,7 +1397,8 @@ const LogisticsPage = () => {
                             });
                           }}
                         >
-                          Cancel staged removals
+                          <Undo2 className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                          Undo
                         </button>
                       </div>
                     </>
@@ -1453,9 +1469,7 @@ const LogisticsPage = () => {
             <AlertDialogTitle>Remove this lot from the chitti draft?</AlertDialogTitle>
             <AlertDialogDescription>
               {stagingRemove
-                ? `It stays on this buyer until you tap “Save & print chitti”. Then it moves to the Unassigned pool for everyone. Lot: ${formatLotIdentifierForBid(
-                    stagingRemove.bid,
-                  )}.`
+                ? `It stays until you tap Save & Print, then moves to Unassigned. Lot: ${formatLotIdentifierForBid(stagingRemove.bid)}.`
                 : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1490,38 +1504,42 @@ const LogisticsPage = () => {
       >
         <DialogContent className="max-w-lg max-h-[min(90dvh,640px)] flex flex-col gap-0 p-0 sm:max-w-xl">
           <DialogHeader className="p-6 pb-2 text-left">
-            <DialogTitle>Search &amp; migrate bid</DialogTitle>
-            <DialogDescription>
-              {migrateTarget
-                ? `Pull unassigned pool bids onto ${migrateTarget.buyerName} (${migrateTarget.buyerMark}). Then close and use Save & print chitti to print. Type to search — no full list.`
-                : 'Choose a buyer on the card first.'}
-            </DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2.25} aria-hidden />
+              <ArrowRightLeft className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2.25} aria-hidden />
+              <span>Search &amp; migrate</span>
+            </DialogTitle>
+            {migrateTarget ? (
+              <DialogDescription className="text-left">
+                {migrateTarget.buyerName} ({migrateTarget.buyerMark})
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
           <div className="px-6 flex flex-col gap-2 min-h-0 flex-1">
             {unassignedPoolBids.length === 0 ? (
-              <p className="text-sm text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 leading-snug">
-                No bids are in the Unassigned pool right now (nothing to migrate). Send lines to Unassigned from a buyer card if needed, or refresh after auction updates.
+              <p className="text-sm text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
+                Pool is empty.
               </p>
             ) : null}
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Search
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                strokeWidth={2.25}
+                aria-hidden
+              />
               <Input
-                aria-label="Search by lot id, seller, or vehicle"
-                placeholder="e.g. 320/320/110-110, seller name, vehicle#…"
+                aria-label="Search pool"
+                placeholder="Search…"
                 value={migrateSearch}
                 onChange={(e) => setMigrateSearch(e.target.value)}
-                className="h-9 pl-8 text-sm"
+                className="h-10 pl-10 pr-3 text-sm"
                 autoFocus
               />
             </div>
             {!migrateSearch.trim() ? (
-              <p className="text-sm text-muted-foreground py-4 text-center leading-relaxed">
-                Type part of a <span className="font-medium text-foreground">lot identifier</span>,{' '}
-                <span className="font-medium text-foreground">seller</span>, or <span className="font-medium text-foreground">vehicle</span> to
-                see matching unassigned rows — then select.
-              </p>
+              <div className="min-h-[4rem]" aria-hidden />
             ) : migrateSearchResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No unassigned bids match this search.</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">No matches.</p>
             ) : (
               <ul className="min-h-0 max-h-[min(42vh,320px)] overflow-y-auto space-y-1.5 pr-0.5 py-1" role="list">
                 {migrateSearchResults.map((b, rowIdx) => {
@@ -1530,22 +1548,24 @@ const LogisticsPage = () => {
                   const migDomId = `mig-${sk.replace(/[^a-zA-Z0-9_-]/g, '_')}-${rowIdx}`;
                   return (
                     <li key={`mig-${sk}-${rowIdx}`}>
-                      <div className="flex items-start gap-2 rounded-lg border border-border/60 p-2 hover:bg-foreground/5">
-                        <Checkbox
-                          id={migDomId}
-                          checked={selected}
-                          onCheckedChange={(c) => {
-                            const on = c === true;
-                            setMigrateSelectedKeys((prev) => {
-                              const n = new Set(prev);
-                              if (on) n.add(sk);
-                              else n.delete(sk);
-                              return n;
-                            });
-                          }}
-                          className="mt-0.5 h-[18px] w-[18px] rounded-none"
-                          aria-label={`Select ${formatLotIdentifierForBid(b)}`}
-                        />
+                      <div className="flex items-center gap-2 rounded-lg border border-border/60 p-2 hover:bg-foreground/5">
+                        <div className="flex h-9 w-10 shrink-0 items-center justify-center">
+                          <Checkbox
+                            id={migDomId}
+                            checked={selected}
+                            onCheckedChange={(c) => {
+                              const on = c === true;
+                              setMigrateSelectedKeys((prev) => {
+                                const n = new Set(prev);
+                                if (on) n.add(sk);
+                                else n.delete(sk);
+                                return n;
+                              });
+                            }}
+                            className="h-[18px] w-[18px] rounded-none"
+                            aria-label={`Select ${formatLotIdentifierForBid(b)}`}
+                          />
+                        </div>
                         <label htmlFor={migDomId} className="min-w-0 flex-1 text-left text-sm cursor-pointer">
                           <span className="font-semibold text-foreground break-words block">
                             {formatLotIdentifierForBid(b)}
@@ -1596,7 +1616,7 @@ const LogisticsPage = () => {
             </button>
             <button
               type="button"
-              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-w-[10rem] disabled:opacity-40')}
+              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-w-[10rem] disabled:opacity-40 inline-flex items-center justify-center gap-2')}
               style={buyerChittiBulkBtnStyle}
               disabled={
                 migrateSelectedKeys.size === 0 ||
@@ -1605,9 +1625,94 @@ const LogisticsPage = () => {
               }
               onClick={() => void runMigrateFromPool()}
             >
-              {migrateBusy ? 'Assigning…' : `Assign ${migrateSelectedKeys.size} bid(s)`}
+              <ArrowRightLeft className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+              {migrateBusy ? 'Assigning…' : `Assign ${migrateSelectedKeys.size}`}
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={chittiPreviewMark != null}
+        onOpenChange={(open) => {
+          if (!open) setChittiPreviewMark(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[min(92dvh,720px)] flex flex-col gap-0 overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0 space-y-1 pr-8 text-left">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Eye className="h-5 w-5 shrink-0 text-primary" strokeWidth={2.25} aria-hidden />
+              Print preview
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Rows that will appear on the printed buyer chitti
+            </DialogDescription>
+            {chittiPreviewHeader ? (
+              <p className="text-sm font-semibold text-foreground">
+                {chittiPreviewHeader.primary}
+                {chittiPreviewHeader.secondary != null && chittiPreviewHeader.secondary !== '' ? (
+                  <span className="text-muted-foreground font-normal"> [{chittiPreviewHeader.secondary}]</span>
+                ) : null}
+              </p>
+            ) : null}
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+            {chittiPreviewGroup ? (
+              <div className="overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)]">
+                <table className="w-full border-collapse text-left text-[11px]">
+                  <thead>
+                    <tr style={buyerChittiTableHeadStyle}>
+                      <th className={cn(CHITTI_TABLE_HEAD_CELL, 'rounded-tl-xl whitespace-nowrap')}>Lot name</th>
+                      <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center whitespace-nowrap')}>Lot SL</th>
+                      {chittiPreviewRateOn && (
+                        <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center whitespace-nowrap')}>Rate</th>
+                      )}
+                      <th className={cn(CHITTI_TABLE_HEAD_CELL, '!text-center rounded-tr-xl whitespace-nowrap pr-4')}>
+                        Qty
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chittiPreviewDraftBids.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={chittiPreviewRateOn ? 4 : 3}
+                          className="py-8 text-center text-muted-foreground text-sm"
+                        >
+                          Nothing selected.
+                        </td>
+                      </tr>
+                    ) : (
+                      chittiPreviewDraftBids.map((b, rowIdx) => (
+                        <tr key={bidListKey(b, rowIdx)} className="border-b border-border/30">
+                          <td className="py-2 pl-2 pr-2">
+                            <span className="font-semibold break-words">{formatLotIdentifierForBid(b)}</span>
+                          </td>
+                          <td className="py-2 text-center tabular-nums whitespace-nowrap align-middle">
+                            {b.lotNumber && b.lotNumber > 0 ? b.lotNumber : '—'}
+                          </td>
+                          {chittiPreviewRateOn && (
+                            <td className="py-2 px-1 align-middle">
+                              <div className="flex w-full justify-center">
+                                <span className="inline-block min-w-[3.25rem] max-w-full text-right tabular-nums whitespace-nowrap">
+                                  ₹{b.rate}
+                                </span>
+                              </div>
+                            </td>
+                          )}
+                          <td className="py-2 pr-4 text-center tabular-nums align-middle whitespace-nowrap">
+                            {b.quantity}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nothing to show.</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

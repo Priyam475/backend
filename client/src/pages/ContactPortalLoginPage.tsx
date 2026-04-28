@@ -178,7 +178,7 @@ const ContactPortalLoginPage = () => {
   };
 
   return (
-    <div className="h-[100dvh] relative overflow-hidden flex flex-col" role="presentation">
+    <div className="fixed inset-0 z-0 flex flex-col overflow-hidden bg-slate-950" role="presentation">
       {/* Background image */}
       <img
         src={loginBg}
@@ -237,7 +237,7 @@ const ContactPortalLoginPage = () => {
         </div>
 
         {/* Right side — Login form */}
-        <main className="flex-1 flex flex-col min-h-0">
+        <main className="flex-1 flex flex-col min-h-0 overflow-y-auto overscroll-y-contain">
           {/* Top-right link (no theme toggle for portal) */}
           <div className="flex justify-end px-5 pt-[max(1rem,env(safe-area-inset-top))]">
             <Link
