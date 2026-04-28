@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { flushSync } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
@@ -86,14 +85,16 @@ const arrSolidWide10 = cn(arrSolid, 'w-full h-10');
 const arrSolidWide14 = cn(arrSolid, 'w-full h-14');
 const numberInputNoSpinnerClass = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 const billingSummaryInputClass = `h-10 w-[4.5rem] sm:w-24 lg:h-6 lg:w-20 rounded text-right tabular-nums text-[11px] lg:text-[10px] px-1.5 sm:px-2 lg:px-1 py-1 lg:py-0 border border-border bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${numberInputNoSpinnerClass}`;
-/** Read-only ₹ amounts in summary cells: never shrink so values stay fully visible inside scrollable table. */
+/** Computed ₹ column — right edge of cell for manual tally (ledger-style). */
 const billingSummaryValueClass =
-  'text-[10px] font-semibold text-foreground tabular-nums shrink-0 whitespace-nowrap text-right inline-flex items-center justify-end';
+  'text-[10px] font-semibold text-foreground tabular-nums shrink-0 whitespace-nowrap text-right min-w-[5.25rem]';
 /** Commodity column body cells — minimum width so inputs + ₹ totals are not clipped on tablet. */
 const billingSummaryCommodityTdClass =
   'min-w-[168px] sm:min-w-[172px] px-2 py-1.5 align-top border-b border-border/30 border-l border-border/50 dark:border-border/70 bg-white text-foreground dark:text-neutral-900 dark:[&_.text-muted-foreground]:text-neutral-500';
-/** Row controls + computed value: wrap on narrow columns instead of truncating. */
-const billingSummaryCellRowClass = 'flex flex-wrap items-center gap-x-1 gap-y-1 justify-start w-full min-w-0';
+/** Inputs left, calculated ₹ right (same column alignment for Indian manual cross-check). */
+const billingSummaryCellOuterClass =
+  'flex w-full min-w-0 items-center justify-between gap-x-2 gap-y-1';
+const billingSummaryCellInputsClass = 'flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0 flex-1';
 const billingLoginImage = '/login-bg.webp';
 
 /** Commodity line: computed fields (not inputs). Muted + dashed border + not-allowed cursor so they read as read-only. */
@@ -792,7 +793,6 @@ const BillingPage = () => {
   const [showBuyerSuggestions, setShowBuyerSuggestions] = useState(false);
   const buyerSelectRef = useRef<HTMLDivElement | null>(null);
   const summaryTableScrollRef = useRef<HTMLDivElement | null>(null);
-  const summarySnapTimerRef = useRef<number | null>(null);
   const latestVersionSnapshotRef = useRef<BillData | null>(null);
   const mobileCommodityCarouselRef = useRef<HTMLDivElement | null>(null);
   const mobileLotCarouselRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -924,18 +924,6 @@ const BillingPage = () => {
     isGstBill,
     billingCopyLabelsResolved,
   ]);
-
-  const handleSummaryTableScroll = useCallback(() => {
-    const el = summaryTableScrollRef.current;
-    if (!el) return;
-    if (summarySnapTimerRef.current != null) {
-      window.clearTimeout(summarySnapTimerRef.current);
-    }
-    summarySnapTimerRef.current = window.setTimeout(() => {
-      const snappedLeft = Math.round(el.scrollLeft / SUMMARY_COMMODITY_COL_WIDTH) * SUMMARY_COMMODITY_COL_WIDTH;
-      el.scrollTo({ left: snappedLeft, behavior: 'smooth' });
-    }, 90);
-  }, []);
 
   const toggleCommodityCollapse = useCallback((idx: number) => {
     setCollapsedCommodityIndexes(prev =>
@@ -1084,12 +1072,6 @@ const BillingPage = () => {
   useEffect(() => {
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setFullConfigs);
-  }, []);
-
-  useEffect(() => () => {
-    if (summarySnapTimerRef.current != null) {
-      window.clearTimeout(summarySnapTimerRef.current);
-    }
   }, []);
 
   useEffect(() => {
@@ -4945,8 +4927,7 @@ const BillingPage = () => {
               <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch xl:gap-2 min-w-0">
                 <div
                   ref={summaryTableScrollRef}
-                  onScroll={handleSummaryTableScroll}
-                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-visible rounded-xl border border-border/50 bg-background/40 shadow-sm xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
+                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-visible rounded-xl border border-border/50 bg-background/40 shadow-sm [overflow-anchor:none] overscroll-x-contain xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
                 >
                   <table
                     className="w-max max-w-none text-[11px] leading-tight border-separate border-spacing-0"
@@ -4977,7 +4958,7 @@ const BillingPage = () => {
                           key={`gross-${gi}`}
                           className={cn(
                             billingSummaryCommodityTdClass,
-                            'font-semibold',
+                            'font-semibold text-right tabular-nums',
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
@@ -5004,26 +4985,28 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className={billingSummaryCellRowClass}>
-                            <BillingMoneyInput
-                              value={g.commissionPercent}
-                              min={0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.commissionPercent = v;
-                                cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
-                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
-                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <BillingMoneyInput
+                                value={g.commissionPercent}
+                                min={0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.commissionPercent = v;
+                                  cg.commissionAmount = percentOfAmount(cg.subtotal, cg.commissionPercent);
+                                  const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                  cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            </div>
                             <span className={billingSummaryValueClass}>₹{formatBillingInr(g.commissionAmount || 0)}</span>
                           </div>
                         </td>
@@ -5039,26 +5022,28 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className={billingSummaryCellRowClass}>
-                            <BillingMoneyInput
-                              value={g.userFeePercent}
-                              min={0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.userFeePercent = v;
-                                cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
-                                const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
-                                cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <BillingMoneyInput
+                                value={g.userFeePercent}
+                                min={0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.userFeePercent = v;
+                                  cg.userFeeAmount = percentOfAmount(cg.subtotal, cg.userFeePercent);
+                                  const gst = gstOnSubtotal(cg.subtotal, effectiveGstPercent(cg));
+                                  cg.totalCharges = roundMoney2(cg.commissionAmount + cg.userFeeAmount + gst);
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">%</span>
+                            </div>
                             <span className={billingSummaryValueClass}>₹{formatBillingInr(g.userFeeAmount || 0)}</span>
                           </div>
                         </td>
@@ -5075,50 +5060,50 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className={billingSummaryCellRowClass}>
-                              <BillingMoneyInput
-                                value={g.coolieRate || 0}
-                                min={0}
-                                commitMode="live"
-                                onCommit={rate => {
-                                  const updated = { ...bill };
-                                  const cg = { ...updated.commodityGroups[gi] };
-                                  cg.coolieRate = rate;
-                                  updated.commodityGroups = [...updated.commodityGroups];
-                                  updated.commodityGroups[gi] = cg;
-                                  setBill(recalcGrandTotal(updated));
-                                }}
-                                className={cn(billingSummaryInputClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
-                                placeholder="Rate"
-                              />
-                              <span className="text-[10px] font-semibold text-muted-foreground">x</span>
-                              <BillingMoneyInput
-                                value={effectiveCoolieChargeQty(g)}
-                                min={0}
-                                integerOnly
-                                commitMode="live"
-                                onCommit={qtyVal => {
-                                  const updated = { ...bill };
-                                  const cg = { ...updated.commodityGroups[gi] };
-                                  cg.coolieChargeQty = Math.min(
-                                    MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
-                                    Math.max(0, Math.round(qtyVal)),
-                                  );
-                                  updated.commodityGroups = [...updated.commodityGroups];
-                                  updated.commodityGroups[gi] = cg;
-                                  flushSync(() => {
+                            <div className={billingSummaryCellOuterClass}>
+                              <div className={billingSummaryCellInputsClass}>
+                                <BillingMoneyInput
+                                  value={g.coolieRate || 0}
+                                  min={0}
+                                  commitMode="live"
+                                  onCommit={rate => {
+                                    const updated = { ...bill };
+                                    const cg = { ...updated.commodityGroups[gi] };
+                                    cg.coolieRate = rate;
+                                    updated.commodityGroups = [...updated.commodityGroups];
+                                    updated.commodityGroups[gi] = cg;
                                     setBill(recalcGrandTotal(updated));
-                                  });
-                                }}
-                                className={cn(
-                                  billingSummaryInputClass,
-                                  (validationErrors[`coolieQty-${gi}`] || validationErrors[`coolie-${gi}`])
-                                    && 'border-destructive ring-1 ring-destructive/30',
-                                  validationWarnings[`chargeQty.coolie.${gi}`]
-                                    && 'ring-1 ring-destructive/50 border-destructive/50',
-                                )}
-                                placeholder="Qty"
-                              />
+                                  }}
+                                  className={cn(billingSummaryInputClass, validationErrors[`coolie-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
+                                  placeholder="Rate"
+                                />
+                                <span className="text-[10px] font-semibold text-muted-foreground">x</span>
+                                <BillingMoneyInput
+                                  value={effectiveCoolieChargeQty(g)}
+                                  min={0}
+                                  integerOnly
+                                  commitMode="live"
+                                  onCommit={qtyVal => {
+                                    const updated = { ...bill };
+                                    const cg = { ...updated.commodityGroups[gi] };
+                                    cg.coolieChargeQty = Math.min(
+                                      MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
+                                      Math.max(0, Math.round(qtyVal)),
+                                    );
+                                    updated.commodityGroups = [...updated.commodityGroups];
+                                    updated.commodityGroups[gi] = cg;
+                                    setBill(recalcGrandTotal(updated));
+                                  }}
+                                  className={cn(
+                                    billingSummaryInputClass,
+                                    (validationErrors[`coolieQty-${gi}`] || validationErrors[`coolie-${gi}`])
+                                      && 'border-destructive ring-1 ring-destructive/30',
+                                    validationWarnings[`chargeQty.coolie.${gi}`]
+                                      && 'ring-1 ring-destructive/50 border-destructive/50',
+                                  )}
+                                  placeholder="Qty"
+                                />
+                              </div>
                               <span className={billingSummaryValueClass}>₹{formatBillingInr(g.coolieAmount || 0)}</span>
                             </div>
                           </td>
@@ -5135,50 +5120,50 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className={billingSummaryCellRowClass}>
-                              <BillingMoneyInput
-                                value={g.weighmanChargeRate || 0}
-                                min={0}
-                                commitMode="live"
-                                onCommit={rate => {
-                                  const updated = { ...bill };
-                                  const cg = { ...updated.commodityGroups[gi] };
-                                  cg.weighmanChargeRate = rate;
-                                  updated.commodityGroups = [...updated.commodityGroups];
-                                  updated.commodityGroups[gi] = cg;
-                                  setBill(recalcGrandTotal(updated));
-                                }}
-                                className={cn(billingSummaryInputClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
-                                placeholder="Rate"
-                              />
-                              <span className="text-[10px] font-semibold text-muted-foreground">x</span>
-                              <BillingMoneyInput
-                                value={effectiveWeighmanChargeQty(g)}
-                                min={0}
-                                integerOnly
-                                commitMode="live"
-                                onCommit={qtyVal => {
-                                  const updated = { ...bill };
-                                  const cg = { ...updated.commodityGroups[gi] };
-                                  cg.weighmanChargeQty = Math.min(
-                                    MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
-                                    Math.max(0, Math.round(qtyVal)),
-                                  );
-                                  updated.commodityGroups = [...updated.commodityGroups];
-                                  updated.commodityGroups[gi] = cg;
-                                  flushSync(() => {
+                            <div className={billingSummaryCellOuterClass}>
+                              <div className={billingSummaryCellInputsClass}>
+                                <BillingMoneyInput
+                                  value={g.weighmanChargeRate || 0}
+                                  min={0}
+                                  commitMode="live"
+                                  onCommit={rate => {
+                                    const updated = { ...bill };
+                                    const cg = { ...updated.commodityGroups[gi] };
+                                    cg.weighmanChargeRate = rate;
+                                    updated.commodityGroups = [...updated.commodityGroups];
+                                    updated.commodityGroups[gi] = cg;
                                     setBill(recalcGrandTotal(updated));
-                                  });
-                                }}
-                                className={cn(
-                                  billingSummaryInputClass,
-                                  (validationErrors[`weighmanQty-${gi}`] || validationErrors[`weighman-${gi}`])
-                                    && 'border-destructive ring-1 ring-destructive/30',
-                                  validationWarnings[`chargeQty.weighman.${gi}`]
-                                    && 'ring-1 ring-destructive/50 border-destructive/50',
-                                )}
-                                placeholder="Qty"
-                              />
+                                  }}
+                                  className={cn(billingSummaryInputClass, validationErrors[`weighman-${gi}`] && 'border-destructive ring-1 ring-destructive/30')}
+                                  placeholder="Rate"
+                                />
+                                <span className="text-[10px] font-semibold text-muted-foreground">x</span>
+                                <BillingMoneyInput
+                                  value={effectiveWeighmanChargeQty(g)}
+                                  min={0}
+                                  integerOnly
+                                  commitMode="live"
+                                  onCommit={qtyVal => {
+                                    const updated = { ...bill };
+                                    const cg = { ...updated.commodityGroups[gi] };
+                                    cg.weighmanChargeQty = Math.min(
+                                      MAX_COOLIE_WEIGHMAN_CHARGE_QTY,
+                                      Math.max(0, Math.round(qtyVal)),
+                                    );
+                                    updated.commodityGroups = [...updated.commodityGroups];
+                                    updated.commodityGroups[gi] = cg;
+                                    setBill(recalcGrandTotal(updated));
+                                  }}
+                                  className={cn(
+                                    billingSummaryInputClass,
+                                    (validationErrors[`weighmanQty-${gi}`] || validationErrors[`weighman-${gi}`])
+                                      && 'border-destructive ring-1 ring-destructive/30',
+                                    validationWarnings[`chargeQty.weighman.${gi}`]
+                                      && 'ring-1 ring-destructive/50 border-destructive/50',
+                                  )}
+                                  placeholder="Qty"
+                                />
+                              </div>
                               <span className={billingSummaryValueClass}>₹{formatBillingInr(g.weighmanChargeAmount || 0)}</span>
                             </div>
                           </td>
@@ -5268,48 +5253,50 @@ const BillingPage = () => {
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className={billingSummaryCellRowClass}>
-                            <Select
-                              value={g.sgstInputMode || 'PERCENT'}
-                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.sgstInputMode = value;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                            >
-                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
-                                <SelectValue placeholder="%" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="PERCENT">%</SelectItem>
-                                <SelectItem value="AMOUNT">₹</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <BillingMoneyInput
-                              value={g.sgstInputMode === 'AMOUNT'
-                                ? gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0)
-                                : g.sgstRate}
-                              min={0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.sgstRate = (cg.sgstInputMode === 'AMOUNT')
-                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
-                                  : v;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">
-                              {g.sgstInputMode === 'AMOUNT' ? '₹' : '%'}
-                            </span>
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <Select
+                                value={g.sgstInputMode || 'PERCENT'}
+                                onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.sgstInputMode = value;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                              >
+                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                  <SelectValue placeholder="%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERCENT">%</SelectItem>
+                                  <SelectItem value="AMOUNT">₹</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <BillingMoneyInput
+                                value={g.sgstInputMode === 'AMOUNT'
+                                  ? gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0)
+                                  : g.sgstRate}
+                                min={0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.sgstRate = (cg.sgstInputMode === 'AMOUNT')
+                                    ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                    : v;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">
+                                {g.sgstInputMode === 'AMOUNT' ? '₹' : '%'}
+                              </span>
+                            </div>
                             <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.sgstRate ?? 0))}
                             </span>
@@ -5344,48 +5331,50 @@ const BillingPage = () => {
                           {!hasTax || !gstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className={billingSummaryCellRowClass}>
-                            <Select
-                              value={g.cgstInputMode || 'PERCENT'}
-                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.cgstInputMode = value;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                            >
-                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
-                                <SelectValue placeholder="%" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="PERCENT">%</SelectItem>
-                                <SelectItem value="AMOUNT">₹</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <BillingMoneyInput
-                              value={g.cgstInputMode === 'AMOUNT'
-                                ? gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0)
-                                : g.cgstRate}
-                              min={0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.cgstRate = (cg.cgstInputMode === 'AMOUNT')
-                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
-                                  : v;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">
-                              {g.cgstInputMode === 'AMOUNT' ? '₹' : '%'}
-                            </span>
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <Select
+                                value={g.cgstInputMode || 'PERCENT'}
+                                onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.cgstInputMode = value;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                              >
+                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                  <SelectValue placeholder="%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERCENT">%</SelectItem>
+                                  <SelectItem value="AMOUNT">₹</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <BillingMoneyInput
+                                value={g.cgstInputMode === 'AMOUNT'
+                                  ? gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0)
+                                  : g.cgstRate}
+                                min={0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.cgstRate = (cg.cgstInputMode === 'AMOUNT')
+                                    ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                    : v;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">
+                                {g.cgstInputMode === 'AMOUNT' ? '₹' : '%'}
+                              </span>
+                            </div>
                             <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.cgstRate ?? 0))}
                             </span>
@@ -5420,48 +5409,50 @@ const BillingPage = () => {
                           {!hasTax || !igstMode ? (
                             <div className="text-[10px] text-muted-foreground font-semibold">—</div>
                           ) : (
-                          <div className={billingSummaryCellRowClass}>
-                            <Select
-                              value={g.igstInputMode || 'PERCENT'}
-                              onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.igstInputMode = value;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                            >
-                              <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
-                                <SelectValue placeholder="%" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="PERCENT">%</SelectItem>
-                                <SelectItem value="AMOUNT">₹</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <BillingMoneyInput
-                              value={g.igstInputMode === 'AMOUNT'
-                                ? gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0)
-                                : g.igstRate}
-                              min={0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const v = Math.max(0, val);
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.igstRate = (cg.igstInputMode === 'AMOUNT')
-                                  ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
-                                  : v;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                            />
-                            <span className="text-[10px] font-semibold text-muted-foreground">
-                              {g.igstInputMode === 'AMOUNT' ? '₹' : '%'}
-                            </span>
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <Select
+                                value={g.igstInputMode || 'PERCENT'}
+                                onValueChange={(value: 'PERCENT' | 'AMOUNT') => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.igstInputMode = value;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                              >
+                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                  <SelectValue placeholder="%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERCENT">%</SelectItem>
+                                  <SelectItem value="AMOUNT">₹</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <BillingMoneyInput
+                                value={g.igstInputMode === 'AMOUNT'
+                                  ? gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0)
+                                  : g.igstRate}
+                                min={0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const v = Math.max(0, val);
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.igstRate = (cg.igstInputMode === 'AMOUNT')
+                                    ? (cg.subtotal > 0 ? roundMoney2((v * 100) / cg.subtotal) : 0)
+                                    : v;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                              />
+                              <span className="text-[10px] font-semibold text-muted-foreground">
+                                {g.igstInputMode === 'AMOUNT' ? '₹' : '%'}
+                              </span>
+                            </div>
                             <span className={billingSummaryValueClass}>
                               ₹{formatBillingInr(gstOnSubtotal(g.subtotal || 0, g.igstRate ?? 0))}
                             </span>
@@ -5499,39 +5490,41 @@ const BillingPage = () => {
                               gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                             )}
                           >
-                            <div className={billingSummaryCellRowClass}>
-                              <Select value={g.discountType || 'AMOUNT'} onValueChange={(value: any) => {
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.discountType = value;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}>
-                                <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
-                                  <SelectValue placeholder="%" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="PERCENT">%</SelectItem>
-                                  <SelectItem value="AMOUNT">₹</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <BillingMoneyInput
-                                value={g.discount || 0}
-                                min={0}
-                                commitMode="live"
-                                onCommit={val => {
-                                  const v = Math.max(0, val);
+                            <div className={billingSummaryCellOuterClass}>
+                              <div className={billingSummaryCellInputsClass}>
+                                <Select value={g.discountType || 'AMOUNT'} onValueChange={(value: any) => {
                                   const updated = { ...bill };
                                   const cg = { ...updated.commodityGroups[gi] };
-                                  cg.discount = v;
+                                  cg.discountType = value;
                                   updated.commodityGroups = [...updated.commodityGroups];
                                   updated.commodityGroups[gi] = cg;
                                   setBill(recalcGrandTotal(updated));
-                                }}
-                                className={billingSummaryInputClass}
-                                placeholder="0"
-                              />
+                                }}>
+                                  <SelectTrigger className="h-10 w-12 lg:h-6 lg:w-11 rounded text-center text-[10px] px-1 py-1 lg:py-0">
+                                    <SelectValue placeholder="%" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="PERCENT">%</SelectItem>
+                                    <SelectItem value="AMOUNT">₹</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <BillingMoneyInput
+                                  value={g.discount || 0}
+                                  min={0}
+                                  commitMode="live"
+                                  onCommit={val => {
+                                    const v = Math.max(0, val);
+                                    const updated = { ...bill };
+                                    const cg = { ...updated.commodityGroups[gi] };
+                                    cg.discount = v;
+                                    updated.commodityGroups = [...updated.commodityGroups];
+                                    updated.commodityGroups[gi] = cg;
+                                    setBill(recalcGrandTotal(updated));
+                                  }}
+                                  className={billingSummaryInputClass}
+                                  placeholder="0"
+                                />
+                              </div>
                               <span className={billingSummaryValueClass}>₹{formatBillingInr(discountAmount)}</span>
                             </div>
                           </td>
@@ -5549,20 +5542,22 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <BillingMoneyInput
-                            value={g.manualRoundOff || 0}
-                            commitMode="live"
-                            onCommit={val => {
-                              const updated = { ...bill };
-                              const cg = { ...updated.commodityGroups[gi] };
-                              cg.manualRoundOff = val;
-                              updated.commodityGroups = [...updated.commodityGroups];
-                              updated.commodityGroups[gi] = cg;
-                              setBill(recalcGrandTotal(updated));
-                            }}
-                            className={billingSummaryInputClass}
-                            placeholder="0"
-                          />
+                          <div className="flex w-full justify-end">
+                            <BillingMoneyInput
+                              value={g.manualRoundOff || 0}
+                              commitMode="live"
+                              onCommit={val => {
+                                const updated = { ...bill };
+                                const cg = { ...updated.commodityGroups[gi] };
+                                cg.manualRoundOff = val;
+                                updated.commodityGroups = [...updated.commodityGroups];
+                                updated.commodityGroups[gi] = cg;
+                                setBill(recalcGrandTotal(updated));
+                              }}
+                              className={billingSummaryInputClass}
+                              placeholder="0"
+                            />
+                          </div>
                         </td>
                       ))}
                     </tr>
