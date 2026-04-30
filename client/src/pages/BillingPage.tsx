@@ -4926,12 +4926,12 @@ const BillingPage = () => {
                   </ul>
                 </div>
               )}
-              <div className="flex flex-col gap-2 xl:flex-row xl:items-stretch xl:gap-2 min-w-0">
+              <div className="flex flex-col gap-1.5 xl:flex-row xl:items-stretch xl:gap-3 min-w-0">
                 <div
-                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-clip rounded-xl border border-border/50 bg-background/40 shadow-sm overscroll-x-contain xl:flex-none xl:min-w-0 xl:max-w-[min(100%,calc(100%-14rem))]"
+                  className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-clip rounded-xl border border-border/50 bg-background/40 shadow-sm overscroll-x-contain xl:w-max xl:max-w-full xl:flex-none xl:shrink-0"
                 >
                   <table
-                    className="w-max max-w-none text-[11px] leading-tight border-separate border-spacing-0"
+                    className="w-full max-w-none xl:w-max text-[11px] leading-tight border-separate border-spacing-0"
                     style={{ minWidth: `${110 + bill.commodityGroups.length * SUMMARY_COMMODITY_COL_WIDTH}px` }}
                   >
                   <thead>
@@ -5543,21 +5543,23 @@ const BillingPage = () => {
                             gi === bill.commodityGroups.length - 1 && 'border-r border-border/50 dark:border-border/70',
                           )}
                         >
-                          <div className="flex w-full justify-end">
-                            <BillingMoneyInput
-                              value={g.manualRoundOff || 0}
-                              commitMode="live"
-                              onCommit={val => {
-                                const updated = { ...bill };
-                                const cg = { ...updated.commodityGroups[gi] };
-                                cg.manualRoundOff = val;
-                                updated.commodityGroups = [...updated.commodityGroups];
-                                updated.commodityGroups[gi] = cg;
-                                setBill(recalcGrandTotal(updated));
-                              }}
-                              className={billingSummaryInputClass}
-                              placeholder="0"
-                            />
+                          <div className={billingSummaryCellOuterClass}>
+                            <div className={billingSummaryCellInputsClass}>
+                              <BillingMoneyInput
+                                value={g.manualRoundOff || 0}
+                                commitMode="live"
+                                onCommit={val => {
+                                  const updated = { ...bill };
+                                  const cg = { ...updated.commodityGroups[gi] };
+                                  cg.manualRoundOff = val;
+                                  updated.commodityGroups = [...updated.commodityGroups];
+                                  updated.commodityGroups[gi] = cg;
+                                  setBill(recalcGrandTotal(updated));
+                                }}
+                                className={billingSummaryInputClass}
+                                placeholder="0"
+                              />
+                            </div>
                           </div>
                         </td>
                       ))}
@@ -5652,11 +5654,11 @@ const BillingPage = () => {
                   </tbody>
                   </table>
                 </div>
-                <div className="hidden xl:flex xl:flex-1 rounded-xl border border-border/40 bg-background/30 overflow-hidden items-center justify-center">
+                <div className="hidden xl:flex xl:min-w-0 xl:flex-1 xl:self-stretch min-h-[18rem] rounded-xl border border-border/40 bg-background/30 overflow-hidden">
                   <img
                     src={billingLoginImage}
                     alt="Billing visual"
-                    className="h-full w-full object-cover opacity-85"
+                    className="h-full w-full min-h-[18rem] object-cover object-left opacity-85"
                     loading="lazy"
                   />
                 </div>
