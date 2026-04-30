@@ -1042,7 +1042,8 @@ const LogisticsPage = () => {
             const printRateOn = buyerChittiPrintRateByMark[g.buyerMark] !== false;
             const isExpanded = !buyerChittiCollapsed.has(g.buyerMark);
             const { primary: titlePrimary, secondary: titleMark } = buyerChittiHeaderLines(g);
-            const printRateId = `${chittiPrintRateLabelBase}-pr-${i}`;
+            const printRateIdMd = `${chittiPrintRateLabelBase}-pr-${i}-md`;
+            const printRateIdSm = `${chittiPrintRateLabelBase}-pr-${i}-sm`;
             const isUnassignedGroup = g.buyerMark === LOGISTICS_UNASSIGNED_BUYER_MARK;
             const chittiListId = `buyer-chitti-list-${g.buyerMark || 'x'}`;
             return (
@@ -1083,14 +1084,90 @@ const LogisticsPage = () => {
                 >
                   {isUnassignedGroup ? null : (
                     <>
-                      <div className="w-full">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Label htmlFor={printRateId} className="text-sm font-semibold text-foreground shrink-0">
+                      <div className="w-full space-y-2">
+                        {/* Tablet/desktop (md+): Print rate → Preview → Save & Print → Undo → Search & migrate */}
+                        <div className="hidden md:flex md:flex-wrap md:items-center md:gap-x-3 md:gap-y-2 md:w-full">
+                          <div className="flex items-center gap-2 min-w-0 shrink-0">
+                            <Label htmlFor={printRateIdMd} className="text-sm font-semibold text-foreground shrink-0">
                               Print rate
                             </Label>
                             <Switch
-                              id={printRateId}
+                              id={printRateIdMd}
+                              checked={buyerChittiPrintRateByMark[g.buyerMark] !== false}
+                              onCheckedChange={(on) => setBuyerChittiPrintRateByMark((p) => ({ ...p, [g.buyerMark]: on }))}
+                              className="shrink-0"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setChittiPreviewMark(g.buyerMark)}
+                            className={cn(
+                              chittiRedoBtnClass,
+                              'h-8 w-8 min-h-8 min-w-8 shrink-0 rounded-lg border-[rgba(91,140,255,0.4)] text-primary hover:bg-primary/10',
+                            )}
+                            aria-label="Print preview"
+                            title="Print preview"
+                          >
+                            <Eye className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 justify-center inline-flex items-center gap-2 px-3')}
+                            style={buyerChittiBulkBtnStyle}
+                            disabled={
+                              (draftPreviewBids.length === 0 && pendingSet.size === 0) ||
+                              (draftPreviewBids.length === 0 && pendingSet.size > 0 && !canEditAuctionBids)
+                            }
+                            onClick={() => void handleSavePrintBuyerChitti(g)}
+                          >
+                            <Save className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                            Save &amp; Print
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 justify-center inline-flex items-center gap-2 px-3')}
+                            style={buyerChittiBulkBtnStyle}
+                            disabled={pendingSet.size === 0}
+                            onClick={() => {
+                              const pend = pendingRemoveByMark[g.buyerMark] ?? new Set<string>();
+                              setPendingRemoveByMark((p) => ({ ...p, [g.buyerMark]: new Set() }));
+                              setBuyerChittiSelected((p) => {
+                                const cur = new Set(p[g.buyerMark] ?? []);
+                                pend.forEach((key) => cur.add(key));
+                                return { ...p, [g.buyerMark]: cur };
+                              });
+                            }}
+                          >
+                            <Undo2 className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                            Undo
+                          </button>
+                          {canEditAuctionBids && (
+                            <button
+                              type="button"
+                              className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'h-8 shrink-0 max-w-full justify-center inline-flex items-center gap-1.5')}
+                              style={buyerChittiBulkBtnStyle}
+                              title="Add lots from unassigned pool"
+                              onClick={() => {
+                                setMigrateTarget({ buyerName: g.buyerName, buyerMark: g.buyerMark });
+                                setMigrateSearch('');
+                                setMigrateSelectedKeys(new Set());
+                                setMigrateOpen(true);
+                              }}
+                            >
+                              <Search className="w-3.5 h-3.5 shrink-0 opacity-95" strokeWidth={2.25} aria-hidden />
+                              <ArrowRightLeft className="w-3.5 h-3.5 shrink-0 opacity-95" aria-hidden />
+                              <span className="truncate">Search &amp; migrate</span>
+                            </button>
+                          )}
+                        </div>
+                        {/* Mobile: Print rate + Search & migrate (unchanged placement) */}
+                        <div className="flex md:hidden items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Label htmlFor={printRateIdSm} className="text-sm font-semibold text-foreground shrink-0">
+                              Print rate
+                            </Label>
+                            <Switch
+                              id={printRateIdSm}
                               checked={buyerChittiPrintRateByMark[g.buyerMark] !== false}
                               onCheckedChange={(on) => setBuyerChittiPrintRateByMark((p) => ({ ...p, [g.buyerMark]: on }))}
                               className="shrink-0"
@@ -1131,7 +1208,7 @@ const LogisticsPage = () => {
                             onClick={() => setChittiPreviewMark(g.buyerMark)}
                             className={cn(
                               chittiRedoBtnClass,
-                              'h-8 w-8 min-h-8 min-w-8 md:h-8 md:w-8 md:min-h-8 md:min-w-8 rounded-lg border-[rgba(91,140,255,0.4)] text-primary hover:bg-primary/10',
+                              'md:hidden h-8 w-8 min-h-8 min-w-8 rounded-lg border-[rgba(91,140,255,0.4)] text-primary hover:bg-primary/10',
                             )}
                             aria-label="Print preview"
                             title="Print preview"
@@ -1368,23 +1445,13 @@ const LogisticsPage = () => {
                           </ul>
                       </section>
 
-                      <div className="flex flex-row flex-wrap items-stretch justify-end gap-2 sm:gap-3 pt-1 w-full">
+                      <div className="flex md:hidden flex-row items-stretch justify-end gap-2 sm:gap-3 pt-1 w-full">
                         <button
                           type="button"
-                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[12rem] justify-center inline-flex items-center gap-2')}
-                          style={buyerChittiBulkBtnStyle}
-                          disabled={
-                            (draftPreviewBids.length === 0 && pendingSet.size === 0) ||
-                            (draftPreviewBids.length === 0 && pendingSet.size > 0 && !canEditAuctionBids)
-                          }
-                          onClick={() => void handleSavePrintBuyerChitti(g)}
-                        >
-                          <Save className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
-                          Save &amp; Print
-                        </button>
-                        <button
-                          type="button"
-                          className={cn(BUYER_CHITTI_BULK_BTN_CLASS, 'min-h-10 min-w-[10.5rem] sm:min-w-[11rem] justify-center inline-flex items-center gap-2')}
+                          className={cn(
+                            BUYER_CHITTI_BULK_BTN_CLASS,
+                            'min-h-10 min-w-0 shrink-0 inline-flex items-center justify-center gap-2',
+                          )}
                           style={buyerChittiBulkBtnStyle}
                           disabled={pendingSet.size === 0}
                           onClick={() => {
@@ -1399,6 +1466,22 @@ const LogisticsPage = () => {
                         >
                           <Undo2 className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
                           Undo
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            BUYER_CHITTI_BULK_BTN_CLASS,
+                            'min-h-10 min-w-0 shrink-0 inline-flex items-center justify-center gap-2',
+                          )}
+                          style={buyerChittiBulkBtnStyle}
+                          disabled={
+                            (draftPreviewBids.length === 0 && pendingSet.size === 0) ||
+                            (draftPreviewBids.length === 0 && pendingSet.size > 0 && !canEditAuctionBids)
+                          }
+                          onClick={() => void handleSavePrintBuyerChitti(g)}
+                        >
+                          <Save className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden />
+                          Save &amp; Print
                         </button>
                       </div>
                     </>
@@ -1502,7 +1585,10 @@ const LogisticsPage = () => {
           }
         }}
       >
-        <DialogContent className="max-w-lg max-h-[min(90dvh,640px)] flex flex-col gap-0 p-0 sm:max-w-xl">
+        <DialogContent
+          className="max-w-lg max-h-[min(90dvh,640px)] flex flex-col gap-0 p-0 sm:max-w-xl"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader className="p-6 pb-2 text-left">
             <DialogTitle className="flex items-center gap-2">
               <Search className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2.25} aria-hidden />
