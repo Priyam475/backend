@@ -505,7 +505,7 @@ const BluetoothPrinterSettingsPage = () => {
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground sm:max-w-md lg:max-w-lg">
-            Use tabs to switch between organization printers, this device, and access rules.
+            Use tabs to switch between the list of active printers, adding printers, and who can access printers.
           </p>
           <Button
             variant="default"
@@ -527,16 +527,16 @@ const BluetoothPrinterSettingsPage = () => {
           <TabsList className="flex h-auto w-full flex-col gap-2 rounded-none border-0 bg-transparent p-0 shadow-none sm:flex-row sm:gap-2">
             <TabsTrigger value="org" className={bluetoothSettingsTabsTriggerClass}>
               <Building2 className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">Organization</span>
+              <span className="truncate">List of active printers</span>
             </TabsTrigger>
             <TabsTrigger value="device" className={bluetoothSettingsTabsTriggerClass}>
               <Smartphone className="h-4 w-4 shrink-0" aria-hidden />
-              <span className="truncate">This device</span>
+              <span className="truncate">Add printers</span>
             </TabsTrigger>
             {showAccessTab ? (
               <TabsTrigger value="access" className={bluetoothSettingsTabsTriggerClass}>
                 <Shield className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">Access</span>
+                <span className="truncate">Access printers</span>
               </TabsTrigger>
             ) : null}
           </TabsList>
@@ -555,7 +555,7 @@ const BluetoothPrinterSettingsPage = () => {
               {sharedLoading && <div className="mt-3 text-xs text-muted-foreground">Loading…</div>}
               {!sharedLoading && sharedPrinters.length === 0 && (
                 <div className="mt-3 text-xs text-muted-foreground">
-                  No organization printers yet. Register one from the This device tab (paired list or manual MAC).
+                  No organization printers yet. Register one from the Add printers tab (paired list or manual MAC).
                 </div>
               )}
 
