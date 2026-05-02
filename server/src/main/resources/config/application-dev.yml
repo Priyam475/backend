@@ -74,6 +74,10 @@ jhipster:
   cors:
     # Allow local frontends (Ionic + React dev server) and deployed sites
     allowed-origins:
+      # Capacitor / WebView (no port)
+      - http://localhost
+      - https://localhost
+      - capacitor://localhost
       - http://localhost:8100
       - https://localhost:8100
       - http://localhost:8081

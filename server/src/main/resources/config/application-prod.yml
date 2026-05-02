@@ -97,6 +97,10 @@ jhipster:
   # CORS configuration for production (applies to all APIs, including /api/portal/**)
   cors:
     allowed-origins:
+      # Capacitor / WebView: origin is often https://localhost or http://localhost (no port), not :8100
+      - http://localhost
+      - https://localhost
+      - capacitor://localhost
       - http://localhost:8100
       - https://localhost:8100
       - http://localhost:8081
