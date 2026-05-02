@@ -976,7 +976,7 @@ const ArrivalsPage = () => {
   /** Lot-field focus: tear down visualViewport listeners / timers from prior focus. */
   const lotFieldVVDetachRef = useRef<(() => void) | null>(null);
   /** Merge rapid ensureLastThreeLotsVisible calls (legacy multi-timeout pattern). */
-  const ensureLotsCoalesceTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const ensureLotsCoalesceTimerRef = useRef<number | null>(null);
   const newArrivalPanelScrollRef = useRef<HTMLDivElement | null>(null);
   /** Mobile sheet: "Sellers & Lots" row — scroll target to tuck arrival hero under sticky header. */
   const arrivalSellersWorkSectionRef = useRef<HTMLDivElement | null>(null);
@@ -1214,7 +1214,7 @@ const ArrivalsPage = () => {
         return;
       }
 
-      let resizeTimer: ReturnType<typeof window.setTimeout> | null = null;
+      let resizeTimer: number | null = null;
       const onVVChange = () => {
         if (resizeTimer != null) window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => {

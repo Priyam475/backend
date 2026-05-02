@@ -79,9 +79,9 @@ const SummaryPage = () => {
   const [summaryLayout, setSummaryLayout] = useState<'grid' | 'list'>(() => {
     try {
       const v = localStorage.getItem(SUMMARY_LAYOUT_STORAGE_KEY);
-      return v === 'grid' || v === 'list' ? v : 'list';
+      return v === 'grid' || v === 'list' ? v : 'grid';
     } catch {
-      return 'list';
+      return 'grid';
     }
   });
   const loadDataAbortRef = useRef<AbortController | null>(null);
