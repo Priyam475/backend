@@ -365,6 +365,37 @@ function AuctionTouchLayoutSheet(props: {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
+              <Label>Preset chip min width</Label>
+              <span className="text-xs text-muted-foreground tabular-nums">{layout.presetChipMinWidthPx}px</span>
+            </div>
+            <Slider
+              value={[layout.presetChipMinWidthPx]}
+              min={64}
+              max={140}
+              step={4}
+              onValueChange={([v]) => patch({ presetChipMinWidthPx: v })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Wider chips reduce accidental taps on the wrong preset when scrolling the row.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label>Preset chip min height</Label>
+              <span className="text-xs text-muted-foreground tabular-nums">{layout.presetChipMinHeightPx}px</span>
+            </div>
+            <Slider
+              value={[layout.presetChipMinHeightPx]}
+              min={40}
+              max={76}
+              step={2}
+              onValueChange={([v]) => patch({ presetChipMinHeightPx: v })}
+            />
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
               <Label>Auction table min width</Label>
               <span className="text-xs text-muted-foreground tabular-nums">{layout.gridMinWidthPx}px</span>
             </div>
@@ -625,6 +656,41 @@ function mapOrderedSessionEntries(entries: AuctionEntryDTO[]): SaleEntry[] {
       if (a.bidNumber !== b.bidNumber) return a.bidNumber - b.bidNumber;
       return a.id.localeCompare(b.id);
     });
+}
+
+/**
+ * Align preset margin switch + pad ring with loaded session bids (`preset_margin` / `preset_type` per entry).
+ * When all bids share one margin, restore that value; if split, prefer first non-zero. Toggle stays off when margin is 0
+ * (cannot distinguish "preset on with ₹0" from off without extra server flag).
+ */
+function derivePresetUiFromSessionEntries(entries: SaleEntry[]): {
+  showPresetMargin: boolean;
+  preset: number;
+  presetType: PresetType;
+} {
+  if (entries.length === 0) {
+    return { showPresetMargin: false, preset: 0, presetType: 'PROFIT' };
+  }
+  const pVals = entries.map((e) => Number(e.presetApplied ?? 0));
+  const tVals = entries.map((e) => (e.presetType ?? 'PROFIT') as PresetType);
+  const allSame =
+    pVals.every((v) => v === pVals[0]) && tVals.every((t) => t === tVals[0]);
+  let preset: number;
+  let presetType: PresetType;
+  if (allSame) {
+    preset = pVals[0];
+    presetType = tVals[0];
+  } else {
+    const nz = entries.find((e) => Number(e.presetApplied ?? 0) !== 0);
+    const pick = nz ?? entries[0];
+    preset = Number(pick.presetApplied ?? 0);
+    presetType = (pick.presetType ?? 'PROFIT') as PresetType;
+  }
+  return {
+    showPresetMargin: preset !== 0,
+    preset,
+    presetType,
+  };
 }
 
 const AUCTION_SCROLL_EPS = 2;
@@ -979,6 +1045,12 @@ const AuctionsPage = () => {
   const [scribbleMark, setScribbleMark] = useState('');
   const [preset, setPreset] = useState(0);
   const [presetType, setPresetType] = useState<PresetType>('PROFIT');
+  /** Per-lot UI: must not carry over when user picks another lot or returns to selector after save/complete. */
+  const resetAuctionPresetUi = useCallback(() => {
+    setShowPresetMargin(false);
+    setPreset(0);
+    setPresetType('PROFIT');
+  }, []);
   const [showTokenInput, setShowTokenInput] = useState<string | null>(null);
   const [scribblePadResetTrigger, setScribblePadResetTrigger] = useState(0);
   /** Last segment appended from the inline scribble pad (for correcting via candidate chip in append mode). */
@@ -1020,6 +1092,8 @@ const AuctionsPage = () => {
   const touchLayoutSaveTimerRef = useRef<number | null>(null);
   const touchLayoutLatestForSaveRef = useRef<AuctionTouchLayoutConfig>(readLocalAuctionTouchLayout());
   const [touchLayout, setTouchLayout] = useState<AuctionTouchLayoutConfig>(() => readLocalAuctionTouchLayout());
+  /** Filled in useLayoutEffect; used after layout sheet commits so padding catches new dock height immediately. */
+  const measureMobileDockChromeRef = useRef<() => void>(() => {});
 
   const commitTouchLayout = useCallback((next: AuctionTouchLayoutConfig) => {
     setTouchLayout(next);
@@ -1034,6 +1108,13 @@ const AuctionsPage = () => {
         toast.error('Could not sync Sales Pad layout to server; stored on this device only.');
       });
     }, 750);
+    queueMicrotask(() => {
+      measureMobileDockChromeRef.current();
+      requestAnimationFrame(() => {
+        measureMobileDockChromeRef.current();
+        requestAnimationFrame(() => measureMobileDockChromeRef.current());
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -1095,8 +1176,10 @@ const AuctionsPage = () => {
     pendingEntry: Omit<SaleEntry, 'id' | 'bidNumber'>;
   } | null>(null);
 
-  // Preset options from Settings (dynamic only; no local fallback)
-  const [presetOptions, setPresetOptions] = useState<{ label: string; value: number }[]>([]);
+  /** First entry always value 0; remainder from Settings (no duplicate 0 from API). */
+  const [presetOptions, setPresetOptions] = useState<{ label: string; value: number }[]>([
+    { label: '0', value: 0 },
+  ]);
 
   // API loading / 409 retry
   const [lotsLoading, setLotsLoading] = useState(true);
@@ -1158,6 +1241,13 @@ const AuctionsPage = () => {
   const mobileDockMeasureRef = useRef<HTMLDivElement>(null);
   const [mobileDockHeightPx, setMobileDockHeightPx] = useState(420);
 
+  /** Measured fixed dock + small slack for max-height / scroll (not full viewport tail — that inflated padding). */
+  const MOBILE_DOCK_LAYOUT_SLACK_PX = 12;
+  const mobileDockContentReservePx = useMemo(
+    () => (isDesktop ? 0 : Math.max(mobileDockHeightPx + MOBILE_DOCK_LAYOUT_SLACK_PX, 296)),
+    [isDesktop, mobileDockHeightPx]
+  );
+
   /** Mobile/tablet: scroll-padding inside grid only (height comes from flex flex-1 min-h-0 chain). */
   const auctionGridMobileScrollStyle = useMemo((): CSSProperties | undefined => {
     if (isDesktop) return undefined;
@@ -1174,7 +1264,7 @@ const AuctionsPage = () => {
    */
   const auctionGridMobileSectionStyle = useMemo((): CSSProperties | undefined => {
     if (isDesktop) return undefined;
-    const dockPx = Math.max(mobileDockHeightPx, 340);
+    const dockPx = mobileDockContentReservePx;
     if (mobileAuctionHeroCollapsed) {
       return {
         minHeight: 0,
@@ -1182,7 +1272,7 @@ const AuctionsPage = () => {
       };
     }
     return { minHeight: 0, maxHeight: '100%' };
-  }, [isDesktop, mobileAuctionHeroCollapsed, mobileDockHeightPx]);
+  }, [isDesktop, mobileAuctionHeroCollapsed, mobileDockContentReservePx]);
 
   const heroTitleFontRem = useMemo(() => {
     const ts = touchLayout.textScale;
@@ -1231,6 +1321,21 @@ const AuctionsPage = () => {
     }),
     [touchLayout.numpadKeyHeight, touchLayout.numpadSecondaryRowHeight, touchLayout.numpadKeyFontPx]
   );
+
+  const presetChipButtonStyle = useMemo((): CSSProperties => {
+    const h = touchLayout.presetChipMinHeightPx;
+    const fontPx = Math.min(18, Math.max(12, Math.round(h * 0.31)));
+    return {
+      minWidth: touchLayout.presetChipMinWidthPx,
+      minHeight: h,
+      fontSize: fontPx,
+    };
+  }, [touchLayout.presetChipMinWidthPx, touchLayout.presetChipMinHeightPx]);
+
+  const presetChipIconSquareStyle = useMemo((): CSSProperties => {
+    const s = touchLayout.presetChipMinHeightPx;
+    return { minWidth: s, minHeight: s };
+  }, [touchLayout.presetChipMinHeightPx]);
 
   // Skip initial draft restore flag
   const draftRestored = useRef(false);
@@ -1344,18 +1449,17 @@ const AuctionsPage = () => {
     presetMarksApi
       .list()
       .then((list) => {
-        if (list && list.length > 0) {
-          setPresetOptions(
-            list.map((p) => ({
-              label: p.predefined_mark ?? String(p.extra_amount),
-              value: Number(p.extra_amount),
-            }))
-          );
-        } else {
-          setPresetOptions([]);
-        }
+        const DEFAULT = { label: '0', value: 0 };
+        const fromApi = (list ?? []).map((p) => ({
+          label: p.predefined_mark ?? String(p.extra_amount),
+          value: Number(p.extra_amount),
+        }));
+        const rest = fromApi.filter((o) => o.value !== 0 && Number.isFinite(o.value));
+        setPresetOptions([DEFAULT, ...rest]);
       })
-      .catch(() => { setPresetOptions([]); });
+      .catch(() => {
+        setPresetOptions([{ label: '0', value: 0 }]);
+      });
   }, [loadTemporaryBuyerMarks, loadLots, loadSelfSaleLots]);
 
   useEffect(() => {
@@ -1855,15 +1959,20 @@ const AuctionsPage = () => {
       const rect = dockEl.getBoundingClientRect();
       const ih = window.innerHeight;
       const vv = window.visualViewport;
-      /** Layout viewport: distance from dock top to bottom of layout (fixed bottom bar uses full layout width). */
-      const fromLayoutBottom = Math.max(0, Math.ceil(ih - rect.top));
-      /** Visual viewport: segment below dock top (mobile browser chrome / keyboard). */
-      const visibleBottom = vv ? vv.offsetTop + vv.height : ih;
-      const fromVisualBottom = Math.max(0, Math.ceil(visibleBottom - rect.top));
-      const fromRect = Math.ceil(rect.height);
-      const h = Math.max(fromLayoutBottom, fromVisualBottom, fromRect) + 12;
+      const rectH = Math.max(1, Math.ceil(rect.height));
+      /** When dock is flush to bottom, this should match rect height; if much larger, layout metrics are wrong — ignore. */
+      const layoutTail = Math.ceil(ih - rect.top);
+      const visualTail = vv ? Math.ceil(vv.offsetTop + vv.height - rect.top) : layoutTail;
+      const agreesWithBox = (t: number) => t > 0 && t <= rectH + 40 && t >= rectH - 12;
+      let core = rectH;
+      if (agreesWithBox(layoutTail)) core = Math.max(core, layoutTail);
+      if (agreesWithBox(visualTail)) core = Math.max(core, visualTail);
+      const cap = Math.ceil(ih * 0.78);
+      const h = Math.min(cap, core + 12);
       setMobileDockHeightPx((prev) => (h > 0 ? h : prev));
     };
+
+    measureMobileDockChromeRef.current = measureDockChrome;
 
     measureDockChrome();
     const ro = new ResizeObserver(() => measureDockChrome());
@@ -1882,6 +1991,7 @@ const AuctionsPage = () => {
     });
 
     return () => {
+      measureMobileDockChromeRef.current = () => {};
       ro.disconnect();
       vv?.removeEventListener('resize', measureDockChrome);
       vv?.removeEventListener('scroll', measureDockChrome);
@@ -1889,7 +1999,7 @@ const AuctionsPage = () => {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [isDesktop]);
+  }, [isDesktop, touchLayout, canUsePreset, showPresetMargin, isMdViewport, editingBidId]);
 
   // Status counts for lot selector
   const statusCounts = useMemo(() => {
@@ -2330,6 +2440,7 @@ const AuctionsPage = () => {
       setSelectedLotSource('regular');
       setSelfSaleContext(null);
       setEntries([]);
+      resetAuctionPresetUi();
       void loadTemporaryBuyerMarks();
       loadLots();
       loadSelfSaleLots();
@@ -2351,6 +2462,7 @@ const AuctionsPage = () => {
     loadTemporaryBuyerMarks,
     loadLots,
     loadSelfSaleLots,
+    resetAuctionPresetUi,
   ]);
 
   const handleSaveAndCompleteAuction = useCallback(() => {
@@ -2745,6 +2857,7 @@ const AuctionsPage = () => {
     setQty('');
     setLotNumberSearch('');
     userClearedRateRef.current = false;
+    resetAuctionPresetUi();
     // Available lots have no bids yet — user must enter a rate, so focus Rate first.
     // Sold/partial/pending lots already have bids and the rate auto-fills from the
     // last bid, so focus Mark instead (existing behaviour).
@@ -2769,13 +2882,18 @@ const AuctionsPage = () => {
           seller_total_qty: info.seller_total_qty ?? lot.seller_total_qty,
           commodity_name: info.commodity_name || lot.commodity_name || '',
         });
-        setEntries(mapOrderedSessionEntries(session.entries));
+        const mapped = mapOrderedSessionEntries(session.entries ?? []);
+        setEntries(mapped);
+        const presetUi = derivePresetUiFromSessionEntries(mapped);
+        setShowPresetMargin(presetUi.showPresetMargin);
+        setPreset(presetUi.preset);
+        setPresetType(presetUi.presetType);
         setSelfSaleContext(session.self_sale_context ?? null);
         void loadTemporaryBuyerMarks();
       })
       .catch(() => toast.error('Failed to load session'))
       .finally(() => setSessionLoading(false));
-  }, [loadTemporaryBuyerMarks, statusFilter]);
+  }, [loadTemporaryBuyerMarks, statusFilter, resetAuctionPresetUi]);
 
   const goBackToSelector = () => {
     // Don't clear entries — they're auto-saved
@@ -2883,6 +3001,7 @@ const AuctionsPage = () => {
                 setShowLotSelector(true);
                 setSelectedLot(null);
                 setEntries([]);
+                resetAuctionPresetUi();
                 loadLots();
               }}
               variant="outline"
@@ -3198,7 +3317,7 @@ const AuctionsPage = () => {
           ? "min-h-[100dvh] pb-28"
           : "box-border flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden"
       )}
-      style={!isDesktop ? { paddingBottom: Math.max(mobileDockHeightPx, 340) } : undefined}
+      style={!isDesktop ? { paddingBottom: mobileDockContentReservePx } : undefined}
     >
       {/* Mobile Header — tap empty area to collapse hero and free space for auction grid */}
       {!isDesktop && (
@@ -4324,7 +4443,7 @@ const AuctionsPage = () => {
       {!isDesktop && (
         <div
           ref={mobileDockMeasureRef}
-          className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 backdrop-blur-xl px-1 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-2"
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-border/60 bg-background px-1 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-12px_32px_-16px_rgba(0,0,0,0.12)] dark:shadow-[0_-12px_32px_-16px_rgba(0,0,0,0.45)] sm:px-2"
           style={{ fontSize: `${14 * touchLayout.textScale}px` }}
         >
           <div className="space-y-1 mb-1">
@@ -4555,12 +4674,15 @@ const AuctionsPage = () => {
             </div>
           </div>
           {canUsePreset && (
-            <div className="mb-0.5 flex min-h-[38px] items-center gap-2">
+            <div
+              className="my-[0.5rem] flex items-center gap-2"
+              style={{ minHeight: touchLayout.presetChipMinHeightPx }}
+            >
               <div
                 className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden no-scrollbar overscroll-x-contain scroll-smooth touch-[pan-x_pan-y]"
                 style={{ WebkitOverflowScrolling: 'touch' }}
               >
-                <div className="inline-flex max-w-none flex-nowrap items-stretch gap-1.5">
+                <div className="inline-flex max-w-none flex-nowrap items-stretch gap-2">
                   {showPresetMargin && presetOptions.length > 0 && (
                     <>
                       {presetOptions.map((opt) => (
@@ -4568,8 +4690,9 @@ const AuctionsPage = () => {
                           key={opt.label + String(opt.value)}
                           type="button"
                           onClick={() => applyPreset(opt.value)}
+                          style={presetChipButtonStyle}
                           className={cn(
-                            'shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition-all min-h-[38px] sm:min-h-[40px] sm:py-2.5 sm:text-sm',
+                            'shrink-0 inline-flex items-center justify-center whitespace-nowrap rounded-none px-3 py-2 font-bold transition-all leading-tight',
                             preset === opt.value
                               ? opt.value >= 0
                                 ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-white'
@@ -4589,7 +4712,8 @@ const AuctionsPage = () => {
                             const hit = presetOptions.find((o) => o.value === preset);
                             if (hit) applyPreset(hit.value);
                           }}
-                          className="flex size-9 min-h-[38px] shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted sm:size-10 sm:min-h-[40px]"
+                          style={presetChipIconSquareStyle}
+                          className="inline-flex shrink-0 items-center justify-center rounded-none border border-border/60 bg-muted/50 text-muted-foreground hover:bg-muted"
                           aria-label="Clear preset margin"
                           title="Reset margin"
                         >

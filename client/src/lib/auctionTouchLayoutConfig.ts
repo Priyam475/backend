@@ -13,6 +13,9 @@ export interface AuctionTouchLayoutConfig {
   numpadKeyHeight: number;
   numpadKeyFontPx: number;
   numpadSecondaryRowHeight: number;
+  /** Mobile dock preset margin chips — min touch target (px). */
+  presetChipMinWidthPx: number;
+  presetChipMinHeightPx: number;
   gridMinWidthPx: number;
   gridMaxVhExpanded: number;
   gridMaxVhCollapsed: number;
@@ -29,6 +32,8 @@ export const DEFAULT_AUCTION_TOUCH_LAYOUT: AuctionTouchLayoutConfig = {
   numpadKeyHeight: 54,
   numpadKeyFontPx: 18,
   numpadSecondaryRowHeight: 50,
+  presetChipMinWidthPx: 92,
+  presetChipMinHeightPx: 48,
   gridMinWidthPx: 400,
   gridMaxVhExpanded: 42,
   gridMaxVhCollapsed: 64,
@@ -53,6 +58,8 @@ export function parseAuctionTouchLayout(raw: string | null): AuctionTouchLayoutC
     if (typeof o.numpadKeyHeight === 'number') d.numpadKeyHeight = clampNum(o.numpadKeyHeight, 40, 92);
     if (typeof o.numpadKeyFontPx === 'number') d.numpadKeyFontPx = clampNum(o.numpadKeyFontPx, 14, 26);
     if (typeof o.numpadSecondaryRowHeight === 'number') d.numpadSecondaryRowHeight = clampNum(o.numpadSecondaryRowHeight, 38, 88);
+    if (typeof o.presetChipMinWidthPx === 'number') d.presetChipMinWidthPx = clampNum(o.presetChipMinWidthPx, 64, 140);
+    if (typeof o.presetChipMinHeightPx === 'number') d.presetChipMinHeightPx = clampNum(o.presetChipMinHeightPx, 40, 76);
     if (typeof o.gridMinWidthPx === 'number') d.gridMinWidthPx = clampNum(o.gridMinWidthPx, 320, 560);
     if (typeof o.gridMaxVhExpanded === 'number') d.gridMaxVhExpanded = clampNum(o.gridMaxVhExpanded, 28, 56);
     if (typeof o.gridMaxVhCollapsed === 'number') d.gridMaxVhCollapsed = clampNum(o.gridMaxVhCollapsed, 48, 82);
