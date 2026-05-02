@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, Fragment } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, Fragment, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Gavel, Plus, Trash2,
@@ -872,11 +872,11 @@ function AuctionsGridScrollPanel({
   }, [setScrollLeftFromPointerX]);
 
   return (
-    <div className="relative">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col basis-0">
       <div
         ref={outerRef}
         className={cn(
-          'auctions-grid-scroll-panel lot-fields-x-scroll isolate min-h-0 overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5',
+          'auctions-grid-scroll-panel lot-fields-x-scroll isolate min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5',
           className
         )}
         style={{
@@ -1012,12 +1012,9 @@ const AuctionsPage = () => {
   const [statusFilter, setStatusFilter] = useState<LotStatus | 'all'>('all');
   const [showLotList, setShowLotList] = useState(false);
   /** Mobile/tablet: collapse gradient hero to maximize auction grid vertical space. */
-  const [mobileAuctionHeroCollapsed, setMobileAuctionHeroCollapsed] = useState(false);
+  const [mobileAuctionHeroCollapsed, setMobileAuctionHeroCollapsed] = useState(true);
   /** Matches fixed collapsed hero + spacer — sticky auction block / thead sit below this offset. */
   const auctionCollapsedBarHeight = 'calc(max(0.5rem, env(safe-area-inset-top, 0px)) + 2.75rem + 0.5rem)';
-  /** Expanded mobile hero height — ResizeObserver so sticky grid section pins below hero when scrolling. */
-  const expandedHeroMeasureRef = useRef<HTMLDivElement>(null);
-  const [expandedHeroHeightPx, setExpandedHeroHeightPx] = useState(0);
 
   const [touchLayoutSheetOpen, setTouchLayoutSheetOpen] = useState(false);
   const touchLayoutSaveTimerRef = useRef<number | null>(null);
@@ -1156,21 +1153,36 @@ const AuctionsPage = () => {
   const isTouchLayout = !isDesktop;
 
   const mobileTouchHero = useMemo(() => touchHeroShell(touchLayout.heroLayout), [touchLayout.heroLayout]);
-  const auctionGridMobileMaxHeight = useMemo(() => {
-    if (isDesktop) return undefined as string | undefined;
-    return mobileAuctionHeroCollapsed
-      ? (isMdViewport
-        ? `min(${touchLayout.gridMaxVhCollapsedMd}vh, 34rem)`
-        : `min(${touchLayout.gridMaxVhCollapsed}vh, 30rem)`)
-      : `min(${touchLayout.gridMaxVhExpanded}vh, 18rem)`;
-  }, [
-    isDesktop,
-    isMdViewport,
-    mobileAuctionHeroCollapsed,
-    touchLayout.gridMaxVhCollapsed,
-    touchLayout.gridMaxVhCollapsedMd,
-    touchLayout.gridMaxVhExpanded,
-  ]);
+
+  /** Full fixed Sales Pad chrome (buyer strips → inputs → preset → scribble/numpad). */
+  const mobileDockMeasureRef = useRef<HTMLDivElement>(null);
+  const [mobileDockHeightPx, setMobileDockHeightPx] = useState(420);
+
+  /** Mobile/tablet: scroll-padding inside grid only (height comes from flex flex-1 min-h-0 chain). */
+  const auctionGridMobileScrollStyle = useMemo((): CSSProperties | undefined => {
+    if (isDesktop) return undefined;
+    return {
+      scrollPaddingTop: '3.5rem',
+      overscrollBehaviorY: 'contain',
+      WebkitOverflowScrolling: 'touch',
+    };
+  }, [isDesktop]);
+
+  /**
+   * Collapsed hero is fixed — table min-height:auto can still grow the grid to ~full viewport.
+   * Hard max-height keeps the glass card above the fixed dock (buyer chips + inputs + pad).
+   */
+  const auctionGridMobileSectionStyle = useMemo((): CSSProperties | undefined => {
+    if (isDesktop) return undefined;
+    const dockPx = Math.max(mobileDockHeightPx, 340);
+    if (mobileAuctionHeroCollapsed) {
+      return {
+        minHeight: 0,
+        maxHeight: `calc(100dvh - ${auctionCollapsedBarHeight} - ${dockPx}px)`,
+      };
+    }
+    return { minHeight: 0, maxHeight: '100%' };
+  }, [isDesktop, mobileAuctionHeroCollapsed, mobileDockHeightPx]);
 
   const heroTitleFontRem = useMemo(() => {
     const ts = touchLayout.textScale;
@@ -1832,23 +1844,52 @@ const AuctionsPage = () => {
   const canGoPrev = currentLotIndex > 0;
   const canGoNext = currentLotIndex >= 0 && currentLotIndex < navigationLots.length - 1;
 
-  /** Mobile expanded hero height → sticky offset for auction grid below gradient header. */
   useLayoutEffect(() => {
-    if (isDesktop || mobileAuctionHeroCollapsed) {
-      setExpandedHeroHeightPx(0);
-      return;
-    }
-    const el = expandedHeroMeasureRef.current;
+    if (isDesktop) return;
+    const el = mobileDockMeasureRef.current;
     if (!el) return;
-    const measure = () => {
-      const h = Math.round(el.offsetHeight || el.getBoundingClientRect().height);
-      setExpandedHeroHeightPx(h);
+
+    const measureDockChrome = () => {
+      const dockEl = mobileDockMeasureRef.current;
+      if (!dockEl) return;
+      const rect = dockEl.getBoundingClientRect();
+      const ih = window.innerHeight;
+      const vv = window.visualViewport;
+      /** Layout viewport: distance from dock top to bottom of layout (fixed bottom bar uses full layout width). */
+      const fromLayoutBottom = Math.max(0, Math.ceil(ih - rect.top));
+      /** Visual viewport: segment below dock top (mobile browser chrome / keyboard). */
+      const visibleBottom = vv ? vv.offsetTop + vv.height : ih;
+      const fromVisualBottom = Math.max(0, Math.ceil(visibleBottom - rect.top));
+      const fromRect = Math.ceil(rect.height);
+      const h = Math.max(fromLayoutBottom, fromVisualBottom, fromRect) + 12;
+      setMobileDockHeightPx((prev) => (h > 0 ? h : prev));
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+
+    measureDockChrome();
+    const ro = new ResizeObserver(() => measureDockChrome());
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [isDesktop, mobileAuctionHeroCollapsed, selectedLot?.lot_id]);
+
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', measureDockChrome);
+    vv?.addEventListener('scroll', measureDockChrome);
+    window.addEventListener('resize', measureDockChrome);
+
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = window.requestAnimationFrame(() => {
+      measureDockChrome();
+      raf2 = window.requestAnimationFrame(measureDockChrome);
+    });
+
+    return () => {
+      ro.disconnect();
+      vv?.removeEventListener('resize', measureDockChrome);
+      vv?.removeEventListener('scroll', measureDockChrome);
+      window.removeEventListener('resize', measureDockChrome);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [isDesktop]);
 
   // Status counts for lot selector
   const statusCounts = useMemo(() => {
@@ -3150,10 +3191,15 @@ const AuctionsPage = () => {
 
   // ═══ SALES PAD (AUCTION) SCREEN ═══
   return (
-    <div className={cn(
-      "min-h-[100dvh] bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
-      isDesktop ? "pb-28" : "pb-[42rem] md:pb-[48rem]"
-    )}>
+    <div
+      className={cn(
+        "bg-gradient-to-b from-background via-background to-blue-50/30 dark:to-blue-950/10 lg:pb-6",
+        isDesktop
+          ? "min-h-[100dvh] pb-28"
+          : "box-border flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden"
+      )}
+      style={!isDesktop ? { paddingBottom: Math.max(mobileDockHeightPx, 340) } : undefined}
+    >
       {/* Mobile Header — tap empty area to collapse hero and free space for auction grid */}
       {!isDesktop && (
         mobileAuctionHeroCollapsed ? (
@@ -3233,7 +3279,6 @@ const AuctionsPage = () => {
           </>
         ) : (
           <div
-            ref={expandedHeroMeasureRef}
             className={cn(
               'sticky top-0 z-[38] cursor-pointer shrink-0 bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 relative overflow-hidden shadow-[0_8px_24px_-12px_rgba(59,130,246,0.35)]',
               mobileTouchHero.expandedClass
@@ -3373,6 +3418,12 @@ const AuctionsPage = () => {
         )
       )}
 
+      <div
+        className={cn(
+          !isDesktop && 'flex min-h-0 flex-1 flex-col overflow-hidden min-w-0',
+          isDesktop && 'contents'
+        )}
+      >
       {/* Desktop Toolbar */}
       {isDesktop && (
         <div className="px-8 py-5">
@@ -3515,7 +3566,10 @@ const AuctionsPage = () => {
         )}
       </AnimatePresence>
 
-      <div className={cn('flex flex-col h-auto min-h-0', isDesktop ? 'mt-4 gap-3 px-4' : 'mt-3 gap-2 px-0')}>
+      <div className={cn(
+        'flex flex-col min-h-0',
+        isDesktop ? 'mt-4 gap-3 px-4 h-auto' : 'mt-3 gap-2 px-0 flex-1 overflow-hidden'
+      )}>
         {/* REQ-AUC-003: Preset margin (preset labels A/B/C; green = profit, red = negative). Toggle to show/hide. */}
         {isDesktop && canUsePreset && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-2xl p-3">
@@ -3875,25 +3929,21 @@ const AuctionsPage = () => {
         {/* Auction Grid — entries list */}
         <div
           ref={auctionGridSectionRef}
-          className={cn(!isDesktop && 'w-full min-w-0')}
-          style={
-            !isDesktop
-              ? {
-                  position: 'sticky',
-                  top: mobileAuctionHeroCollapsed
-                    ? auctionCollapsedBarHeight
-                    : `${expandedHeroHeightPx}px`,
-                  zIndex: mobileAuctionHeroCollapsed ? 40 : 36,
-                }
-              : undefined
-          }
+          className={cn(
+            !isDesktop && 'flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden'
+          )}
+          style={auctionGridMobileSectionStyle}
         >
           {/* Mobile: no y-transform — transform ancestors break sticky thead inside scroll panel */}
           <motion.div
             initial={isDesktop ? { opacity: 0, y: 10 } : { opacity: 0 }}
             animate={isDesktop ? { opacity: 1, y: 0 } : { opacity: 1 }}
             transition={{ delay: isDesktop ? 0.2 : 0.1 }}
-            className="w-full min-w-0"
+            style={!isDesktop ? { minHeight: 0 } : undefined}
+            className={cn(
+              'w-full min-w-0',
+              !isDesktop && 'flex h-full min-h-0 max-h-full flex-1 flex-col overflow-hidden basis-0'
+            )}
           >
           {isDesktop && (
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -3909,9 +3959,9 @@ const AuctionsPage = () => {
           ) : (
             <div
               className={cn(
-                'glass-card rounded-2xl h-auto min-h-0',
+                'glass-card rounded-2xl min-h-0',
                 /* Mobile: overflow-visible so sticky thead inside inner scrollport is not trapped by glass-card overflow:hidden */
-                isDesktop ? 'overflow-hidden' : '!py-0 !px-1 rounded-xl sm:rounded-2xl !overflow-visible'
+                isDesktop ? 'overflow-hidden h-auto flex min-h-0 flex-col' : '!py-0 !px-1 rounded-xl sm:rounded-2xl flex h-full min-h-0 max-h-full flex-1 flex-col overflow-hidden basis-0'
               )}
             >
               <AuctionsGridScrollPanel
@@ -3921,9 +3971,9 @@ const AuctionsPage = () => {
                     ? entries.length > 5
                       ? 'max-h-[min(60vh,28rem)] lg:max-h-[min(55vh,26rem)]'
                       : 'max-h-[min(65vh,32rem)] lg:max-h-[min(60vh,30rem)]'
-                    : cn('scroll-pt-[3.25rem]', '!pb-[max(14rem,36svh)]')
+                    : 'min-h-0 max-h-full flex-1 basis-0 pb-10'
                 )}
-                style={!isDesktop && auctionGridMobileMaxHeight ? { maxHeight: auctionGridMobileMaxHeight } : undefined}
+                style={auctionGridMobileScrollStyle}
                 contentLayoutKey={entries.length}
                 autoScrollToBottomKey={autoScrollKey}
                 gridSectionRef={auctionGridSectionRef}
@@ -4025,7 +4075,7 @@ const AuctionsPage = () => {
                           }}
                           className={cn(
                             "border-b border-border/30 hover:bg-muted/20 transition-colors",
-                            !isDesktop && "scroll-mt-[3.25rem]",
+                            !isDesktop && "scroll-mt-14",
                             !isDesktop && can('Auctions / Sales', 'Edit') && !editingBidId && "cursor-pointer",
                             entry.isSelfSale && "border-l-4 border-l-amber-500",
                             entry.isScribble && "border-l-4 border-l-violet-500",
@@ -4187,7 +4237,7 @@ const AuctionsPage = () => {
                   </tbody>
                 </table>
                 {/* Extra vertical slack so last tbody rows can scroll fully below sticky thead (not visually under gradient header). */}
-                {!isDesktop && <div className="pointer-events-none h-16 shrink-0 md:h-0" aria-hidden />}
+                {!isDesktop && <div className="pointer-events-none h-6 shrink-0 md:h-0" aria-hidden />}
               </AuctionsGridScrollPanel>
             </div>
           )}
@@ -4268,10 +4318,13 @@ const AuctionsPage = () => {
         {/* Preset margin for mobile: now in fixed dock below rate/qty. */}
       </div>
 
+      </div>
+
       {/* Mobile/Tablet Dock: compact layout, preset below rate/qty. */}
       {!isDesktop && (
         <div
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-border/50 bg-background/95 backdrop-blur-xl px-1 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-2"
+          ref={mobileDockMeasureRef}
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-border/50 bg-background/95 backdrop-blur-xl px-1 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-2"
           style={{ fontSize: `${14 * touchLayout.textScale}px` }}
         >
           <div className="space-y-1 mb-1">
