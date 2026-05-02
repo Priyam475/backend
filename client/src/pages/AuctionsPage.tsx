@@ -57,12 +57,15 @@ import { generateAuctionCompletionPrintHTML } from '@/utils/printDocumentTemplat
 import { useAuth } from '@/context/AuthContext';
 import {
   DEFAULT_AUCTION_TOUCH_LAYOUT,
+  HERO_DENSITY_TOUCH_PRESETS,
+  MOBILE_TOUCH_LAYOUT_PRESET,
   parseAuctionTouchLayout,
   persistLocalAuctionTouchLayout,
   readLocalAuctionTouchLayout,
   type AuctionTouchHeroLayout,
   type AuctionTouchLayoutConfig,
 } from '@/lib/auctionTouchLayoutConfig';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { auctionTouchLayoutApi } from '@/services/api/auctionTouchLayout';
 
 /** Progressive fetch page size for Sales Pad lot lists (stable sort: `id,asc`). */
@@ -161,6 +164,13 @@ function clearDraft() {
   inMemoryAuctionDraft = null;
 }
 
+const HERO_DENSITY_LABEL: Record<AuctionTouchHeroLayout, string> = {
+  compact: 'Compact',
+  balanced: 'Balanced',
+  spacious: 'Spacious',
+  default_tab: 'Default tab',
+};
+
 function touchHeroShell(layout: AuctionTouchHeroLayout) {
   switch (layout) {
     case 'compact':
@@ -180,6 +190,15 @@ function touchHeroShell(layout: AuctionTouchHeroLayout) {
         stripValue: 'text-[11px] font-semibold text-white truncate',
         lotIndex: 'text-[10px] text-white/75',
         hint: 'text-[9px] font-medium uppercase tracking-wide text-white/55',
+        /** Fixed collapsed header (default view — must track density or presets feel broken). */
+        collapsedBarClass: 'gap-1 px-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-1.5',
+        collapsedSummaryMinH: 'min-h-[2rem]',
+        collapsedBtnClass: 'h-8 w-8',
+        collapsedGlyphClass: 'h-3.5 w-3.5',
+        collapsedSummaryBasePx: 11,
+        collapsedExpandClass:
+          'flex h-8 shrink-0 items-center gap-0.5 self-center rounded-full bg-white/20 px-2 text-[8px] font-semibold uppercase tracking-wide text-white active:bg-white/30 sm:px-2',
+        collapsedExpandChevronClass: 'h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4',
       };
     case 'spacious':
       return {
@@ -198,6 +217,14 @@ function touchHeroShell(layout: AuctionTouchHeroLayout) {
         stripValue: 'text-sm font-semibold text-white truncate md:text-base',
         lotIndex: 'text-sm text-white/75 md:text-base',
         hint: 'text-[11px] font-medium uppercase tracking-wide text-white/55',
+        collapsedBarClass: 'gap-2 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-3',
+        collapsedSummaryMinH: 'min-h-[2.75rem]',
+        collapsedBtnClass: 'h-10 w-10',
+        collapsedGlyphClass: 'h-5 w-5',
+        collapsedSummaryBasePx: 13,
+        collapsedExpandClass:
+          'flex h-10 shrink-0 items-center gap-0.5 self-center rounded-full bg-white/20 px-2.5 text-[10px] font-semibold uppercase tracking-wide text-white active:bg-white/30 sm:px-3',
+        collapsedExpandChevronClass: 'h-5 w-5 shrink-0 sm:h-5 sm:w-5',
       };
     default:
       return {
@@ -216,6 +243,14 @@ function touchHeroShell(layout: AuctionTouchHeroLayout) {
         stripValue: 'text-xs font-semibold text-white truncate md:text-sm',
         lotIndex: 'text-xs text-white/75 md:text-sm',
         hint: 'text-[10px] font-medium uppercase tracking-wide text-white/55',
+        collapsedBarClass: 'gap-1.5 px-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2',
+        collapsedSummaryMinH: 'min-h-[2.25rem]',
+        collapsedBtnClass: 'h-9 w-9',
+        collapsedGlyphClass: 'h-4 w-4',
+        collapsedSummaryBasePx: 12,
+        collapsedExpandClass:
+          'flex h-9 shrink-0 items-center gap-0.5 self-center rounded-full bg-white/20 px-2 text-[9px] font-semibold uppercase tracking-wide text-white active:bg-white/30 sm:px-2.5 sm:text-[10px]',
+        collapsedExpandChevronClass: 'h-4 w-4 shrink-0 sm:h-5 sm:w-5',
       };
   }
 }
@@ -240,23 +275,32 @@ function AuctionTouchLayoutSheet(props: {
             Mobile and tablet widths only (not desktop). Saved to your trader account on the server so every device and session reuse the same layout; this device also keeps a local copy when offline.
           </SheetDescription>
         </SheetHeader>
-        <div className="mt-6 space-y-8 pb-4">
+        <Tabs defaultValue="mobile" className="mt-6 w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="custom">Custom</TabsTrigger>
+            <TabsTrigger value="mobile">Mobile</TabsTrigger>
+          </TabsList>
+          <TabsContent
+            value="custom"
+            forceMount
+            className="mt-6 space-y-8 pb-4 outline-none data-[state=inactive]:hidden"
+          >
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <Label>Hero density</Label>
-              <span className="text-xs text-muted-foreground tabular-nums">{layout.heroLayout}</span>
+              <span className="text-xs text-muted-foreground">{HERO_DENSITY_LABEL[layout.heroLayout]}</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {(['compact', 'balanced', 'spacious'] as const).map((mode) => (
+              {(['compact', 'balanced', 'spacious', 'default_tab'] as const).map((mode) => (
                 <Button
                   key={mode}
                   type="button"
                   variant={layout.heroLayout === mode ? 'default' : 'outline'}
                   size="sm"
-                  className="rounded-lg capitalize"
-                  onClick={() => patch({ heroLayout: mode })}
+                  className={cn('rounded-lg', mode !== 'default_tab' && 'capitalize')}
+                  onClick={() => onLayoutChange({ ...HERO_DENSITY_TOUCH_PRESETS[mode] })}
                 >
-                  {mode}
+                  {HERO_DENSITY_LABEL[mode]}
                 </Button>
               ))}
             </div>
@@ -469,7 +513,28 @@ function AuctionTouchLayoutSheet(props: {
           >
             Reset layout defaults
           </Button>
-        </div>
+          </TabsContent>
+          <TabsContent value="mobile" className="mt-6 space-y-5 pb-4 outline-none">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Applies minimum sizes across numpad, preset chips, scribble area, grid height, and text scale. Hero density is set to compact so the fixed top bar stays tight on small screens.
+            </p>
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              <li>Smallest allowed touch targets and fonts</li>
+              <li>Maximum vertical space for the bid grid</li>
+              <li>Narrowest horizontal table scroll width</li>
+            </ul>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => {
+                onLayoutChange({ ...MOBILE_TOUCH_LAYOUT_PRESET });
+                onOpenChange(false);
+              }}
+            >
+              Apply mobile-optimized layout
+            </Button>
+          </TabsContent>
+        </Tabs>
       </SheetContent>
     </Sheet>
   );
@@ -1118,11 +1183,14 @@ const AuctionsPage = () => {
   const [touchLayoutSheetOpen, setTouchLayoutSheetOpen] = useState(false);
   const touchLayoutSaveTimerRef = useRef<number | null>(null);
   const touchLayoutLatestForSaveRef = useRef<AuctionTouchLayoutConfig>(readLocalAuctionTouchLayout());
+  /** User changed layout this session — don't overwrite with late-arriving GET /api layout. */
+  const skipServerTouchLayoutOverlayRef = useRef(false);
   const [touchLayout, setTouchLayout] = useState<AuctionTouchLayoutConfig>(() => readLocalAuctionTouchLayout());
   /** Filled in useLayoutEffect; used after layout sheet commits so padding catches new dock height immediately. */
   const measureMobileDockChromeRef = useRef<() => void>(() => {});
 
   const commitTouchLayout = useCallback((next: AuctionTouchLayoutConfig) => {
+    skipServerTouchLayoutOverlayRef.current = true;
     setTouchLayout(next);
     persistLocalAuctionTouchLayout(next);
     touchLayoutLatestForSaveRef.current = next;
@@ -1151,6 +1219,7 @@ const AuctionsPage = () => {
         const raw = await auctionTouchLayoutApi.get();
         if (cancelled) return;
         if (raw != null && raw.trim()) {
+          if (skipServerTouchLayoutOverlayRef.current) return;
           const parsed = parseAuctionTouchLayout(raw);
           setTouchLayout(parsed);
           persistLocalAuctionTouchLayout(parsed);
@@ -3559,7 +3628,12 @@ const AuctionsPage = () => {
       {!isDesktop && (
         mobileAuctionHeroCollapsed ? (
           <>
-            <div className="fixed inset-x-0 top-0 z-[45] flex w-full items-center gap-1.5 border-b border-white/20 bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 px-2 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 shadow-[0_6px_16px_-8px_rgba(59,130,246,0.55)]">
+            <div
+              className={cn(
+                'fixed inset-x-0 top-0 z-[45] flex w-full items-center border-b border-white/20 bg-gradient-to-br from-blue-400 via-blue-500 to-violet-500 shadow-[0_6px_16px_-8px_rgba(59,130,246,0.55)]',
+                mobileTouchHero.collapsedBarClass
+              )}
+            >
               <button
                 type="button"
                 data-auction-hero-interactive
@@ -3569,20 +3643,28 @@ const AuctionsPage = () => {
                   goBackToSelector();
                 }}
                 aria-label="Back to lot list"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur active:bg-white/30"
+                className={cn(
+                  'flex shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur active:bg-white/30',
+                  mobileTouchHero.collapsedBtnClass
+                )}
               >
-                <ArrowLeft className="h-4 w-4 text-white" strokeWidth={2.5} />
+                <ArrowLeft className={cn(mobileTouchHero.collapsedGlyphClass, 'text-white')} strokeWidth={2.5} />
               </button>
 
               <div
-                className="flex min-h-[2.25rem] min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                className={cn(
+                  'flex min-w-0 flex-1 items-center overflow-x-auto overscroll-x-contain py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                  mobileTouchHero.collapsedSummaryMinH
+                )}
                 role="region"
                 aria-label="Lot summary"
               >
                 {selectedLot ? (
                   <p
                     className="whitespace-nowrap pr-1 text-left font-semibold leading-snug tracking-tight text-white"
-                    style={{ fontSize: `${Math.round(12 * touchLayout.textScale)}px` }}
+                    style={{
+                      fontSize: `${Math.round(mobileTouchHero.collapsedSummaryBasePx * touchLayout.textScale)}px`,
+                    }}
                   >
                     {(isSelfSaleReauction ? (trader?.business_name || 'Trader') : selectedLot.seller_name) || '—'}
                     <span className="mx-1 text-white/45 md:mx-1.5">|</span>
@@ -3593,7 +3675,14 @@ const AuctionsPage = () => {
                     <span className="tabular-nums">{totalSold}/{remaining}</span>
                   </p>
                 ) : (
-                  <span className="truncate text-sm font-bold text-white">Sales Pad</span>
+                  <span
+                    className="truncate font-bold text-white"
+                    style={{
+                      fontSize: `${Math.round(mobileTouchHero.collapsedSummaryBasePx * touchLayout.textScale * 1.05)}px`,
+                    }}
+                  >
+                    Sales Pad
+                  </span>
                 )}
               </div>
 
@@ -3606,9 +3695,12 @@ const AuctionsPage = () => {
                   setTouchLayoutSheetOpen(true);
                 }}
                 aria-label="Sales Pad layout settings"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur active:bg-white/30"
+                className={cn(
+                  'flex shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur active:bg-white/30',
+                  mobileTouchHero.collapsedBtnClass
+                )}
               >
-                <Settings2 className="h-4 w-4 text-white" strokeWidth={2.5} />
+                <Settings2 className={cn(mobileTouchHero.collapsedGlyphClass, 'text-white')} strokeWidth={2.5} />
               </button>
 
               <button
@@ -3617,11 +3709,11 @@ const AuctionsPage = () => {
                   hapticSelection();
                   setMobileAuctionHeroCollapsed(false);
                 }}
-                className="flex h-9 shrink-0 items-center gap-0.5 self-center rounded-full bg-white/20 px-2 text-[9px] font-semibold uppercase tracking-wide text-white active:bg-white/30 sm:px-2.5 sm:text-[10px]"
+                className={cn(mobileTouchHero.collapsedExpandClass, 'active:bg-white/30')}
                 aria-expanded={false}
                 aria-label="Expand Sales Pad header"
               >
-                <ChevronDown className="h-4 w-4 shrink-0 sm:h-5 sm:w-5" strokeWidth={2.5} />
+                <ChevronDown className={cn(mobileTouchHero.collapsedExpandChevronClass, 'shrink-0 text-white')} strokeWidth={2.5} />
                 <span>Expand</span>
               </button>
             </div>
@@ -4772,8 +4864,18 @@ const AuctionsPage = () => {
               </div>
             </div>
           </div>
-          <div className="mb-0.5 flex min-w-0 items-end gap-4">
-            <div className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
+          <div
+            className={cn(
+              'mb-0.5 w-full min-w-0 items-end',
+              isMdViewport ? 'flex gap-4' : 'grid grid-cols-3 gap-2'
+            )}
+          >
+            <div
+              className={cn(
+                'flex min-w-0 flex-col items-center gap-0.5',
+                isMdViewport && 'flex-1'
+              )}
+            >
               <label htmlFor="sales-pad-rate-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block w-full truncate text-center leading-tight">
                 Rate ₹
               </label>
@@ -4804,12 +4906,20 @@ const AuctionsPage = () => {
                 placeholder="0"
                 aria-label="Bid rate in rupees"
                 className={cn(
-                  'h-14 w-full min-w-[7rem] max-w-[9.75rem] shrink-0 rounded-md border-2 border-primary/45 bg-muted/25 px-2 text-center text-[1.07em] font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  'h-14 w-full rounded-md border-2 border-primary/45 bg-muted/25 text-center font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  isMdViewport
+                    ? 'min-w-[7rem] max-w-[9.75rem] shrink-0 px-2 text-[1.07em]'
+                    : 'min-w-0 max-w-full shrink px-1 text-[0.95em]',
                   activeNumpadField === 'rate' && 'border-primary ring-2 ring-primary'
                 )}
               />
             </div>
-            <div className="flex min-w-0 flex-[1.15] flex-col items-center gap-0.5">
+            <div
+              className={cn(
+                'flex min-w-0 flex-col items-center',
+                isMdViewport ? 'min-w-0 flex-[1.15] gap-0.5' : 'gap-1'
+              )}
+            >
               <label htmlFor="sales-pad-mark-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block w-full truncate text-center leading-tight">
                 Mark
               </label>
@@ -4847,16 +4957,24 @@ const AuctionsPage = () => {
                 placeholder="Search…"
                 aria-label="Search mark or name"
                 className={cn(
-                  'h-14 w-full min-w-[8rem] max-w-[12.5rem] shrink-0 rounded-md border-2 border-violet-500/45 bg-muted/25 px-2 py-1 text-center text-[1.07em] font-medium leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  'h-14 w-full rounded-md border-2 border-violet-500/45 bg-muted/25 py-1 text-center font-medium leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  isMdViewport
+                    ? 'min-w-[8rem] max-w-[12.5rem] shrink-0 px-2 text-[1.07em]'
+                    : 'min-w-0 max-w-full shrink truncate px-1 text-[0.95em]',
                   activeNumpadField === 'mark' && 'border-violet-600 ring-2 ring-violet-500/55'
                 )}
               />
             </div>
-            <div className="flex min-w-0 flex-[1.35] flex-col items-center gap-0.5">
-              <span className="mb-0 block w-full truncate text-center text-[0.93em] font-semibold uppercase tracking-wide text-muted-foreground leading-tight">
-                Qty
-              </span>
-              <div className="flex w-full min-w-0 items-center justify-center gap-3">
+            <div className={cn('min-w-0', isMdViewport && 'flex-[1.35]')}>
+              <div
+                className={cn(
+                  'grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto]',
+                  isMdViewport ? 'gap-x-3 gap-y-0.5' : 'gap-x-1.5 gap-y-0.5'
+                )}
+              >
+                <span className="col-start-1 row-start-1 justify-self-center text-center text-[0.93em] font-semibold uppercase tracking-wide text-muted-foreground leading-tight">
+                  Qty
+                </span>
                 <Input
                   id="sales-pad-qty-mobile"
                   ref={qtyInputRef}
@@ -4880,35 +4998,51 @@ const AuctionsPage = () => {
                   placeholder="0"
                   aria-label={`Quantity in bags, ${remaining} bags remaining in lot`}
                   className={cn(
-                    'h-14 w-full min-w-[7rem] max-w-[9.75rem] shrink-0 rounded-md border-2 border-primary/45 bg-muted/25 px-2 text-center text-[1.07em] font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                    'col-start-1 row-start-2 rounded-md border-2 border-primary/45 bg-muted/25 text-center font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                    isMdViewport
+                      ? 'h-14 w-full min-w-[7rem] max-w-[9.75rem] shrink-0 justify-self-center px-2 text-[1.07em]'
+                      : 'h-14 w-full min-w-0 justify-self-stretch px-1 text-[0.95em]',
                     activeNumpadField === 'qty' && 'border-primary ring-2 ring-primary'
                   )}
                 />
-                <span
-                  className="min-w-[2ch] shrink-0 text-right text-[1.15em] font-black tabular-nums leading-none text-foreground"
-                  title={`${remaining} bags remaining in lot`}
-                  aria-hidden
+                <div
+                  className={cn(
+                    'col-start-2 row-start-2 flex h-14 shrink-0 items-center self-end',
+                    isMdViewport ? 'gap-3' : 'gap-1'
+                  )}
                 >
-                  /{remaining}
-                </span>
-                {editingBidId && editBidDraft && editingEntry && (
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() =>
-                      setPendingDeleteBid({
-                        id: editingEntry.id,
-                        label: `${editingEntry.buyerName} (${editingEntry.buyerMark})`,
-                      })
-                    }
-                    disabled={completeLoading || !can('Auctions / Sales', 'Delete')}
-                    className="flex h-14 min-w-[4.25rem] shrink-0 items-center justify-center rounded-md border-2 border-destructive/40 bg-destructive/10 px-2 text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-40"
-                    aria-label="Delete bid"
-                    title="Delete bid"
+                  <span
+                    className={cn(
+                      'font-black tabular-nums leading-none text-foreground',
+                      isMdViewport ? 'min-w-[2ch] text-right text-[1.15em]' : 'text-[0.95em]'
+                    )}
+                    title={`${remaining} bags remaining in lot`}
+                    aria-hidden
                   >
-                    <Trash2 className="h-5 w-5" strokeWidth={2.25} />
-                  </button>
-                )}
+                    /{remaining}
+                  </span>
+                  {editingBidId && editBidDraft && editingEntry && (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        setPendingDeleteBid({
+                          id: editingEntry.id,
+                          label: `${editingEntry.buyerName} (${editingEntry.buyerMark})`,
+                        })
+                      }
+                      disabled={completeLoading || !can('Auctions / Sales', 'Delete')}
+                      className={cn(
+                        'flex shrink-0 items-center justify-center rounded-md border-2 border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-40',
+                        isMdViewport ? 'h-14 min-w-[4.25rem] px-2' : 'h-12 min-w-[2.5rem] px-1'
+                      )}
+                      aria-label="Delete bid"
+                      title="Delete bid"
+                    >
+                      <Trash2 className={cn(isMdViewport ? 'h-5 w-5' : 'h-[18px] w-[18px]')} strokeWidth={2.25} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
