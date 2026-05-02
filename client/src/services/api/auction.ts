@@ -190,6 +190,19 @@ export interface ListResultsParams {
   sort?: string;
 }
 
+/** Paginated list response with Spring `X-Total-Count` (Sales Pad progressive load). */
+export interface AuctionPagedResult<T> {
+  items: T[];
+  totalElements: number;
+}
+
+function readTotalCount(res: Response, fallback: number): number {
+  const raw = res.headers.get('X-Total-Count');
+  if (raw == null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function parseJsonOrThrow(res: Response, defaultMessage: string): Promise<never> {
   let message = defaultMessage;
   try {
@@ -230,6 +243,27 @@ export const auctionApi = {
     return res.json();
   },
 
+  /**
+   * One page of lots plus total count from `X-Total-Count`. Prefer stable `sort` (e.g. `id,asc`) when paging.
+   * Do not use with non-empty `status` until backend filters status in the query (see AuctionService).
+   */
+  async listLotsPage(
+    params: ListLotsParams = {},
+    init?: RequestInit
+  ): Promise<AuctionPagedResult<LotSummaryDTO>> {
+    const searchParams = new URLSearchParams();
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    if (params.sort) searchParams.set('sort', params.sort);
+    if (params.status) searchParams.set('status', params.status);
+    if (params.q) searchParams.set('q', params.q);
+    const res = await apiFetch(`${BASE}/lots?${searchParams.toString()}`, { method: 'GET', ...init });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load lots');
+    const items = (await res.json()) as LotSummaryDTO[];
+    const totalElements = readTotalCount(res, items.length);
+    return { items, totalElements };
+  },
+
   async getOrStartSession(lotId: string | number): Promise<AuctionSessionDTO> {
     const id = typeof lotId === 'string' ? lotId : String(lotId);
     const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session`, { method: 'GET' });
@@ -259,6 +293,22 @@ export const auctionApi = {
     const res = await apiFetch(`${BASE}/self-sale-units?${searchParams.toString()}`, { method: 'GET' });
     if (!res.ok) await parseJsonOrThrow(res, 'Failed to load self-sale units');
     return res.json();
+  },
+
+  async listSelfSaleUnitsPage(
+    params: ListLotsParams = {},
+    init?: RequestInit
+  ): Promise<AuctionPagedResult<AuctionSelfSaleUnitDTO>> {
+    const searchParams = new URLSearchParams();
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    if (params.sort) searchParams.set('sort', params.sort);
+    if (params.q) searchParams.set('q', params.q);
+    const res = await apiFetch(`${BASE}/self-sale-units?${searchParams.toString()}`, { method: 'GET', ...init });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load self-sale units');
+    const items = (await res.json()) as AuctionSelfSaleUnitDTO[];
+    const totalElements = readTotalCount(res, items.length);
+    return { items, totalElements };
   },
 
   async addBid(lotId: string | number, body: AuctionBidCreateRequest): Promise<AuctionSessionDTO> {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, Fragment, type CSSProperties } from 'react';
+import { useWindowVirtualizer, measureElement } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Gavel, Plus, Trash2,
@@ -63,6 +64,16 @@ import {
   type AuctionTouchLayoutConfig,
 } from '@/lib/auctionTouchLayoutConfig';
 import { auctionTouchLayoutApi } from '@/services/api/auctionTouchLayout';
+
+/** Progressive fetch page size for Sales Pad lot lists (stable sort: `id,asc`). */
+const AUCTION_LOTS_PAGE_SIZE = 90;
+
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+    (e instanceof Error && e.name === 'AbortError')
+  );
+}
 
 // ── Types ─────────────────────────────────────────────────
 interface LotInfo {
@@ -937,12 +948,21 @@ function AuctionsGridScrollPanel({
     window.addEventListener('pointercancel', onUp, { passive: true });
   }, [setScrollLeftFromPointerX]);
 
+  /** Desktop column is `h-auto`; `flex-1` here collapses scrollport height to 0. Mobile fixed dock needs `flex-1`. */
+  const growInFlexParent = !scrollPageIntoViewOnAutoScroll;
+
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col basis-0">
+    <div
+      className={cn(
+        'relative flex min-h-0 min-w-0 flex-col',
+        growInFlexParent ? 'flex-1 basis-0' : 'w-full flex-none'
+      )}
+    >
       <div
         ref={outerRef}
         className={cn(
-          'auctions-grid-scroll-panel lot-fields-x-scroll isolate min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5',
+          'auctions-grid-scroll-panel lot-fields-x-scroll isolate min-h-0 overflow-y-auto overflow-x-auto overscroll-contain touch-auto pb-5',
+          growInFlexParent && 'flex-1 basis-0',
           className
         )}
         style={{
@@ -1033,9 +1053,6 @@ const AuctionsPage = () => {
   const { canAccessModule, can } = usePermissions();
   const canUsePreset = trader?.preset_enabled !== false;
   const canView = canAccessModule('Auctions / Sales');
-  if (!canView) {
-    return <ForbiddenPage moduleName="Auctions" />;
-  }
   const [buyers, setBuyers] = useState<Contact[]>([]);
   /** Distinct scribble marks for current trader calendar day (from API); not tied to current lot only. */
   const [temporaryBuyerMarks, setTemporaryBuyerMarks] = useState<string[]>([]);
@@ -1082,6 +1099,16 @@ const AuctionsPage = () => {
   const [lotNavMode, setLotNavMode] = useState<'all' | 'vehicle' | 'seller' | 'buyer' | 'lot_number'>('all');
   const [lotNumberSearch, setLotNumberSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LotStatus | 'all'>('all');
+  const [lotsFetchingMore, setLotsFetchingMore] = useState(false);
+  const [regularLotsLoadComplete, setRegularLotsLoadComplete] = useState(false);
+  const [regularLotsTotal, setRegularLotsTotal] = useState<number | null>(null);
+  const [selfSaleFetchingMore, setSelfSaleFetchingMore] = useState(false);
+  const [selfSaleLotsLoadComplete, setSelfSaleLotsLoadComplete] = useState(false);
+  const [selfSaleLotsTotal, setSelfSaleLotsTotal] = useState<number | null>(null);
+  const loadLotsGenRef = useRef(0);
+  const loadSelfSaleGenRef = useRef(0);
+  const loadLotsAbortRef = useRef<AbortController | null>(null);
+  const loadSelfSaleAbortRef = useRef<AbortController | null>(null);
   const [showLotList, setShowLotList] = useState(false);
   /** Mobile/tablet: collapse gradient hero to maximize auction grid vertical space. */
   const [mobileAuctionHeroCollapsed, setMobileAuctionHeroCollapsed] = useState(true);
@@ -1394,40 +1421,166 @@ const AuctionsPage = () => {
   }, []);
 
   const loadLots = useCallback(async (opts?: { q?: string; status?: string }) => {
+    const myGen = ++loadLotsGenRef.current;
+    loadLotsAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadLotsAbortRef.current = ac;
+    const { signal } = ac;
+
     setLotsLoading(true);
+    setLotsFetchingMore(false);
+    setRegularLotsLoadComplete(false);
+    setRegularLotsTotal(null);
+    setAvailableLots([]);
+
+    const applyIfCurrent = (fn: () => void) => {
+      if (loadLotsGenRef.current === myGen) fn();
+    };
+
+    const merged = new Map<string, LotInfo>();
+    let lastArr: LotInfo[] = [];
+
     try {
-      const list = await auctionApi.listLots({
-        page: 0,
-        size: 500,
-        q: opts?.q || undefined,
-        status: opts?.status || undefined,
-      });
-      const lots: LotInfo[] = list.map(lotSummaryToLotInfo);
-      setAvailableLots(lots);
-      return lots;
+      let page = 0;
+      let reportedTotal = 0;
+      for (;;) {
+        const { items, totalElements } = await auctionApi.listLotsPage(
+          {
+            page,
+            size: AUCTION_LOTS_PAGE_SIZE,
+            sort: 'id,asc',
+            q: opts?.q || undefined,
+            status: opts?.status || undefined,
+          },
+          { signal }
+        );
+
+        if (signal.aborted || loadLotsGenRef.current !== myGen) {
+          return lastArr;
+        }
+
+        if (page === 0) {
+          reportedTotal = totalElements;
+          applyIfCurrent(() => setRegularLotsTotal(totalElements));
+        }
+
+        for (const dto of items) {
+          const info = lotSummaryToLotInfo(dto);
+          merged.set(info.lot_id, info);
+        }
+        lastArr = [...merged.values()].sort((a, b) => Number(a.lot_id) - Number(b.lot_id));
+        applyIfCurrent(() => setAvailableLots(lastArr));
+
+        if (page === 0) {
+          applyIfCurrent(() => setLotsLoading(false));
+        }
+
+        const noMore =
+          items.length === 0 ||
+          items.length < AUCTION_LOTS_PAGE_SIZE ||
+          merged.size >= reportedTotal;
+        if (noMore) break;
+
+        page += 1;
+        applyIfCurrent(() => setLotsFetchingMore(true));
+      }
+
+      applyIfCurrent(() => setRegularLotsLoadComplete(true));
+      return lastArr;
     } catch (e) {
+      if (isAbortError(e) || loadLotsGenRef.current !== myGen) {
+        return lastArr;
+      }
       toast.error(e instanceof Error ? e.message : 'Failed to load lots');
-      setAvailableLots([]);
+      applyIfCurrent(() => {
+        setAvailableLots([]);
+        setRegularLotsLoadComplete(true);
+      });
       return [];
     } finally {
-      setLotsLoading(false);
+      applyIfCurrent(() => {
+        setLotsLoading(false);
+        setLotsFetchingMore(false);
+      });
     }
   }, []);
 
   const loadSelfSaleLots = useCallback(async (opts?: { q?: string }) => {
+    const myGen = ++loadSelfSaleGenRef.current;
+    loadSelfSaleAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadSelfSaleAbortRef.current = ac;
+    const { signal } = ac;
+
+    setSelfSaleFetchingMore(false);
+    setSelfSaleLotsLoadComplete(false);
+    setSelfSaleLotsTotal(null);
+    setSelfSaleLots([]);
+
+    const applyIfCurrent = (fn: () => void) => {
+      if (loadSelfSaleGenRef.current === myGen) fn();
+    };
+
+    const merged = new Map<string, LotInfo>();
+    let lastArr: LotInfo[] = [];
+
     try {
-      const list = await auctionApi.listSelfSaleUnits({
-        page: 0,
-        size: 500,
-        q: opts?.q || undefined,
-      });
-      const lots: LotInfo[] = list.map(selfSaleUnitToLotInfo);
-      setSelfSaleLots(lots);
-      return lots;
+      let page = 0;
+      let reportedTotal = 0;
+      for (;;) {
+        const { items, totalElements } = await auctionApi.listSelfSaleUnitsPage(
+          {
+            page,
+            size: AUCTION_LOTS_PAGE_SIZE,
+            sort: 'id,asc',
+            q: opts?.q || undefined,
+          },
+          { signal }
+        );
+
+        if (signal.aborted || loadSelfSaleGenRef.current !== myGen) {
+          return lastArr;
+        }
+
+        if (page === 0) {
+          reportedTotal = totalElements;
+          applyIfCurrent(() => setSelfSaleLotsTotal(totalElements));
+        }
+
+        for (const dto of items) {
+          const info = selfSaleUnitToLotInfo(dto);
+          const key = info.selfSaleUnitId ?? `lot-${info.lot_id}`;
+          merged.set(String(key), info);
+        }
+        lastArr = [...merged.values()].sort(
+          (a, b) => Number(a.selfSaleUnitId ?? 0) - Number(b.selfSaleUnitId ?? 0)
+        );
+        applyIfCurrent(() => setSelfSaleLots(lastArr));
+
+        const noMore =
+          items.length === 0 ||
+          items.length < AUCTION_LOTS_PAGE_SIZE ||
+          merged.size >= reportedTotal;
+        if (noMore) break;
+
+        page += 1;
+        applyIfCurrent(() => setSelfSaleFetchingMore(true));
+      }
+
+      applyIfCurrent(() => setSelfSaleLotsLoadComplete(true));
+      return lastArr;
     } catch (e) {
+      if (isAbortError(e) || loadSelfSaleGenRef.current !== myGen) {
+        return lastArr;
+      }
       toast.error(e instanceof Error ? e.message : 'Failed to load self-sale lots');
-      setSelfSaleLots([]);
+      applyIfCurrent(() => {
+        setSelfSaleLots([]);
+        setSelfSaleLotsLoadComplete(true);
+      });
       return [];
+    } finally {
+      applyIfCurrent(() => setSelfSaleFetchingMore(false));
     }
   }, []);
 
@@ -1442,6 +1595,7 @@ const AuctionsPage = () => {
 
   // Load buyers, lots, and preset settings from API
   useEffect(() => {
+    if (!canView) return;
     contactApi.list({ scope: 'participants' }).then(setBuyers);
     loadTemporaryBuyerMarks();
     loadLots();
@@ -1460,7 +1614,7 @@ const AuctionsPage = () => {
       .catch(() => {
         setPresetOptions([{ label: '0', value: 0 }]);
       });
-  }, [loadTemporaryBuyerMarks, loadLots, loadSelfSaleLots]);
+  }, [canView, loadTemporaryBuyerMarks, loadLots, loadSelfSaleLots]);
 
   useEffect(() => {
     if (canUsePreset) return;
@@ -1473,9 +1627,12 @@ const AuctionsPage = () => {
     if (draftRestored.current || availableLots.length === 0) return;
     const draft = loadDraft();
     if (!draft || !draft.selectedLotId) return;
-    draftRestored.current = true;
     const lot = availableLots.find(l => l.lot_id === draft.selectedLotId);
-    if (!lot) return;
+    if (!lot) {
+      if (!regularLotsLoadComplete) return;
+      return;
+    }
+    draftRestored.current = true;
     setSelectedLot(lot);
     setShowLotSelector(false);
     setRate(draft.rate || '');
@@ -1495,7 +1652,7 @@ const AuctionsPage = () => {
       .catch(() => { /* entries stay empty from draft if API fails */ })
       .finally(() => setSessionLoading(false));
     toast.info('Draft restored from previous session');
-  }, [availableLots, loadTemporaryBuyerMarks]);
+  }, [availableLots, loadTemporaryBuyerMarks, regularLotsLoadComplete]);
 
   // ── Auto-save draft on state change ─────────────────────
   useEffect(() => {
@@ -1581,6 +1738,44 @@ const AuctionsPage = () => {
     });
     return map;
   }, [filteredLots]);
+
+  const isLotSelectorGroupedNav =
+    lotNavMode === 'vehicle' ||
+    lotNavMode === 'seller' ||
+    (lotNavMode === 'buyer' && statusFilter !== 'self_sale');
+
+  const flatLotsForVirtual = useMemo(() => {
+    if (!showLotSelector || isLotSelectorGroupedNav) return [];
+    return filteredLots;
+  }, [showLotSelector, isLotSelectorGroupedNav, filteredLots]);
+
+  const lotRowVirtualizer = useWindowVirtualizer({
+    count: flatLotsForVirtual.length,
+    estimateSize: () => 96,
+    overscan: 8,
+    measureElement,
+    getItemKey: index => getLotRenderKey(flatLotsForVirtual[index]!),
+    enabled: flatLotsForVirtual.length > 0,
+  });
+
+  const regularLotsCountLabel = useMemo(() => {
+    if (regularLotsTotal != null && !regularLotsLoadComplete) {
+      return `${availableLots.length} / ${regularLotsTotal}`;
+    }
+    return String(availableLots.length);
+  }, [regularLotsTotal, regularLotsLoadComplete, availableLots.length]);
+
+  const selfSaleLotsCountLabel = useMemo(() => {
+    if (selfSaleLotsTotal != null && !selfSaleLotsLoadComplete) {
+      return `${selfSaleLots.length} / ${selfSaleLotsTotal}`;
+    }
+    return String(selfSaleLots.length);
+  }, [selfSaleLotsTotal, selfSaleLotsLoadComplete, selfSaleLots.length]);
+
+  const selectorLotsCountLabel = useMemo(
+    () => (statusFilter === 'self_sale' ? selfSaleLotsCountLabel : regularLotsCountLabel),
+    [statusFilter, selfSaleLotsCountLabel, regularLotsCountLabel]
+  );
 
   // Row 1: Contacts from contact module — filter by scribble pad search (name/mark/phone)
   const filteredContacts = useMemo(() => {
@@ -2489,7 +2684,8 @@ const AuctionsPage = () => {
         completedAt: completedAuction.completedAt,
         entries: completedAuction.entries,
       }), { mode: "system" });
-      ok ? toast.success('Auction completion print opened') : toast.error('Printer not connected.');
+      if (ok) toast.success('Auction completion print opened');
+      else toast.error('Printer not connected.');
     })();
   }, [showPrint, completedAuction]);
 
@@ -2903,6 +3099,10 @@ const AuctionsPage = () => {
     loadSelfSaleLots();
   };
 
+  if (!canView) {
+    return <ForbiddenPage moduleName="Auctions" />;
+  }
+
   // ═══ AUCTION PRINT PREVIEW ═══
   if (showPrint && completedAuction) {
     const totalQty = completedAuction.entries.reduce((sum, e) => sum + (Number(e.quantity) || 0), 0);
@@ -2988,7 +3188,8 @@ const AuctionsPage = () => {
                   completedAt: completedAuction.completedAt,
                   entries: completedAuction.entries,
                 }), { mode: "system" });
-                ok ? toast.success('Auction details sent to printer!') : toast.error('Printer not connected.');
+                if (ok) toast.success('Auction details sent to printer!');
+                else toast.error('Printer not connected.');
               }}
               className="flex-1 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-violet-500 text-white font-bold shadow-lg"
             >
@@ -3077,7 +3278,7 @@ const AuctionsPage = () => {
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                   <Gavel className="w-5 h-5 text-blue-500" /> Sales Pad — Lot Selection
                 </h2>
-                <p className="text-sm text-muted-foreground">{selectorLots.length} lots available · Select a lot to begin auction</p>
+                <p className="text-sm text-muted-foreground">{selectorLotsCountLabel} lots available · Select a lot to begin auction</p>
               </div>
               <div className="flex gap-3">
                 <div className="relative w-56">
@@ -3103,7 +3304,7 @@ const AuctionsPage = () => {
             <div className="grid grid-cols-4 gap-4">
               <div className="glass-card rounded-2xl p-4 border-l-4 border-l-blue-500">
                 <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Lots</p>
-                <p className="text-2xl font-black text-foreground">{selectorLots.length}</p>
+                <p className="text-2xl font-black text-foreground tabular-nums">{selectorLotsCountLabel}</p>
               </div>
               <div className="glass-card rounded-2xl p-4 border-l-4 border-l-emerald-500">
                 <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Bags</p>
@@ -3129,18 +3330,30 @@ const AuctionsPage = () => {
                 statusFilter === 'all'
                   ? 'bg-foreground text-background shadow-md'
                   : 'bg-muted/40 text-muted-foreground')}>
-              All ({availableLots.length})
+              All ({regularLotsCountLabel})
             </button>
-            {(Object.entries(STATUS_CONFIG) as [LotStatus, typeof STATUS_CONFIG['available']][]).map(([key, cfg]) => (
+            {(Object.entries(STATUS_CONFIG) as [LotStatus, typeof STATUS_CONFIG['available']][]).map(([key, cfg]) => {
+              const countLabel =
+                key === 'self_sale'
+                  ? selfSaleLotsLoadComplete
+                    ? String(statusCounts[key])
+                    : selfSaleLotsTotal != null
+                      ? `${selfSaleLots.length} / ${selfSaleLotsTotal}`
+                      : '—'
+                  : regularLotsLoadComplete
+                    ? String(statusCounts[key])
+                    : '—';
+              return (
               <button key={key} onClick={() => setStatusFilter(key)}
                 className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all",
                   statusFilter === key
                     ? `${cfg.bg} ${cfg.text} shadow-md ring-1 ring-current/20`
                     : 'bg-muted/40 text-muted-foreground')}>
                 <span className={cn("w-2 h-2 rounded-full", cfg.dot)} />
-                {cfg.label} ({statusCounts[key]})
+                {cfg.label} ({countLabel})
               </button>
-            ))}
+            );
+            })}
           </div>
         </div>
 
@@ -3171,6 +3384,10 @@ const AuctionsPage = () => {
           {lotsLoading ? (
             <div className="glass-card rounded-2xl p-8 text-center">
               <p className="text-sm text-muted-foreground font-medium">Loading lots…</p>
+            </div>
+          ) : statusFilter === 'self_sale' && !selfSaleLotsLoadComplete && selfSaleLots.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <p className="text-sm text-muted-foreground font-medium">Loading self-sale lots…</p>
             </div>
           ) : selectorLots.length === 0 ? (
             <div className="glass-card rounded-2xl p-8 text-center">
@@ -3298,9 +3515,28 @@ const AuctionsPage = () => {
               });
             })()
           ) : (
-            filteredLots.map(lot => (
-              <LotRow key={getLotRenderKey(lot)} lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
-            ))
+            <>
+              <div className="relative w-full" style={{ height: lotRowVirtualizer.getTotalSize() }}>
+                {lotRowVirtualizer.getVirtualItems().map(vi => {
+                  const lot = flatLotsForVirtual[vi.index];
+                  if (!lot) return null;
+                  return (
+                    <div
+                      key={vi.key}
+                      data-index={vi.index}
+                      ref={lotRowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full pb-2"
+                      style={{ transform: `translateY(${vi.start}px)` }}
+                    >
+                      <LotRow lot={lot} onSelect={selectLot} statusFilter={statusFilter} />
+                    </div>
+                  );
+                })}
+              </div>
+              {(lotsFetchingMore || selfSaleFetchingMore) && (
+                <p className="py-2 text-center text-xs text-muted-foreground">Loading more lots…</p>
+              )}
+            </>
           )}
         </div>
         {isDesktop && <BottomNav />}
@@ -3780,7 +4016,7 @@ const AuctionsPage = () => {
                       }}
                       onFocus={() => setActiveNumpadField('mark')}
                       placeholder="Or type mark / name to search…"
-                      className="h-11 rounded-xl text-sm sm:text-base font-medium bg-muted/20 border-violet-400/20"
+                      className="h-11 rounded-xl text-sm sm:text-base font-medium bg-muted/20 border-violet-400/20 focus-visible:ring-0 focus-visible:ring-offset-0"
                     />
                   </div>
                 ) : null}
@@ -3942,9 +4178,9 @@ const AuctionsPage = () => {
               </div>
 
               <div className={cn("space-y-2", !isDesktop && "hidden")}>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Rate (₹)</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block text-center w-full">Rate (₹)</label>
                     <Input
                       ref={rateInputRef}
                       type="number"
@@ -3970,12 +4206,12 @@ const AuctionsPage = () => {
                       inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
                       placeholder="0"
                       className={cn(
-                        "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
-                        activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/50"
+                        "h-14 w-full max-w-[8.75rem] min-w-[7rem] shrink-0 rounded-xl px-2 text-center font-bold text-lg bg-muted/20 border-2 border-primary/25 focus-visible:ring-0 focus-visible:ring-offset-0",
+                        activeNumpadField === 'rate' && "ring-2 ring-primary border-primary/55"
                       )} />
                   </div>
-                  <div>
-                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block">Qty (Bags)</label>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <label className="text-[9px] font-semibold text-muted-foreground uppercase mb-0.5 block text-center w-full">Qty (Bags)</label>
                     <Input
                       ref={qtyInputRef}
                       type="number"
@@ -3997,8 +4233,8 @@ const AuctionsPage = () => {
                       inputMode={isTouchLayout && !mobileKeyboardEnabled ? 'none' : 'numeric'}
                       placeholder="0"
                       className={cn(
-                        "h-11 rounded-xl text-center font-bold text-lg bg-muted/20 border-primary/20",
-                        activeNumpadField === 'qty' && "ring-2 ring-primary border-primary/50"
+                        "h-14 w-full max-w-[8.75rem] min-w-[7rem] shrink-0 rounded-xl px-2 text-center font-bold text-lg bg-muted/20 border-2 border-primary/25 focus-visible:ring-0 focus-visible:ring-offset-0",
+                        activeNumpadField === 'qty' && "ring-2 ring-primary border-primary/55"
                       )} />
                   </div>
                 </div>
@@ -4536,9 +4772,9 @@ const AuctionsPage = () => {
               </div>
             </div>
           </div>
-          <div className="flex gap-1.5 mb-0.5 min-w-0">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="sales-pad-rate-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block truncate text-center leading-tight">
+          <div className="mb-0.5 flex min-w-0 items-end gap-4">
+            <div className="flex min-w-0 flex-1 flex-col items-center gap-0.5">
+              <label htmlFor="sales-pad-rate-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block w-full truncate text-center leading-tight">
                 Rate ₹
               </label>
               <Input
@@ -4568,13 +4804,13 @@ const AuctionsPage = () => {
                 placeholder="0"
                 aria-label="Bid rate in rupees"
                 className={cn(
-                  'h-11 min-h-[44px] rounded-md border-2 border-primary/45 bg-muted/25 text-center text-[1.07em] font-bold min-w-0 py-1 leading-none',
-                  activeNumpadField === 'rate' && 'border-primary ring-2 ring-primary shadow-[0_0_0_2px_hsl(var(--primary))]'
+                  'h-14 w-full min-w-[7rem] max-w-[9.75rem] shrink-0 rounded-md border-2 border-primary/45 bg-muted/25 px-2 text-center text-[1.07em] font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  activeNumpadField === 'rate' && 'border-primary ring-2 ring-primary'
                 )}
               />
             </div>
-            <div className="min-w-0 flex-[1.15]">
-              <label htmlFor="sales-pad-mark-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block truncate text-center leading-tight">
+            <div className="flex min-w-0 flex-[1.15] flex-col items-center gap-0.5">
+              <label htmlFor="sales-pad-mark-mobile" className="text-[0.93em] font-semibold text-muted-foreground uppercase tracking-wide mb-0 block w-full truncate text-center leading-tight">
                 Mark
               </label>
               <Input
@@ -4611,20 +4847,16 @@ const AuctionsPage = () => {
                 placeholder="Search…"
                 aria-label="Search mark or name"
                 className={cn(
-                  'h-11 min-h-[44px] rounded-md border-2 border-violet-500/45 bg-muted/25 px-2 py-1 text-center text-[1.07em] font-medium min-w-0 leading-none',
-                  activeNumpadField === 'mark' && 'border-violet-600 ring-2 ring-violet-500/60'
+                  'h-14 w-full min-w-[8rem] max-w-[12.5rem] shrink-0 rounded-md border-2 border-violet-500/45 bg-muted/25 px-2 py-1 text-center text-[1.07em] font-medium leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                  activeNumpadField === 'mark' && 'border-violet-600 ring-2 ring-violet-500/55'
                 )}
               />
             </div>
-            <div className="min-w-0 flex-1">
-              <label
-                htmlFor="sales-pad-qty-mobile"
-                className="mb-0 block truncate text-center text-[0.93em] font-semibold uppercase tracking-wide text-muted-foreground leading-tight"
-                title={`Quantity · ${remaining} bags remaining in lot`}
-              >
-                QTY / <span className="font-black tabular-nums text-foreground">{remaining}</span>
-              </label>
-              <div className="flex min-w-0 gap-1">
+            <div className="flex min-w-0 flex-[1.35] flex-col items-center gap-0.5">
+              <span className="mb-0 block w-full truncate text-center text-[0.93em] font-semibold uppercase tracking-wide text-muted-foreground leading-tight">
+                Qty
+              </span>
+              <div className="flex w-full min-w-0 items-center justify-center gap-3">
                 <Input
                   id="sales-pad-qty-mobile"
                   ref={qtyInputRef}
@@ -4648,10 +4880,17 @@ const AuctionsPage = () => {
                   placeholder="0"
                   aria-label={`Quantity in bags, ${remaining} bags remaining in lot`}
                   className={cn(
-                    'h-11 min-h-[44px] min-w-0 flex-1 rounded-md border-2 border-primary/45 bg-muted/25 text-center text-[1.07em] font-bold py-1 leading-none',
-                    activeNumpadField === 'qty' && 'border-primary ring-2 ring-primary shadow-[0_0_0_2px_hsl(var(--primary))]'
+                    'h-14 w-full min-w-[7rem] max-w-[9.75rem] shrink-0 rounded-md border-2 border-primary/45 bg-muted/25 px-2 text-center text-[1.07em] font-bold leading-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                    activeNumpadField === 'qty' && 'border-primary ring-2 ring-primary'
                   )}
                 />
+                <span
+                  className="min-w-[2ch] shrink-0 text-right text-[1.15em] font-black tabular-nums leading-none text-foreground"
+                  title={`${remaining} bags remaining in lot`}
+                  aria-hidden
+                >
+                  /{remaining}
+                </span>
                 {editingBidId && editBidDraft && editingEntry && (
                   <button
                     type="button"
@@ -4663,7 +4902,7 @@ const AuctionsPage = () => {
                       })
                     }
                     disabled={completeLoading || !can('Auctions / Sales', 'Delete')}
-                    className="flex h-11 min-h-[44px] w-11 shrink-0 items-center justify-center rounded-md border-2 border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-40"
+                    className="flex h-14 min-w-[4.25rem] shrink-0 items-center justify-center rounded-md border-2 border-destructive/40 bg-destructive/10 px-2 text-destructive hover:bg-destructive/20 disabled:pointer-events-none disabled:opacity-40"
                     aria-label="Delete bid"
                     title="Delete bid"
                   >
@@ -4794,7 +5033,7 @@ const AuctionsPage = () => {
                 </button>
               </div>
 
-              {/* ( ... ) / Self — delete while editing: trash next to QTY above */}
+              {/* ( ... ) / Self — delete while editing: trash beside qty row in dock */}
               <div
                 className={cn(
                   'grid gap-1',
