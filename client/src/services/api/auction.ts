@@ -274,12 +274,34 @@ export const auctionApi = {
     return res.json();
   },
 
+  async getCurrentSession(lotId: string | number): Promise<AuctionSessionDTO | null> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/lots/${encodeURIComponent(id)}/session/current`, { method: 'GET' });
+    if (res.status === 204) return null;
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Lot not found');
+      await parseJsonOrThrow(res, 'Failed to get current session');
+    }
+    return res.json();
+  },
+
   async getOrStartSelfSaleSession(lotId: string | number): Promise<AuctionSessionDTO> {
     const id = typeof lotId === 'string' ? lotId : String(lotId);
     const res = await apiFetch(`${BASE}/self-sale-units/${encodeURIComponent(id)}/session`, { method: 'GET' });
     if (!res.ok) {
       if (res.status === 404) throw new Error('Self-sale unit not found');
       await parseJsonOrThrow(res, 'Failed to get self-sale session');
+    }
+    return res.json();
+  },
+
+  async getCurrentSelfSaleSession(lotId: string | number): Promise<AuctionSessionDTO | null> {
+    const id = typeof lotId === 'string' ? lotId : String(lotId);
+    const res = await apiFetch(`${BASE}/self-sale-units/${encodeURIComponent(id)}/session/current`, { method: 'GET' });
+    if (res.status === 204) return null;
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('Self-sale unit not found');
+      await parseJsonOrThrow(res, 'Failed to get current self-sale session');
     }
     return res.json();
   },
