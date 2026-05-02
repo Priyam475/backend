@@ -38,6 +38,55 @@ function normalizeOptions(options?: DocumentPrintOptions): Required<DocumentPrin
   };
 }
 
+/**
+ * On-screen preview only: paper width + each `.pg` = full ISO portrait sheet height
+ * so short bills show empty white below content (not cut off). Print ignores @media screen.
+ */
+function screenPreviewSheetCSS(pageSize: 'A4' | 'A5'): string {
+  const sheetW = pageSize === 'A5' ? '148mm' : '210mm';
+  const sheetH = pageSize === 'A5' ? '210mm' : '297mm';
+  return `
+    @media screen {
+      html { background: #e8e8ea; }
+      body {
+        max-width: ${sheetW};
+        width: 100%;
+        margin: 12px auto;
+        padding-bottom: 24px;
+        background: transparent !important;
+        box-shadow: none;
+      }
+      /* Full blank sheet per printed page (GST / Non-GST .pg wrapper) */
+      .pg {
+        min-height: ${sheetH};
+        background: #fff;
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
+        margin-bottom: 20px;
+        box-sizing: border-box;
+      }
+      .gst-bill-print-copy,
+      .ng-bill-print-copy {
+        margin-bottom: 28px;
+      }
+      .gst-bill-print-copy:last-child,
+      .ng-bill-print-copy:last-child {
+        margin-bottom: 0;
+      }
+      /* Empty-state message still looks like one sheet */
+      body > p:only-child {
+        min-height: ${sheetH};
+        max-width: ${sheetW};
+        margin-left: auto;
+        margin-right: auto;
+        padding: 24px;
+        background: #fff;
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
+        box-sizing: border-box;
+      }
+    }
+  `;
+}
+
 // ── Sales Bill (BillingPage) — GST layout + firm header ─────
 export interface BillPrintFirmInfo {
   businessName: string;
@@ -404,6 +453,8 @@ function buildGstBillCSS(pageSize: 'A4' | 'A5'): string {
       color: #555;
       padding: 2px 0;
     }
+
+    ${screenPreviewSheetCSS(pageSize)}
 
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -817,6 +868,8 @@ function buildNonGstBillCSS(pageSize: 'A4' | 'A5'): string {
       font-size: 8px;
       color: #555;
     }
+
+    ${screenPreviewSheetCSS(pageSize)}
 
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

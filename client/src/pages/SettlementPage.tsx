@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle, Check, X,
+  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle, Check, X, LayoutGrid, List,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -61,6 +61,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
+const SETTLEMENT_SAVED_PATTI_LAYOUT_STORAGE_KEY = 'merco.settlement.savedPatti.layout';
 
 /**
  * Settlement button language:
@@ -265,6 +267,8 @@ interface SavedArrivalSummaryRow {
   bids: number;
   weighed: number;
   representativePattiId: number | null;
+  /** Sum over pattis in this vehicle group: max(Σ rate-cluster qty, seller lots) per patti. */
+  totalBags: number;
 }
 
 type InProgressSettlementDraft = {
@@ -337,6 +341,100 @@ function uniqueArrivalSellerCount(sellerIds: string[] | undefined): number {
     if (s) set.add(s);
   }
   return set.size;
+}
+
+function totalBagsFromPattiRateClusters(p: PattiDTO): number {
+  let s = 0;
+  for (const c of p.rateClusters ?? []) {
+    const q = (c as { totalQuantity?: unknown }).totalQuantity;
+    const n = typeof q === 'number' && !Number.isNaN(q) ? q : Number(q) || 0;
+    s += n;
+  }
+  return Math.round(s);
+}
+
+/** Vehicle-group saved patti card (same grouping as table): bags + weighed bar + aggregated sellers. */
+function SettlementSavedPattiVehicleCard({
+  row,
+  onOpen,
+}: {
+  row: SavedArrivalSummaryRow;
+  onOpen: () => void;
+}) {
+  const total = Math.round(Math.max(row.totalBags ?? 0, row.lots));
+  const weighedPct = total > 0 ? (Math.min(Math.max(0, row.weighed), total) / total) * 100 : 0;
+  const nSellers = uniqueArrivalSellerCount(row.sellerIds);
+  const canOpen = row.representativePattiId != null;
+
+  return (
+    <button
+      type="button"
+      disabled={!canOpen}
+      onClick={onOpen}
+      className={cn(
+        'w-full rounded-2xl border border-border/50 bg-white p-4 text-left shadow-sm transition-colors dark:bg-card touch-manipulation',
+        canOpen
+          ? 'hover:bg-muted/25 active:scale-[0.99]'
+          : 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+              {row.vehicleNumber}
+            </span>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground tabular-nums">
+              {nSellers} seller{nSellers === 1 ? '' : 's'}
+            </span>
+          </div>
+          <p className="mt-2 line-clamp-2 text-sm font-bold text-foreground">{row.sellerNames || '-'}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{row.fromLocation}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-lg font-bold tabular-nums leading-none text-foreground">{total}</p>
+          <p className="text-[11px] font-medium text-muted-foreground">Bags</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg bg-muted/40 px-1 py-2">
+          <div className="text-base font-bold tabular-nums text-foreground">{row.lots}</div>
+          <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Lots</div>
+        </div>
+        <div className="rounded-lg bg-muted/40 px-1 py-2">
+          <div className="text-base font-bold tabular-nums text-foreground">{row.bids}</div>
+          <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Bids</div>
+        </div>
+        <div className="rounded-lg bg-muted/40 px-1 py-2">
+          <div className="text-base font-bold tabular-nums text-foreground">{row.weighed}</div>
+          <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Weighed</div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex min-w-0 items-center gap-2 border-t border-border/30 pt-2">
+        <span className="shrink-0 text-xs font-semibold text-emerald-600 dark:text-emerald-400">Completed</span>
+        <div
+          className="relative h-8 min-h-[2rem] min-w-0 flex-1 overflow-hidden rounded-xl border-2 border-foreground/15 shadow-inner dark:border-white/20"
+          title={total > 0 ? `Weighed ${row.weighed} of ${total} bags` : 'Bag total unavailable'}
+          aria-label={total > 0 ? `Weighed ${row.weighed} of ${total} bags` : 'Weighing progress'}
+        >
+          <div className="absolute inset-0 bg-red-500" aria-hidden />
+          <div
+            className="absolute inset-y-0 left-0 bg-emerald-500 transition-[width] duration-300 ease-out"
+            style={{ width: `${weighedPct}%` }}
+            aria-hidden
+          />
+          <div className="relative flex h-full items-center justify-center px-2">
+            <span className="text-[11px] font-bold tabular-nums text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
+              {total > 0 ? `${row.weighed}/${total}` : '—'}
+            </span>
+          </div>
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{row.dateLabel}</span>
+      </div>
+    </button>
+  );
 }
 
 function InlineCalcTip({ label, lines }: { label: string; lines: string[] }) {
@@ -1921,6 +2019,14 @@ const SettlementPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [settlementMainTab, setSettlementMainTab] = useState<'arrival-summary' | 'create-settlements'>('arrival-summary');
   const [arrivalSummaryTab, setArrivalSummaryTab] = useState<'new-patti' | 'in-progress-patti' | 'saved-patti'>('new-patti');
+  const [savedPattiLayout, setSavedPattiLayout] = useState<'grid' | 'list'>(() => {
+    try {
+      const v = localStorage.getItem(SETTLEMENT_SAVED_PATTI_LAYOUT_STORAGE_KEY);
+      return v === 'grid' || v === 'list' ? v : 'list';
+    } catch {
+      return 'list';
+    }
+  });
   const [inProgressPattiDtos, setInProgressPattiDtos] = useState<PattiDTO[]>([]);
   /** Drives Sales Patti header subtitle: new vs draft vs completed edit. */
   const [settlementFormMode, setSettlementFormMode] = useState<'idle' | 'new' | 'in-progress' | 'saved'>('idle');
@@ -2055,6 +2161,13 @@ const SettlementPage = () => {
     };
     void loadPrintSetting();
   }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTLEMENT_SAVED_PATTI_LAYOUT_STORAGE_KEY, savedPattiLayout);
+    } catch {
+      /* ignore */
+    }
+  }, [savedPattiLayout]);
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'visible') setAmountSummaryNonce(n => n + 1);
@@ -3700,9 +3813,12 @@ const SettlementPage = () => {
   const filteredSavedPattis = useMemo(() => {
     if (!searchQuery) return savedPattis;
     const q = searchQuery.toLowerCase();
-    return savedPattis.filter(p =>
-      (p.pattiId ?? '').toLowerCase().includes(q) ||
-      (p.sellerName ?? '').toLowerCase().includes(q)
+    return savedPattis.filter(
+      p =>
+        (p.pattiId ?? '').toLowerCase().includes(q) ||
+        (p.sellerName ?? '').toLowerCase().includes(q) ||
+        (p.vehicleNumber ?? '').toLowerCase().includes(q) ||
+        (p.fromLocation ?? '').toLowerCase().includes(q),
     );
   }, [savedPattis, searchQuery]);
 
@@ -3832,6 +3948,7 @@ const SettlementPage = () => {
       const lots = seller ? getSellerLots(seller) : 0;
       const bids = seller ? getSellerBids(seller) : 0;
       const weighed = seller ? getSellerWeighed(seller) : 0;
+      const entryBags = Math.max(totalBagsFromPattiRateClusters(p), lots);
       if (!existing) {
         groups.set(key, {
           key,
@@ -3844,6 +3961,7 @@ const SettlementPage = () => {
           lots,
           bids,
           weighed,
+          totalBags: entryBags,
           representativePattiId: p.id ?? null,
           _fallbackName: (p.sellerName || '').trim() || undefined,
         });
@@ -3855,6 +3973,7 @@ const SettlementPage = () => {
         existing.bids += bids;
         existing.weighed += weighed;
       }
+      existing.totalBags += entryBags;
       if (existing.serialNo == null && serialNo != null) existing.serialNo = serialNo;
       if (existing.representativePattiId == null && p.id != null) existing.representativePattiId = p.id;
       if (!existing._fallbackName && (p.sellerName || '').trim()) {
@@ -5455,6 +5574,25 @@ const SettlementPage = () => {
       );
     }
 
+    /** Saved patti: seller-level cards (Summary-style), desktop grid mode. */
+    if (tab === 'saved-patti' && savedPattiLayout === 'grid' && savedPattiArrivalRows.length > 0) {
+      return (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {savedPattiArrivalRows.map(row => (
+            <SettlementSavedPattiVehicleCard
+              key={row.key}
+              row={row}
+              onOpen={() => {
+                if (row.representativePattiId != null) {
+                  void openPattiForEdit(row.representativePattiId, row.sellerIds, { formContext: 'saved' });
+                }
+              }}
+            />
+          ))}
+        </div>
+      );
+    }
+
     if (tab === 'in-progress-patti') {
       const q = searchQuery.trim().toLowerCase();
       const rows = inProgressPattiDrafts
@@ -5481,74 +5619,118 @@ const SettlementPage = () => {
         );
       }
       return (
-        <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
-          <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
-            <table className="w-full min-w-[1060px] border-separate border-spacing-0 text-sm">
-              <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
-                <tr>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Total Sellers</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
-                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
-                  <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.key}
-                    onClick={() => void openInProgressDraft(row)}
-                    className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
-                  >
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.vehicleNumber || '-'}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center tabular-nums text-foreground">
-                      {uniqueArrivalSellerCount(row.sellerIds)}
-                    </td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{shortAddressLabel(row.fromLocation)}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo || '-'}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots ?? 0}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids ?? 0}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed ?? 0}</td>
-                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">In Progress</td>
-                    <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">
-                      {row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-'}
-                    </td>
+        <>
+          <div className="glass-card hidden rounded-2xl border border-border/50 overflow-hidden lg:block">
+            <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+              <table className="w-full min-w-[1060px] border-separate border-spacing-0 text-sm">
+                <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                  <tr>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Total Sellers</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
+                    <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Updated</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map(row => (
+                    <tr
+                      key={row.key}
+                      onClick={() => void openInProgressDraft(row)}
+                      className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
+                    >
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.vehicleNumber || '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center tabular-nums text-foreground">
+                        {uniqueArrivalSellerCount(row.sellerIds)}
+                      </td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{shortAddressLabel(row.fromLocation)}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo || '-'}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots ?? 0}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids ?? 0}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed ?? 0}</td>
+                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">In Progress</td>
+                      <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">
+                        {row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+          <div className="space-y-3 lg:hidden">
+            {rows.map(row => (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => void openInProgressDraft(row)}
+                className="w-full rounded-2xl border border-border/50 bg-white p-4 text-left shadow-sm transition-colors hover:bg-muted/25 active:scale-[0.99] dark:bg-card touch-manipulation"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+                    {row.vehicleNumber || '-'}
+                  </span>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                    In progress
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-bold text-foreground">{row.sellerNames || '-'}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {row.fromLocation || '-'} · SL {row.serialNo || '-'} · {uniqueArrivalSellerCount(row.sellerIds)} seller
+                  {uniqueArrivalSellerCount(row.sellerIds) === 1 ? '' : 's'}
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.lots ?? 0}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Lots</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.bids ?? 0}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Bids</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.weighed ?? 0}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Weighed</div>
+                  </div>
+                </div>
+                <p className="mt-3 border-t border-border/30 pt-2 text-[11px] text-muted-foreground">
+                  Updated {row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '—'}
+                </p>
+              </button>
+            ))}
+          </div>
+        </>
       );
     }
 
-    return (
-      <div className="glass-card rounded-2xl border border-border/50 overflow-hidden">
-        <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
-          <table className="w-full min-w-[1060px] border-separate border-spacing-0 text-sm">
-            <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
-              <tr>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Total Sellers</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
-                <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
-                <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tab === 'new-patti'
-                ? newPattiArrivalRows.map((row) => (
+    if (tab === 'new-patti') {
+      return (
+        <>
+          <div className="glass-card hidden rounded-2xl border border-border/50 overflow-hidden lg:block">
+            <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+              <table className="w-full min-w-[1060px] border-separate border-spacing-0 text-sm">
+                <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                  <tr>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Total Sellers</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
+                    <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
+                    <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {newPattiArrivalRows.map(row => (
                     <tr
                       key={row.key}
                       onClick={() => generatePatti(row.representativeSeller, { arrivalSellerIds: row.sellerIds })}
@@ -5582,49 +5764,128 @@ const SettlementPage = () => {
                       <td className="border-t border-r border-border/30 px-3 py-2 text-center text-amber-600 dark:text-amber-400 font-medium">New Patti</td>
                       <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
                     </tr>
-                  ))
-                : savedPattiArrivalRows.map((row) => (
-                    <tr
-                      key={row.key}
-                      onClick={() =>
-                        row.representativePattiId != null &&
-                        openPattiForEdit(row.representativePattiId, row.sellerIds, { formContext: 'saved' })
-                      }
-                      className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
-                    >
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
-                        <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
-                          {row.vehicleNumber}
-                        </span>
-                      </td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center tabular-nums text-foreground">
-                        {uniqueArrivalSellerCount(row.sellerIds)}
-                      </td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-block max-w-[10ch] truncate align-bottom">
-                              {shortAddressLabel(row.fromLocation)}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={8} className="max-w-[260px] text-xs">
-                            {row.fromLocation || '-'}
-                          </TooltipContent>
-                        </Tooltip>
-                      </td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots}</td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids}</td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed}</td>
-                      <td className="border-t border-r border-border/30 px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
-                      <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
-                    </tr>
                   ))}
-            </tbody>
-          </table>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {newPattiArrivalRows.map(row => (
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => generatePatti(row.representativeSeller, { arrivalSellerIds: row.sellerIds })}
+                className="w-full rounded-2xl border border-border/50 bg-white p-4 text-left shadow-sm transition-colors hover:bg-muted/25 active:scale-[0.99] dark:bg-card touch-manipulation"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+                    {row.vehicleNumber}
+                  </span>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">New patti</span>
+                </div>
+                <p className="mt-2 text-sm font-bold text-foreground">{row.sellerNames || '-'}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {row.fromLocation || '-'} · SL {row.serialNo ?? '-'} · {uniqueArrivalSellerCount(row.sellerIds)} seller
+                  {uniqueArrivalSellerCount(row.sellerIds) === 1 ? '' : 's'}
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.lots}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Lots</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.bids}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Bids</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-1 py-2">
+                    <div className="text-base font-bold tabular-nums text-foreground">{row.weighed}</div>
+                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Weighed</div>
+                  </div>
+                </div>
+                <p className="mt-3 border-t border-border/30 pt-2 text-[11px] text-muted-foreground tabular-nums">{row.dateLabel}</p>
+              </button>
+            ))}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <div className="glass-card hidden rounded-2xl border border-border/50 overflow-hidden lg:block">
+          <div className="overflow-x-auto rounded-xl border border-border/50 bg-background/40 shadow-sm">
+            <table className="w-full min-w-[1060px] border-separate border-spacing-0 text-sm">
+              <thead className={cn(SETTLEMENT_LOTS_TABLE_HEADER_GRADIENT, 'shadow-md')}>
+                <tr>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Vehicle Number</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Seller</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Total Sellers</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">From</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">SL No</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Lots</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Bids</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Weighed</th>
+                  <th className="whitespace-nowrap border-b border-r border-white/25 px-3 py-2 text-center font-semibold text-white">Status</th>
+                  <th className="whitespace-nowrap border-b border-white/25 px-3 py-2 text-center font-semibold text-white">Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savedPattiArrivalRows.map(row => (
+                  <tr
+                    key={row.key}
+                    onClick={() =>
+                      row.representativePattiId != null &&
+                      void openPattiForEdit(row.representativePattiId, row.sellerIds, { formContext: 'saved' })
+                    }
+                    className="border-t border-border/30 hover:bg-muted/20 cursor-pointer"
+                  >
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                      <span className="inline-flex items-center rounded-full bg-[#eef0ff] px-2 py-0.5 text-[10px] font-bold text-[#6075FF] dark:bg-[#6075FF]/20">
+                        {row.vehicleNumber}
+                      </span>
+                    </td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.sellerNames || '-'}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center tabular-nums text-foreground">
+                      {uniqueArrivalSellerCount(row.sellerIds)}
+                    </td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-block max-w-[10ch] truncate align-bottom">
+                            {shortAddressLabel(row.fromLocation)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={8} className="max-w-[260px] text-xs">
+                          {row.fromLocation || '-'}
+                        </TooltipContent>
+                      </Tooltip>
+                    </td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.serialNo ?? '-'}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.lots}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.bids}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-foreground">{row.weighed}</td>
+                    <td className="border-t border-r border-border/30 px-3 py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">Completed Patti</td>
+                    <td className="border-t border-border/30 px-3 py-2 text-center text-foreground">{row.dateLabel}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+        <div className="space-y-3 lg:hidden">
+          {savedPattiArrivalRows.map(row => (
+            <SettlementSavedPattiVehicleCard
+              key={row.key}
+              row={row}
+              onOpen={() => {
+                if (row.representativePattiId != null) {
+                  void openPattiForEdit(row.representativePattiId, row.sellerIds, { formContext: 'saved' });
+                }
+              }}
+            />
+          ))}
+        </div>
+      </>
     );
   };
 
@@ -8419,34 +8680,72 @@ const SettlementPage = () => {
       <div className="mt-4 space-y-4 px-4 lg:px-8">
         {settlementMainTab === 'arrival-summary' ? (
           <>
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Arrival summary">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={arrivalSummaryTab === 'new-patti'}
-                onClick={() => setArrivalSummaryTab('new-patti')}
-                className={settlementToggleTabBtn(arrivalSummaryTab === 'new-patti')}
-              >
-                Create New Patti{tabHint('Alt X')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={arrivalSummaryTab === 'in-progress-patti'}
-                onClick={() => setArrivalSummaryTab('in-progress-patti')}
-                className={settlementToggleTabBtn(arrivalSummaryTab === 'in-progress-patti')}
-              >
-                Patti In Progress{tabHint('Alt Y')}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={arrivalSummaryTab === 'saved-patti'}
-                onClick={() => setArrivalSummaryTab('saved-patti')}
-                className={settlementToggleTabBtn(arrivalSummaryTab === 'saved-patti')}
-              >
-                Saved Patti{tabHint('Alt Z')}
-              </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-wrap gap-2" role="tablist" aria-label="Arrival summary">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={arrivalSummaryTab === 'new-patti'}
+                  onClick={() => setArrivalSummaryTab('new-patti')}
+                  className={settlementToggleTabBtn(arrivalSummaryTab === 'new-patti')}
+                >
+                  Create New Patti{tabHint('Alt X')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={arrivalSummaryTab === 'in-progress-patti'}
+                  onClick={() => setArrivalSummaryTab('in-progress-patti')}
+                  className={settlementToggleTabBtn(arrivalSummaryTab === 'in-progress-patti')}
+                >
+                  Patti In Progress{tabHint('Alt Y')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={arrivalSummaryTab === 'saved-patti'}
+                  onClick={() => setArrivalSummaryTab('saved-patti')}
+                  className={settlementToggleTabBtn(arrivalSummaryTab === 'saved-patti')}
+                >
+                  Saved Patti{tabHint('Alt Z')}
+                </button>
+              </div>
+              {arrivalSummaryTab === 'saved-patti' && !loadingPattis && savedPattis.length > 0 ? (
+                <div
+                  className="inline-flex shrink-0 rounded-xl border border-border/40 bg-muted/40 p-0.5 dark:bg-muted/20"
+                  role="group"
+                  aria-label="Saved patti layout"
+                >
+                  <button
+                    type="button"
+                    title="Table view (vehicle groups)"
+                    aria-pressed={savedPattiLayout === 'list'}
+                    onClick={() => setSavedPattiLayout('list')}
+                    className={cn(
+                      'rounded-lg p-2 transition-colors touch-manipulation',
+                      savedPattiLayout === 'list'
+                        ? 'bg-white text-[#6075FF] shadow-sm dark:bg-card'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <List className="h-4 w-4" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    title="Grid view (one card per vehicle / arrival group)"
+                    aria-pressed={savedPattiLayout === 'grid'}
+                    onClick={() => setSavedPattiLayout('grid')}
+                    className={cn(
+                      'rounded-lg p-2 transition-colors touch-manipulation',
+                      savedPattiLayout === 'grid'
+                        ? 'bg-white text-[#6075FF] shadow-sm dark:bg-card'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <LayoutGrid className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+              ) : null}
             </div>
             {renderArrivalSummaryTable(arrivalSummaryTab)}
           </>
