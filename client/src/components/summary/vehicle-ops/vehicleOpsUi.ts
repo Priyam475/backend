@@ -22,17 +22,17 @@ export const vehicleOpsBackCircleClass = cn(
   'flex h-10 w-10 shrink-0 items-center justify-center rounded-full p-0 touch-manipulation',
 );
 
-/** Bid row / seller strip: red = bags for this bid not fully auctioned yet; green = auctioned. */
-export const vehicleOpsAuctionStripPendingClass = 'bg-red-500';
-export const vehicleOpsAuctionStripAuctionedClass = 'bg-emerald-500';
+/** Bid row / seller strip: rose = not fully auctioned yet; auctioned = brand green #92D050. */
+export const vehicleOpsAuctionStripPendingClass = 'bg-rose-500';
+export const vehicleOpsAuctionStripAuctionedClass = 'bg-[#92D050]';
 
 export function vehicleOpsAuctionStripClass(entryOrLotAuctionComplete: boolean): string {
   return entryOrLotAuctionComplete ? vehicleOpsAuctionStripAuctionedClass : vehicleOpsAuctionStripPendingClass;
 }
 
-/** Lot block header background — 50% opacity green vs red. */
+/** Lot block header background — 50% opacity brand green vs rose. */
 export function vehicleOpsLotHeaderBgClass(lotFullyAuctioned: boolean): string {
   return lotFullyAuctioned
-    ? 'bg-emerald-500/50 dark:bg-emerald-600/45'
-    : 'bg-red-500/50 dark:bg-red-600/45';
+    ? 'bg-[#92D050]/50 dark:bg-[#92D050]/45'
+    : 'bg-rose-500/50 dark:bg-rose-600/45';
 }

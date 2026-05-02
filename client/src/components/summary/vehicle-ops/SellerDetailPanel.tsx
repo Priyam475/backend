@@ -45,7 +45,7 @@ function LotBlockHeader({
   showExpandToggle: boolean;
   expanded?: boolean;
   onToggleExpand?: () => void;
-  /** True when sold_bags ≥ bag_count — header uses green tint; else red (50% opacity). */
+  /** True when sold_bags ≥ bag_count — header uses brand green tint; else rose (50% opacity). */
   lotFullyAuctioned: boolean;
 }) {
   const label = formatLotLabelFromSummary(lot);

@@ -35,40 +35,42 @@ function PipelineStepPill({
   const displayNumber = t > 0 ? Math.min(Math.round(dRaw), t) : Math.round(dRaw);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+    <div className="flex min-w-0 flex-[1_1_0%] flex-col items-center gap-1 sm:gap-1.5">
       <div
         className={cn(
-          'relative h-[3rem] w-full min-w-[4.25rem] max-w-[7rem] overflow-hidden rounded-xl border-2 shadow-inner sm:h-[3.25rem] sm:max-w-none',
+          'relative h-11 w-full min-w-0 overflow-hidden rounded-lg border-2 shadow-inner sm:h-[3.25rem] sm:rounded-xl',
           variant === 'invoiced' && complete
             ? 'border-blue-500 dark:border-blue-400'
             : 'border-foreground/15 dark:border-white/20',
         )}
       >
-        {/* Pending (red) full track */}
-        <div className="absolute inset-0 bg-red-500" aria-hidden />
-        {/* Completed (green) fill from left */}
+        {/* Pending (rose) full track */}
+        <div className="absolute inset-0 bg-rose-500" aria-hidden />
+        {/* Completed fill — brand green #92D050 */}
         <div
-          className="absolute inset-y-0 left-0 bg-emerald-500 transition-[width] duration-300 ease-out"
+          className="absolute inset-y-0 left-0 bg-[#92D050] transition-[width] duration-300 ease-out"
           style={{ width: `${pct}%` }}
           aria-hidden
         />
-        <div className="relative flex h-full items-center justify-center px-1.5">
+        <div className="relative flex h-full min-w-0 items-center justify-center px-0.5 sm:px-1.5">
           {variant === 'invoiced' && complete ? (
-            <span className="text-center text-[11px] font-bold leading-tight text-white drop-shadow-sm sm:text-xs">
+            <span className="max-w-full truncate text-center text-[10px] font-bold leading-tight text-white drop-shadow-sm sm:text-xs">
               Invoiced
             </span>
           ) : variant === 'invoiced' && !complete ? (
-            <span className="text-center text-[11px] font-bold tabular-nums leading-tight text-white drop-shadow-sm sm:text-xs">
+            <span className="text-center text-[10px] font-bold tabular-nums leading-none text-white drop-shadow-sm sm:text-xs">
               {displayNumber}
             </span>
           ) : (
-            <span className="text-sm font-bold tabular-nums text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] sm:text-base">
+            <span className="text-center text-[11px] font-bold tabular-nums leading-none text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)] sm:text-base">
               {displayNumber}
             </span>
           )}
         </div>
       </div>
-      <span className="text-center text-[10px] font-medium leading-tight text-muted-foreground sm:text-xs">{label}</span>
+      <span className="max-w-full truncate text-center text-[10px] font-medium leading-tight text-muted-foreground sm:text-xs">
+        {label}
+      </span>
     </div>
   );
 }
@@ -76,7 +78,7 @@ function PipelineStepPill({
 function StepConnector() {
   return (
     <div
-      className="mx-0.5 h-px min-w-[0.875rem] shrink-0 self-center bg-foreground/25 sm:min-w-[1.25rem]"
+      className="h-px w-1 shrink-0 self-center bg-foreground/25 sm:mx-0.5 sm:w-3 sm:min-w-[0.75rem] md:min-w-[1rem]"
       aria-hidden
     />
   );
@@ -130,7 +132,7 @@ const SummaryArrivalPipelineCard = ({ arrival: a, billing, auction, index, onOpe
           onOpenVehicle(a);
         }
       }}
-      className="flex cursor-pointer flex-col rounded-2xl border border-border/60 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:bg-card"
+      className="flex min-w-0 cursor-pointer flex-col rounded-2xl border border-border/60 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:bg-card"
     >
       {/* Header: vehicle block left, total bags top-right (no fractions here) */}
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -155,7 +157,7 @@ const SummaryArrivalPipelineCard = ({ arrival: a, billing, auction, index, onOpe
         </div>
       </div>
 
-      <div className="mb-1 flex min-w-0 items-center gap-0 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
+      <div className="mb-1 flex min-w-0 items-center gap-0 pb-1">
         <PipelineStepPill label="Bid" done={bidDone} total={denom} />
         <StepConnector />
         <PipelineStepPill label="Weighed" done={weighedDone} total={denom} />

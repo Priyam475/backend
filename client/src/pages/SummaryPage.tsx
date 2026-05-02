@@ -362,7 +362,7 @@ const SummaryPage = () => {
               ) : summaryLayout === 'list' ? (
                 <SummaryArrivalsTable arrivals={filteredArrivals} onSelectArrival={onSelectArrival} />
               ) : (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
                   {filteredArrivals.map((a, i) => (
                     <SummaryArrivalPipelineCard
                       key={`${a.vehicleId}-${i}`}
@@ -482,7 +482,7 @@ const SummaryPage = () => {
             ) : summaryLayout === 'list' ? (
               <SummaryArrivalsTable arrivals={filteredArrivals} onSelectArrival={onSelectArrival} />
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
                 {filteredArrivals.map((a, i) => (
                   <SummaryArrivalPipelineCard
                     key={`${a.vehicleId}-${i}`}

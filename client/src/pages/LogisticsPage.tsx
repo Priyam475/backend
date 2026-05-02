@@ -80,6 +80,21 @@ const bidListKey = (b: BidInfo, indexInList: number): string => {
 const buyerChittiRowKey = (b: BidInfo, indexInBuyerBids: number): string => bidListKey(b, indexInBuyerBids);
 
 /**
+ * True if the selection set contains any row key that refers to this bid (`ae:*` or `lotId:bidNumber#*`).
+ * Used so selection survives row-key rotation when `printedBidKeys` / auction refetch updates the list.
+ */
+const selectionSetHasBid = (set: Set<string>, b: BidInfo): boolean => {
+  if (b.auctionEntryId != null && Number.isFinite(Number(b.auctionEntryId))) {
+    if (set.has(`ae:${b.auctionEntryId}`)) return true;
+  }
+  const pref = `${bidKey(b)}#`;
+  for (const k of set) {
+    if (k === bidKey(b) || k.startsWith(pref)) return true;
+  }
+  return false;
+};
+
+/**
  * Migrate dialog selection: must NOT include search-result row index — changing the query reorderes
  * results and breaks `bidListKey(_, i)`. Use stable id only.
  */
@@ -691,10 +706,19 @@ const LogisticsPage = () => {
           const b = list[i];
           const rk = buyerChittiRowKey(b, i);
           const bk = bidKey(b);
-          if (printedBidKeys.has(bk)) continue;
           const isNew = !prevKeys || !prevKeys.includes(rk);
-          if (isNew) next.add(rk);
-          else if (prevSel.has(rk)) next.add(rk);
+          const printed = printedBidKeys.has(bk);
+          const wasSelected = prevSel.has(rk) || selectionSetHasBid(prevSel, b);
+
+          if (!printed) {
+            if (isNew) {
+              next.add(rk);
+            } else if (wasSelected) {
+              next.add(rk);
+            }
+          } else if (wasSelected) {
+            next.add(rk);
+          }
         }
         out[mark] = next;
       }
@@ -746,9 +770,10 @@ const LogisticsPage = () => {
     return chittiPreviewGroup.bids.filter((b, i) => {
       const rk = buyerChittiRowKey(b, i);
       const bk = bidKey(b);
-      return selectedSet.has(rk) && !pendingSet.has(bk) && !printedBidKeys.has(bk);
+      if (pendingSet.has(bk)) return false;
+      return selectedSet.has(rk) || selectionSetHasBid(selectedSet, b);
     });
-  }, [chittiPreviewGroup, buyerChittiSelected, pendingRemoveByMark, printedBidKeys]);
+  }, [chittiPreviewGroup, buyerChittiSelected, pendingRemoveByMark]);
 
   const chittiPreviewRateOn =
     chittiPreviewGroup != null && buyerChittiPrintRateByMark[chittiPreviewGroup.buyerMark] !== false;
@@ -770,13 +795,9 @@ const LogisticsPage = () => {
   const selectAllBuyerBids = useCallback((g: (typeof buyerGroups)[number]) => {
     setBuyerChittiSelected((p) => ({
       ...p,
-      [g.buyerMark]: new Set(
-        g.bids
-          .map((b, i) => (!printedBidKeys.has(bidKey(b)) ? buyerChittiRowKey(b, i) : null))
-          .filter((x): x is string => x != null)
-      ),
+      [g.buyerMark]: new Set(g.bids.map((b, i) => buyerChittiRowKey(b, i))),
     }));
-  }, [printedBidKeys]);
+  }, []);
 
   const deselectAllBuyerBids = useCallback((g: (typeof buyerGroups)[number]) => {
     setBuyerChittiSelected((p) => ({
@@ -785,20 +806,15 @@ const LogisticsPage = () => {
     }));
   }, []);
 
-  const setBidSelected = useCallback(
-    (buyerMark: string, b: BidInfo, rowIdx: number, on: boolean) => {
-      const bk = bidKey(b);
-      if (printedBidKeys.has(bk)) return;
-      const rk = buyerChittiRowKey(b, rowIdx);
-      setBuyerChittiSelected((p) => {
-        const cur = new Set(p[buyerMark] ?? []);
-        if (on) cur.add(rk);
-        else cur.delete(rk);
-        return { ...p, [buyerMark]: cur };
-      });
-    },
-    [printedBidKeys]
-  );
+  const setBidSelected = useCallback((buyerMark: string, b: BidInfo, rowIdx: number, on: boolean) => {
+    const rk = buyerChittiRowKey(b, rowIdx);
+    setBuyerChittiSelected((p) => {
+      const cur = new Set(p[buyerMark] ?? []);
+      if (on) cur.add(rk);
+      else cur.delete(rk);
+      return { ...p, [buyerMark]: cur };
+    });
+  }, []);
 
   const sellerGroups = useMemo(() => {
     const bySeller = new Map<string, { name: string; serial: number; bids: BidInfo[] }>();
@@ -839,7 +855,7 @@ const LogisticsPage = () => {
     const toPrint = g.bids.filter((b, i) => {
       const rk = buyerChittiRowKey(b, i);
       const bk = bidKey(b);
-      return selectedSet.has(rk) && !pending.has(bk) && !printedBidKeys.has(bk);
+      return selectedSet.has(rk) && !pending.has(bk);
     });
     if (toPrint.length === 0 && pending.size === 0) {
       toast.error('Nothing to save: select lots to print and/or stage removals.');
@@ -1140,24 +1156,24 @@ const LogisticsPage = () => {
           ) : buyerGroups.map((g, i) => {
             const selectedSet = buyerChittiSelected[g.buyerMark] ?? new Set<string>();
             const unprintedBids = g.bids.filter((b) => !printedBidKeys.has(bidKey(b)));
-            const selectedUnprinted = g.bids.filter(
-              (b, idx) => !printedBidKeys.has(bidKey(b)) && selectedSet.has(buyerChittiRowKey(b, idx)),
-            );
             const pendingSet = pendingRemoveByMark[g.buyerMark] ?? new Set<string>();
+            const selectedCount = g.bids.filter((b, idx) => {
+              const rk = buyerChittiRowKey(b, idx);
+              const bk = bidKey(b);
+              return selectedSet.has(rk) && !pendingSet.has(bk);
+            }).length;
             const draftPreviewBids = g.bids.filter((b, idx) => {
               const rk = buyerChittiRowKey(b, idx);
               const bk = bidKey(b);
-              return selectedSet.has(rk) && !pendingSet.has(bk) && !printedBidKeys.has(bk);
+              return selectedSet.has(rk) && !pendingSet.has(bk);
             });
-            const unprintedRowKeys = g.bids
-              .map((b, idx) => (!printedBidKeys.has(bidKey(b)) ? buyerChittiRowKey(b, idx) : null))
-              .filter((x): x is string => x != null);
-            const allUnprintedSelected =
-              unprintedRowKeys.length > 0 && unprintedRowKeys.every((rk) => selectedSet.has(rk));
-            const noUnprintedSelected = unprintedRowKeys.every((rk) => !selectedSet.has(rk));
-            const headerSelectChecked: boolean | 'indeterminate' = allUnprintedSelected
+            const allRowKeys = g.bids.map((b, idx) => buyerChittiRowKey(b, idx));
+            const allRowsSelected =
+              allRowKeys.length > 0 && allRowKeys.every((rk) => selectedSet.has(rk));
+            const noRowsSelected = allRowKeys.every((rk) => !selectedSet.has(rk));
+            const headerSelectChecked: boolean | 'indeterminate' = allRowsSelected
               ? true
-              : noUnprintedSelected
+              : noRowsSelected
                 ? false
                 : 'indeterminate';
             const printRateOn = buyerChittiPrintRateByMark[g.buyerMark] !== false;
@@ -1328,7 +1344,8 @@ const LogisticsPage = () => {
                         </div>
                       </div>
                       <p className="text-[10px] font-semibold text-muted-foreground">
-                        {selectedUnprinted.length}/{unprintedBids.length} selected
+                        {selectedCount}/{g.bids.length} lots selected
+                        {unprintedBids.length < g.bids.length ? ` · ${unprintedBids.length} not yet printed` : ''}
                         {pendingSet.size > 0 ? ` · ${pendingSet.size} staged` : ''}
                       </p>
 
@@ -1356,15 +1373,13 @@ const LogisticsPage = () => {
                             const split = Math.ceil(g.bids.length / 2);
                             const leftBids = g.bids.slice(0, split);
                             const rightBids = g.bids.slice(split);
+                            const dualColumn = rightBids.length > 0;
 
-                            const sliceUnprintedKeys = (slice: BidInfo[], indexOffset: number) =>
-                              slice
-                                .map((b, localIdx) => ({ b, rowIdx: indexOffset + localIdx }))
-                                .filter(({ b }) => !printedBidKeys.has(bidKey(b)))
-                                .map(({ b, rowIdx }) => buyerChittiRowKey(b, rowIdx));
+                            const sliceRowKeys = (slice: BidInfo[], indexOffset: number) =>
+                              slice.map((b, localIdx) => buyerChittiRowKey(b, indexOffset + localIdx));
 
                             const sliceHeaderSelect = (slice: BidInfo[], indexOffset: number) => {
-                              const keys = sliceUnprintedKeys(slice, indexOffset);
+                              const keys = sliceRowKeys(slice, indexOffset);
                               const allSel = keys.length > 0 && keys.every((k) => selectedSet.has(k));
                               const noneSel = keys.every((k) => !selectedSet.has(k));
                               const checked: boolean | 'indeterminate' = allSel ? true : noneSel ? false : 'indeterminate';
@@ -1372,7 +1387,7 @@ const LogisticsPage = () => {
                             };
 
                             const setSliceSelection = (slice: BidInfo[], indexOffset: number, select: boolean) => {
-                              const keys = sliceUnprintedKeys(slice, indexOffset);
+                              const keys = sliceRowKeys(slice, indexOffset);
                               setBuyerChittiSelected((p) => {
                                 const cur = new Set(p[g.buyerMark] ?? []);
                                 if (select) keys.forEach((k) => cur.add(k));
@@ -1418,7 +1433,7 @@ const LogisticsPage = () => {
                                                     else setSliceSelection(slice, indexOffset, false);
                                                   }}
                                                   className="h-[18px] w-[18px] rounded-none border-white/50 data-[state=checked]:bg-white data-[state=checked]:text-primary"
-                                                  aria-label="Select or deselect all unprinted lots in this list"
+                                                  aria-label="Select or deselect all lots in this column"
                                                 />
                                               ) : null}
                                             </div>
@@ -1465,11 +1480,10 @@ const LogisticsPage = () => {
                                               <td className="p-0 align-middle w-10">
                                                 <div className="flex h-9 w-full items-center justify-center">
                                                   <Checkbox
-                                                    checked={isPrinted || on}
+                                                    checked={on}
                                                     onCheckedChange={(c) =>
                                                       setBidSelected(g.buyerMark, b, rowIdx, c === true)
                                                     }
-                                                    disabled={isPrinted}
                                                     className="h-[18px] w-[18px] rounded-none border-foreground/30"
                                                     aria-label={
                                                       isPrinted
@@ -1547,15 +1561,22 @@ const LogisticsPage = () => {
                               );
                             };
                             return (
-                              <div className="grid min-w-0 grid-cols-2 gap-3 lg:gap-5">
-                                {renderChittiTable(leftBids, 0)}
-                                {renderChittiTable(rightBids, split)}
+                              <div className="w-full min-w-0">
+                                <div
+                                  className={cn(
+                                    'grid min-w-0 gap-3 lg:gap-5 w-full',
+                                    dualColumn ? 'grid-cols-2' : 'grid-cols-1',
+                                  )}
+                                >
+                                  {renderChittiTable(leftBids, 0)}
+                                  {dualColumn ? renderChittiTable(rightBids, split) : null}
+                                </div>
                               </div>
                             );
                           })()}
                         </div>
                         <ul className="md:hidden space-y-2" role="list">
-                            {unprintedRowKeys.length > 0 && (
+                            {allRowKeys.length > 0 && (
                               <li className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5 min-h-10">
                                 <div className="flex h-9 w-10 shrink-0 items-center justify-center">
                                   <Checkbox
@@ -1565,10 +1586,10 @@ const LogisticsPage = () => {
                                       else deselectAllBuyerBids(g);
                                     }}
                                     className="h-[18px] w-[18px] rounded-none"
-                                    aria-label="Select or deselect all unprinted lots"
+                                    aria-label="Select or deselect all lots"
                                   />
                                 </div>
-                                <span className="text-[11px] font-semibold text-muted-foreground">All unprinted</span>
+                                <span className="text-[11px] font-semibold text-muted-foreground">All lots</span>
                               </li>
                             )}
                             {g.bids.map((b, rowIdx) => {
@@ -1589,11 +1610,10 @@ const LogisticsPage = () => {
                                   <div className="flex items-center gap-2">
                                     <div className="flex h-9 w-10 shrink-0 items-center justify-center">
                                       <Checkbox
-                                        checked={isPrinted || on}
+                                        checked={on}
                                         onCheckedChange={(c) =>
                                           setBidSelected(g.buyerMark, b, rowIdx, c === true)
                                         }
-                                        disabled={isPrinted}
                                         className="h-[18px] w-[18px] rounded-none"
                                         aria-label={`Select ${formatLotIdentifierForBid(b)}`}
                                       />
@@ -2101,6 +2121,7 @@ const LogisticsPage = () => {
                   const mid = Math.ceil(bids.length / 2);
                   const leftPreview = bids.slice(0, mid);
                   const rightPreview = bids.slice(mid);
+                  const previewDual = rightPreview.length > 0;
                   const colSpan = chittiPreviewRateOn ? 4 : 3;
                   const previewShell =
                     'min-w-0 overflow-hidden rounded-xl border border-[rgba(91,140,255,0.35)] shadow-[0_0_12px_rgba(91,140,255,0.2)] bg-background/30';
@@ -2186,9 +2207,16 @@ const LogisticsPage = () => {
 
                   return (
                     <>
-                      <div className="hidden min-w-0 md:grid md:grid-cols-2 md:gap-3 lg:gap-5">
-                        {renderPreviewSliceTable(leftPreview, 0)}
-                        {renderPreviewSliceTable(rightPreview, mid)}
+                      <div className="hidden w-full min-w-0 md:block">
+                        <div
+                          className={cn(
+                            'grid min-w-0 w-full gap-3 lg:gap-5',
+                            previewDual ? 'grid-cols-2' : 'grid-cols-1',
+                          )}
+                        >
+                          {renderPreviewSliceTable(leftPreview, 0)}
+                          {previewDual ? renderPreviewSliceTable(rightPreview, mid) : null}
+                        </div>
                       </div>
                       <div className="md:hidden">
                         <div className={previewShell}>

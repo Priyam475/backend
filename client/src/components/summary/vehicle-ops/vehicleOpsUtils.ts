@@ -68,7 +68,7 @@ export function isLotFullyAuctioned(lot: LotSummaryDTO): boolean {
 
 /**
  * FIFO by bid_number: row is auction-complete when cumulative sold_bags fully covers this bid’s qty.
- * Self-sale rows use green strip (not competing for normal FIFO bags).
+ * Self-sale rows use auctioned (brand green) strip (not competing for normal FIFO bags).
  */
 export function entryFullyAuctionedBySoldBags(entries: AuctionEntryDTO[], soldBags: number): Map<number, boolean> {
   const sorted = [...entries].sort((a, b) => (a.bid_number ?? 0) - (b.bid_number ?? 0));
