@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -37,7 +37,31 @@ import { toast } from 'sonner';
 const SUMMARY_MODULE = 'SummaryPage' as const;
 const SUMMARY_LAYOUT_STORAGE_KEY = 'merco.summary.layout';
 const BILLS_PAGE_SIZE = 100;
-const MAX_BILLING_PAGES = 6;
+const SUMMARY_ARRIVALS_PAGE_SIZE = 90;
+const SUMMARY_LOTS_PAGE_SIZE = 100;
+const ARRIVAL_LIST_SORT = 'arrivalDatetime,desc';
+const MAX_BILL_PAGES_SAFETY = 500;
+
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+    (e instanceof Error && e.name === 'AbortError')
+  );
+}
+
+function sortArrivalSummaries(a: ArrivalSummary, b: ArrivalSummary): number {
+  const ta = new Date(a.arrivalDatetime).getTime();
+  const tb = new Date(b.arrivalDatetime).getTime();
+  if (tb !== ta) return tb - ta;
+  return Number(b.vehicleId) - Number(a.vehicleId);
+}
+
+function sortArrivalDetails(a: ArrivalDetail, b: ArrivalDetail): number {
+  const ta = new Date(a.arrivalDatetime).getTime();
+  const tb = new Date(b.arrivalDatetime).getTime();
+  if (tb !== ta) return tb - ta;
+  return b.vehicleId - a.vehicleId;
+}
 
 const SummaryPage = () => {
   const navigate = useNavigate();
@@ -60,6 +84,7 @@ const SummaryPage = () => {
       return 'list';
     }
   });
+  const loadDataAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     try {
@@ -70,29 +95,111 @@ const SummaryPage = () => {
   }, [summaryLayout]);
 
   const loadData = useCallback(async () => {
+    loadDataAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadDataAbortRef.current = ac;
+    const { signal } = ac;
+
     setLoading(true);
+    setApiArrivals([]);
+    setArrivalDetails([]);
+    setLotSummaries([]);
+    setSalesBills([]);
+
+    const mergeArrivals = async () => {
+      const merged = new Map<string, ArrivalSummary>();
+      let page = 0;
+      let reportedTotal = 0;
+      for (;;) {
+        const { items, totalElements } = await arrivalsApi.listPage(
+          {
+            page,
+            size: SUMMARY_ARRIVALS_PAGE_SIZE,
+            sort: ARRIVAL_LIST_SORT,
+            partiallyCompleted: false,
+          },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (page === 0) reportedTotal = totalElements;
+        for (const it of items) merged.set(String(it.vehicleId), it);
+        setApiArrivals([...merged.values()].sort(sortArrivalSummaries));
+        const noMore =
+          items.length === 0 ||
+          items.length < SUMMARY_ARRIVALS_PAGE_SIZE ||
+          merged.size >= reportedTotal;
+        if (noMore) break;
+        page += 1;
+      }
+    };
+
+    const mergeDetails = async () => {
+      const merged = new Map<string, ArrivalDetail>();
+      let page = 0;
+      let reportedTotal = 0;
+      for (;;) {
+        const { items, totalElements } = await arrivalsApi.listDetailPage(
+          { page, size: SUMMARY_ARRIVALS_PAGE_SIZE, sort: ARRIVAL_LIST_SORT },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (page === 0) reportedTotal = totalElements;
+        for (const it of items) merged.set(String(it.vehicleId), it);
+        setArrivalDetails([...merged.values()].sort(sortArrivalDetails));
+        const noMore =
+          items.length === 0 ||
+          items.length < SUMMARY_ARRIVALS_PAGE_SIZE ||
+          merged.size >= reportedTotal;
+        if (noMore) break;
+        page += 1;
+      }
+    };
+
+    const mergeLots = async () => {
+      const merged = new Map<number, LotSummaryDTO>();
+      let page = 0;
+      let reportedTotal = 0;
+      for (;;) {
+        const { items, totalElements } = await auctionApi.listLotsPage(
+          { page, size: SUMMARY_LOTS_PAGE_SIZE, sort: 'id,asc' },
+          { signal },
+        );
+        if (signal.aborted) return;
+        if (page === 0) reportedTotal = totalElements;
+        for (const it of items) merged.set(it.lot_id, it);
+        setLotSummaries([...merged.values()]);
+        const noMore =
+          items.length === 0 ||
+          items.length < SUMMARY_LOTS_PAGE_SIZE ||
+          merged.size >= reportedTotal;
+        if (noMore) break;
+        page += 1;
+      }
+    };
+
     try {
-      const [list, details, lots] = await Promise.all([
-        arrivalsApi.list(0, 100, undefined, false),
-        arrivalsApi.listDetail(0, 500),
-        auctionApi.listLots({ size: 2000, sort: 'id,asc' }).catch(() => [] as LotSummaryDTO[]),
-      ]);
-      setApiArrivals(list);
-      setArrivalDetails(details);
-      setLotSummaries(Array.isArray(lots) ? lots : []);
+      await Promise.all([mergeArrivals(), mergeDetails(), mergeLots()]);
 
       let bills: SalesBillDTO[] = [];
       try {
-        for (let p = 0; p < MAX_BILLING_PAGES; p += 1) {
-          const page = await billingApi.getPage({ page: p, size: BILLS_PAGE_SIZE, sort: 'billDate,desc' });
-          bills.push(...(page.content ?? []));
-          if ((page.content ?? []).length < BILLS_PAGE_SIZE) break;
+        let totalElements = Infinity;
+        for (let p = 0; p < MAX_BILL_PAGES_SAFETY; p += 1) {
+          const page = await billingApi.getPage({
+            page: p,
+            size: BILLS_PAGE_SIZE,
+            sort: 'billDate,desc',
+          });
+          const content = page.content ?? [];
+          totalElements = page.totalElements ?? totalElements;
+          bills.push(...content);
+          if (content.length < BILLS_PAGE_SIZE || bills.length >= totalElements) break;
         }
       } catch {
         bills = [];
       }
-      setSalesBills(bills);
+      if (!signal.aborted) setSalesBills(bills);
     } catch (err) {
+      if (isAbortError(err)) return;
       const message = err instanceof Error ? err.message : 'Failed to load data';
       toast.error(message);
       setApiArrivals([]);
@@ -100,7 +207,7 @@ const SummaryPage = () => {
       setSalesBills([]);
       setLotSummaries([]);
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
@@ -108,6 +215,10 @@ const SummaryPage = () => {
     if (!canView) return;
     void loadData();
   }, [canView, loadData]);
+
+  useEffect(() => {
+    return () => loadDataAbortRef.current?.abort();
+  }, []);
 
   /** Same rule as Arrivals + backend `arrivalStatusFromDto`: AUCTIONED when there is a bid and not all lots are weighed yet. */
   const auctionedArrivals = useMemo(

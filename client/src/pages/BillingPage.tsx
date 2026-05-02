@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
+import { useVirtualizer, measureElement } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Receipt, Search, User, Package, IndianRupee, Truck, Hash,
@@ -901,6 +902,79 @@ function validateBill(
   return { isValid: Object.keys(errors).length === 0, errors, warnings };
 }
 
+/** Saved bills list paging (SummaryPage-style; uses `totalElements` from Spring page). */
+const BILLING_SAVED_BILLS_PAGE_SIZE = 100;
+const BILLING_WEIGHING_PAGE_SIZE = 100;
+/** Sales Pad–aligned lot page size for add-bid browser (`id,asc`). */
+const BILLING_ADD_BID_LOTS_PAGE_SIZE = 90;
+
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+    (e instanceof Error && e.name === 'AbortError')
+  );
+}
+
+async function fetchAllWeighingSessions(signal?: AbortSignal): Promise<Awaited<ReturnType<typeof weighingApi.list>>> {
+  const merged: Awaited<ReturnType<typeof weighingApi.list>> = [];
+  let page = 0;
+  let totalElements = Infinity;
+  for (;;) {
+    const { items, totalElements: tot } = await weighingApi.listPage(
+      { page, size: BILLING_WEIGHING_PAGE_SIZE },
+      signal ? { signal } : undefined,
+    );
+    totalElements = tot;
+    merged.push(...items);
+    if (items.length < BILLING_WEIGHING_PAGE_SIZE || merged.length >= totalElements) break;
+    page += 1;
+    if (page > 500) break;
+  }
+  return merged;
+}
+
+async function fetchAllAuctionLotsForBrowse(signal?: AbortSignal): Promise<LotSummaryDTO[]> {
+  const merged = new Map<string, LotSummaryDTO>();
+  let page = 0;
+  let reportedTotal = 0;
+  for (;;) {
+    const { items, totalElements } = await auctionApi.listLotsPage(
+      { page, size: BILLING_ADD_BID_LOTS_PAGE_SIZE, sort: 'id,asc' },
+      signal ? { signal } : undefined,
+    );
+    if (page === 0) reportedTotal = totalElements;
+    for (const lot of items) {
+      const id = String(lot.lot_id ?? '').trim();
+      if (id) merged.set(id, lot);
+    }
+    if (items.length === 0 || items.length < BILLING_ADD_BID_LOTS_PAGE_SIZE || merged.size >= reportedTotal) break;
+    page += 1;
+    if (page > 500) break;
+  }
+  return [...merged.values()].sort((a, b) => Number(a.lot_id) - Number(b.lot_id));
+}
+
+async function fetchAuctionLotsByQuery(q: string, signal?: AbortSignal): Promise<LotSummaryDTO[]> {
+  const merged = new Map<string, LotSummaryDTO>();
+  let page = 0;
+  let reportedTotal = 0;
+  for (;;) {
+    const { items, totalElements } = await auctionApi.listLotsPage(
+      { page, size: BILLING_ADD_BID_LOTS_PAGE_SIZE, sort: 'id,asc', q },
+      signal ? { signal } : undefined,
+    );
+    if (page === 0) reportedTotal = totalElements;
+    for (const lot of items) {
+      const id = String(lot.lot_id ?? '').trim();
+      if (id) merged.set(id, lot);
+    }
+    if (items.length === 0 || items.length < BILLING_ADD_BID_LOTS_PAGE_SIZE || merged.size >= reportedTotal) break;
+    page += 1;
+    if (page > 500) break;
+  }
+  return [...merged.values()].sort((a, b) => Number(a.lot_id) - Number(b.lot_id));
+}
+
 const BillingPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -1221,9 +1295,10 @@ const BillingPage = () => {
   const billingTabConfirmIfDirtyRef = useRef<() => Promise<boolean>>(() => Promise.resolve(true));
 
   useEffect(() => {
+    if (!canView) return;
     commodityApi.list().then(setCommodities);
     commodityApi.getAllFullConfigs().then(setFullConfigs);
-  }, []);
+  }, [canView]);
 
   useEffect(() => {
     if (!bill) {
@@ -1236,64 +1311,76 @@ const BillingPage = () => {
   }, [bill, selectedPrintVersion]);
 
   useEffect(() => {
-    weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([]));
-  }, []);
-
-  useEffect(() => {
-    if (!addBidDialogOpen) return;
+    if (!canView) return;
     let cancelled = false;
-    setAddBidLotLoading(true);
-    void auctionApi
-      .listLots({ page: 0, size: 4000 })
-      .then(list => {
-        if (cancelled) return;
-        const arr = Array.isArray(list) ? list : [];
-        addBidBrowseLotsRef.current = arr;
-        if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions(arr);
+    void fetchAllWeighingSessions()
+      .then((list) => {
+        if (!cancelled) setWeighingSessions(list);
       })
       .catch(() => {
-        if (!cancelled) {
-          addBidBrowseLotsRef.current = [];
-          if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAddBidLotLoading(false);
+        if (!cancelled) setWeighingSessions([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [addBidDialogOpen]);
+  }, [canView]);
+
+  useEffect(() => {
+    if (!canView || !addBidDialogOpen) return;
+    const ac = new AbortController();
+    let cancelled = false;
+    setAddBidLotLoading(true);
+    void (async () => {
+      try {
+        const arr = await fetchAllAuctionLotsForBrowse(ac.signal);
+        if (cancelled || ac.signal.aborted) return;
+        addBidBrowseLotsRef.current = arr;
+        if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions(arr);
+      } catch (e) {
+        if (isAbortError(e) || cancelled || ac.signal.aborted) return;
+        addBidBrowseLotsRef.current = [];
+        if (addBidLotSearchRef.current.trim().length < 2) setAddBidLotOptions([]);
+      } finally {
+        if (!cancelled && !ac.signal.aborted) setAddBidLotLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [canView, addBidDialogOpen]);
 
   /** Server search by lot name (backend ignores status — sold lots remain discoverable). */
   useEffect(() => {
-    if (!addBidDialogOpen) return;
+    if (!canView || !addBidDialogOpen) return;
     const q = addBidLotSearch.trim();
     if (q.length < 2) {
       setAddBidLotOptions(addBidBrowseLotsRef.current);
       return;
     }
     let cancelled = false;
+    const ac = new AbortController();
     const t = window.setTimeout(() => {
       setAddBidLotLoading(true);
-      void auctionApi
-        .listLots({ page: 0, size: 1500, q })
-        .then(list => {
-          if (cancelled) return;
-          setAddBidLotOptions(Array.isArray(list) ? list : []);
-        })
-        .catch(() => {
-          if (!cancelled) setAddBidLotOptions([]);
-        })
-        .finally(() => {
-          if (!cancelled) setAddBidLotLoading(false);
-        });
+      void (async () => {
+        try {
+          const list = await fetchAuctionLotsByQuery(q, ac.signal);
+          if (cancelled || ac.signal.aborted) return;
+          setAddBidLotOptions(list);
+        } catch (e) {
+          if (isAbortError(e) || cancelled || ac.signal.aborted) return;
+          setAddBidLotOptions([]);
+        } finally {
+          if (!cancelled && !ac.signal.aborted) setAddBidLotLoading(false);
+        }
+      })();
     }, 300);
     return () => {
       cancelled = true;
+      ac.abort();
       window.clearTimeout(t);
     };
-  }, [addBidDialogOpen, addBidLotSearch]);
+  }, [canView, addBidDialogOpen, addBidLotSearch]);
 
   const getAddBidLotIdentifier = useCallback((lot: LotSummaryDTO): string => {
     const lotQty = Number(lot.bag_count) || 0;
@@ -1330,22 +1417,39 @@ const BillingPage = () => {
       .slice(0, 150);
   }, [addBidLotOptions, addBidLotSearch, getAddBidLotIdentifier]);
 
-  // Load saved bills from backend
+  // Load saved bills from backend (all pages; no 200 cap)
   const loadSavedBills = useCallback(async () => {
+    if (!canView) return;
     setSavedBillsLoading(true);
     try {
-      const page = await billingApi.getPage({ page: 0, size: 200, sort: 'billDate,desc' });
-      setSavedBills(page.content ?? []);
+      const merged: SalesBillDTO[] = [];
+      let page = 0;
+      let totalElements = Infinity;
+      for (;;) {
+        const batch = await billingApi.getPage({
+          page,
+          size: BILLING_SAVED_BILLS_PAGE_SIZE,
+          sort: 'billDate,desc',
+        });
+        const content = batch.content ?? [];
+        totalElements = batch.totalElements ?? totalElements;
+        merged.push(...content);
+        if (content.length < BILLING_SAVED_BILLS_PAGE_SIZE || merged.length >= totalElements) break;
+        page += 1;
+        if (page > 500) break;
+      }
+      setSavedBills(merged);
     } catch {
       setSavedBills([]);
     } finally {
       setSavedBillsLoading(false);
     }
-  }, []);
+  }, [canView]);
 
   useEffect(() => {
-    loadSavedBills();
-  }, [loadSavedBills]);
+    if (!canView) return;
+    void loadSavedBills();
+  }, [canView, loadSavedBills]);
 
   const reloadArrivalDetails = useCallback(async () => {
     const all: ArrivalDetail[] = [];
@@ -1359,6 +1463,7 @@ const BillingPage = () => {
   }, []);
 
   useEffect(() => {
+    if (!canView) return;
     let cancelled = false;
     (async () => {
       try {
@@ -1368,7 +1473,7 @@ const BillingPage = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [reloadArrivalDetails]);
+  }, [canView, reloadArrivalDetails]);
 
   const handleResync = useCallback(async () => {
     setResyncing(true);
@@ -1377,7 +1482,7 @@ const BillingPage = () => {
         refetchAuctions(),
         commodityApi.list().then(setCommodities),
         commodityApi.getAllFullConfigs().then(setFullConfigs),
-        weighingApi.list({ page: 0, size: 2000 }).then(setWeighingSessions).catch(() => setWeighingSessions([])),
+        fetchAllWeighingSessions().then(setWeighingSessions).catch(() => setWeighingSessions([])),
         loadSavedBills(),
         reloadArrivalDetails(),
       ]);
@@ -3438,6 +3543,19 @@ const BillingPage = () => {
       b.outboundVehicle?.toLowerCase().includes(q)
     );
   }, [numberedBills, searchQuery]);
+
+  const savedBillsTableScrollRef = useRef<HTMLDivElement>(null);
+  const savedBillsTableVirtualEnabled =
+    isDesktop && billingMainTab === 'saved' && !savedBillsLoading && filteredSavedBillsOnly.length > 0;
+
+  const savedBillRowVirtualizer = useVirtualizer({
+    count: savedBillsTableVirtualEnabled ? filteredSavedBillsOnly.length : 0,
+    getScrollElement: () => savedBillsTableScrollRef.current,
+    estimateSize: () => 56,
+    overscan: 12,
+    measureElement,
+    getItemKey: index => String(filteredSavedBillsOnly[index]?.billId ?? index),
+  });
 
   const applySelectedVersion = useCallback((versionSel: 'latest' | number) => {
     if (!bill) return;
@@ -6233,8 +6351,23 @@ const BillingPage = () => {
           ) : (
             isDesktop ? (
               <div className="glass-card rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1100px] text-sm">
+                <div
+                  ref={savedBillsTableScrollRef}
+                  className="max-h-[min(72vh,840px)] overflow-y-auto overflow-x-auto"
+                >
+                  <table className="w-full min-w-[1100px] table-fixed text-sm">
+                    <colgroup>
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '11%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '12%' }} />
+                    </colgroup>
                     <thead>
                       <tr className="bg-[linear-gradient(90deg,#4B7CF3_0%,#5B8CFF_45%,#7B61FF_100%)] border-b border-white/25">
                         <th className="px-4 py-3 text-center font-semibold text-white first:rounded-tl-xl">Bill Number</th>
@@ -6249,8 +6382,16 @@ const BillingPage = () => {
                         <th className="px-4 py-3 text-center font-semibold text-white last:rounded-tr-xl">Billing Name</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {filteredSavedBillsOnly.map((b: SalesBillDTO) => {
+                    <tbody
+                      style={{
+                        height: savedBillRowVirtualizer.getTotalSize(),
+                        position: 'relative',
+                        width: '100%',
+                      }}
+                    >
+                      {savedBillRowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const b = filteredSavedBillsOnly[virtualRow.index];
+                        if (!b) return null;
                         const bidsCount = (b.commodityGroups || []).reduce((sum, g) => sum + (g.items?.length || 0), 0);
                         const pendingDays = Math.max(
                           0,
@@ -6261,13 +6402,22 @@ const BillingPage = () => {
                           : (b.brokerName || b.brokerMark || '-');
                         return (
                           <tr
-                            key={String(b.billId)}
+                            key={virtualRow.key}
+                            data-index={virtualRow.index}
+                            ref={savedBillRowVirtualizer.measureElement}
                             onClick={() => openBillFromList(b)}
                             className="border-b border-border/40 hover:bg-muted/30 cursor-pointer transition-colors"
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
                           >
-                            <td className="px-4 py-3 text-center text-foreground">{b.billNumber || '-'}</td>
-                            <td className="px-4 py-3 text-center text-foreground">{b.buyerName || '-'}</td>
-                            <td className="px-4 py-3 text-center text-foreground">{brokerDisplay}</td>
+                            <td className="px-4 py-3 text-center text-foreground truncate">{b.billNumber || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground truncate">{b.buyerName || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground truncate">{brokerDisplay}</td>
                             <td className="px-4 py-3 text-center text-foreground tabular-nums">{bidsCount}</td>
                             <td className="px-4 py-3 text-center text-foreground tabular-nums">₹{formatBillingInr(b.grandTotal ?? 0)}</td>
                             <td className="px-4 py-3 text-center text-foreground tabular-nums">₹{formatBillingInr(b.pendingBalance ?? 0)}</td>
@@ -6276,7 +6426,7 @@ const BillingPage = () => {
                               {(b.pendingBalance ?? 0) > 0 ? `${pendingDays} day${pendingDays === 1 ? '' : 's'}` : '-'}
                             </td>
                             <td className="px-4 py-3 text-center text-foreground">-</td>
-                            <td className="px-4 py-3 text-center text-foreground">{b.billingName || '-'}</td>
+                            <td className="px-4 py-3 text-center text-foreground truncate">{b.billingName || '-'}</td>
                           </tr>
                         );
                       })}

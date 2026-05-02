@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react';
+import { useWindowVirtualizer, measureElement } from '@tanstack/react-virtual';
 import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -171,6 +172,16 @@ const FILTER_TABS: { key: FilterMode; label: string; icon: typeof Layers; desc: 
   { key: 'LOT', label: 'Lot', icon: Layers, desc: 'Sales sticker per lot' },
 ];
 
+const ARRIVAL_DETAIL_PAGE_SIZE = 100;
+
+function mergeArrivalDetailsByVehicleId(prev: ArrivalDetail[], chunk: ArrivalDetail[]): ArrivalDetail[] {
+  if (chunk.length === 0) return prev;
+  const m = new Map<number, ArrivalDetail>();
+  prev.forEach((a) => m.set(a.vehicleId, a));
+  chunk.forEach((a) => m.set(a.vehicleId, a));
+  return Array.from(m.values());
+}
+
 const LogisticsPage = () => {
   const navigate = useNavigate();
   const isDesktop = useDesktopMode();
@@ -185,13 +196,48 @@ const LogisticsPage = () => {
     [trader?.business_name, user?.name]
   );
 
-  const { auctionResults: auctionData, refetch: refetchAuctions } = useAuctionResults();
+  const {
+    auctionResults: auctionData,
+    loading: auctionResultsLoading,
+    loadingMore: auctionResultsLoadingMore,
+    resultsComplete: auctionResultsComplete,
+    totalElements: auctionResultsTotal,
+    refetch: refetchAuctions,
+  } = useAuctionResults();
   const { can } = usePermissions();
   const canEditAuctionBids = can('Auctions / Sales', 'Edit');
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
+  const [arrivalDetailsComplete, setArrivalDetailsComplete] = useState(false);
 
   useEffect(() => {
-    arrivalsApi.listDetail(0, 500).then(setArrivalDetails).catch(() => setArrivalDetails([]));
+    let cancelled = false;
+    setArrivalDetails([]);
+    setArrivalDetailsComplete(false);
+    let merged: ArrivalDetail[] = [];
+
+    (async () => {
+      try {
+        let page = 0;
+        while (!cancelled) {
+          const chunk = await arrivalsApi.listDetail(page, ARRIVAL_DETAIL_PAGE_SIZE);
+          if (cancelled) return;
+          merged = mergeArrivalDetailsByVehicleId(merged, chunk);
+          setArrivalDetails(merged);
+          if (chunk.length < ARRIVAL_DETAIL_PAGE_SIZE) break;
+          page += 1;
+        }
+      } catch {
+        if (!cancelled) {
+          setArrivalDetails(merged.length > 0 ? merged : []);
+        }
+      } finally {
+        if (!cancelled) setArrivalDetailsComplete(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // REQ-LOG-004: Load bids from completed auctions; enrich with origin/godown/commodity from arrival full detail; daily serials from API
@@ -409,6 +455,17 @@ const LogisticsPage = () => {
   }, [bids, searchQuery]);
 
   const lotList = useMemo(() => filteredBids, [filteredBids]);
+
+  const lotRowVirtualizer = useWindowVirtualizer({
+    count: filterMode === 'LOT' ? lotList.length : 0,
+    estimateSize: () => 96,
+    overscan: 10,
+    measureElement,
+    getItemKey: (index) => {
+      const bid = lotList[index];
+      return bid ? bidListKey(bid, index) : String(index);
+    },
+  });
 
   const buyerGroups = useMemo(() => {
     const byBuyer = new Map<string, BidInfo[]>();
@@ -1048,7 +1105,16 @@ const LogisticsPage = () => {
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Printer className="w-5 h-5 text-emerald-500" /> Print Hub
               </h2>
-              <p className="text-sm text-muted-foreground">{bids.length} bids · Direct print · No preview</p>
+              <p className="text-sm text-muted-foreground">
+                {bids.length} bids
+                {auctionResultsLoadingMore || !auctionResultsComplete
+                  ? auctionResultsTotal != null && auctionResultsTotal > 0
+                    ? ` · Auction results ${auctionData.length} / ${auctionResultsTotal}`
+                    : ' · Loading auction results…'
+                  : ''}
+                {!arrivalDetailsComplete ? ' · Arrival details loading…' : ''}
+                {' · '}Direct print · No preview
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative w-64">
@@ -1104,52 +1170,104 @@ const LogisticsPage = () => {
         </div>
       )}
 
+      {!isDesktop && (!auctionResultsComplete || !arrivalDetailsComplete) && (bids.length > 0 || auctionResultsLoading) ? (
+        <p className="px-4 mt-1 text-center text-[10px] text-muted-foreground">
+          {!auctionResultsComplete
+            ? auctionResultsTotal != null && auctionResultsTotal > 0
+              ? `Auction results ${auctionData.length} / ${auctionResultsTotal}`
+              : 'Loading auction results…'
+            : null}
+          {!auctionResultsComplete && !arrivalDetailsComplete ? ' · ' : ''}
+          {!arrivalDetailsComplete ? 'Arrival details…' : null}
+        </p>
+      ) : null}
+
       <div className="px-4 mt-4 space-y-2">
         {bids.length === 0 ? (
-          <div className="glass-card rounded-2xl p-8 text-center">
-            <Printer className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground font-medium">No completed bids yet</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">Complete an auction first</p>
-            <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl">
-              Go to Auctions
-            </Button>
-          </div>
+          auctionResultsLoading ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <Printer className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3 animate-pulse" />
+              <p className="text-sm text-muted-foreground font-medium">Loading auction results…</p>
+              {auctionResultsTotal != null && auctionResultsTotal > 0 ? (
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  {auctionData.length} / {auctionResultsTotal} loaded
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <Printer className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">No completed bids yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">Complete an auction first</p>
+              <Button onClick={() => navigate('/auctions')} className="mt-4 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl">
+                Go to Auctions
+              </Button>
+            </div>
+          )
         ) : filterMode === 'LOT' ? (
           lotList.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">No matching lots</p>
-          ) : lotList.map((bid, i) => (
-            <motion.div key={`${bid.lotNumber}-${i}`}
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.02 }}
-              className="glass-card rounded-2xl p-3 overflow-hidden">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md flex-shrink-0">
-                  <span className="text-white font-black text-[10px]">
-                    {bid.vehicleTotalQty != null && bid.sellerVehicleQty != null
-                      ? `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`
-                      : `L${bid.lotNumber}`}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-bold text-foreground truncate">
-                      {formatLotIdentifierForBid(bid)}
-                    </p>
-                    <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-bold">[{bid.buyerMark}]</span>
+          ) : (
+            <div
+              className="w-full"
+              style={{
+                height: `${lotRowVirtualizer.getTotalSize()}px`,
+                position: 'relative',
+              }}
+            >
+              {lotRowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const bid = lotList[virtualRow.index];
+                if (!bid) return null;
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={lotRowVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full pb-2"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    <div className="glass-card rounded-2xl p-3 overflow-hidden">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-md flex-shrink-0">
+                          <span className="text-white font-black text-[10px]">
+                            {bid.vehicleTotalQty != null && bid.sellerVehicleQty != null
+                              ? `${bid.vehicleTotalQty}/${bid.sellerVehicleQty}`
+                              : `L${bid.lotNumber}`}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-bold text-foreground truncate">
+                              {formatLotIdentifierForBid(bid)}
+                            </p>
+                            <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[8px] font-bold">
+                              [{bid.buyerMark}]
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+                            <span>
+                              S#{bid.sellerSerial} {bid.sellerName}
+                            </span>
+                            <span>•</span>
+                            <span>{bid.quantity} bags</span>
+                            <span>•</span>
+                            <span>{bid.origin || bid.vehicleNumber}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSticker(bid)}
+                          className="px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[10px] font-bold shadow-sm flex-shrink-0"
+                        >
+                          🖨 Sticker
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
-                    <span>S#{bid.sellerSerial} {bid.sellerName}</span>
-                    <span>•</span>
-                    <span>{bid.quantity} bags</span>
-                    <span>•</span>
-                    <span>{bid.origin || bid.vehicleNumber}</span>
-                  </div>
-                </div>
-                <button onClick={() => handlePrintSticker(bid)}
-                  className="px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[10px] font-bold shadow-sm flex-shrink-0">🖨 Sticker</button>
-              </div>
-            </motion.div>
-          ))
+                );
+              })}
+            </div>
+          )
         ) : filterMode === 'BUYER' ? (
           buyerGroups.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">No matching buyers</p>

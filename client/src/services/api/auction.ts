@@ -465,6 +465,22 @@ export const auctionApi = {
     return res.json();
   },
 
+  /** One page of completed auction results plus `X-Total-Count` (progressive Print Hub / hooks). */
+  async listResultsPage(
+    params: ListResultsParams = {},
+    init?: RequestInit
+  ): Promise<AuctionPagedResult<AuctionResultDTO>> {
+    const searchParams = new URLSearchParams();
+    if (params.page != null) searchParams.set('page', String(params.page));
+    if (params.size != null) searchParams.set('size', String(params.size));
+    if (params.sort) searchParams.set('sort', params.sort);
+    const res = await apiFetch(`${BASE}/results?${searchParams.toString()}`, { method: 'GET', ...init });
+    if (!res.ok) await parseJsonOrThrow(res, 'Failed to load results');
+    const items = (await res.json()) as AuctionResultDTO[];
+    const totalElements = readTotalCount(res, items.length);
+    return { items, totalElements };
+  },
+
   async getResultByLot(lotId: string | number): Promise<AuctionResultDTO | null> {
     const id = typeof lotId === 'string' ? lotId : String(lotId);
     const res = await apiFetch(`${BASE}/results/lots/${encodeURIComponent(id)}`, { method: 'GET' });
@@ -487,18 +503,25 @@ export const auctionApi = {
  * downstream pages (Billing, Weighing, Logistics, etc.) need minimal changes.
  * Result shape is normalized to include lotId, entries[].bidNumber, etc.
  */
-export async function fetchAllAuctionResults(maxPages = 50, pageSize = 100): Promise<AuctionResultDTO[]> {
+export async function fetchAllAuctionResults(
+  maxPages = 50,
+  pageSize = 100,
+  init?: RequestInit
+): Promise<AuctionResultDTO[]> {
   const all: AuctionResultDTO[] = [];
   let page = 0;
   while (page < maxPages) {
-    const chunk = await auctionApi.listResults({
-      page,
-      size: pageSize,
-      /** Newest first (matches server default); avoids missing today’s auctions when capped at maxPages × pageSize. */
-      sort: 'completedAt,desc',
-    });
-    all.push(...chunk);
-    if (chunk.length < pageSize) break;
+    const { items, totalElements } = await auctionApi.listResultsPage(
+      {
+        page,
+        size: pageSize,
+        /** Newest first (matches server default); avoids missing today’s auctions when capped at maxPages × pageSize. */
+        sort: 'completedAt,desc',
+      },
+      init
+    );
+    all.push(...items);
+    if (items.length < pageSize || (totalElements > 0 && all.length >= totalElements)) break;
     page += 1;
   }
   return all;
