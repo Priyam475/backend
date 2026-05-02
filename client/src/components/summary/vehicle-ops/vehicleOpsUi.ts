@@ -22,10 +22,17 @@ export const vehicleOpsBackCircleClass = cn(
   'flex h-10 w-10 shrink-0 items-center justify-center rounded-full p-0 touch-manipulation',
 );
 
-/** Summary vehicle-ops save sync: rose = unsaved “new seller rate” edits vs server; emerald = clean. */
-export const vehicleOpsSaveStripUnsavedClass = 'bg-rose-500';
-export const vehicleOpsSaveStripSavedClass = 'bg-emerald-500';
+/** Bid row / seller strip: red = bags for this bid not fully auctioned yet; green = auctioned. */
+export const vehicleOpsAuctionStripPendingClass = 'bg-red-500';
+export const vehicleOpsAuctionStripAuctionedClass = 'bg-emerald-500';
 
-export function vehicleOpsSaveStripClass(hasUnsavedRateEdits: boolean): string {
-  return hasUnsavedRateEdits ? vehicleOpsSaveStripUnsavedClass : vehicleOpsSaveStripSavedClass;
+export function vehicleOpsAuctionStripClass(entryOrLotAuctionComplete: boolean): string {
+  return entryOrLotAuctionComplete ? vehicleOpsAuctionStripAuctionedClass : vehicleOpsAuctionStripPendingClass;
+}
+
+/** Lot block header background — 50% opacity green vs red. */
+export function vehicleOpsLotHeaderBgClass(lotFullyAuctioned: boolean): string {
+  return lotFullyAuctioned
+    ? 'bg-emerald-500/50 dark:bg-emerald-600/45'
+    : 'bg-red-500/50 dark:bg-red-600/45';
 }
