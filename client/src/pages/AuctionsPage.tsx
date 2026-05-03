@@ -1115,7 +1115,7 @@ function sessionEntryToSaleEntry(e: AuctionEntryDTO): SaleEntry {
     extraRate: Number(e.extra_rate ?? 0),
     presetApplied: Number(e.preset_margin ?? 0),
     presetType: (e.preset_type as PresetType) ?? 'PROFIT',
-    // API keeps seller bid and preset separate; UI shows buyer total as bid + preset on the subline
+    // API: bid_rate = seller bid; preset_margin signed; buyer_rate = buyer-facing total when set.
     sellerRate: Number(e.bid_rate) + Number(e.preset_margin ?? 0),
     buyerRate: Number(e.buyer_rate ?? e.bid_rate),
     lastModifiedMs: e.last_modified_ms ?? null,
@@ -3265,15 +3265,12 @@ const AuctionsPage = () => {
     return () => window.clearTimeout(t);
   }, [showTokenInput, isDesktop]);
 
-  /**
-   * When preset is on, the rate field shows buyer total (bid + preset); this returns seller bid for API / grid `rate`.
-   * When preset is off, the field is the seller bid.
-   */
+  /** Rate field is always seller bid (`bid_rate` / grid Rate column); preset is separate. */
   const getBidRateFromInput = useCallback((rawRate: string) => {
     const parsed = parseInt(rawRate, 10);
     if (!Number.isFinite(parsed)) return 0;
-    return showPresetMargin ? Math.max(0, parsed - preset) : parsed;
-  }, [showPresetMargin, preset]);
+    return Math.max(0, parsed);
+  }, []);
 
   const editingEntry = useMemo(() => {
     if (!editingBidId) return null;
@@ -3829,7 +3826,7 @@ const AuctionsPage = () => {
         presetApplied: mergeEffectivePreset,
         presetType,
         sellerRate: calcSellerRate(newRate, mergeEffectivePreset),
-        buyerRate: newRate,
+        buyerRate: calcSellerRate(newRate, mergeEffectivePreset),
       });
       toast.info(`Kept as separate bid (different rate)`);
     }
@@ -3861,7 +3858,7 @@ const AuctionsPage = () => {
       presetApplied: effectivePreset,
       presetType,
       sellerRate: calcSellerRate(entryRate, effectivePreset),
-      buyerRate: entryRate,
+      buyerRate: calcSellerRate(entryRate, effectivePreset),
     });
   };
 
@@ -3884,7 +3881,7 @@ const AuctionsPage = () => {
       presetApplied: effectivePreset,
       presetType,
       sellerRate: calcSellerRate(currentRate, effectivePreset),
-      buyerRate: currentRate,
+      buyerRate: calcSellerRate(currentRate, effectivePreset),
     });
     setShowScribble(false);
     lastScribbleSegmentRef.current = '';
@@ -3911,7 +3908,7 @@ const AuctionsPage = () => {
       presetApplied: effectivePreset,
       presetType,
       sellerRate: calcSellerRate(entryRate, effectivePreset),
-      buyerRate: entryRate,
+      buyerRate: calcSellerRate(entryRate, effectivePreset),
     });
     lastScribbleSegmentRef.current = '';
     setScribbleMark('');
@@ -3944,7 +3941,7 @@ const AuctionsPage = () => {
         presetApplied: effectivePreset,
         presetType,
         sellerRate: calcSellerRate(entryRate, effectivePreset),
-        buyerRate: entryRate,
+        buyerRate: calcSellerRate(entryRate, effectivePreset),
       });
       setSelectedBuyer(null);
     } else if (scribbleMark.trim()) {
@@ -3962,7 +3959,7 @@ const AuctionsPage = () => {
         presetApplied: effectivePreset,
         presetType,
         sellerRate: calcSellerRate(entryRate, effectivePreset),
-        buyerRate: entryRate,
+        buyerRate: calcSellerRate(entryRate, effectivePreset),
       });
     } else return;
 
@@ -4258,10 +4255,7 @@ const AuctionsPage = () => {
     setEditBidQtyDialog(null);
     setEditingBidId(entry.id);
     setEditBidRetryAllowIncrease(false);
-    const displayRateForInput =
-      entry.presetApplied !== 0
-        ? Math.trunc(entry.rate + entry.presetApplied)
-        : Math.trunc(entry.rate);
+    const displayRateForInput = Math.trunc(entry.rate);
     setEditBidDraft({
       rate: String(displayRateForInput),
       qty: String(entry.quantity),
@@ -4316,9 +4310,7 @@ const AuctionsPage = () => {
       toast.error('Enter valid rate and quantity (at least 1).');
       return;
     }
-    const baseBid = showPresetMargin
-      ? Math.max(0, rateDisplay - editBidDraft.preset)
-      : rateDisplay;
+    const baseBid = Math.max(0, rateDisplay);
     if (baseBid < 1) {
       toast.error('Enter valid rate and quantity (at least 1).');
       return;
@@ -4393,7 +4385,6 @@ const AuctionsPage = () => {
     applyAuctionSession,
     refetchAuctionSession,
     cancelEditBid,
-    showPresetMargin,
   ]);
 
   const confirmEditBidQtyIncrease = useCallback(async () => {
@@ -4431,14 +4422,6 @@ const AuctionsPage = () => {
 
   const applyPreset = (value: number) => {
     const next = preset === value ? 0 : value;
-    const currentInput = parseInt(rate, 10);
-    let newRateStr: string | null = null;
-    if (showPresetMargin && Number.isFinite(currentInput) && currentInput > 0) {
-      const baseRate = currentInput - preset;
-      const nextDisplay = baseRate + next;
-      newRateStr = String(Math.max(0, nextDisplay));
-      setRate(newRateStr);
-    }
     setPreset(next);
     if (next !== 0) setPresetType(value >= 0 ? 'PROFIT' : 'LOSS');
 
@@ -4449,7 +4432,6 @@ const AuctionsPage = () => {
           ...d,
           preset: next,
           presetType: next < 0 ? 'LOSS' : 'PROFIT',
-          ...(newRateStr !== null ? { rate: newRateStr } : {}),
         };
       });
     }
@@ -4465,36 +4447,23 @@ const AuctionsPage = () => {
     if (userClearedRateRef.current) return;
     if (rate.trim() !== '') return;
     if (previousBidRate <= 0) return;
-    const displayRate = showPresetMargin ? previousBidRate + preset : previousBidRate;
-    setRate(String(displayRate));
-  }, [editingBidId, previousBidRate, rate, showPresetMargin, preset]);
+    setRate(String(previousBidRate));
+  }, [editingBidId, previousBidRate, rate]);
 
   const handleShowPresetMarginChange = useCallback((checked: boolean) => {
-    const currentInput = parseInt(rate, 10);
-    if (Number.isFinite(currentInput) && currentInput > 0) {
-      // Field shows seller bid when preset off, buyer total (bid + preset) when preset on.
-      const nextDisplay = checked ? currentInput + preset : currentInput - preset;
-      const s = String(Math.max(0, nextDisplay));
-      setRate(s);
-      if (editingBidId) {
-        setEditBidDraft((d) => (d ? { ...d, rate: s } : d));
-      }
-      userClearedRateRef.current = false;
-    } else if (!editingBidId) {
-      if (checked) {
+    // Do not rewrite rate when toggling preset — field stays seller bid; preset is separate.
+    if (!editingBidId) {
+      const currentInput = parseInt(rate, 10);
+      if (!Number.isFinite(currentInput) || currentInput <= 0) {
         if (previousBidRate > 0) {
-          setRate(String(previousBidRate + preset));
+          setRate(String(previousBidRate));
           userClearedRateRef.current = false;
         } else {
           setRate('');
         }
-      } else if (previousBidRate > 0) {
-        setRate(String(previousBidRate));
-        userClearedRateRef.current = false;
-      } else {
-        setRate('');
       }
     }
+
     setShowPresetMargin(checked);
     if (editingBidId) {
       setEditBidDraft((d) => {
