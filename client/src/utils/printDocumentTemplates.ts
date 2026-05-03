@@ -1,7 +1,7 @@
 // ── Print document HTML for Billing, Settlement, Weighing ───
 // Same format as client_origin; used with directPrint() + printLogApi.
 
-import { effectiveGstPercent, formatBillingInr, gstOnSubtotal, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
+import { formatBillingInr, gstComponentRupees, percentOfAmount, roundMoney2 } from '@/utils/billingMoney';
 import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
 
 const PRINT_STYLES = `
@@ -139,6 +139,12 @@ export interface BillPrintData {
     discount?: number;
     discountType?: 'PERCENT' | 'AMOUNT';
     manualRoundOff?: number;
+    sgstInputMode?: 'PERCENT' | 'AMOUNT';
+    cgstInputMode?: 'PERCENT' | 'AMOUNT';
+    igstInputMode?: 'PERCENT' | 'AMOUNT';
+    sgstAmountFixed?: number;
+    cgstAmountFixed?: number;
+    igstAmountFixed?: number;
     items: {
       quantity: number;
       weight: number;
@@ -608,9 +614,9 @@ function gstBillFooter(
   const cgstR = roundMoney2(group.cgstRate ?? 0);
   const sgstR = roundMoney2(group.sgstRate ?? 0);
   const igstR = roundMoney2(group.igstRate ?? 0);
-  const cgstA = cgstR > 0 ? gstOnSubtotal(sub, cgstR) : 0;
-  const sgstA = sgstR > 0 ? gstOnSubtotal(sub, sgstR) : 0;
-  const igstA = igstR > 0 ? gstOnSubtotal(sub, igstR) : 0;
+  const cgstA = gstComponentRupees(group, 'cgst');
+  const sgstA = gstComponentRupees(group, 'sgst');
+  const igstA = gstComponentRupees(group, 'igst');
   const totalTax = roundMoney2(cgstA + sgstA + igstA);
 
   const bankHtml = `
