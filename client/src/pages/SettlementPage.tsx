@@ -3603,12 +3603,6 @@ const SettlementPage = () => {
         }
         return `${sellerName}: total quantity (${qtyTot}) is less than arrival bags (${allowedQty}); adjust rows to match.`;
       }
-      if (!isSettlementSellerPrintAllowed(seller, form)) {
-        return (
-          settlementSellerPrintGateMessage(seller, form) ??
-          `${sellerName}: check Unregistered to confirm saving/printing, or link a registered contact`
-        );
-      }
       return null;
     },
     [
