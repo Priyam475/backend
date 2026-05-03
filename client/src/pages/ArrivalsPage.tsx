@@ -5027,46 +5027,53 @@ const ArrivalsPage = () => {
                     {/* ── Sticky Submit Button ── */}
                     <div className="h-2" />
                   </div>
-
-                  {/* Fixed bottom submit bar - sits above bottom nav */}
-                  <div className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] sm:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-1px)] md:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-0.75rem-1px)] lg:bottom-0 left-0 right-0 z-[60] bg-background/90 backdrop-blur-xl px-3 pt-2.5 pb-0 sm:px-4 sm:pt-3 sm:pb-0 md:px-6">
-                    <div className="max-w-[480px] md:max-w-full mx-auto">
-                      <div className="flex items-stretch gap-0 rounded-2xl bg-white dark:bg-card p-1.5 shadow-sm border border-border/30">
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={openSellerSearchPanel}
-                          disabled={(!isMultiSeller && sellers.length >= 1) || hasIncompleteSellerDetails}
-                          className={cn(
-                            "h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center disabled:opacity-60",
-                            ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
-                          )}
-                        >
-                          <Users className="w-4 h-4 md:w-5 md:h-5" />
-                          <span className="ml-1.5 sm:ml-2">Add Seller</span>
-                        </Button>
-                        <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
-                        <Button
-                          type="button"
-                          onClick={handleSubmitArrival}
-                          disabled={isSubmittingArrival}
-                          aria-busy={isSubmittingArrival}
-                          className={cn(
-                            "flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base disabled:opacity-60 flex items-center justify-center",
-                            ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
-                          )}
-                        >
-                          <FileText className="w-4 h-4 md:w-5 md:h-5" />
-                          <span className="ml-1.5 sm:ml-2 truncate">{editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit (${sellers.length})` : 'Submit Arrival')}</span>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </motion.div>
               </>
             )}
           </AnimatePresence>
+
+          {/* Fixed action row: portal to body so z-index wins over BottomNav; sheet stays z-50 so tab bar stays visible */}
+          {showAdd &&
+            createPortal(
+              <div
+                className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)+1px)] left-0 right-0 z-[55] bg-background/90 backdrop-blur-xl px-3 pt-2.5 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] sm:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)+1px)] sm:px-4 sm:pt-3 sm:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px)-0.75rem+1px)] md:px-6 lg:bottom-0 lg:pb-3 pointer-events-auto"
+                aria-label="Arrival actions"
+              >
+                <div className="max-w-[480px] md:max-w-full mx-auto">
+                  <div className="flex items-stretch gap-0 rounded-2xl bg-white dark:bg-card p-1.5 shadow-sm border border-border/30">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={openSellerSearchPanel}
+                      disabled={(!isMultiSeller && sellers.length >= 1) || hasIncompleteSellerDetails}
+                      className={cn(
+                        "h-12 md:h-14 rounded-xl flex-1 text-xs sm:text-sm font-semibold flex items-center justify-center disabled:opacity-60",
+                        ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
+                      )}
+                    >
+                      <Users className="w-4 h-4 md:w-5 md:h-5" />
+                      <span className="ml-1.5 sm:ml-2">Add Seller</span>
+                    </Button>
+                    <div className="w-2 shrink-0 bg-white dark:bg-card" aria-hidden />
+                    <Button
+                      type="button"
+                      onClick={handleSubmitArrival}
+                      disabled={isSubmittingArrival}
+                      aria-busy={isSubmittingArrival}
+                      className={cn(
+                        "flex-1 h-12 md:h-14 rounded-xl font-bold text-xs sm:text-sm md:text-base disabled:opacity-60 flex items-center justify-center",
+                        ARRIVALS_SETTLEMENT_BUTTON_GRADIENT,
+                      )}
+                    >
+                      <FileText className="w-4 h-4 md:w-5 md:h-5" />
+                      <span className="ml-1.5 sm:ml-2 truncate">{editingVehicleId != null ? 'Update Arrival' : (sellers.length > 0 ? `Submit (${sellers.length})` : 'Submit Arrival')}</span>
+                    </Button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
         </>
       )}
 
