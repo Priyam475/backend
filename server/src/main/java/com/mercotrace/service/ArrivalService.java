@@ -283,6 +283,7 @@ public class ArrivalService {
         summary.setFreightTotal(freightTotal);
         summary.setFreightMethod(fm);
         summary.setArrivalDatetime(vehicle.getArrivalDatetime());
+        summary.setLastModifiedDate(vehicle.getLastModifiedDate());
         summary.setPartiallyCompleted(isPartial);
         return summary;
     }
@@ -392,6 +393,7 @@ public class ArrivalService {
             dto.setBidsCount(bidsCount);
             dto.setWeighedCount(weighedCount);
             dto.setPartiallyCompleted(Boolean.TRUE.equals(v.getPartiallyCompleted()));
+            dto.setLastModifiedDate(v.getLastModifiedDate());
             return dto;
         }).toList();
 
@@ -877,6 +879,7 @@ public class ArrivalService {
         dto.setGatepassNumber(v.getGatepassNumber());
         dto.setOrigin(v.getOrigin());
         dto.setPartiallyCompleted(Boolean.TRUE.equals(v.getPartiallyCompleted()));
+        dto.setLastModifiedDate(v.getLastModifiedDate());
         return dto;
     }
 

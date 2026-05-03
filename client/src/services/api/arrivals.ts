@@ -58,6 +58,8 @@ export interface ArrivalSummary {
   freightTotal: number;
   freightMethod: FreightMethod | null;
   arrivalDatetime: string;
+  /** From server auditing; list uses this so edited rows surface first */
+  lastModifiedDate?: string;
   godown?: string;
   gatepassNumber?: string;
   origin?: string;

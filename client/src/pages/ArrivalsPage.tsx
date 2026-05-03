@@ -62,9 +62,15 @@ function isAbortError(e: unknown): boolean {
   );
 }
 
+function arrivalSummarySortKeyMs(row: ArrivalSummary): number {
+  const lm = row.lastModifiedDate ? new Date(row.lastModifiedDate).getTime() : NaN;
+  if (Number.isFinite(lm)) return lm;
+  return new Date(row.arrivalDatetime).getTime();
+}
+
 function sortArrivalSummaries(a: ArrivalSummary, b: ArrivalSummary): number {
-  const ta = new Date(a.arrivalDatetime).getTime();
-  const tb = new Date(b.arrivalDatetime).getTime();
+  const ta = arrivalSummarySortKeyMs(a);
+  const tb = arrivalSummarySortKeyMs(b);
   if (tb !== ta) return tb - ta;
   return Number(b.vehicleId) - Number(a.vehicleId);
 }
@@ -1826,7 +1832,7 @@ const ArrivalsPage = () => {
       statusFilter === 'PARTIALLY_COMPLETED'
         ? partialArrivals
         : statusFilter === 'ALL'
-          ? [...apiArrivals, ...partialArrivals]
+          ? [...apiArrivals, ...partialArrivals].sort(sortArrivalSummaries)
           : apiArrivals;
     let result = source;
     const q = searchQuery.trim().toLowerCase();

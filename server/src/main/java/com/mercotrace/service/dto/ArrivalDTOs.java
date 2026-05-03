@@ -367,6 +367,9 @@ public final class ArrivalDTOs {
 
         private boolean partiallyCompleted;
 
+        /** Vehicle row last-modified (auditing); UI sorts by this so edited arrivals rise to top. */
+        private Instant lastModifiedDate;
+
         public Long getVehicleId() {
             return vehicleId;
         }
@@ -509,6 +512,14 @@ public final class ArrivalDTOs {
 
         public void setPartiallyCompleted(boolean partiallyCompleted) {
             this.partiallyCompleted = partiallyCompleted;
+        }
+
+        public Instant getLastModifiedDate() {
+            return lastModifiedDate;
+        }
+
+        public void setLastModifiedDate(Instant lastModifiedDate) {
+            this.lastModifiedDate = lastModifiedDate;
         }
     }
 
