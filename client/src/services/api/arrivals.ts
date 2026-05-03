@@ -127,6 +127,8 @@ export interface ArrivalFullDetail {
   /** Persisted multi-seller vs single-seller mode (restored on edit). */
   multiSeller?: boolean;
   sellers: ArrivalSellerFullDetail[];
+  /** Server-side reasons delete is blocked; enum names (e.g. `BILLING`). */
+  deleteBlockers?: string[];
 }
 
 export interface ArrivalLotFullDetail {
@@ -171,6 +173,30 @@ export interface ArrivalUpdatePayload {
   multi_seller?: boolean;
   partially_completed?: boolean;
   sellers?: ArrivalSellerPayload[];
+}
+
+export class ArrivalDeletionBlockedError extends Error {
+  readonly blockers: string[];
+
+  constructor(message: string, blockers: string[]) {
+    super(message);
+    this.name = 'ArrivalDeletionBlockedError';
+    this.blockers = blockers;
+  }
+}
+
+/** Human-readable list for tooltips (English). */
+export function formatArrivalDeletionBlockerCodes(codes: string[]): string {
+  const labels: Record<string, string> = {
+    BILLING: 'Billing',
+    AUCTION_SELF_SALE: 'Auction self-sale',
+    SELF_SALE_CLOSURE: 'Self-sale closure',
+    CDN: 'CDN',
+    STOCK_PURCHASE: 'Stock purchase',
+    WEIGHING: 'Weighing',
+    WRITER_PAD: 'Writer pad',
+  };
+  return codes.map(c => labels[c] ?? c).join(', ');
 }
 
 async function handleArrivalResponse<T>(res: Response, defaultMessage: string): Promise<T> {
@@ -380,9 +406,29 @@ export const arrivalsApi = {
 
   async delete(vehicleId: number | string): Promise<void> {
     const res = await apiFetch(`/arrivals/${vehicleId}`, { method: 'DELETE' });
-    if (!res.ok) {
-      await handleArrivalResponse<never>(res, 'Failed to delete arrival');
+    if (res.ok) return;
+    let message = 'Failed to delete arrival';
+    let blockers: string[] = [];
+    try {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json') || contentType.includes('application/problem+json')) {
+        const problem: { detail?: unknown; title?: unknown; blockers?: unknown } = await res.json();
+        if (typeof problem.detail === 'string' && problem.detail.trim().length > 0) {
+          message = problem.detail.trim();
+        } else if (typeof problem.title === 'string' && problem.title.trim().length > 0) {
+          message = problem.title.trim();
+        }
+        if (Array.isArray(problem.blockers)) {
+          blockers = problem.blockers.filter((x): x is string => typeof x === 'string');
+        }
+      }
+    } catch {
+      // ignore parse errors
     }
+    if (res.status === 409 && blockers.length > 0) {
+      throw new ArrivalDeletionBlockedError(message, blockers);
+    }
+    throw new Error(message);
   },
 };
 

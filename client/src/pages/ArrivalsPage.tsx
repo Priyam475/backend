@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { contactApi, arrivalsApi, commodityApi } from '@/services/api';
 import type { ArrivalSummary, ArrivalCreatePayload, ArrivalFullDetail, ArrivalDetail } from '@/services/api/arrivals';
+import { ArrivalDeletionBlockedError, formatArrivalDeletionBlockerCodes } from '@/services/api/arrivals';
 import ArrivalStatusBadge, { getArrivalStatus, type ArrivalStatus } from '@/components/arrivals/ArrivalStatusBadge';
 import ArrivalSummaryVehicleSellerQty from '@/components/arrivals/ArrivalSummaryVehicleSellerQty';
 import { ARRIVALS_TABLE_HEADER_GRADIENT } from '@/components/arrivals/arrivalsTableTokens';
@@ -1573,10 +1574,14 @@ const ArrivalsPage = () => {
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save partial data';
-      if (message.includes('Vehicle mark/alias')) {
+      if (err instanceof ArrivalDeletionBlockedError) {
+        toast.error(message);
+      } else if (message.includes('Vehicle mark/alias')) {
         setVehicleMarkAliasApiError(message);
+        toast.error(message);
+      } else {
+        toast.error(message);
       }
-      toast.error(message);
       return false;
     }
   }, [editingVehicleId, buildPartialPayload, vehicleMarkAlias]);
@@ -2786,7 +2791,11 @@ const ArrivalsPage = () => {
       await loadArrivalsFromApi();
       toast.success('Arrival deleted');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete arrival');
+      if (err instanceof ArrivalDeletionBlockedError) {
+        toast.error(err.message);
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete arrival');
+      }
     }
   };
 
@@ -2893,10 +2902,14 @@ const ArrivalsPage = () => {
       toast.success('Arrival updated');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update arrival';
-      if (message.includes('Vehicle mark/alias')) {
+      if (err instanceof ArrivalDeletionBlockedError) {
+        toast.error(message);
+      } else if (message.includes('Vehicle mark/alias')) {
         setVehicleMarkAliasApiError(message);
+        toast.error(message);
+      } else {
+        toast.error(message);
       }
-      toast.error(message);
     }
   };
 
@@ -3207,7 +3220,23 @@ const ArrivalsPage = () => {
                                                   </Button>
                                                 )}
                                                 {can('Arrivals', 'Delete') && (
-                                                  <Button type="button" variant="destructive" size="sm" onClick={e => { e.stopPropagation(); setPendingDelete({ kind: 'arrival', vehicleId: expandedDetail.vehicleId, label: expandedDetail.vehicleNumber }); }}><Trash2 className="w-3.5 h-3.5 mr-1" /> Delete</Button>
+                                                  <Button
+                                                    type="button"
+                                                    variant="destructive"
+                                                    size="sm"
+                                                    disabled={(expandedDetail.deleteBlockers?.length ?? 0) > 0}
+                                                    title={
+                                                      (expandedDetail.deleteBlockers?.length ?? 0) > 0
+                                                        ? `Cannot delete: ${formatArrivalDeletionBlockerCodes(expandedDetail.deleteBlockers ?? [])}`
+                                                        : undefined
+                                                    }
+                                                    onClick={e => {
+                                                      e.stopPropagation();
+                                                      setPendingDelete({ kind: 'arrival', vehicleId: expandedDetail.vehicleId, label: expandedDetail.vehicleNumber });
+                                                    }}
+                                                  >
+                                                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                                                  </Button>
                                                 )}
                                               </div>
                                             </div>
@@ -4208,6 +4237,12 @@ const ArrivalsPage = () => {
                                       {can('Arrivals', 'Delete') && (
                                         <button
                                           type="button"
+                                          disabled={(expandedDetail.deleteBlockers?.length ?? 0) > 0}
+                                          title={
+                                            (expandedDetail.deleteBlockers?.length ?? 0) > 0
+                                              ? `Cannot delete: ${formatArrivalDeletionBlockerCodes(expandedDetail.deleteBlockers ?? [])}`
+                                              : undefined
+                                          }
                                           onClick={e => {
                                             e.stopPropagation();
                                             setPendingDelete({
@@ -4216,7 +4251,7 @@ const ArrivalsPage = () => {
                                               label: expandedDetail.vehicleNumber ?? a.vehicleNumber,
                                             });
                                           }}
-                                          className="inline-flex min-h-[44px] min-w-0 flex-1 touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-red-50 px-2 text-xs font-semibold text-red-600 dark:bg-red-950/20"
+                                          className="inline-flex min-h-[44px] min-w-0 flex-1 touch-manipulation items-center justify-center gap-1.5 rounded-xl bg-red-50 px-2 text-xs font-semibold text-red-600 dark:bg-red-950/20 disabled:pointer-events-none disabled:opacity-50"
                                         >
                                           <Trash2 className="h-4 w-4 shrink-0" /> Delete
                                         </button>
