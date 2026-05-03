@@ -945,6 +945,8 @@ const ArrivalsPage = () => {
   const [arrivalDetails, setArrivalDetails] = useState<ArrivalDetail[]>([]);
   const loadArrivalsGenRef = useRef(0);
   const loadArrivalsAbortRef = useRef<AbortController | null>(null);
+  const arrivalFullDetailCacheRef = useRef<Map<string, ArrivalFullDetail>>(new Map());
+  const arrivalFullDetailPrefetchingRef = useRef<Set<string>>(new Set());
   const [arrivalsStreamingMore, setArrivalsStreamingMore] = useState(false);
   const [completedArrivalsTotal, setCompletedArrivalsTotal] = useState<number | null>(null);
   const [completedArrivalsComplete, setCompletedArrivalsComplete] = useState(false);
@@ -1303,6 +1305,75 @@ const ArrivalsPage = () => {
     }));
   }, []);
 
+  const populateEditFormFromDetail = useCallback((detail: ArrivalFullDetail) => {
+    setVehicleNumber(detail?.vehicleNumber ?? '');
+    setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(detail?.vehicleMarkAlias ?? ''));
+    setLoadedWeight(detail?.loadedWeight != null ? String(detail.loadedWeight) : '');
+    setEmptyWeight(detail?.emptyWeight != null ? String(detail.emptyWeight) : '');
+    setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
+    setFreightMethod((detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT');
+    setFreightRate(detail?.freightRate != null ? String(detail.freightRate) : '');
+    setFreightKgs(detail?.freightKgs != null ? String(detail.freightKgs) : '1');
+    setNoRental(Boolean(detail?.noRental));
+    setAdvancePaid(detail?.advancePaid != null ? String(detail.advancePaid) : '');
+    setGodown(detail?.godown ?? '');
+    setGatepassNumber(detail?.gatepassNumber ?? '');
+    setOrigin(detail?.origin ?? '');
+    setBrokerName(detail?.brokerName ?? '');
+    setBrokerContactId(detail?.brokerContactId ?? null);
+    setNarration(detail?.narration ?? '');
+    setStep(2);
+
+    const mappedSellers: SellerEntry[] = (detail?.sellers ?? []).map((s, idx) => ({
+      seller_vehicle_id: `edit-${s?.contactId ?? idx}-${idx}`,
+      contact_id: String(s?.contactId ?? ''),
+      seller_serial_number: s?.sellerSerialNumber ?? null,
+      seller_name: s?.sellerName ?? '',
+      seller_phone: s?.sellerPhone ?? '',
+      seller_mark: s?.sellerMark ?? '',
+      lots: (s?.lots ?? []).map((l, lotIdx) => ({
+        lot_id: l?.id != null ? String(l.id) : `lot-${idx}-${lotIdx}`,
+        lot_name: l?.lotName ?? '',
+        lot_serial_number: l?.lotSerialNumber ?? null,
+        quantity: l?.bagCount ?? 0,
+        commodity_name: l?.commodityName ?? '',
+        broker_tag: l?.brokerTag ?? '',
+        variant: l?.variant ?? '',
+      })),
+    }));
+    setSellers(mappedSellers);
+    setSellerExpanded(
+      mappedSellers.reduce<Record<string, boolean>>((acc, s) => {
+        acc[s.seller_vehicle_id] = false;
+        return acc;
+      }, {})
+    );
+    const resolvedMulti = resolveMultiSellerForEdit(detail, mappedSellers.length);
+    setIsMultiSeller(resolvedMulti);
+
+    editBaselineSnapshotRef.current = JSON.stringify({
+      step: 2,
+      isMultiSeller: resolvedMulti,
+      vehicleNumber: detail?.vehicleNumber ?? '',
+      vehicleMarkAlias: detail?.vehicleMarkAlias ?? '',
+      loadedWeight: detail?.loadedWeight != null ? String(detail.loadedWeight) : '',
+      emptyWeight: detail?.emptyWeight != null ? String(detail.emptyWeight) : '',
+      deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
+      freightMethod: (detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT',
+      freightRate: detail?.freightRate != null ? String(detail.freightRate) : '',
+      freightKgs: detail?.freightKgs != null ? String(detail.freightKgs) : '1',
+      noRental: Boolean(detail?.noRental),
+      advancePaid: detail?.advancePaid != null ? String(detail.advancePaid) : '',
+      brokerName: detail?.brokerName ?? '',
+      brokerContactId: detail?.brokerContactId ?? null,
+      narration: detail?.narration ?? '',
+      godown: detail?.godown ?? '',
+      gatepassNumber: detail?.gatepassNumber ?? '',
+      origin: detail?.origin ?? '',
+      sellers: serializeSellersForDirty(mappedSellers),
+    });
+  }, [serializeSellersForDirty]);
+
   const formatSellerSerialNumber = useCallback((sellerSerialNumber?: number | null) => {
     if (sellerSerialNumber == null || sellerSerialNumber < 1) return null;
     return String(sellerSerialNumber);
@@ -1485,6 +1556,7 @@ const ArrivalsPage = () => {
           partially_completed: true,
           sellers: payload.sellers,
         });
+        arrivalFullDetailCacheRef.current.delete(String(editingVehicleId));
       } else {
         await arrivalsApi.create(buildPartialPayload());
       }
@@ -1840,6 +1912,43 @@ const ArrivalsPage = () => {
     getItemKey: index => String(filteredArrivals[index]?.vehicleId ?? index),
     enabled: !isDesktop && filteredArrivals.length > 0,
   });
+
+  useEffect(() => {
+    if (!allStreamsComplete || filteredArrivals.length === 0 || showAdd) return;
+    const rows = filteredArrivals.slice(0, 12);
+
+    const prefetchVisibleDetails = async () => {
+      for (const row of rows) {
+        const key = String(row.vehicleId);
+        if (arrivalFullDetailCacheRef.current.has(key) || arrivalFullDetailPrefetchingRef.current.has(key)) continue;
+        arrivalFullDetailPrefetchingRef.current.add(key);
+        try {
+          const detail = await arrivalsApi.getById(row.vehicleId);
+          arrivalFullDetailCacheRef.current.set(key, detail);
+        } catch {
+          // Best-effort warm cache only; visible UI should not be noisy.
+        } finally {
+          arrivalFullDetailPrefetchingRef.current.delete(key);
+        }
+      }
+    };
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const id = idleWindow.requestIdleCallback(() => {
+        void prefetchVisibleDetails();
+      }, { timeout: 2500 });
+      return () => idleWindow.cancelIdleCallback?.(id);
+    }
+
+    const id = window.setTimeout(() => {
+      void prefetchVisibleDetails();
+    }, 1500);
+    return () => window.clearTimeout(id);
+  }, [allStreamsComplete, filteredArrivals, showAdd]);
 
   const loadArrivalsFromApi = useCallback(async () => {
     const myGen = ++loadArrivalsGenRef.current;
@@ -2649,6 +2758,7 @@ const ArrivalsPage = () => {
     setExpandedDetailLoading(true);
     try {
       const detail = await arrivalsApi.getById(vehicleId);
+      arrivalFullDetailCacheRef.current.set(String(vehicleId), detail);
       setExpandedDetail(detail);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load detail');
@@ -2665,6 +2775,7 @@ const ArrivalsPage = () => {
     }
     try {
       await arrivalsApi.delete(vehicleId);
+      arrivalFullDetailCacheRef.current.delete(String(vehicleId));
       setExpandedDetail(null);
       await loadArrivalsFromApi();
       toast.success('Arrival deleted');
@@ -2674,6 +2785,11 @@ const ArrivalsPage = () => {
   };
 
   const handleEditArrival = async (a: Pick<ArrivalSummary, 'vehicleId'>) => {
+    const key = String(a.vehicleId);
+    const cachedDetail = sameArrivalVehicleId(expandedDetail?.vehicleId, a.vehicleId)
+      ? expandedDetail
+      : arrivalFullDetailCacheRef.current.get(key);
+
     setActiveSellerSearch(null);
     setSellerDropdown(false);
     setAddLotForm(null);
@@ -2682,77 +2798,19 @@ const ArrivalsPage = () => {
     editBaselineSnapshotRef.current = null;
     setShowAdd(true);
     setExpandedDetail(null);
-    setEditLoading(true);
     if (isDesktop) setDesktopTab('new-arrival');
+
+    if (cachedDetail) {
+      setEditLoading(false);
+      populateEditFormFromDetail(cachedDetail);
+      return;
+    }
+
+    setEditLoading(true);
     try {
       const detail = await arrivalsApi.getById(a.vehicleId);
-      setVehicleNumber(detail?.vehicleNumber ?? '');
-      setVehicleMarkAlias(sanitizeVehicleMarkAliasInput(detail?.vehicleMarkAlias ?? ''));
-      setLoadedWeight(detail?.loadedWeight != null ? String(detail.loadedWeight) : '');
-      setEmptyWeight(detail?.emptyWeight != null ? String(detail.emptyWeight) : '');
-      setDeductedWeight(detail?.deductedWeight != null ? String(detail.deductedWeight) : '');
-      setFreightMethod((detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT');
-      setFreightRate(detail?.freightRate != null ? String(detail.freightRate) : '');
-      setFreightKgs(detail?.freightKgs != null ? String(detail.freightKgs) : '1');
-      setNoRental(Boolean(detail?.noRental));
-      setAdvancePaid(detail?.advancePaid != null ? String(detail.advancePaid) : '');
-      setGodown(detail?.godown ?? '');
-      setGatepassNumber(detail?.gatepassNumber ?? '');
-      setOrigin(detail?.origin ?? '');
-      setBrokerName(detail?.brokerName ?? '');
-      setBrokerContactId(detail?.brokerContactId ?? null);
-      setNarration(detail?.narration ?? '');
-      setStep(2);
-      const mappedSellers: SellerEntry[] = (detail?.sellers ?? []).map((s, idx) => ({
-        seller_vehicle_id: `edit-${s?.contactId ?? idx}-${idx}`,
-        contact_id: String(s?.contactId ?? ''),
-        seller_serial_number: s?.sellerSerialNumber ?? null,
-        seller_name: s?.sellerName ?? '',
-        seller_phone: s?.sellerPhone ?? '',
-        seller_mark: s?.sellerMark ?? '',
-        lots: (s?.lots ?? []).map((l, lotIdx) => ({
-          lot_id: l?.id != null ? String(l.id) : `lot-${idx}-${lotIdx}`,
-          lot_name: l?.lotName ?? '',
-          lot_serial_number: l?.lotSerialNumber ?? null,
-          quantity: l?.bagCount ?? 0,
-          commodity_name: l?.commodityName ?? '',
-          broker_tag: l?.brokerTag ?? '',
-          variant: l?.variant ?? '',
-        })),
-      }));
-      setSellers(mappedSellers);
-      setSellerExpanded(
-        mappedSellers.reduce<Record<string, boolean>>((acc, s) => {
-          acc[s.seller_vehicle_id] = false; // keep seller cards collapsed on edit open
-          return acc;
-        }, {})
-      );
-      const resolvedMulti = resolveMultiSellerForEdit(detail, mappedSellers.length);
-      setIsMultiSeller(resolvedMulti);
-
-      // Capture baseline immediately after we populate all edit fields,
-      // so dirty detection works reliably even with invalid data.
-      editBaselineSnapshotRef.current = JSON.stringify({
-        step: 2,
-        isMultiSeller: resolvedMulti,
-        vehicleNumber: detail?.vehicleNumber ?? '',
-        vehicleMarkAlias: detail?.vehicleMarkAlias ?? '',
-        loadedWeight: detail?.loadedWeight != null ? String(detail.loadedWeight) : '',
-        emptyWeight: detail?.emptyWeight != null ? String(detail.emptyWeight) : '',
-        deductedWeight: detail?.deductedWeight != null ? String(detail.deductedWeight) : '',
-        freightMethod: (detail?.freightMethod as FreightMethod) ?? 'BY_WEIGHT',
-        freightRate: detail?.freightRate != null ? String(detail.freightRate) : '',
-        freightKgs: detail?.freightKgs != null ? String(detail.freightKgs) : '1',
-        noRental: Boolean(detail?.noRental),
-        advancePaid: detail?.advancePaid != null ? String(detail.advancePaid) : '',
-        brokerName: detail?.brokerName ?? '',
-        brokerContactId: detail?.brokerContactId ?? null,
-        narration: detail?.narration ?? '',
-        godown: detail?.godown ?? '',
-        gatepassNumber: detail?.gatepassNumber ?? '',
-        origin: detail?.origin ?? '',
-        sellers: serializeSellersForDirty(mappedSellers),
-      });
+      arrivalFullDetailCacheRef.current.set(key, detail);
+      populateEditFormFromDetail(detail);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load arrival for edit');
       setEditingVehicleId(null);
@@ -2819,6 +2877,7 @@ const ArrivalsPage = () => {
           };
         }) : undefined,
       });
+      arrivalFullDetailCacheRef.current.delete(String(editingVehicleId));
       await loadArrivalsFromApi();
       await loadContactsFromApi();
       setEditingVehicleId(null);
