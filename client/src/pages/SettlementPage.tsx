@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, FileText, Search, Users, Package, Truck,
   Edit3, Save, Printer, PlusCircle, Receipt, Scale, Gavel, IndianRupee, Trash2, Loader2,
-  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle, Check, X, LayoutGrid, List,
+  ChevronDown, ChevronUp, Info, RotateCcw, AlertTriangle, Check, X, LayoutGrid, List, Lock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDesktopMode } from '@/hooks/use-desktop';
@@ -926,6 +926,10 @@ const settlementReadOnlyCellClass =
 /** Uniform editable expense amount fields (per seller). */
 const settlementExpenseInputClass =
   'h-9 w-full min-w-[5.5rem] max-w-[6.75rem] rounded-md border border-border bg-background px-2 text-right text-xs tabular-nums shadow-sm [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
+/** Freight & unloading on Expenses card: auto-derived — dashed border, muted fill, lock (matches Billing computed-cell language). */
+const settlementExpenseDerivedInputAffordanceClass =
+  'border-dashed border-border/75 bg-muted/45 shadow-inner cursor-not-allowed select-text';
 
 /** Per-seller registration (Sales report): registered = linked to contact registry. */
 interface SellerRegFormState {
@@ -8017,7 +8021,7 @@ const SettlementPage = () => {
                                     'Quick Expenses default: (seller settlement weight / total settlement weight) x arrival freight.',
                                     isWeighingEnabledForSeller(seller.sellerId) &&
                                       isWeighingMergedIntoFreight(seller.sellerId)
-                                      ? 'Add to freight ON: this field shows freight + weighing (edits adjust base freight).'
+                                      ? 'Add to freight ON: this field shows freight + weighing (system-derived; not editable here).'
                                       : 'Freight always applies to net payable; weighing follows Use weighman / Add to freight.',
                                     `Stored freight: ${formatMoney2Display(exp.freight)}`,
                                   ]}
@@ -8028,29 +8032,64 @@ const SettlementPage = () => {
                                   isWeighingEnabledForSeller(seller.sellerId) &&
                                   isWeighingMergedIntoFreight(seller.sellerId);
                                 const displayedFreight = mergeIntoFreightMode ? exp.freight + exp.weighman : exp.freight;
+                                const showDerivedChrome = !isSettlementFormReadOnly;
+                                const freightInput = (
+                                  <SettlementNumericInput
+                                    id={`settlement-seller-expense-${seller.sellerId}-freight`}
+                                    value={displayedFreight}
+                                    onCommit={entered => {
+                                      const v = clampMoney(entered);
+                                      setSellerExpensesById(prev => {
+                                        const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                        if (mergeIntoFreightMode) {
+                                          const baseFreight = clampMoney(v - e0.weighman);
+                                          return { ...prev, [seller.sellerId]: { ...e0, freight: baseFreight } };
+                                        }
+                                        return { ...prev, [seller.sellerId]: { ...e0, freight: v } };
+                                      });
+                                    }}
+                                    commitMode="live"
+                                    fractionDigits={2}
+                                    emptyWhenZero
+                                    className={cn(
+                                      settlementExpenseInputClass,
+                                      showDerivedChrome && settlementExpenseDerivedInputAffordanceClass,
+                                      showDerivedChrome && 'pr-8'
+                                    )}
+                                    aria-label="Freight amount (read-only, auto-calculated)"
+                                    title={
+                                      showDerivedChrome
+                                        ? 'Auto-calculated from arrival freight and settlement weights — not editable here'
+                                        : undefined
+                                    }
+                                    readOnly={showDerivedChrome}
+                                    disabled={!showDerivedChrome}
+                                  />
+                                );
                                 return (
                                   <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                                    <SettlementNumericInput
-                                      id={`settlement-seller-expense-${seller.sellerId}-freight`}
-                                      value={displayedFreight}
-                                      onCommit={entered => {
-                                        const v = clampMoney(entered);
-                                        setSellerExpensesById(prev => {
-                                          const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                          if (mergeIntoFreightMode) {
-                                            const baseFreight = clampMoney(v - e0.weighman);
-                                            return { ...prev, [seller.sellerId]: { ...e0, freight: baseFreight } };
-                                          }
-                                          return { ...prev, [seller.sellerId]: { ...e0, freight: v } };
-                                        });
-                                      }}
-                                      commitMode="live"
-                                      fractionDigits={2}
-                                      emptyWhenZero
-                                      className={settlementExpenseInputClass}
-                                      aria-label="Freight amount"
-                                      disabled={isSettlementFormReadOnly}
-                                    />
+                                    {showDerivedChrome ? (
+                                      <Tooltip delayDuration={250}>
+                                        <TooltipTrigger asChild>
+                                          <div className="relative w-full">
+                                            {freightInput}
+                                            <Lock
+                                              className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/85"
+                                              aria-hidden
+                                            />
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="left" sideOffset={8} className="max-w-[280px] text-xs leading-relaxed">
+                                          <p className="font-semibold text-foreground">Read-only (auto-calculated)</p>
+                                          <p className="mt-1.5 text-muted-foreground">
+                                            Freight is allocated from arrival freight and this seller&apos;s share of settlement
+                                            weight. To change it, adjust arrival freight or lot weights — not this field.
+                                          </p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    ) : (
+                                      freightInput
+                                    )}
                                   </div>
                                 );
                               })()}
@@ -8068,23 +8107,60 @@ const SettlementPage = () => {
                                 />
                               </span>
                               <div className="flex max-w-[8.5rem] shrink-0 items-center justify-end gap-1">
-                                <SettlementNumericInput
-                                  value={exp.unloading}
-                                  onCommit={v => {
-                                    const x = clampMoney(v);
-                                    quickAdjustmentAppliedRef.current = true;
-                                    setSellerExpensesById(prev => {
-                                      const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
-                                      return { ...prev, [seller.sellerId]: { ...e0, unloading: x } };
-                                    });
-                                  }}
-                                  commitMode="blur"
-                                  fractionDigits={2}
-                                  emptyWhenZero
-                                  className={settlementExpenseInputClass}
-                                  aria-label="Unloading amount"
-                                  disabled={isSettlementFormReadOnly}
-                                />
+                                {(() => {
+                                  const showDerivedChrome = !isSettlementFormReadOnly;
+                                  const unloadingInput = (
+                                    <SettlementNumericInput
+                                      value={exp.unloading}
+                                      onCommit={v => {
+                                        const x = clampMoney(v);
+                                        quickAdjustmentAppliedRef.current = true;
+                                        setSellerExpensesById(prev => {
+                                          const e0 = prev[seller.sellerId] ?? defaultSellerExpenses();
+                                          return { ...prev, [seller.sellerId]: { ...e0, unloading: x } };
+                                        });
+                                      }}
+                                      commitMode="blur"
+                                      fractionDigits={2}
+                                      emptyWhenZero
+                                      className={cn(
+                                        settlementExpenseInputClass,
+                                        showDerivedChrome && settlementExpenseDerivedInputAffordanceClass,
+                                        showDerivedChrome && 'pr-8'
+                                      )}
+                                      aria-label="Unloading amount (read-only, auto-calculated)"
+                                      title={
+                                        showDerivedChrome
+                                          ? 'Auto-calculated from commodity slabs and bag share — not editable here'
+                                          : undefined
+                                      }
+                                      readOnly={showDerivedChrome}
+                                      disabled={!showDerivedChrome}
+                                    />
+                                  );
+                                  return showDerivedChrome ? (
+                                    <Tooltip delayDuration={250}>
+                                      <TooltipTrigger asChild>
+                                        <div className="relative w-full">
+                                          {unloadingInput}
+                                          <Lock
+                                            className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/85"
+                                            aria-hidden
+                                          />
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="left" sideOffset={8} className="max-w-[280px] text-xs leading-relaxed">
+                                        <p className="font-semibold text-foreground">Read-only (auto-calculated)</p>
+                                        <p className="mt-1.5 text-muted-foreground">
+                                          Unloading comes from lot-level commodity slab rules and this seller&apos;s bag share
+                                          (Quick Adjustment distribution). Edit slabs or weights upstream — not here.
+                                        </p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  ) : (
+                                    unloadingInput
+                                  );
+                                })()}
                               </div>
                             </div>
                             <div className="flex items-center justify-between gap-2">
