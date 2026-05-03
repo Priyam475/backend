@@ -897,7 +897,7 @@ function validateBill(
         errors[`items.${gi}.${ii}.quantity`] = 'Quantity must be at least 1';
       }
       if (!item.weight || item.weight <= 0) {
-        errors[`items.${gi}.${ii}.weight`] = 'Weight cannot be zero';
+        warnings[`items.${gi}.${ii}.weight`] = 'Weight cannot be zero';
       }
       const avgWeight = item.quantity > 0 ? item.weight / item.quantity : 0;
       const bounds = commodityAvgWeightBounds[group.commodityName];
@@ -932,6 +932,16 @@ function validateBill(
   });
 
   return { isValid: Object.keys(errors).length === 0, errors, warnings };
+}
+
+/** If true, skip {@link billingApi.assignNumber} so bill stays in progress until every line has positive weight. */
+function billHasAnyLineWeightZeroOrMissing(b: BillData): boolean {
+  return b.commodityGroups.some(g =>
+    (g.items ?? []).some(it => {
+      const w = Number(it.weight);
+      return !Number.isFinite(w) || w <= 0;
+    }),
+  );
 }
 
 /** Saved bills list paging (SummaryPage-style; uses `totalElements` from Spring page). */
@@ -3457,9 +3467,12 @@ const BillingPage = () => {
     if (!bill) return;
     const result = await persistBill();
     if (!result) return;
-    // Assign bill number on save (completed bill), idempotent if already numbered.
-    const assigned = await billingApi.assignNumber(result.billId);
-    const normalized = recalcGrandTotal(normalizeBillFromApi(assigned, fullConfigs, commodities) as BillData);
+    const persistedHasNoBillNumber = !String(result.billNumber ?? '').trim();
+    const skipAssignNumber =
+      persistedHasNoBillNumber && billHasAnyLineWeightZeroOrMissing(bill);
+    // Assign bill number only when every line has weight — otherwise stay in Bill In Progress (no billNumber).
+    const dtoAfter = skipAssignNumber ? result : await billingApi.assignNumber(result.billId);
+    const normalized = recalcGrandTotal(normalizeBillFromApi(dtoAfter, fullConfigs, commodities) as BillData);
     const withTempFlag: BillData = {
       ...normalized,
       buyerIsTemporary: !normalized.buyerContactId && Boolean(bill.buyerIsTemporary),
@@ -3467,7 +3480,12 @@ const BillingPage = () => {
     setBill(withTempFlag);
     billDirtyBaselineRef.current = serializeBillForDirty(withTempFlag);
     setHasSavedOnce(true);
-    toast.success(result.billNumber ? `Bill ${result.billNumber} updated.` : 'Bill saved.');
+    if (skipAssignNumber) {
+      toast.success('Saved to Bill In Progress. Set weight on every line, then save again to get a bill number.');
+    } else {
+      const bn = (dtoAfter.billNumber ?? '').trim();
+      toast.success(bn ? `Bill ${bn} updated.` : 'Bill saved.');
+    }
     void loadSavedBills();
   };
 
@@ -5268,16 +5286,13 @@ const BillingPage = () => {
                                       }}
                                       className={cn(
                                         'h-10 lg:h-6 text-[11px] lg:text-[10px] text-center px-2 lg:px-1 py-1 lg:py-0 border border-border rounded bg-background font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50',
-                                        (validationErrors[`items.${gi}.${ii}.weight`] || item.weight === 0) &&
-                                          'ring-1 ring-destructive/40 rounded',
+                                        validationWarnings[`items.${gi}.${ii}.weight`] &&
+                                          'ring-1 ring-amber-500/45 rounded border-amber-500/35',
                                       )}
                                     />
-                                    {item.weight === 0 && (
-                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive text-center">Can&apos;t be 0</p>
-                                    )}
-                                    {validationErrors[`items.${gi}.${ii}.weight`] && (
-                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-destructive text-center">
-                                        {validationErrors[`items.${gi}.${ii}.weight`]}
+                                    {validationWarnings[`items.${gi}.${ii}.weight`] && (
+                                      <p className="mt-0.5 text-[9px] lg:text-[8px] text-amber-700 dark:text-amber-400 text-center">
+                                        {validationWarnings[`items.${gi}.${ii}.weight`]}
                                       </p>
                                     )}
                                   </div>
