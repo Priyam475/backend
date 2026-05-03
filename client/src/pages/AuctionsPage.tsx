@@ -332,6 +332,8 @@ interface AuctionBuyerStripsProps {
   didDragMarkRef: MutableRefObject<boolean>;
   onBuyerSelect: (buyer: Contact) => void;
   onTemporaryMarkSelect: (mark: string) => void;
+  /** When true, only the temporary-marks row renders (registered contact chips hidden). */
+  hideRegisteredContactStrip?: boolean;
 }
 
 const AuctionBuyerStrips = memo(function AuctionBuyerStrips({
@@ -350,6 +352,7 @@ const AuctionBuyerStrips = memo(function AuctionBuyerStrips({
   didDragMarkRef,
   onBuyerSelect,
   onTemporaryMarkSelect,
+  hideRegisteredContactStrip = false,
 }: AuctionBuyerStripsProps) {
   const isDesktopVariant = variant === 'desktop';
   const regionClassName = isDesktopVariant
@@ -373,7 +376,9 @@ const AuctionBuyerStrips = memo(function AuctionBuyerStrips({
   const emptyMarkClassName = isDesktopVariant
     ? 'flex-shrink-0 px-4 py-2.5 rounded-xl border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-sm font-medium'
     : 'flex-shrink-0 px-3 py-2 rounded-md border border-l-4 border-l-violet-400 border-dashed bg-violet-500/5 text-violet-700 dark:text-violet-300 text-[1.07em] font-medium';
-  const stripSpacingClassName = isDesktopVariant ? 'space-y-3 min-w-0' : 'space-y-1 mb-1';
+  const stripSpacingClassName = isDesktopVariant
+    ? 'space-y-3 min-w-0'
+    : 'space-y-1 mb-[0.5rem]';
   const stripWrapperClassName = isDesktopVariant ? 'min-w-0 w-full max-w-full space-y-1.5' : '';
   const scrollStyle = {
     scrollbarWidth: 'thin',
@@ -383,51 +388,53 @@ const AuctionBuyerStrips = memo(function AuctionBuyerStrips({
 
   return (
     <div className={stripSpacingClassName}>
-      <div className={stripWrapperClassName}>
-        <div
-          ref={contactScrollRef}
-          role="region"
-          aria-label="Registered buyers"
-          tabIndex={0}
-          {...contactScrollHandlers}
-          className={regionClassName}
-          style={scrollStyle}
-        >
-          {contacts.length > 0 ? (
-            contacts.slice(0, 50).map((buyer) => (
-              <button
-                key={buyer.contact_id}
-                type="button"
-                disabled={!!editingBidId}
-                onClick={(e) => {
-                  if (didDragContactRef.current) {
-                    e.preventDefault();
-                    return;
-                  }
-                  onBuyerSelect(buyer);
-                }}
-                className={cn(
-                  contactButtonClassName,
-                  selectedBuyer?.contact_id === buyer.contact_id
-                    ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
-                    : 'bg-muted/40 border-border/50 hover:bg-muted/60'
-                )}
-              >
-                <span className={contactTextClassName}>{buyer.name}</span>
-                {buyer.mark && (
-                  <span className={isDesktopVariant ? 'text-xs opacity-90 flex-shrink-0' : 'text-[0.93em] opacity-90 flex-shrink-0'}>
-                    ({buyer.mark})
-                  </span>
-                )}
-              </button>
-            ))
-          ) : buyerSearchLoading ? (
-            <div className={emptyContactClassName}>Searching contacts</div>
-          ) : (
-            <div className={emptyContactClassName}>No matching contact</div>
-          )}
+      {!hideRegisteredContactStrip && (
+        <div className={stripWrapperClassName}>
+          <div
+            ref={contactScrollRef}
+            role="region"
+            aria-label="Registered buyers"
+            tabIndex={0}
+            {...contactScrollHandlers}
+            className={regionClassName}
+            style={scrollStyle}
+          >
+            {contacts.length > 0 ? (
+              contacts.slice(0, 50).map((buyer) => (
+                <button
+                  key={buyer.contact_id}
+                  type="button"
+                  disabled={!!editingBidId}
+                  onClick={(e) => {
+                    if (didDragContactRef.current) {
+                      e.preventDefault();
+                      return;
+                    }
+                    onBuyerSelect(buyer);
+                  }}
+                  className={cn(
+                    contactButtonClassName,
+                    selectedBuyer?.contact_id === buyer.contact_id
+                      ? 'bg-primary text-primary-foreground border-primary shadow-md border-l-primary'
+                      : 'bg-muted/40 border-border/50 hover:bg-muted/60'
+                  )}
+                >
+                  <span className={contactTextClassName}>{buyer.name}</span>
+                  {buyer.mark && (
+                    <span className={isDesktopVariant ? 'text-xs opacity-90 flex-shrink-0' : 'text-[0.93em] opacity-90 flex-shrink-0'}>
+                      ({buyer.mark})
+                    </span>
+                  )}
+                </button>
+              ))
+            ) : buyerSearchLoading ? (
+              <div className={emptyContactClassName}>Searching contacts</div>
+            ) : (
+              <div className={emptyContactClassName}>No matching contact</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className={stripWrapperClassName}>
         <div
@@ -5508,10 +5515,11 @@ const AuctionsPage = () => {
                     />
                   </div>
                 ) : null}
-                {/* Two rows always visible. Scroll: touch (smooth left/right), mouse-drag, arrow keys. */}
+                {/* Scroll: touch (smooth left/right), mouse-drag, arrow keys. Registered contact row off — set hideRegisteredContactStrip false to restore. */}
                 {isDesktop && (
                   <AuctionBuyerStrips
                     variant="desktop"
+                    hideRegisteredContactStrip
                     contacts={filteredContacts}
                     temporaryMarks={filteredTemporaryMarks}
                     selectedBuyer={selectedBuyer}
@@ -5715,6 +5723,7 @@ const AuctionsPage = () => {
         >
           <AuctionBuyerStrips
             variant="mobile"
+            hideRegisteredContactStrip
             contacts={filteredContacts}
             temporaryMarks={filteredTemporaryMarks}
             selectedBuyer={selectedBuyer}
