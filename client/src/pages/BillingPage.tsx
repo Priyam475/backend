@@ -1461,6 +1461,14 @@ const BillingPage = () => {
       .slice(0, 150);
   }, [addBidLotOptions, addBidLotSearch, getAddBidLotIdentifier]);
 
+  /** Lot bags left after the qty entered in Add New Bid (live with qty field). */
+  const addBidRuntimeRemaining = useMemo(() => {
+    if (!addBidSelectedLot) return null;
+    const digits = String(addBidQty).replace(/[^\d]/g, '') || '0';
+    const q = Math.max(0, parseInt(digits, 10) || 0);
+    return Math.max(0, addBidRemainingQty - q);
+  }, [addBidSelectedLot, addBidQty, addBidRemainingQty]);
+
   // Load saved bills from backend (all pages; no 200 cap)
   const loadSavedBills = useCallback(async () => {
     if (!canView) return;
@@ -4046,7 +4054,7 @@ const BillingPage = () => {
                 value={addBidLotSearch}
                 onFocus={() => setShowAddBidLotDropdown(true)}
                 onBlur={() => {
-                  window.setTimeout(() => setShowAddBidLotDropdown(false), 120);
+                  window.setTimeout(() => setShowAddBidLotDropdown(false), 280);
                 }}
                 onChange={e => {
                   setAddBidLotSearch(e.target.value);
@@ -4066,7 +4074,13 @@ const BillingPage = () => {
                 </p>
               )}
               {!addBidLotLoading && showAddBidLotDropdown && !addBidSelectedLot && (
-                <div className="absolute z-[100] left-0 right-0 top-full mt-1 max-h-[40vh] sm:max-h-48 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg">
+                <div
+                  className="absolute z-[100] left-0 right-0 top-full mt-1 max-h-[40vh] sm:max-h-48 overflow-y-auto rounded-lg border border-border/50 bg-background shadow-lg"
+                  onMouseDown={e => {
+                    // Keep lot search focused until click runs; otherwise blur+timeout unmounts list and click is lost.
+                    e.preventDefault();
+                  }}
+                >
                   {filteredAddBidLots.length === 0 && (
                     <p className="px-3 py-2 text-xs text-muted-foreground">No auction lots found.</p>
                   )}
@@ -4075,10 +4089,14 @@ const BillingPage = () => {
                       key={lot.lot_id}
                       type="button"
                       className="w-full px-3 py-2 text-left border-b border-border/30 last:border-b-0 hover:bg-muted/40 min-h-[44px] sm:min-h-0"
+                      onMouseDown={e => e.preventDefault()}
                       onClick={async () => {
                         setAddBidSelectedLot(lot);
                         setAddBidLotSearch(getAddBidLotIdentifier(lot));
                         setShowAddBidLotDropdown(false);
+                        const totalBags = Number(lot.bag_count) || 0;
+                        const soldBags = Number(lot.sold_bags ?? 0);
+                        setAddBidRemainingQty(Math.max(0, totalBags - soldBags));
                         try {
                           const session = await auctionApi.getOrStartSession(lot.lot_id);
                           setAddBidSession(session);
@@ -4112,6 +4130,11 @@ const BillingPage = () => {
                   ))}
                 </div>
               )}
+              {addBidSelectedLot && (
+                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400 pt-0.5" role="status">
+                  Bid: lot selected — enter quantity and rates, then save.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs sm:text-sm">Buyer *</Label>
@@ -4125,15 +4148,43 @@ const BillingPage = () => {
             <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-4">
               <div className="space-y-1">
                 <Label className="text-xs">Qty (bags) *</Label>
-                <BillingMoneyInput
-                  value={Number(addBidQty) || 0}
-                  min={0}
-                  integerOnly
-                  onCommit={(n) => setAddBidQty(n > 0 ? String(Math.max(1, Math.round(n))) : '')}
-                  placeholder={String(addBidRemainingQty)}
-                  className={cn('h-10 sm:h-9 rounded-lg text-sm', numberInputNoSpinnerClass)}
-                  title={`Remaining bags: ${addBidRemainingQty}`}
-                />
+                <div className="flex h-10 sm:h-9 items-center justify-end gap-1 whitespace-nowrap tabular-nums">
+                  <BillingMoneyInput
+                    value={Number(addBidQty) || 0}
+                    min={0}
+                    integerOnly
+                    liveDebounceMs={0}
+                    onCommit={(n) => setAddBidQty(n > 0 ? String(Math.max(1, Math.round(n))) : '')}
+                    className={cn(
+                      'h-10 sm:h-9 min-w-0 flex-1 rounded-lg text-sm text-right tabular-nums',
+                      numberInputNoSpinnerClass,
+                    )}
+                    title={
+                      addBidSelectedLot
+                        ? `This bid qty / bags left on lot after this bid (${addBidRuntimeRemaining ?? 0}; ${addBidRemainingQty} before)`
+                        : 'Select a lot first'
+                    }
+                  />
+                  <span
+                    className="inline-flex shrink-0 items-baseline gap-0 text-sm text-muted-foreground"
+                    aria-label={
+                      addBidSelectedLot && addBidRuntimeRemaining != null
+                        ? `Bags remaining on lot after this bid: ${addBidRuntimeRemaining} (${addBidRemainingQty} before this bid)`
+                        : 'No lot selected'
+                    }
+                  >
+                    {addBidSelectedLot && addBidRuntimeRemaining != null ? (
+                      <>
+                        <span className="leading-none select-none" aria-hidden>
+                          /
+                        </span>
+                        <span className="leading-none tabular-nums -ml-0.5">{addBidRuntimeRemaining}</span>
+                      </>
+                    ) : (
+                      <span className="leading-none">—</span>
+                    )}
+                  </span>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Base *</Label>
