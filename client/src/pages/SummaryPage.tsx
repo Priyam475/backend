@@ -179,6 +179,8 @@ const SummaryPage = () => {
 
     try {
       await Promise.all([mergeArrivals(), mergeDetails(), mergeLots()]);
+      if (signal.aborted) return;
+      setLoading(false);
 
       let bills: SalesBillDTO[] = [];
       try {
@@ -188,13 +190,16 @@ const SummaryPage = () => {
             page: p,
             size: BILLS_PAGE_SIZE,
             sort: 'billDate,desc',
+            signal,
           });
+          if (signal.aborted) return;
           const content = page.content ?? [];
           totalElements = page.totalElements ?? totalElements;
           bills.push(...content);
           if (content.length < BILLS_PAGE_SIZE || bills.length >= totalElements) break;
         }
-      } catch {
+      } catch (err) {
+        if (isAbortError(err)) return;
         bills = [];
       }
       if (!signal.aborted) setSalesBills(bills);

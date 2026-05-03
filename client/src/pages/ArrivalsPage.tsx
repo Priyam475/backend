@@ -1262,6 +1262,21 @@ const ArrivalsPage = () => {
   useAutofocusWhen(isStep1PanelOpen && !isMultiSeller, loadedWeightInputRef);
 
   const isArrivalPanelOpen = isDesktop ? desktopTab === 'new-arrival' : showAdd;
+
+  useEffect(() => {
+    if (isDesktop || !showAdd) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [isDesktop, showAdd]);
+
   // Detect the "lots flow" context.
   // We hide printer + Net/Billable cards whenever the arrival editor/sheet is open,
   // since the lots-related UI is accessible from there and we can't reliably infer
@@ -3898,7 +3913,7 @@ const ArrivalsPage = () => {
               </div>
             )}
           </div>
-          <div className="px-4 space-y-2.5 md:space-y-1.5 md:px-6">
+          <div className="px-4 space-y-2.5 md:px-6">
             {activeArrivalsLoading ? (
               <div className="glass-card p-8 rounded-2xl text-center">
                 <p className="text-muted-foreground">Loading arrivals…</p>
@@ -3947,14 +3962,14 @@ const ArrivalsPage = () => {
                         style={{ transform: `translateY(${vi.start}px)` }}
                       >
                         <motion.div initial={false}>
-                          <div className="glass-card max-w-full overflow-x-hidden overflow-y-visible rounded-2xl md:rounded-xl md:shadow-sm md:max-w-4xl md:mx-auto">
+                          <div className="glass-card max-w-full overflow-x-hidden overflow-y-visible rounded-2xl md:max-w-4xl md:mx-auto">
                       <button
                         type="button"
                         onClick={() => loadExpandedDetail(a.vehicleId)}
-                        className="flex w-full min-w-0 touch-manipulation items-start gap-3 p-3.5 text-left md:items-center md:gap-2 md:p-2.5 md:pr-2"
+                        className="flex w-full min-w-0 touch-manipulation items-start gap-3 p-3.5 text-left"
                       >
-                        {/* Phone: stacked card (unchanged below md) */}
-                        <div className="min-w-0 flex-1 space-y-2 md:hidden">
+                        {/* Non-desktop: stacked card. Desktop uses the table above. */}
+                        <div className="min-w-0 flex-1 space-y-2">
                           <ArrivalSummaryVehicleSellerQty
                             layout="stack"
                             vehicleNumber={a.vehicleNumber}
@@ -3997,7 +4012,7 @@ const ArrivalsPage = () => {
                             </span>
                           </div>
                         </div>
-                        <div className="flex shrink-0 flex-col items-end gap-1 self-start pt-0.5 md:hidden">
+                        <div className="flex shrink-0 flex-col items-end gap-1 self-start pt-0.5">
                           <span className="whitespace-nowrap text-xs text-muted-foreground">
                             {new Date(a.arrivalDatetime).toLocaleDateString()}
                           </span>
@@ -4013,8 +4028,8 @@ const ArrivalsPage = () => {
                           </span>
                         </div>
 
-                        {/* Tablet (md–lg): single dense row — hidden at lg+ where desktop table is used */}
-                        <div className="hidden w-full min-w-0 items-center gap-2 md:flex">
+                        {/* Reserved for desktop-only alternatives; non-desktop keeps the readable stacked card. */}
+                        <div className="hidden w-full min-w-0 items-center gap-2 lg:flex">
                           <div className="min-w-0 flex-1 overflow-x-auto [-webkit-overflow-scrolling:touch]">
                             <ArrivalSummaryVehicleSellerQty
                               layout="inline"
@@ -4067,7 +4082,7 @@ const ArrivalsPage = () => {
                         </div>
                       </button>
                       {showMobileArrivalActions && !isExpanded && (
-                        <div className="flex w-full gap-2 border-t border-border/30 px-3 py-2.5 md:px-2.5 md:py-2">
+                        <div className="flex w-full gap-2 border-t border-border/30 px-3 py-2.5">
                           {can('Arrivals', 'Edit') && (
                             <button
                               type="button"
@@ -4169,32 +4184,20 @@ const ArrivalsPage = () => {
             )}
           </div>
 
-          {/* Mobile / Tablet Modal */}
+          {/* Mobile / Tablet full-screen sheet */}
           <AnimatePresence>
             {showAdd && (
               <>
-                {/* Glassmorphism backdrop overlay — tablet only */}
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-40 bg-black/50 backdrop-blur-md hidden md:block lg:hidden"
-                    onClick={() => {
-                      void tryCloseArrivalPanel(() => setShowAdd(false));
-                    }}
-                />
-                <motion.div
-                  initial={{ opacity: 0, y: 30, scale: 0.97 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 30, scale: 0.97 }}
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 30 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   className={cn(
                     "fixed z-50 flex justify-center",
                     "inset-0 bg-background",
-                    "md:inset-3 md:rounded-3xl md:border md:border-white/20 md:shadow-2xl md:bg-background/80 md:backdrop-blur-2xl",
-                    "lg:inset-0 lg:rounded-none lg:border-0 lg:shadow-none lg:bg-background lg:backdrop-blur-none"
+                    "lg:inset-0 lg:rounded-none lg:border-0 lg:shadow-none lg:bg-background"
                   )}
-                  style={{ WebkitBackdropFilter: 'blur(24px)' }}
                 >
                 <div ref={newArrivalPanelScrollRef} className="w-full max-w-[480px] md:max-w-full overflow-y-auto">
                   <div
