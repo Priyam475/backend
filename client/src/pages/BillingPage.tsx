@@ -60,11 +60,13 @@ import {
 import { formatAuctionLotIdentifier } from '@/utils/auctionLotIdentifier';
 import {
   billGroupSubtotalWithTaxAndCharges,
+  commodityPreRoundTotalRupees,
   effectiveGstPercent,
   formatBillingInr,
   gstComponentRupees,
   percentOfAmount,
   roundMoney2,
+  rupeeWholeRoundOffDelta,
   syncGstRatesFromFixedAmounts,
   totalGstRupeesForGroup,
 } from '@/utils/billingMoney';
@@ -411,7 +413,7 @@ interface CommodityGroup {
   weighmanChargeQty?: number;
   discount: number; // Per-commodity discount amount or percentage
   discountType: 'PERCENT' | 'AMOUNT'; // Per-commodity discount type
-  manualRoundOff: number; // Per-commodity manual round off
+  manualRoundOff: number; // Per-commodity round-off (auto: whole-rupee adjustment from fractional paise)
   items: BillLineItem[];
   subtotal: number;
   commissionAmount: number;
@@ -2115,7 +2117,7 @@ const BillingPage = () => {
     }
   }, [buyersForBilling, selectBidBuyer]);
 
-  // Recalculate grand total (includes per-commodity discount and round-off)
+  // Recalculate grand total (includes per-commodity discount; round-off auto-snaps each commodity to whole ₹)
   const recalcGrandTotal = useCallback((b: BillData): BillData => {
     const calculateGroupCharges = (group: CommodityGroup) => {
       const sub = roundMoney2(group.subtotal);
@@ -2141,25 +2143,30 @@ const BillingPage = () => {
       return next;
     });
 
+    const commodityGroupsWithRoundOff = commodityGroups.map(group => ({
+      ...group,
+      manualRoundOff: rupeeWholeRoundOffDelta(commodityPreRoundTotalRupees(group)),
+    }));
+
     let grandTotal = 0;
-    commodityGroups.forEach(group => {
-      const subtotalWithCharges = roundMoney2(group.subtotal + group.totalCharges);
-      const additionsSum = roundMoney2((group.coolieAmount || 0) + (group.weighmanChargeAmount || 0));
-      let discountAmount = roundMoney2(group.discount || 0);
-      if (group.discountType === 'PERCENT') {
-        discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
-      }
+    commodityGroupsWithRoundOff.forEach(group => {
       const commodityTotal = roundMoney2(
-        subtotalWithCharges + additionsSum - discountAmount + roundMoney2(group.manualRoundOff || 0),
+        commodityPreRoundTotalRupees(group) + roundMoney2(group.manualRoundOff || 0),
       );
       grandTotal = roundMoney2(grandTotal + commodityTotal);
     });
 
     grandTotal = roundMoney2(grandTotal + roundMoney2(b.outboundFreight || 0));
 
-    const tokenAdvance = sumLineTokenAdvances({ ...b, commodityGroups });
+    const tokenAdvance = sumLineTokenAdvances({ ...b, commodityGroups: commodityGroupsWithRoundOff });
     const pendingBalance = roundMoney2(grandTotal - tokenAdvance);
-    return roundBillMoneyValues({ ...b, commodityGroups, grandTotal, pendingBalance, tokenAdvance });
+    return roundBillMoneyValues({
+      ...b,
+      commodityGroups: commodityGroupsWithRoundOff,
+      grandTotal,
+      pendingBalance,
+      tokenAdvance,
+    });
   }, []);
 
   const serializeBillForDirty = useCallback((b: BillData): string => {
@@ -6200,22 +6207,12 @@ const BillingPage = () => {
                           )}
                         >
                           <div className={billingSummaryCellOuterClass}>
-                            <div className={billingSummaryCellInputsClass}>
-                              <BillingMoneyInput
-                                value={g.manualRoundOff || 0}
-                                commitMode="live"
-                                onCommit={val => {
-                                  const updated = { ...bill };
-                                  const cg = { ...updated.commodityGroups[gi] };
-                                  cg.manualRoundOff = val;
-                                  updated.commodityGroups = [...updated.commodityGroups];
-                                  updated.commodityGroups[gi] = cg;
-                                  setBill(recalcGrandTotal(updated));
-                                }}
-                                className={billingSummaryInputClass}
-                                placeholder="0"
-                              />
+                            <div className="text-[10px] text-muted-foreground font-medium shrink-0 min-w-0">
+                              Auto
                             </div>
+                            <span className={billingSummaryValueClass}>
+                              {(g.manualRoundOff || 0) > 0 ? '+' : ''}₹{formatBillingInr(g.manualRoundOff || 0)}
+                            </span>
                           </div>
                         </td>
                       ))}
@@ -6224,14 +6221,9 @@ const BillingPage = () => {
                     <tr className="border-t border-border/30">
                       <td className="sticky left-0 z-20 px-2 py-1.5 text-[10px] font-semibold text-foreground bg-background dark:bg-slate-900 border-r border-border/50 whitespace-normal min-w-[110px] max-w-[110px] w-[110px]">Overall Rate</td>
                       {bill.commodityGroups.map((g, gi) => {
-                        const subtotalWithCharges = billGroupSubtotalWithTaxAndCharges(g);
-                        let discountAmount = g.discount || 0;
-                        if (g.discountType === 'PERCENT') {
-                          discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
-                        } else {
-                          discountAmount = roundMoney2(discountAmount);
-                        }
-                        const totalAmount = roundMoney2(subtotalWithCharges - discountAmount + (g.manualRoundOff || 0));
+                        const totalAmount = roundMoney2(
+                          commodityPreRoundTotalRupees(g) + roundMoney2(g.manualRoundOff || 0),
+                        );
                         return (
                           <td
                             key={`overallrate-${gi}`}

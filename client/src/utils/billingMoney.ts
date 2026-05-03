@@ -150,3 +150,45 @@ export function billGroupSubtotalWithTaxAndCharges(g: {
       + totalGstRupeesForGroup(g),
   );
 }
+
+/**
+ * Commodity net ₹ before round-off (matches BillingPage `recalcGrandTotal`: subtotal + bundled charges
+ * + coolie + weighman − discount).
+ */
+export function commodityPreRoundTotalRupees(group: {
+  subtotal: number;
+  totalCharges?: number;
+  coolieAmount?: number;
+  weighmanChargeAmount?: number;
+  discount?: number;
+  discountType?: string;
+}): number {
+  const subtotalWithCharges = roundMoney2(
+    roundMoney2(Number(group.subtotal) || 0) + roundMoney2(Number(group.totalCharges) || 0),
+  );
+  const additionsSum = roundMoney2(
+    roundMoney2(Number(group.coolieAmount) || 0) + roundMoney2(Number(group.weighmanChargeAmount) || 0),
+  );
+  let discountAmount = roundMoney2(Number(group.discount) || 0);
+  if (String(group.discountType || 'AMOUNT').toUpperCase() === 'PERCENT') {
+    discountAmount = percentOfAmount(subtotalWithCharges, discountAmount);
+  }
+  return roundMoney2(subtotalWithCharges + additionsSum - discountAmount);
+}
+
+/**
+ * Signed adjustment so `amountBeforeRoundOff + delta` is a whole rupee: fractional part strictly below 0.50 → floor,
+ * else ceil (half-up toward +∞ for positive amounts; mirrored for negatives).
+ */
+export function rupeeWholeRoundOffDelta(amountBeforeRoundOff: number): number {
+  const a = roundMoney2(amountBeforeRoundOff);
+  if (!Number.isFinite(a)) return 0;
+  if (a === 0) return 0;
+  const sign = a > 0 ? 1 : -1;
+  const abs = roundMoney2(Math.abs(a));
+  const intPart = Math.floor(abs);
+  const frac = roundMoney2(abs - intPart);
+  const roundedAbs = frac < 0.5 ? intPart : intPart + 1;
+  const rounded = roundMoney2(sign * roundedAbs);
+  return roundMoney2(rounded - a);
+}
