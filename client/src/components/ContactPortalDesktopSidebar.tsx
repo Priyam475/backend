@@ -40,39 +40,57 @@ const ContactPortalDesktopSidebar = () => {
     navigate('/login');
   };
 
-  return (
-    <motion.aside
-      animate={{ width: collapsed ? 72 : 260 }}
-      transition={{ duration: 0.25, ease: 'easeInOut' }}
-      className="hidden lg:flex fixed left-0 top-0 bottom-0 z-40 flex-col overflow-hidden"
-      style={{ background: 'linear-gradient(180deg, #4B7CF3 0%, #5B8CFF 30%, #7B61FF 100%)' }}
-    >
-      {/* Shine overlay */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15)_0%,transparent_60%)] pointer-events-none" />
+  const collapsedRailPx = 72;
 
-      {/* Logo */}
-      <div className="relative z-10 flex items-center gap-3 px-4 py-5 border-b border-white/15">
-        <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg flex-shrink-0 border border-white/25">
-          <MercotraceIcon size={22} color="white" />
-        </div>
-        <AnimatePresence>
-          {!collapsed && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="overflow-hidden"
-            >
-              <h1 className="text-sm font-bold text-white whitespace-nowrap drop-shadow-sm">
-                Mercotrace
-              </h1>
-              <p className="text-[10px] text-white/70 whitespace-nowrap flex items-center gap-1">
-                Contact Portal
-              </p>
-            </motion.div>
+  return (
+    <>
+      <motion.aside
+        animate={{ width: collapsed ? collapsedRailPx : 260 }}
+        transition={{ duration: 0.25, ease: 'easeInOut' }}
+        className="hidden lg:flex fixed left-0 top-0 bottom-0 z-40 flex-col overflow-hidden"
+        style={{ background: 'linear-gradient(180deg, #4B7CF3 0%, #5B8CFF 30%, #7B61FF 100%)' }}
+      >
+        {/* Shine overlay */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15)_0%,transparent_60%)] pointer-events-none" />
+
+        {/* Logo + collapse when expanded; icon-only when collapsed */}
+        <div
+          className={cn(
+            'relative z-10 flex items-center border-b border-white/15 min-w-0',
+            collapsed ? 'justify-center px-2 py-5' : 'gap-2 sm:gap-3 px-3 sm:px-4 py-5'
           )}
-        </AnimatePresence>
-      </div>
+        >
+          <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg flex-shrink-0 border border-white/25">
+            <MercotraceIcon size={22} color="white" />
+          </div>
+          {!collapsed && (
+            <>
+              <div className="flex-1 min-w-0">
+                <AnimatePresence>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <h1 className="text-sm font-bold text-white truncate drop-shadow-sm">Mercotrace</h1>
+                    <p className="text-[10px] text-white/70 truncate flex items-center gap-1">
+                      Contact Portal
+                    </p>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollapsed(true)}
+                aria-label="Collapse sidebar"
+                className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/30 flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-transform duration-300 border-2 border-white/30"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            </>
+          )}
+        </div>
 
       {/* Nav */}
       <nav className="relative z-10 flex-1 py-3 px-2 space-y-1 overflow-y-auto no-scrollbar">
@@ -148,27 +166,33 @@ const ContactPortalDesktopSidebar = () => {
         </button>
       </div>
 
-      {/* Collapse toggle */}
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="absolute top-6 -right-5 w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent shadow-xl shadow-primary/30 flex items-center justify-center text-white hover:scale-110 transition-all duration-300 z-50 border-2 border-white/30"
-      >
-        {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-      </button>
+        {/* Floating particles */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {[...Array(6)].map((_, i) => (
+            <motion.div
+              key={i}
+              className="absolute w-1 h-1 bg-white/25 rounded-full"
+              style={{ left: `${15 + Math.random() * 70}%`, top: `${Math.random() * 100}%` }}
+              animate={{ y: [-12, 12], opacity: [0.1, 0.4, 0.1] }}
+              transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
+            />
+          ))}
+        </div>
+      </motion.aside>
 
-      {/* Floating particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {[...Array(6)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-1 h-1 bg-white/25 rounded-full"
-            style={{ left: `${15 + Math.random() * 70}%`, top: `${Math.random() * 100}%` }}
-            animate={{ y: [-12, 12], opacity: [0.1, 0.4, 0.1] }}
-            transition={{ duration: 3 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-          />
-        ))}
-      </div>
-    </motion.aside>
+      {collapsed && (
+        <div className="fixed z-[60] top-20 left-[72px] hidden -translate-x-1/2 lg:block" role="presentation">
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/50 bg-gradient-to-br from-primary to-accent text-white shadow-xl shadow-primary/35 hover:scale-105 active:scale-95 transition-transform"
+          >
+            <ChevronRight className="w-5 h-5" strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
+    </>
   );
 };
 

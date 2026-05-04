@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { MercotraceIcon } from '@/components/MercotraceLogo';
 import FontSizeControls from '@/components/FontSizeControls';
+import { useFontSize } from '@/context/FontSizeContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useAdminAuth } from '@/context/AdminAuthContext';
 import { useAdminPermissions } from '@/admin/lib/adminPermissions';
@@ -47,8 +49,13 @@ const AdminLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
+  const { scale } = useFontSize();
   const { user, logout } = useAdminAuth();
   const { canAccessModule } = useAdminPermissions();
+
+  // Match TraderLayout: scale only main page body (not sidebar / header). `zoom` keeps scroll/layout sane in Chromium.
+  const scaledBodyStyle: CSSProperties | undefined =
+    scale === 1 ? undefined : { zoom: scale };
 
   const visibleNavItems = navItems.filter((item) =>
     item.moduleKey ? canAccessModule(item.moduleKey) : false
@@ -59,11 +66,13 @@ const AdminLayout = () => {
     navigate('/admin/login');
   };
 
+  const collapsedRailPx = 72;
+
   return (
     <div className="flex min-h-screen w-full bg-background relative">
       {/* Sidebar — strong blue-violet gradient */}
       <motion.aside
-        animate={{ width: collapsed ? 72 : 260 }}
+        animate={{ width: collapsed ? collapsedRailPx : 260 }}
         transition={{ duration: 0.3, ease: 'easeInOut' }}
         className="fixed left-0 top-0 bottom-0 z-40 flex flex-col overflow-hidden"
         style={{ background: 'linear-gradient(180deg, #4B7CF3 0%, #5B8CFF 30%, #7B61FF 100%)' }}
@@ -71,21 +80,38 @@ const AdminLayout = () => {
         {/* Subtle shine overlay */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15)_0%,transparent_60%)] pointer-events-none" />
 
-        {/* Logo */}
-        <div className="relative z-10 flex items-center gap-3 px-4 py-5 border-b border-white/15">
+        {/* Logo + collapse when expanded; icon-only when collapsed */}
+        <div
+          className={cn(
+            'relative z-10 flex items-center border-b border-white/15 min-w-0',
+            collapsed ? 'justify-center px-2 py-5' : 'gap-2 sm:gap-3 px-3 sm:px-4 py-5'
+          )}
+        >
           <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg flex-shrink-0 border border-white/25">
             <MercotraceIcon size={22} color="white" />
           </div>
-          <AnimatePresence>
-            {!collapsed && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-hidden">
-                <h1 className="text-sm font-bold text-white whitespace-nowrap drop-shadow-sm">Merkotrace</h1>
-                <p className="text-[10px] text-white/70 whitespace-nowrap flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-white/80" /> Admin Portal
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {!collapsed && (
+            <>
+              <div className="flex-1 min-w-0">
+                <AnimatePresence>
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="overflow-hidden">
+                    <h1 className="text-sm font-bold text-white truncate drop-shadow-sm">Merkotrace</h1>
+                    <p className="text-[10px] text-white/70 truncate flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 shrink-0 text-white/80" /> Admin Portal
+                    </p>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollapsed(true)}
+                aria-label="Collapse sidebar"
+                className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/30 flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-transform duration-300 border-2 border-white/30"
+              >
+                <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Nav Items */}
@@ -153,14 +179,6 @@ const AdminLayout = () => {
           </button>
         </div>
 
-        {/* Collapse Toggle — prominent & always visible */}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="absolute top-6 -right-5 w-10 h-10 rounded-full bg-gradient-to-br from-primary to-accent shadow-xl shadow-primary/30 flex items-center justify-center text-white hover:scale-110 hover:shadow-2xl hover:shadow-primary/40 transition-all duration-300 z-50 border-2 border-white/30"
-        >
-          {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-        </button>
-
         {/* Floating particles in sidebar */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           {[...Array(8)].map((_, i) => (
@@ -175,14 +193,27 @@ const AdminLayout = () => {
         </div>
       </motion.aside>
 
+      {collapsed && (
+        <div className="fixed z-[60] top-20 left-[72px] -translate-x-1/2" role="presentation">
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/50 bg-gradient-to-br from-primary to-accent text-white shadow-xl shadow-primary/35 hover:scale-105 active:scale-95 transition-transform"
+          >
+            <ChevronRight className="w-5 h-5" strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
+
       {/* Main Content — white/light background */}
       <motion.div
-        animate={{ marginLeft: collapsed ? 72 : 260 }}
+        animate={{ marginLeft: collapsed ? collapsedRailPx : 260 }}
         transition={{ duration: 0.3, ease: 'easeInOut' }}
         className="flex-1 min-h-screen relative"
       >
         {/* Subtle gradient accent blobs on corners */}
-        <div className="fixed pointer-events-none" style={{ left: collapsed ? 72 : 260, right: 0, top: 0, bottom: 0 }}>
+        <div className="fixed pointer-events-none" style={{ left: collapsed ? collapsedRailPx : 260, right: 0, top: 0, bottom: 0 }}>
           <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-primary/8 via-accent/5 to-transparent rounded-full blur-3xl" />
           <div className="absolute bottom-0 left-0 w-80 h-80 bg-gradient-to-tr from-accent/6 via-primary/4 to-transparent rounded-full blur-3xl" />
           <div className="absolute top-1/2 right-1/4 w-64 h-64 bg-primary/3 rounded-full blur-3xl" />
@@ -223,7 +254,7 @@ const AdminLayout = () => {
         </header>
 
         {/* Page Content */}
-        <main id="route-autofocus-root" className="p-6 relative z-10">
+        <main id="route-autofocus-root" className="p-6 relative z-10" style={scaledBodyStyle}>
           <Outlet />
         </main>
       </motion.div>

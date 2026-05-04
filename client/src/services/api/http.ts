@@ -7,16 +7,38 @@ import {
   setTraderToken,
 } from './tokenStore';
 
-const RAW_API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+const envApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+/** Empty in dev → same-origin `/api` (Vite proxy → Spring). Set VITE_API_URL for production or mobile webviews. */
+const RAW_API_URL =
+  envApiUrl != null && String(envApiUrl).trim() !== ''
+    ? String(envApiUrl).trim()
+    : import.meta.env.DEV
+      ? ''
+      : 'http://localhost:8080';
+
+const trimmedBase = RAW_API_URL.replace(/\/+$/, '');
+
+function devOriginFallback(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return 'http://localhost:8080';
+}
 
 // Server origin (no path) — use for building authenticated image URLs.
-export const API_ORIGIN = RAW_API_URL.replace(/\/+$/, '').replace(/\/api\/?$/, '') || RAW_API_URL.replace(/\/+$/, '');
+export const API_ORIGIN =
+  trimmedBase === ''
+    ? devOriginFallback()
+    : trimmedBase.replace(/\/api\/?$/, '') || trimmedBase;
 
 // Always talk to the backend under the /api prefix, regardless of whether
 // VITE_API_URL includes it or not.
-export const API_BASE = RAW_API_URL.replace(/\/+$/, '').endsWith('/api')
-  ? RAW_API_URL.replace(/\/+$/, '')
-  : `${RAW_API_URL.replace(/\/+$/, '')}/api`;
+export const API_BASE =
+  trimmedBase === ''
+    ? '/api'
+    : trimmedBase.endsWith('/api')
+      ? trimmedBase
+      : `${trimmedBase}/api`;
 
 type TokenKind = 'trader' | 'admin' | 'contact';
 
