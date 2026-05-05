@@ -34,10 +34,13 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Runtime defaults for container deployments:
 # - use prod profile
 # - disable Redis-backed cache unless explicitly enabled
-# - use PostgreSQL defaults that work with docker-compose service names
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV APPLICATION_CACHE_REDIS_ENABLED=false
 ENV SPRING_CACHE_TYPE=simple
+
+# Database connection defaults (override with environment variables on Render/production)
+# For docker-compose: uses 'postgres' hostname
+# For Render: override with your PostgreSQL service connection details
 ENV DATABASE_URL=jdbc:postgresql://postgres:5432/mercotrace
 ENV DATABASE_USER=postgres
 ENV DATABASE_PASSWORD=postgres

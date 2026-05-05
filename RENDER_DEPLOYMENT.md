@@ -9,9 +9,11 @@ This guide explains how to deploy MercoTrace to Render with proper configuration
 
 ## Required Environment Variables
 
-### Database Configuration
+### Database Configuration (REQUIRED - Use JDBC Format)
+⚠️ **Important**: Use the JDBC format for DATABASE_URL, not the standard PostgreSQL URI format.
+
 ```
-DATABASE_URL=postgresql://[user]:[password]@[host]:[port]/[database]
+DATABASE_URL=jdbc:postgresql://[host]:[port]/[database]
 DATABASE_USER=your_database_user
 DATABASE_PASSWORD=your_database_password
 DATABASE_POOL_SIZE=10
@@ -19,10 +21,16 @@ DATABASE_POOL_SIZE=10
 
 **Example for Render PostgreSQL:**
 ```
-DATABASE_URL=postgresql://user123:mypassword@dpg-12345.render.com:5432/mercotrace_db
+DATABASE_URL=jdbc:postgresql://dpg-12345abc.oregon-postgres.render.com:5432/mercotrace_db
 DATABASE_USER=user123
 DATABASE_PASSWORD=mypassword
+DATABASE_POOL_SIZE=10
 ```
+
+ℹ️ **Note**: If Render gives you a connection string like `postgresql://user:pass@host/db`, convert it to JDBC format:
+- **Render format**: `postgresql://user123:pass@dpg-abc.render.com:5432/mercotrace`
+- **JDBC format for Java**: `jdbc:postgresql://dpg-abc.render.com:5432/mercotrace`
+- Then set `DATABASE_USER` and `DATABASE_PASSWORD` separately
 
 ### Security Configuration
 ```
@@ -54,19 +62,38 @@ SPRING_CACHE_TYPE=simple
 
 1. **Create a PostgreSQL Database Service**
    - Go to Dashboard → New → PostgreSQL
-   - Note the connection details
+   - Note the connection details from the database service page
 
-2. **Deploy the Application**
+2. **Convert Connection String to JDBC Format**
+   - Render provides a connection string like:
+     ```
+     postgresql://user123:password@dpg-abc.render.com:5432/mercotrace_db
+     ```
+   - Extract the components:
+     - **Host & Port**: `dpg-abc.render.com:5432`
+     - **Database**: `mercotrace_db`
+     - **User**: `user123`
+     - **Password**: `password` (if shown)
+   - Create JDBC URL:
+     ```
+     jdbc:postgresql://dpg-abc.render.com:5432/mercotrace_db
+     ```
+
+3. **Deploy the Application**
    - Connect your GitHub repository
    - Select `Dockerfile` as the build method
    - Set the following environment variables in Render dashboard:
 
-3. **Set Environment Variables**
+4. **Set Environment Variables in Render**
    - Go to your service → Environment
-   - Add all required variables from the section above
-   - Make sure `DATABASE_URL` matches your PostgreSQL service
+   - Add these variables (replace with your actual values):
+     - `DATABASE_URL`: `jdbc:postgresql://your-host:5432/your-db`
+     - `DATABASE_USER`: Your PostgreSQL username
+     - `DATABASE_PASSWORD`: Your PostgreSQL password
+     - `JHIPSTER_SECURITY_AUTHENTICATION_JWT_BASE64_SECRET`: [Generate new]
+     - `JHIPSTER_MAIL_BASE_URL`: `https://your-app.render.com`
 
-4. **Deploy**
+5. **Deploy**
    - Render will automatically build the Docker image and deploy
 
 ## Verifying the Deployment
