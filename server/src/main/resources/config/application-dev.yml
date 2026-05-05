@@ -121,8 +121,6 @@ jhipster:
 # ===================================================================
 
 application:
-  cache:
-    redis-enabled: true
   liquibase:
     # Run Liquibase synchronously so all tables exist before the app accepts requests
     async-start: false
