@@ -18,6 +18,7 @@ WORKDIR /app/server
 # Copy server files
 COPY server/pom.xml ./
 COPY server/src ./src
+COPY server/sonar-project.properties ./
 
 # Build the application
 RUN mvn clean package -DskipTests
