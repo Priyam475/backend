@@ -34,9 +34,14 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Runtime defaults for container deployments:
 # - use prod profile
 # - disable Redis-backed cache unless explicitly enabled
+# - use PostgreSQL if DATABASE_URL not provided
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV APPLICATION_CACHE_REDIS_ENABLED=false
 ENV SPRING_CACHE_TYPE=simple
+ENV DATABASE_URL=${DATABASE_URL:-jdbc:postgresql://postgres:5432/mercotrace}
+ENV DATABASE_USER=${DATABASE_USER:-postgres}
+ENV DATABASE_PASSWORD=${DATABASE_PASSWORD:-postgres}
+ENV DATABASE_POOL_SIZE=10
 
 # Copy built backend JAR
 COPY --from=server-builder /app/server/target/*.jar app.jar
