@@ -21,7 +21,8 @@ COPY server/src ./src
 COPY server/sonar-project.properties ./
 
 # Build the application
-RUN mvn clean package -DskipTests
+# Skip heavyweight quality gates in container builds; these should run in CI.
+RUN mvn clean package -Dmaven.test.skip=true -Denforcer.skip=true -Dcheckstyle.skip=true -Dspotless.check.skip=true
 
 # Stage 3: Runtime image
 FROM eclipse-temurin:21-jre
