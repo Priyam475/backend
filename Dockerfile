@@ -31,6 +31,13 @@ WORKDIR /app
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
+# Runtime defaults for container deployments:
+# - use prod profile
+# - disable Redis-backed cache unless explicitly enabled
+ENV SPRING_PROFILES_ACTIVE=prod
+ENV APPLICATION_CACHE_REDIS_ENABLED=false
+ENV SPRING_CACHE_TYPE=simple
+
 # Copy built backend JAR
 COPY --from=server-builder /app/server/target/*.jar app.jar
 
