@@ -23,7 +23,7 @@ COPY server/src ./src
 RUN mvn clean package -DskipTests
 
 # Stage 3: Runtime image
-FROM eclipse-temurin:21-jre-focal
+FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # Install curl for health checks
