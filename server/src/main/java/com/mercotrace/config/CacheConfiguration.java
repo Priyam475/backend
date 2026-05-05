@@ -12,6 +12,7 @@ import org.redisson.config.Config;
 import org.redisson.config.SingleServerConfig;
 import org.redisson.jcache.configuration.RedissonConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.cache.JCacheManagerCustomizer;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
 import org.springframework.boot.info.BuildProperties;
@@ -39,6 +40,7 @@ public class CacheConfiguration {
     private BuildProperties buildProperties;
 
     @Bean
+    @ConditionalOnProperty(name = "application.cache.redis-enabled", havingValue = "true")
     public javax.cache.configuration.Configuration<Object, Object> jcacheConfiguration(JHipsterProperties jHipsterProperties) {
         MutableConfiguration<Object, Object> jcacheConfig = new MutableConfiguration<>();
 
@@ -78,11 +80,13 @@ public class CacheConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "application.cache.redis-enabled", havingValue = "true")
     public HibernatePropertiesCustomizer hibernatePropertiesCustomizer(javax.cache.CacheManager cm) {
         return hibernateProperties -> hibernateProperties.put(ConfigSettings.CACHE_MANAGER, cm);
     }
 
     @Bean
+    @ConditionalOnProperty(name = "application.cache.redis-enabled", havingValue = "true")
     public JCacheManagerCustomizer cacheManagerCustomizer(javax.cache.configuration.Configuration<Object, Object> jcacheConfiguration) {
         return cm -> {
             createCache(cm, com.mercotrace.repository.UserRepository.USERS_BY_LOGIN_CACHE, jcacheConfiguration);

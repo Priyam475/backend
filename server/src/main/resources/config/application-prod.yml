@@ -49,6 +49,8 @@ spring:
     password:
   thymeleaf:
     cache: true
+  cache:
+    type: simple
 
 # ===================================================================
 # To enable TLS in production, generate a certificate using:
@@ -145,6 +147,8 @@ jhipster:
 # ===================================================================
 
 application:
+  cache:
+    redis-enabled: false
   liquibase:
     # Run Liquibase synchronously so all tables exist before the app accepts requests
     async-start: false
